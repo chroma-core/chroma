@@ -1,7 +1,6 @@
 import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
-from chromadb.proto.utils import get_default_grpc_options
 from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
@@ -30,6 +29,7 @@ from chromadb.proto.coordinator_pb2 import (
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Collection,
@@ -55,20 +55,23 @@ class GrpcSysDB(SysDB):
     _channel: grpc.Channel
     _coordinator_url: str
     _coordinator_port: int
+    _request_timeout_seconds: int
 
     def __init__(self, system: System):
         self._coordinator_url = system.settings.require("chroma_coordinator_host")
         # TODO: break out coordinator_port into a separate setting?
         self._coordinator_port = system.settings.require("chroma_server_grpc_port")
+        self._request_timeout_seconds = system.settings.require(
+            "chroma_sysdb_request_timeout_seconds"
+        )
         return super().__init__(system)
 
     @overrides
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}",
-            options=get_default_grpc_options(),
         )
-        interceptors = [OtelInterceptor()]
+        interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._sys_db_stub = SysDBStub(self._channel)  # type: ignore
         return super().start()
@@ -88,14 +91,18 @@ class GrpcSysDB(SysDB):
         self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
     ) -> None:
         request = CreateDatabaseRequest(id=id.hex, name=name, tenant=tenant)
-        response = self._sys_db_stub.CreateDatabase(request)
+        response = self._sys_db_stub.CreateDatabase(
+            request, timeout=self._request_timeout_seconds
+        )
         if response.status.code == 409:
             raise UniqueConstraintError()
 
     @overrides
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         request = GetDatabaseRequest(name=name, tenant=tenant)
-        response = self._sys_db_stub.GetDatabase(request)
+        response = self._sys_db_stub.GetDatabase(
+            request, timeout=self._request_timeout_seconds
+        )
         if response.status.code == 404:
             raise NotFoundError()
         return Database(
@@ -107,14 +114,18 @@ class GrpcSysDB(SysDB):
     @overrides
     def create_tenant(self, name: str) -> None:
         request = CreateTenantRequest(name=name)
-        response = self._sys_db_stub.CreateTenant(request)
+        response = self._sys_db_stub.CreateTenant(
+            request, timeout=self._request_timeout_seconds
+        )
         if response.status.code == 409:
             raise UniqueConstraintError()
 
     @overrides
     def get_tenant(self, name: str) -> Tenant:
         request = GetTenantRequest(name=name)
-        response = self._sys_db_stub.GetTenant(request)
+        response = self._sys_db_stub.GetTenant(
+            request, timeout=self._request_timeout_seconds
+        )
         if response.status.code == 404:
             raise NotFoundError()
         return Tenant(
@@ -127,34 +138,41 @@ class GrpcSysDB(SysDB):
         request = CreateSegmentRequest(
             segment=proto_segment,
         )
-        response = self._sys_db_stub.CreateSegment(request)
+        response = self._sys_db_stub.CreateSegment(
+            request, timeout=self._request_timeout_seconds
+        )
         if response.status.code == 409:
             raise UniqueConstraintError()
 
     @overrides
-    def delete_segment(self, id: UUID) -> None:
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
         request = DeleteSegmentRequest(
             id=id.hex,
+            collection=collection.hex,
         )
-        response = self._sys_db_stub.DeleteSegment(request)
+        response = self._sys_db_stub.DeleteSegment(
+            request, timeout=self._request_timeout_seconds
+        )
         if response.status.code == 404:
             raise NotFoundError()
 
     @overrides
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         request = GetSegmentsRequest(
             id=id.hex if id else None,
             type=type,
             scope=to_proto_segment_scope(scope) if scope else None,
-            collection=collection.hex if collection else None,
+            collection=collection.hex,
         )
-        response = self._sys_db_stub.GetSegments(request)
+        response = self._sys_db_stub.GetSegments(
+            request, timeout=self._request_timeout_seconds
+        )
         results: List[Segment] = []
         for proto_segment in response.segments:
             segment = from_proto_segment(proto_segment)
@@ -164,21 +182,17 @@ class GrpcSysDB(SysDB):
     @overrides
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_collection = None
-        if collection != Unspecified():
-            write_collection = cast(Union[UUID, None], collection)
-
         write_metadata = None
         if metadata != Unspecified():
             write_metadata = cast(Union[UpdateMetadata, None], metadata)
 
         request = UpdateSegmentRequest(
             id=id.hex,
-            collection=write_collection.hex if write_collection else None,
+            collection=collection.hex,
             metadata=to_proto_update_metadata(write_metadata)
             if write_metadata
             else None,
@@ -188,7 +202,7 @@ class GrpcSysDB(SysDB):
             request.ClearField("metadata")
             request.reset_metadata = True
 
-        self._sys_db_stub.UpdateSegment(request)
+        self._sys_db_stub.UpdateSegment(request, timeout=self._request_timeout_seconds)
 
     @overrides
     def create_collection(
@@ -212,7 +226,9 @@ class GrpcSysDB(SysDB):
             tenant=tenant,
             database=database,
         )
-        response = self._sys_db_stub.CreateCollection(request)
+        response = self._sys_db_stub.CreateCollection(
+            request, timeout=self._request_timeout_seconds
+        )
         # TODO: this needs to be changed to try, catch instead of checking the status code
         if response.status.code != 200:
             logger.info(f"failed to create collection, response: {response}")
@@ -230,7 +246,9 @@ class GrpcSysDB(SysDB):
             tenant=tenant,
             database=database,
         )
-        response = self._sys_db_stub.DeleteCollection(request)
+        response = self._sys_db_stub.DeleteCollection(
+            request, timeout=self._request_timeout_seconds
+        )
         logging.debug(f"delete_collection response: {response}")
         if response.status.code == 404:
             raise NotFoundError()
@@ -272,7 +290,9 @@ class GrpcSysDB(SysDB):
                 limit=limit,
                 offset=offset,
             )
-        response: GetCollectionsResponse = self._sys_db_stub.GetCollections(request)
+        response: GetCollectionsResponse = self._sys_db_stub.GetCollections(
+            request, timeout=self._request_timeout_seconds
+        )
         results: List[Collection] = []
         for collection in response.collections:
             results.append(from_proto_collection(collection))
@@ -310,7 +330,9 @@ class GrpcSysDB(SysDB):
             request.ClearField("metadata")
             request.reset_metadata = True
 
-        response = self._sys_db_stub.UpdateCollection(request)
+        response = self._sys_db_stub.UpdateCollection(
+            request, timeout=self._request_timeout_seconds
+        )
         if response.status.code == 404:
             raise NotFoundError()
         if response.status.code == 409:

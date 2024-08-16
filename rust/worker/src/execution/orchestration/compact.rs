@@ -223,7 +223,7 @@ impl CompactOrchestrator {
             Some(end_timestamp),
         );
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching pull logs for compaction {:?}", e);
@@ -242,12 +242,12 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Partition;
         // TODO: make this configurable
-        let max_partition_size = 100;
+        let max_partition_size = 10_000;
         let operator = PartitionOperator::new();
         println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, max_partition_size);
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching partition for compaction {:?}", e);
@@ -356,7 +356,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching register for compaction {:?}", e);
@@ -386,7 +386,7 @@ impl CompactOrchestrator {
 
         let segments = self
             .sysdb
-            .get_segments(None, None, None, Some(self.collection_id))
+            .get_segments(None, None, None, self.collection_id)
             .await;
 
         tracing::info!("Retrived segments: {:?}", segments);

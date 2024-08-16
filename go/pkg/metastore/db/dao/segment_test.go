@@ -51,38 +51,24 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_GetSegments() {
 	err = suite.db.Create(metadata).Error
 	suite.NoError(err)
 
-	// Test when all parameters are nil
-	segments, err := suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.NilUniqueID())
-	suite.NoError(err)
-	suite.Len(segments, 1)
-	suite.Equal(segment.ID, segments[0].Segment.ID)
-	suite.Equal(segment.CollectionID, segments[0].Segment.CollectionID)
-	suite.Equal(segment.Type, segments[0].Segment.Type)
-	suite.Equal(segment.Scope, segments[0].Segment.Scope)
-	suite.Len(segments[0].SegmentMetadata, 1)
-	suite.Equal(metadata.Key, segments[0].SegmentMetadata[0].Key)
-	suite.Equal(metadata.StrValue, segments[0].SegmentMetadata[0].StrValue)
+	// Errors if collection ID is missing
+	_, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.NilUniqueID())
+	suite.Error(err)
 
 	// Test when filtering by ID
-	segments, err = suite.segmentDb.GetSegments(types.MustParse(segment.ID), nil, nil, types.NilUniqueID())
+	segments, err := suite.segmentDb.GetSegments(types.MustParse(segment.ID), nil, nil, types.MustParse(*segment.CollectionID))
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
 
 	// Test when filtering by type
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), &segment.Type, nil, types.NilUniqueID())
+	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), &segment.Type, nil, types.MustParse(*segment.CollectionID))
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)
 
 	// Test when filtering by scope
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, &segment.Scope, types.NilUniqueID())
-	suite.NoError(err)
-	suite.Len(segments, 1)
-	suite.Equal(segment.ID, segments[0].Segment.ID)
-
-	// Test when filtering by collection ID
-	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.MustParse(*segment.CollectionID))
+	segments, err = suite.segmentDb.GetSegments(types.NilUniqueID(), nil, &segment.Scope, types.MustParse(*segment.CollectionID))
 	suite.NoError(err)
 	suite.Len(segments, 1)
 	suite.Equal(segment.ID, segments[0].Segment.ID)

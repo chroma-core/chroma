@@ -18,7 +18,7 @@ metadata:
   name: compaction-service
   namespace: {{ .Values.namespace }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.compactionService.replicaCount }}
   selector:
     matchLabels:
       app: compaction-service
@@ -63,6 +63,10 @@ spec:
       {{if .Values.compactionService.tolerations}}
       tolerations:
         {{ toYaml .Values.compactionService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.compactionService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.compactionService.nodeSelector | nindent 8 }}
       {{ end }}
       updateStrategy:
         type: RollingUpdate

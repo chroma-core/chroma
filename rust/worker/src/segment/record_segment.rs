@@ -305,6 +305,8 @@ pub enum ApplyMaterializedLogError {
     FTSDocumentDeleteError,
     #[error("FTS Document update error")]
     FTSDocumentUpdateError,
+    #[error("Error writing to hnsw index")]
+    HnswIndexError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -319,6 +321,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::FTSDocumentDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
+            ApplyMaterializedLogError::HnswIndexError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -809,7 +812,11 @@ impl RecordSegmentReader<'_> {
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
-        self.id_to_data.count().await
+        // We query using the id_to_user_id blockfile since it is likely to be the smallest
+        // and count loads all the data
+        // In the future, we can optimize this by making the underlying blockfile
+        // store counts in the sparse index.
+        self.id_to_user_id.count().await
     }
 
     pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) -> () {

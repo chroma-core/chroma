@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_types::SegmentFlushInfo;
 use std::sync::Arc;
+use tracing::Instrument;
 
 #[derive(Debug)]
 pub struct FlushS3Operator {}
@@ -60,7 +61,10 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
         let record_segment_flush_info = match record_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.record_segment_writer.id;
-                let res = flusher.flush().await;
+                let res = flusher
+                    .flush()
+                    .instrument(tracing::info_span!("Flush record segment"))
+                    .await;
                 match res {
                     Ok(res) => {
                         tracing::info!("Record Segment Flushed. File paths {:?}", res);
@@ -85,7 +89,10 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
         let hnsw_segment_flush_info = match hnsw_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.hnsw_segment_writer.id;
-                let res = flusher.flush().await;
+                let res = flusher
+                    .flush()
+                    .instrument(tracing::info_span!("Flush HNSW segment"))
+                    .await;
                 match res {
                     Ok(res) => {
                         tracing::info!("HNSW Segment Flushed. File paths {:?}", res);
@@ -110,7 +117,10 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
         let metadata_segment_flush_info = match metadata_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.metadata_segment_writer.id;
-                let res = flusher.flush().await;
+                let res = flusher
+                    .flush()
+                    .instrument(tracing::info_span!("Flush metadata segment"))
+                    .await;
                 match res {
                     Ok(res) => {
                         tracing::info!("Metadata Segment Flushed. File paths {:?}", res);

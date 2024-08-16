@@ -54,6 +54,10 @@ spec:
       tolerations:
         {{ toYaml .Values.frontendService.tolerations | nindent 8 }}
       {{ end }}
+      {{if .Values.frontendService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.frontendService.nodeSelector | nindent 8 }}
+      {{ end }}
       volumes:
         - name: chroma
           emptyDir: {}

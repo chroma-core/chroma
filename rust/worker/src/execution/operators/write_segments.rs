@@ -160,6 +160,9 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         match input
             .record_segment_writer
             .apply_materialized_log_chunk(res.clone())
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to record segment"
+            ))
             .await
         {
             Ok(()) => (),
@@ -171,6 +174,9 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         match input
             .metadata_segment_writer
             .apply_materialized_log_chunk(res.clone())
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to metadata segment"
+            ))
             .await
         {
             Ok(()) => (),
@@ -182,6 +188,9 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         match input
             .hnsw_segment_writer
             .apply_materialized_log_chunk(res)
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to HNSW segment"
+            ))
             .await
         {
             Ok(()) => (),

@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Sequence
-from chromadb.proto.utils import get_default_grpc_options
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import MetadataReader
 from chromadb.config import System
 from chromadb.types import Segment
@@ -22,6 +22,7 @@ import grpc
 class GrpcMetadataSegment(MetadataReader):
     """Embedding Metadata segment interface"""
 
+    _request_timeout_seconds: int
     _metadata_reader_stub: MetadataReaderStub
     _segment: Segment
 
@@ -31,26 +32,28 @@ class GrpcMetadataSegment(MetadataReader):
             raise Exception("Missing grpc_url in segment metadata")
 
         self._segment = segment
+        self._request_timeout_seconds = system.settings.require(
+            "chroma_query_request_timeout_seconds"
+        )
 
     @override
     def start(self) -> None:
         if not self._segment["metadata"] or not self._segment["metadata"]["grpc_url"]:
             raise Exception("Missing grpc_url in segment metadata")
 
-        channel = grpc.insecure_channel(
-            self._segment["metadata"]["grpc_url"], options=get_default_grpc_options()
-        )
-        interceptors = [OtelInterceptor()]
+        channel = grpc.insecure_channel(self._segment["metadata"]["grpc_url"])
+        interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         channel = grpc.intercept_channel(channel, *interceptors)
         self._metadata_reader_stub = MetadataReaderStub(channel)  # type: ignore
 
     @override
     def count(self) -> int:
         request: pb.CountRecordsRequest = pb.CountRecordsRequest(
-            segment_id=self._segment["id"].hex
+            segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
         )
         response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
-            request
+            request, timeout=self._request_timeout_seconds
         )
         return response.count
 
@@ -79,6 +82,7 @@ class GrpcMetadataSegment(MetadataReader):
 
         request: pb.QueryMetadataRequest = pb.QueryMetadataRequest(
             segment_id=self._segment["id"].hex,
+            collection_id=self._segment["collection"].hex,
             where=self._where_to_proto(where)
             if where is not None and len(where) > 0
             else None,
@@ -98,7 +102,7 @@ class GrpcMetadataSegment(MetadataReader):
             raise ValueError("Limit cannot be negative")
 
         response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
-            request
+            request, timeout=self._request_timeout_seconds
         )
         results: List[MetadataEmbeddingRecord] = []
         for record in response.records:
