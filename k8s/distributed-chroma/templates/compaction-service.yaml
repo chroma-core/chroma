@@ -64,6 +64,10 @@ spec:
       tolerations:
         {{ toYaml .Values.compactionService.tolerations | nindent 8 }}
       {{ end }}
+      {{if .Values.compactionService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.compactionService.nodeSelector | nindent 8 }}
+      {{ end }}
       updateStrategy:
         type: RollingUpdate
         rollingUpdate:
