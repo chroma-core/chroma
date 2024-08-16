@@ -17,7 +17,7 @@ pub(in crate::arrow) struct UInt32Storage {
 }
 
 impl UInt32Storage {
-    pub fn new() -> Self {
+    pub(in crate::arrow) fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
         }

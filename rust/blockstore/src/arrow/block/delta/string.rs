@@ -13,7 +13,7 @@ pub(in crate::arrow) struct StringValueStorage {
 }
 
 impl StringValueStorage {
-    pub fn new() -> Self {
+    pub(in crate::arrow) fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
         }

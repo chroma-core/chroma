@@ -1,21 +1,18 @@
 use super::{calculate_key_size, calculate_prefix_size, BlockKeyArrowBuilder};
-use crate::{
-    key::{CompositeKey, KeyWrapper},
-    Value,
-};
+use crate::key::{CompositeKey, KeyWrapper};
 use arrow::{
-    array::{Array, ArrayRef, Int32Array, Int32Builder, ListBuilder},
+    array::{Array, ArrayRef, BinaryBuilder},
     datatypes::Field,
 };
 use parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Debug)]
-pub(in crate::arrow) struct Int32ArrayStorage {
-    pub storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
+pub(in crate::arrow) struct RoaringBitmapStorage {
+    pub storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
 }
 
-impl Int32ArrayStorage {
+impl RoaringBitmapStorage {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
@@ -49,24 +46,28 @@ impl Int32ArrayStorage {
             .skip(start)
             .take(end - start)
             .map(|(_, value)| value);
-        value_stream.fold(0, |acc, value| acc + value.get_size())
+        value_stream.fold(0, |acc, value| acc + value.len())
     }
 
-    /// The count of the total number of values in the storage across all arrays.
-    pub(super) fn total_value_count(&self) -> usize {
-        let storage = self.storage.read();
-        storage.iter().fold(0, |acc, (_, value)| acc + value.len())
-    }
-
-    pub(super) fn split(&self, prefix: &str, key: KeyWrapper) -> Int32ArrayStorage {
+    pub(super) fn split(&self, prefix: &str, key: KeyWrapper) -> RoaringBitmapStorage {
         let mut storage_guard = self.storage.write();
         let split = storage_guard.split_off(&CompositeKey {
             prefix: prefix.to_string(),
             key,
         });
-        Int32ArrayStorage {
+        RoaringBitmapStorage {
             storage: Arc::new(RwLock::new(split)),
         }
+    }
+
+    pub(super) fn total_value_count(&self) -> usize {
+        let storage = self.storage.read();
+        storage.iter().fold(0, |acc, (_, value)| acc + value.len())
+    }
+
+    pub(super) fn len(&self) -> usize {
+        let storage = self.storage.read();
+        storage.len()
     }
 
     pub(super) fn get_key(&self, index: usize) -> CompositeKey {
@@ -77,7 +78,6 @@ impl Int32ArrayStorage {
 
     pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
         let storage = self.storage.read();
-        // TODO: mut ref instead of ownership of builder
         let mut builder = builder;
         for (key, _) in storage.iter() {
             builder.add_key(key.clone());
@@ -85,21 +85,13 @@ impl Int32ArrayStorage {
         builder
     }
 
-    pub(super) fn len(&self) -> usize {
-        let storage = self.storage.read();
-        storage.len()
-    }
-
     pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
-        let item_capacity = self.storage.read().len();
+        let item_capacity = self.len();
         let mut value_builder;
         if item_capacity == 0 {
-            value_builder = ListBuilder::new(Int32Builder::new());
+            value_builder = BinaryBuilder::new();
         } else {
-            value_builder = ListBuilder::with_capacity(
-                Int32Builder::with_capacity(self.total_value_count()),
-                item_capacity,
-            );
+            value_builder = BinaryBuilder::with_capacity(item_capacity, self.total_value_count());
         }
 
         let storage = self.storage.read();
@@ -107,15 +99,7 @@ impl Int32ArrayStorage {
             value_builder.append_value(value);
         }
 
-        let value_field = Field::new(
-            "value",
-            arrow::datatypes::DataType::List(Arc::new(Field::new(
-                "item",
-                arrow::datatypes::DataType::Int32,
-                true,
-            ))),
-            true,
-        );
+        let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = value_builder.finish();
         (
             value_field,

@@ -2,6 +2,8 @@ use crate::arrow::types::{ArrowReadableValue, ArrowWriteableValue};
 use arrow::{array::BinaryArray, util::bit_util};
 use roaring::RoaringBitmap;
 
+use super::delta::roaring_bitmap::RoaringBitmapStorage;
+
 impl ArrowWriteableValue for &RoaringBitmap {
     type ReadableValue<'referred_data> = RoaringBitmap;
 
@@ -55,7 +57,7 @@ impl ArrowWriteableValue for &RoaringBitmap {
     }
 
     fn get_delta_builder() -> super::delta::BlockStorage {
-        super::delta::BlockStorage::RoaringBitmap(super::delta::RoaringBitmapStorage::new())
+        super::delta::BlockStorage::RoaringBitmap(RoaringBitmapStorage::new())
     }
 }
 

@@ -1,7 +1,4 @@
-use super::{
-    delta::BlockDelta,
-    delta::{BlockStorage, DataRecordStorage},
-};
+use super::delta::{data_record::DataRecordStorage, BlockDelta, BlockStorage};
 use crate::{
     arrow::types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
