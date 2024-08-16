@@ -4,9 +4,9 @@ use self::stream::ByteStreamItem;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 
+pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
-pub mod admissioncontrolleds3;
 pub mod s3;
 pub mod stream;
 use futures::Stream;
