@@ -58,9 +58,9 @@ impl BlockDelta {
     ///  the arrow specification. When a block delta is converted into a block data
     ///  the same sizing is used to allocate the memory for the block data.
     pub(in crate::arrow) fn get_size<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> usize {
-        let prefix_data_size = self.builder.get_prefix_size(0, self.len());
-        let key_data_size = self.builder.get_key_size(0, self.len());
-        let value_data_size = self.builder.get_value_size(0, self.len());
+        let prefix_data_size = self.builder.get_prefix_size();
+        let key_data_size = self.builder.get_key_size();
+        let value_data_size = self.builder.get_value_size();
 
         self.get_block_size::<K, V>(
             self.builder.len(),
@@ -117,7 +117,7 @@ impl BlockDelta {
 
         let mut blocks_to_split = Vec::new();
         blocks_to_split.push(self.clone());
-        let mut output = Vec::new();
+        // let mut output = Vec::new();
         let mut first_iter = true;
         // iterate over all blocks to split until its empty
         while !blocks_to_split.is_empty() {
@@ -127,51 +127,54 @@ impl BlockDelta {
             let mut curr_running_key_size = 0;
             let mut curr_running_value_size = 0;
             let mut curr_running_count = 0;
-            for i in 1..curr_block.len() {
-                curr_running_prefix_size += curr_block.builder.get_prefix_size(i - 1, i);
-                curr_running_key_size += curr_block.builder.get_key_size(i - 1, i);
-                curr_running_value_size += curr_block.builder.get_value_size(i - 1, i);
-                curr_running_count += 1;
-
-                let current_size = curr_block.get_block_size::<K, V>(
-                    curr_running_count,
-                    curr_running_prefix_size,
-                    curr_running_key_size,
-                    curr_running_value_size,
-                );
-
-                if current_size > half_size {
-                    break;
-                }
-                curr_split_index = i;
-            }
-
-            // The split() method is exclusive of the split index. Meaning
-            // the new block will contain the key at the split index. So we increment
-            // the split index by 1 to get the correct split point.
-            curr_split_index = std::cmp::min(curr_split_index + 1, curr_block.len() - 1);
-
-            let split_key = curr_block.builder.get_key(curr_split_index);
-            let new_delta = curr_block
-                .builder
-                .split(&split_key.prefix, split_key.key.clone());
-            let new_block = BlockDelta {
-                builder: new_delta,
-                id: Uuid::new_v4(),
-            };
-            if first_iter {
-                first_iter = false;
-            } else {
-                output.push((curr_block.builder.get_key(0).clone(), curr_block));
-            }
-            if new_block.get_size::<K, V>() > max_block_size_bytes {
-                blocks_to_split.push(new_block);
-            } else {
-                output.push((split_key.clone(), new_block));
-            }
         }
+        unimplemented!();
+        // TODO: fix to work with new sizing apis
+        //     for i in 1..curr_block.len() {
+        //         curr_running_prefix_size += curr_block.builder.get_prefix_size(i - 1, i);
+        //         curr_running_key_size += curr_block.builder.get_key_size(i - 1, i);
+        //         curr_running_value_size += curr_block.builder.get_value_size(i - 1, i);
+        //         curr_running_count += 1;
 
-        return output;
+        //         let current_size = curr_block.get_block_size::<K, V>(
+        //             curr_running_count,
+        //             curr_running_prefix_size,
+        //             curr_running_key_size,
+        //             curr_running_value_size,
+        //         );
+
+        //         if current_size > half_size {
+        //             break;
+        //         }
+        //         curr_split_index = i;
+        //     }
+
+        //     // The split() method is exclusive of the split index. Meaning
+        //     // the new block will contain the key at the split index. So we increment
+        //     // the split index by 1 to get the correct split point.
+        //     curr_split_index = std::cmp::min(curr_split_index + 1, curr_block.len() - 1);
+
+        //     let split_key = curr_block.builder.get_key(curr_split_index);
+        //     let new_delta = curr_block
+        //         .builder
+        //         .split(&split_key.prefix, split_key.key.clone());
+        //     let new_block = BlockDelta {
+        //         builder: new_delta,
+        //         id: Uuid::new_v4(),
+        //     };
+        //     if first_iter {
+        //         first_iter = false;
+        //     } else {
+        //         output.push((curr_block.builder.get_key(0).clone(), curr_block));
+        //     }
+        //     if new_block.get_size::<K, V>() > max_block_size_bytes {
+        //         blocks_to_split.push(new_block);
+        //     } else {
+        //         output.push((split_key.clone(), new_block));
+        //     }
+        // }
+
+        // return output;
     }
 
     pub(crate) fn len(&self) -> usize {

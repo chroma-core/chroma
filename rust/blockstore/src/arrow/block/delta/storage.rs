@@ -147,34 +147,34 @@ impl BlockKeyArrowBuilder {
 }
 
 impl BlockStorage {
-    pub fn get_prefix_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_prefix_size(&self) -> usize {
         match self {
-            BlockStorage::String(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::UInt32(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::DataRecord(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::Int32Array(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::RoaringBitmap(builder) => builder.get_prefix_size(start, end),
+            BlockStorage::String(builder) => unimplemented!(), //builder.get_prefix_size(start, end),
+            BlockStorage::UInt32(builder) => unimplemented!(), //builder.get_prefix_size(start, end),
+            BlockStorage::DataRecord(builder) => builder.get_prefix_size(),
+            BlockStorage::Int32Array(builder) => unimplemented!(), //builder.get_prefix_size(start, end),
+            BlockStorage::RoaringBitmap(builder) => unimplemented!(), //builder.get_prefix_size(start, end),
         }
     }
 
-    pub fn get_key_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_key_size(&self) -> usize {
         match self {
-            BlockStorage::String(builder) => builder.get_key_size(start, end),
-            BlockStorage::UInt32(builder) => builder.get_key_size(start, end),
-            BlockStorage::DataRecord(builder) => builder.get_key_size(start, end),
-            BlockStorage::Int32Array(builder) => builder.get_key_size(start, end),
-            BlockStorage::RoaringBitmap(builder) => builder.get_key_size(start, end),
+            BlockStorage::String(builder) => unimplemented!(), //builder.get_key_size(start, end),
+            BlockStorage::UInt32(builder) => unimplemented!(), //builder.get_key_size(start, end),
+            BlockStorage::DataRecord(builder) => builder.get_key_size(),
+            BlockStorage::Int32Array(builder) => unimplemented!(), //builder.get_key_size(start, end),
+            BlockStorage::RoaringBitmap(builder) => unimplemented!(), //builder.get_key_size(start, end),
         }
     }
 
     /// Returns the arrow-padded (rounded to 64 bytes) size of the value data for the given range.
-    pub fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_value_size(&self) -> usize {
         match self {
-            BlockStorage::String(builder) => builder.get_value_size(start, end),
-            BlockStorage::UInt32(builder) => builder.get_value_size(start, end),
-            BlockStorage::DataRecord(builder) => builder.get_value_size(start, end),
-            BlockStorage::Int32Array(builder) => builder.get_value_size(start, end),
-            BlockStorage::RoaringBitmap(builder) => builder.get_value_size(start, end),
+            BlockStorage::String(builder) => unimplemented!(), //builder.get_value_size(start, end),
+            BlockStorage::UInt32(builder) => unimplemented!(), //builder.get_value_size(start, end),
+            BlockStorage::DataRecord(builder) => builder.get_value_size(),
+            BlockStorage::Int32Array(builder) => unimplemented!(), //builder.get_value_size(start, end),
+            BlockStorage::RoaringBitmap(builder) => unimplemented!(), //builder.get_value_size(start, end),
         }
     }
 
@@ -226,11 +226,8 @@ impl BlockStorage {
     }
 
     pub fn to_record_batch<K: ArrowWriteableKey>(&self) -> RecordBatch {
-        let mut key_builder = K::get_arrow_builder(
-            self.len(),
-            self.get_prefix_size(0, self.len()),
-            self.get_key_size(0, self.len()),
-        );
+        let mut key_builder =
+            K::get_arrow_builder(self.len(), self.get_prefix_size(), self.get_key_size());
         match self {
             BlockStorage::String(builder) => {
                 key_builder = builder.build_keys(key_builder);
