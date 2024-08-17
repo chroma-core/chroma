@@ -3,7 +3,7 @@ use std::sync::Arc;
 use self::config::StorageConfig;
 use self::s3::S3GetError;
 use self::stream::ByteStreamItem;
-use admissioncontrolleds3::{AdmissionControlledS3Storage, AdmissionControlledS3StorageError};
+use admissioncontrolleds3::AdmissionControlledS3StorageError;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 
@@ -19,7 +19,7 @@ use thiserror::Error;
 pub enum Storage {
     S3(s3::S3Storage),
     Local(local::LocalStorage),
-    AdmissionControlledS3(AdmissionControlledS3Storage),
+    AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
 }
 
 #[derive(Error, Debug, Clone)]
@@ -174,7 +174,7 @@ pub async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn Chro
             local::LocalStorage::try_from_config(config).await?,
         )),
         StorageConfig::AdmissionControlledS3(_) => Ok(Storage::AdmissionControlledS3(
-            AdmissionControlledS3Storage::try_from_config(config).await?,
+            admissioncontrolleds3::AdmissionControlledS3Storage::try_from_config(config).await?,
         )),
     }
 }

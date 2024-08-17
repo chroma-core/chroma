@@ -1,4 +1,3 @@
-use super::GetError;
 use crate::{
     config::StorageConfig,
     s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
@@ -7,7 +6,7 @@ use crate::{
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::{future::Shared, FutureExt, Stream, StreamExt};
+use futures::{future::Shared, FutureExt, Stream};
 use parking_lot::Mutex;
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
@@ -88,53 +87,13 @@ impl AdmissionControlledS3Storage {
         storage: S3Storage,
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
-        let stream = storage
-            .get_stream(&key)
+        let bytes_res = storage
+            .get(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
             .await;
-        match stream {
-            Ok(mut bytes) => {
-                let read_block_span =
-                    tracing::trace_span!(parent: Span::current(), "Read bytes to end");
-                let buf = read_block_span
-                    .in_scope(|| async {
-                        let mut buf: Vec<u8> = Vec::new();
-                        while let Some(res) = bytes.next().await {
-                            match res {
-                                Ok(chunk) => {
-                                    buf.extend(chunk);
-                                }
-                                Err(err) => {
-                                    tracing::error!("Error reading from storage: {}", err);
-                                    match err {
-                                        GetError::S3Error(e) => {
-                                            return Err(
-                                                AdmissionControlledS3StorageError::S3GetError(e),
-                                            );
-                                        }
-                                        GetError::NoSuchKey(e) => {
-                                            return Err(
-                                                AdmissionControlledS3StorageError::S3GetError(
-                                                    S3GetError::NoSuchKey(e),
-                                                ),
-                                            );
-                                        }
-                                        GetError::LocalError(_) => unreachable!(),
-                                    }
-                                }
-                            }
-                        }
-                        tracing::info!("Read {:?} bytes from s3", buf.len());
-                        Ok(Some(buf))
-                    })
-                    .await?;
-                match buf {
-                    Some(buf) => Ok(Arc::new(buf)),
-                    None => {
-                        // Buffer is empty. Nothing interesting to do.
-                        Ok(Arc::new(vec![]))
-                    }
-                }
+        match bytes_res {
+            Ok(bytes) => {
+                return Ok(bytes);
             }
             Err(e) => {
                 tracing::error!("Error reading from storage: {}", e);
