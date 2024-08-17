@@ -7,7 +7,7 @@ use super::{
 use chroma_error::ChromaError;
 use uuid::Uuid;
 
-pub(crate) struct ArrowBlockfileFlusher {
+pub struct ArrowBlockfileFlusher {
     block_manager: BlockManager,
     sparse_index_manager: SparseIndexManager,
     blocks: Vec<Block>,

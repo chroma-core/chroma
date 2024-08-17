@@ -353,7 +353,7 @@ impl<
 
     pub async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
+            BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(prefixes, keys).await
             }

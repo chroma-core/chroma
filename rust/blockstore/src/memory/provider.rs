@@ -101,7 +101,7 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let data_records = data
+        let _data_records = data
             .iter()
             .map(|record| DataRecord {
                 id: &record.0.record.id,
@@ -111,7 +111,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let provider = MemoryBlockfileProvider::new();
+        let _provider = MemoryBlockfileProvider::new();
         // let mut writer = provider.create::<&str, DataRecord>().unwrap();
         // let id = writer.id();
         // for record in data_records {

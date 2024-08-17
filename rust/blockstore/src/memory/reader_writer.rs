@@ -6,13 +6,13 @@ use crate::key::KeyWrapper;
 use chroma_error::ChromaError;
 
 #[derive(Clone)]
-pub(crate) struct MemoryBlockfileWriter {
+pub struct MemoryBlockfileWriter {
     builder: StorageBuilder,
     storage_manager: StorageManager,
     id: uuid::Uuid,
 }
 
-pub(crate) struct MemoryBlockfileFlusher {
+pub struct MemoryBlockfileFlusher {
     id: uuid::Uuid,
 }
 

@@ -19,7 +19,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub(crate) struct ArrowBlockfileWriter {
+pub struct ArrowBlockfileWriter {
     block_manager: BlockManager,
     sparse_index_manager: SparseIndexManager,
     block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
@@ -229,7 +229,7 @@ impl ArrowBlockfileWriter {
 }
 
 #[derive(Clone)]
-pub(crate) struct ArrowBlockfileReader<
+pub struct ArrowBlockfileReader<
     'me,
     K: ArrowReadableKey<'me> + Into<KeyWrapper>,
     V: ArrowReadableValue<'me>,
