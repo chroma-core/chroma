@@ -13,11 +13,11 @@ use std::{collections::BTreeMap, sync::Arc};
 use super::{calculate_key_size, calculate_prefix_size, BlockKeyArrowBuilder};
 
 #[derive(Clone, Debug)]
-pub(in crate::arrow) struct DataRecordStorage {
-    pub id_storage: Arc<RwLock<BTreeMap<CompositeKey, String>>>,
-    pub embedding_storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<f32>>>>,
-    pub metadata_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<Vec<u8>>>>>,
-    pub document_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<String>>>>,
+pub struct DataRecordStorage {
+    pub(crate) id_storage: Arc<RwLock<BTreeMap<CompositeKey, String>>>,
+    pub(crate) embedding_storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<f32>>>>,
+    pub(crate) metadata_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<Vec<u8>>>>>,
+    pub(crate) document_storage: Arc<RwLock<BTreeMap<CompositeKey, Option<String>>>>,
 }
 
 impl DataRecordStorage {

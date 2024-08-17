@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use super::{calculate_key_size, calculate_prefix_size, BlockKeyArrowBuilder};
 
 #[derive(Clone, Debug)]
-pub(in crate::arrow) struct UInt32Storage {
+pub struct UInt32Storage {
     pub storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
 }
 

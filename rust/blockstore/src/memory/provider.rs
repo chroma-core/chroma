@@ -14,7 +14,7 @@ use crate::{
 /// # Note
 /// This is not intended for production use.
 #[derive(Clone)]
-pub(crate) struct MemoryBlockfileProvider {
+pub struct MemoryBlockfileProvider {
     storage_manager: StorageManager,
 }
 
@@ -51,7 +51,7 @@ impl MemoryBlockfileProvider {
 
     pub(crate) fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
-        id: &uuid::Uuid,
+        _id: &uuid::Uuid,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         todo!();
     }

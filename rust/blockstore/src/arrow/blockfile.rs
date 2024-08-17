@@ -735,11 +735,6 @@ mod tests {
                 ComparisonOperation::LessThanOrEquals => {
                     reader.get_lte(prefix, query.as_str()).await
                 }
-                _ => {
-                    assert!(true, "Invalid operation");
-                    // Won't reach here.
-                    Ok(vec![])
-                }
             };
             match greater_than {
                 Ok(c) => {
@@ -749,13 +744,12 @@ mod tests {
                     }
                     for i in 1..num_keys {
                         let key = format!("{}/{}", "key", i);
-                        let mut condition: bool = false;
+                        let condition: bool;
                         match operation {
                             ComparisonOperation::GreaterThan => condition = key > query,
                             ComparisonOperation::GreaterThanOrEquals => condition = key >= query,
                             ComparisonOperation::LessThan => condition = key < query,
                             ComparisonOperation::LessThanOrEquals => condition = key <= query,
-                            _ => assert!(true, "invalid input"),
                         }
                         if condition {
                             assert!(

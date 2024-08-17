@@ -11,11 +11,11 @@ use std::sync::Arc;
 impl ArrowWriteableValue for u32 {
     type ReadableValue<'referred_data> = u32;
 
-    fn offset_size(item_count: usize) -> usize {
+    fn offset_size(_item_count: usize) -> usize {
         0
     }
 
-    fn validity_size(item_count: usize) -> usize {
+    fn validity_size(_item_count: usize) -> usize {
         0 // We don't support None values for UInt32Array
     }
 

@@ -11,8 +11,8 @@ use parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Debug)]
-pub(in crate::arrow) struct Int32ArrayStorage {
-    pub storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
+pub struct Int32ArrayStorage {
+    pub(crate) storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
 }
 
 impl Int32ArrayStorage {

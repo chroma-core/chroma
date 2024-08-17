@@ -9,12 +9,12 @@ use std::{
     sync::Arc,
 };
 
-pub(crate) trait Writeable {
+pub trait Writeable {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder);
     fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder);
 }
 
-pub(crate) trait Readable<'referred_data>: Sized {
+pub trait Readable<'referred_data>: Sized {
     fn read_from_storage(
         prefix: &str,
         key: KeyWrapper,
@@ -1053,7 +1053,7 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
 }
 
 #[derive(Clone)]
-pub(crate) struct StorageBuilder {
+pub struct StorageBuilder {
     bool_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, bool>>>>,
     // String Value
     string_value_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
@@ -1072,7 +1072,7 @@ pub(crate) struct StorageBuilder {
 }
 
 #[derive(Clone)]
-pub(crate) struct Storage {
+pub struct Storage {
     bool_storage: Arc<BTreeMap<CompositeKey, bool>>,
     // String Value
     string_value_storage: Arc<BTreeMap<CompositeKey, String>>,

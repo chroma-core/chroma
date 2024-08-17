@@ -16,7 +16,7 @@ pub(crate) struct ArrowBlockfileFlusher {
 }
 
 impl ArrowBlockfileFlusher {
-    pub(crate) fn new(
+    pub(in crate::arrow) fn new(
         block_manager: BlockManager,
         sparse_index_manager: SparseIndexManager,
         blocks: Vec<Block>,

@@ -65,7 +65,7 @@ impl MemoryBlockfileWriter {
 }
 
 #[derive(Clone)]
-pub(crate) struct MemoryBlockfileReader<K: Key, V: Value> {
+pub struct MemoryBlockfileReader<K: Key, V: Value> {
     storage_manager: StorageManager,
     storage: Storage,
     marker: std::marker::PhantomData<(K, V)>,

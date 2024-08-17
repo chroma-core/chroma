@@ -19,7 +19,7 @@ use std::{
 };
 
 #[derive(Clone)]
-pub(in crate::arrow) enum BlockStorage {
+pub enum BlockStorage {
     String(StringValueStorage),
     Int32Array(Int32ArrayStorage),
     UInt32(UInt32Storage),

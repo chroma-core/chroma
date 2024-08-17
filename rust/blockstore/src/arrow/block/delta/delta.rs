@@ -18,9 +18,9 @@ use uuid::Uuid;
 /// - get_size: gets the size of the block delta.
 /// - split: splits the block delta into two block deltas.
 #[derive(Clone)]
-pub(in crate::arrow) struct BlockDelta {
-    pub builder: BlockStorage,
-    pub id: Uuid,
+pub struct BlockDelta {
+    pub(in crate::arrow) builder: BlockStorage,
+    pub(in crate::arrow) id: Uuid,
 }
 
 impl BlockDelta {

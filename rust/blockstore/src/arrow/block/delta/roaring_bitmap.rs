@@ -8,8 +8,8 @@ use parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Debug)]
-pub(in crate::arrow) struct RoaringBitmapStorage {
-    pub storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
+pub struct RoaringBitmapStorage {
+    pub(crate) storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
 }
 
 impl RoaringBitmapStorage {
