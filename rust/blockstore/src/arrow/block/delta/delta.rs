@@ -52,14 +52,6 @@ impl BlockDelta {
         V::delete(prefix, key.into(), self)
     }
 
-    /// Gets the minimum key in the block delta.
-    pub(crate) fn get_min_key(&self) -> Option<CompositeKey> {
-        if self.builder.len() == 0 {
-            return None;
-        }
-        Some(self.builder.get_key(0))
-    }
-
     ///  Gets the size of the block delta as it would be in a block. This includes
     ///  the size of the prefix, key, and value data and the size of the offsets
     ///  where applicable. The size is rounded up to the nearest 64 bytes as per

@@ -161,7 +161,7 @@ impl DataRecordStorage {
         let mut id_builder;
         let mut metadata_builder;
         let mut document_builder;
-        let mut embedding_len;
+        let embedding_len;
         if item_capacity == 0 {
             // ok to initialize fixed size float list with fixed size as 0.
             embedding_len = 0;
