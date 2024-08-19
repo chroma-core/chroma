@@ -238,3 +238,61 @@ impl Configurable<RateLimitingConfig> for RateLimitPolicy {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::{admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage};
+
+    fn get_s3_client() -> aws_sdk_s3::Client {
+        // Set up credentials assuming minio is running locally
+        let cred = aws_sdk_s3::config::Credentials::new(
+            "minio",
+            "minio123",
+            None,
+            None,
+            "loaded-from-env",
+        );
+
+        // Set up s3 client
+        let config = aws_sdk_s3::config::Builder::new()
+            .endpoint_url("http://127.0.0.1:9000".to_string())
+            .credentials_provider(cred)
+            .behavior_version_latest()
+            .region(aws_sdk_s3::config::Region::new("us-east-1"))
+            .force_path_style(true)
+            .build();
+
+        aws_sdk_s3::Client::from_conf(config)
+    }
+
+    #[tokio::test]
+    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
+    async fn test_put_get_key() {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: "test".to_string(),
+            client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
+        };
+        storage.create_bucket().await.unwrap();
+        let admission_controlled_storage =
+            AdmissionControlledS3Storage::new_with_default_policy(storage);
+
+        let test_data = "test data";
+        admission_controlled_storage
+            .put_bytes("test", test_data.as_bytes().to_vec())
+            .await
+            .unwrap();
+
+        let buf = admission_controlled_storage
+            .get("test".to_string())
+            .await
+            .unwrap();
+
+        let buf = String::from_utf8(Arc::unwrap_or_clone(buf)).unwrap();
+        assert_eq!(buf, test_data);
+    }
+}
