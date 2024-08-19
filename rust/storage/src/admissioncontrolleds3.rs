@@ -113,33 +113,21 @@ impl AdmissionControlledS3Storage {
         }
     }
 
-    async fn enter(&self) -> SemaphorePermit<'_> {
-        match &*self.rate_limiter {
-            RateLimitPolicy::CountBasedPolicy(policy) => {
-                return policy.acquire().await;
-            }
-        }
-    }
-
-    async fn exit(&self, permit: SemaphorePermit<'_>) {
-        match &*self.rate_limiter {
-            RateLimitPolicy::CountBasedPolicy(policy) => {
-                policy.drop(permit).await;
-            }
-        }
-    }
-
     pub async fn get(
         &self,
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
-        let permit = self.enter().await;
+        // If there is a duplicate request and the original request finishes
+        // before we look it up in the map below then we will end up with another
+        // request to S3. We rely on synchronization on the cache
+        // by the upstream consumer to make sure that this works correctly.
         let future_to_await;
+        let is_dupe: bool;
         {
             let mut requests = self.outstanding_requests.lock();
             let maybe_inflight = requests.get(&key).map(|fut| fut.clone());
-            future_to_await = match maybe_inflight {
-                Some(fut) => fut,
+            (future_to_await, is_dupe) = match maybe_inflight {
+                Some(fut) => (fut, true),
                 None => {
                     let get_storage_future = AdmissionControlledS3Storage::read_from_storage(
                         self.storage.clone(),
@@ -148,18 +136,25 @@ impl AdmissionControlledS3Storage {
                     .boxed()
                     .shared();
                     requests.insert(key.clone(), get_storage_future.clone());
-                    get_storage_future
+                    (get_storage_future, false)
                 }
             };
         }
+
+        // Acquire permit.
+        let permit: SemaphorePermit<'_>;
+        if is_dupe {
+            permit = self.rate_limiter.enter().await;
+        }
+
         let res = future_to_await.await;
         {
             let mut requests = self.outstanding_requests.lock();
             requests.remove(&key);
         }
-        // Release permit.
-        self.exit(permit).await;
+
         res
+        // Permit gets dropped here since it is RAII.
     }
 
     pub async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
@@ -197,6 +192,16 @@ enum RateLimitPolicy {
     CountBasedPolicy(CountBasedPolicy),
 }
 
+impl RateLimitPolicy {
+    async fn enter(&self) -> SemaphorePermit<'_> {
+        match self {
+            RateLimitPolicy::CountBasedPolicy(policy) => {
+                return policy.acquire().await;
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 struct CountBasedPolicy {
     max_allowed_outstanding: usize,
@@ -218,9 +223,6 @@ impl CountBasedPolicy {
             }
             Err(e) => panic!("AcquireToken Failed {}", e),
         }
-    }
-    async fn drop(&self, permit: SemaphorePermit<'_>) {
-        drop(permit);
     }
 }
 
