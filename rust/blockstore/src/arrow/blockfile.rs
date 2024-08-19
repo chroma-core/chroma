@@ -276,7 +276,14 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         None
     }
 
-    pub(super) async fn load_blocks(&self, block_ids: Vec<Uuid>) -> () {
+    /// Load all required blocks into the underlying block manager so that
+    /// they are available for subsequent reads.
+    /// This is a no-op if the block is already cached.
+    /// # Parameters
+    /// - `block_ids`: A list of block ids to load.
+    /// # Returns
+    /// - `()`: Returns nothing.
+    async fn load_blocks(&self, block_ids: &[Uuid]) -> () {
         // TODO: These need to be separate tasks enqueued onto dispatcher.
         let mut futures = Vec::new();
         for block_id in block_ids {
@@ -287,7 +294,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             if !self.block_manager.cached(&block_id)
                 && !self.loaded_blocks.lock().contains_key(&block_id)
             {
-                futures.push(self.get_block(block_id));
+                futures.push(self.get_block(*block_id));
             }
         }
         join_all(futures).await;
@@ -304,7 +311,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             }
         }
         let target_block_ids = self.sparse_index.get_all_target_block_ids(composite_keys);
-        self.load_blocks(target_block_ids).await;
+        self.load_blocks(&target_block_ids).await;
     }
 
     pub(crate) async fn get(&'me self, prefix: &str, key: K) -> Result<V, Box<dyn ChromaError>> {
@@ -547,6 +554,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 block_ids.push(block_id.clone());
             }
         }
+        // Preload all blocks in parallel using the load_blocks helper
+        self.load_blocks(&block_ids).await;
         let mut result: usize = 0;
         for block_id in block_ids {
             let block = self.get_block(block_id).await;
@@ -557,6 +566,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             }
         }
+
         Ok(result)
     }
 

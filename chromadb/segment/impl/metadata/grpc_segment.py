@@ -22,6 +22,7 @@ import grpc
 class GrpcMetadataSegment(MetadataReader):
     """Embedding Metadata segment interface"""
 
+    _request_timeout_seconds: int
     _metadata_reader_stub: MetadataReaderStub
     _segment: Segment
 
@@ -31,6 +32,9 @@ class GrpcMetadataSegment(MetadataReader):
             raise Exception("Missing grpc_url in segment metadata")
 
         self._segment = segment
+        self._request_timeout_seconds = system.settings.require(
+            "chroma_query_request_timeout_seconds"
+        )
 
     @override
     def start(self) -> None:
@@ -49,7 +53,7 @@ class GrpcMetadataSegment(MetadataReader):
             collection_id=self._segment["collection"].hex,
         )
         response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
-            request
+            request, timeout=self._request_timeout_seconds
         )
         return response.count
 
@@ -98,7 +102,7 @@ class GrpcMetadataSegment(MetadataReader):
             raise ValueError("Limit cannot be negative")
 
         response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
-            request
+            request, timeout=self._request_timeout_seconds
         )
         results: List[MetadataEmbeddingRecord] = []
         for record in response.records:
