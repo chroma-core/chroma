@@ -58,6 +58,7 @@ logService:
     - name: OPTL_TRACING_ENDPOINT
       value: 'value: "jaeger:4317"'
   flags:
+  replicaCount: 1
 
 queryService:
   image:
