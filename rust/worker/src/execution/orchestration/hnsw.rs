@@ -642,7 +642,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
                     self.brute_force_query(logs.clone(), ctx.receiver()).await;
                 } else {
                     // Skip running the brute force query if there are no logs
-                    self.merge_dependency_count -= 1;
+                    self.merge_dependency_count -= self.query_vectors.len() as u32;
                 }
 
                 self.hnsw_segment_query(logs, ctx).await;
