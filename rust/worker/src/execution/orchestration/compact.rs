@@ -48,6 +48,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
+use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -623,7 +624,11 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             // how to do that since commit is per partition but write_to_blockfiles
             // only need to be called once across all partitions combined.
             let mut writer = output.metadata_segment_writer.clone();
-            match writer.write_to_blockfiles().await {
+            match writer
+                .write_to_blockfiles()
+                .instrument(tracing::info_span!("Writing to blockfiles"))
+                .await
+            {
                 Ok(()) => (),
                 Err(e) => {
                     tracing::error!("Error writing metadata segment out to blockfiles: {:?}", e);

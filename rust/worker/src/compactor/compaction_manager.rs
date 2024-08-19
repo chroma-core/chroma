@@ -19,6 +19,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_storage::Storage;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use opentelemetry::trace::TraceContextExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::atomic::AtomicU32;
@@ -27,6 +28,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tracing::instrument;
 use tracing::span;
+use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -139,7 +142,14 @@ impl CompactionManager {
         self.scheduler.schedule().await;
         let mut jobs = FuturesUnordered::new();
         for job in self.scheduler.get_jobs() {
-            jobs.push(self.compact(job));
+            let parent_span_id = tracing::Span::current()
+                .context()
+                .span()
+                .span_context()
+                .trace_id()
+                .to_string();
+            let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id, parent_span_id = parent_span_id.as_str());
+            jobs.push(self.compact(job).instrument(instrumented_span));
         }
         println!("Compacting {} jobs", jobs.len());
         tracing::info!("Compacting {} jobs", jobs.len());
