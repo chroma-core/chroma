@@ -151,6 +151,36 @@ impl HnswIndexProvider {
         }
     }
 
+    async fn copy_bytes_to_local_file(
+        &self,
+        file_path: &PathBuf,
+        buf: Arc<Vec<u8>>,
+    ) -> Result<(), Box<HnswIndexProviderFileError>> {
+        let file_handle = tokio::fs::File::create(&file_path).await;
+        let mut file_handle = match file_handle {
+            Ok(file) => file,
+            Err(e) => {
+                tracing::error!("Failed to create file: {}", e);
+                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+            }
+        };
+        let res = file_handle.write_all(&buf).await;
+        match res {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("Failed to copy file: {}", e);
+                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+            }
+        }
+        match file_handle.flush().await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::error!("Failed to flush file: {}", e);
+                Err(Box::new(HnswIndexProviderFileError::IOError(e)))
+            }
+        }
+    }
+
     #[instrument]
     async fn load_hnsw_segment_into_directory(
         &self,
@@ -163,38 +193,26 @@ impl HnswIndexProvider {
             let key = self.format_key(source_id, file);
             tracing::info!("Loading hnsw index file: {}", key);
             let bytes_res = self.storage.get(&key).await;
+            let bytes_read;
             let buf = match bytes_res {
-                Ok(buf) => buf,
+                Ok(buf) => {
+                    bytes_read = buf.len();
+                    buf
+                }
                 Err(e) => {
                     tracing::error!("Failed to load hnsw index file from storage: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
                 }
             };
-
             let file_path = index_storage_path.join(file);
             // For now, we never evict from the cache, so if the index is being loaded, the file does not exist
-            let file_handle = tokio::fs::File::create(&file_path).await;
-            let mut file_handle = match file_handle {
-                Ok(file) => file,
-                Err(e) => {
-                    tracing::error!("Failed to create file: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            };
-            let res = file_handle.write_all(&buf).await;
-            match res {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to copy file: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            }
-            match file_handle.flush().await {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            }
+            self.copy_bytes_to_local_file(&file_path, buf).instrument(tracing::info_span!(parent: Span::current(), "hnsw provider copy bytes to local file", file = file)).await?;
+            tracing::info!(
+                "Copied {} bytes from storage key: {} to file: {}",
+                bytes_read,
+                key,
+                file_path.to_str().unwrap()
+            );
             tracing::info!("Loaded hnsw index file: {}", file);
         }
         Ok(())

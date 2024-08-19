@@ -89,14 +89,14 @@ impl AdmissionControlledS3Storage {
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
         let bytes_res = storage
             .get(&key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
+            .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
             .await;
         match bytes_res {
             Ok(bytes) => {
                 return Ok(bytes);
             }
             Err(e) => {
-                tracing::error!("Error reading from storage: {}", e);
+                tracing::error!("Error reading from s3: {}", e);
                 return Err(AdmissionControlledS3StorageError::S3GetError(e));
             }
         }

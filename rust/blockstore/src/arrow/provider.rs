@@ -212,7 +212,7 @@ impl BlockManager {
         let block = self.block_cache.get(id);
         match block {
             Some(block) => Some(block.clone()),
-            None => {
+            None => async {
                 let key = format!("block/{}", id);
                 let bytes_res = self
                     .storage
@@ -248,7 +248,7 @@ impl BlockManager {
                         return None;
                     }
                 }
-            }
+            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold")).await
         }
     }
 

@@ -172,9 +172,9 @@ impl S3Storage {
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
         let mut stream = self
             .get_stream(key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
+            .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
             .await?;
-        let read_block_span = tracing::trace_span!(parent: Span::current(), "Read bytes to end");
+        let read_block_span = tracing::trace_span!(parent: Span::current(), "S3 read bytes to end");
         let buf = read_block_span
             .in_scope(|| async {
                 let mut buf: Vec<u8> = Vec::new();
@@ -184,7 +184,7 @@ impl S3Storage {
                             buf.extend(chunk);
                         }
                         Err(err) => {
-                            tracing::error!("Error reading from storage: {}", err);
+                            tracing::error!("Error reading from S3: {}", err);
                             match err {
                                 GetError::S3Error(e) => {
                                     return Err(e);
