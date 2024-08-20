@@ -1,6 +1,6 @@
 use crate::{
     arrow::{
-        block::delta::{uint32::UInt32Storage, BlockDelta, BlockStorage},
+        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::{CompositeKey, KeyWrapper},
@@ -21,35 +21,20 @@ impl ArrowWriteableValue for u32 {
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::UInt32(builder) => {
-                let mut storage = builder.storage.write();
-                storage.insert(
-                    CompositeKey {
-                        prefix: prefix.to_string(),
-                        key,
-                    },
-                    value,
-                );
-            }
+            BlockStorage::UInt32(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type: {:?}", &delta.builder),
         }
     }
 
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::UInt32(builder) => {
-                let mut storage = builder.storage.write();
-                storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key,
-                });
-            }
+            BlockStorage::UInt32(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type: {:?}", &delta.builder),
         }
     }
 
     fn get_delta_builder() -> BlockStorage {
-        BlockStorage::UInt32(UInt32Storage::new())
+        BlockStorage::UInt32(SingleColumnStorage::new())
     }
 }
 

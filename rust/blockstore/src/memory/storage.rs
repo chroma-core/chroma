@@ -325,7 +325,7 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
     }
 }
 
-impl Writeable for &RoaringBitmap {
+impl Writeable for RoaringBitmap {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
         storage
             .roaring_bitmap_storage

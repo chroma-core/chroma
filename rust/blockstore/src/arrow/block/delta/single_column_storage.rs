@@ -1,32 +1,37 @@
-use super::{single_value_size_tracker::SingleValueSizeTracker, BlockKeyArrowBuilder};
+use super::{single_column_size_tracker::SingleColumnSizeTracker, BlockKeyArrowBuilder};
 use crate::{
-    arrow::types::ArrowWriteableKey,
+    arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
+    Value,
 };
 use arrow::{
-    array::{Array, ArrayRef, StringBuilder},
+    array::{
+        Array, ArrayRef, BinaryBuilder, Int32Array, Int32Builder, ListBuilder, StringBuilder,
+        UInt32Builder,
+    },
     datatypes::Field,
     util::bit_util,
 };
 use parking_lot::RwLock;
+use roaring::RoaringBitmap;
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone)]
-pub struct StringValueStorage {
-    inner: Arc<RwLock<Inner>>,
+pub struct SingleColumnStorage<T: ArrowWriteableValue> {
+    inner: Arc<RwLock<Inner<T>>>,
 }
 
-struct Inner {
-    storage: BTreeMap<CompositeKey, String>,
-    size_tracker: SingleValueSizeTracker,
+struct Inner<T> {
+    storage: BTreeMap<CompositeKey, T>,
+    size_tracker: SingleColumnSizeTracker,
 }
 
-impl StringValueStorage {
+impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(Inner {
                 storage: BTreeMap::new(),
-                size_tracker: SingleValueSizeTracker::new(),
+                size_tracker: SingleColumnSizeTracker::new(),
             })),
         }
     }
@@ -66,7 +71,8 @@ impl StringValueStorage {
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
 
-        let value_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
+        let value_offset_bytes = T::offset_size(self.len());
+        let value_validity_bytes = T::validity_size(self.len());
 
         prefix_size
             + key_size
@@ -74,6 +80,7 @@ impl StringValueStorage {
             + prefix_offset_bytes
             + key_offset_bytes
             + value_offset_bytes
+            + value_validity_bytes
     }
 
     pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
@@ -86,21 +93,20 @@ impl StringValueStorage {
         builder
     }
 
-    pub fn add(&self, prefix: &str, key: KeyWrapper, value: String) {
+    pub fn add(&self, prefix: &str, key: KeyWrapper, value: T) {
         let mut inner = self.inner.write();
 
         let key_len = key.get_size();
-        let value_len = value.len();
         inner.storage.insert(
             CompositeKey {
                 prefix: prefix.to_string(),
                 key,
             },
-            value,
+            value.to_owned(),
         );
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
-        inner.size_tracker.add_value_size(value_len);
+        inner.size_tracker.add_value_size(value.get_size());
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
@@ -117,11 +123,11 @@ impl StringValueStorage {
                 .size_tracker
                 .subtract_prefix_size(maybe_removed_prefix_len);
             inner.size_tracker.subtract_key_size(maybe_removed_key_len);
-            inner.size_tracker.subtract_value_size(value.len());
+            inner.size_tracker.subtract_value_size(value.get_size());
         }
     }
 
-    pub(super) fn split(&self, split_size: usize) -> (CompositeKey, StringValueStorage) {
+    pub(super) fn split(&self, split_size: usize) -> (CompositeKey, SingleColumnStorage<T>) {
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut value_size = 0;
@@ -136,31 +142,48 @@ impl StringValueStorage {
             while let Some((key, value)) = iter.next() {
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();
-                value_size += value.len();
+                value_size += value.get_size();
 
                 // offset sizing
                 let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((index + 1) * 4);
                 let key_offset_bytes = bit_util::round_upto_multiple_of_64((index + 1) * 4);
                 let value_offset_bytes = bit_util::round_upto_multiple_of_64((index + 1) * 4);
 
+                // validitiy sizing
+                let value_validity_bytes = T::validity_size(index);
+
                 let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
                     + bit_util::round_upto_multiple_of_64(key_size)
                     + bit_util::round_upto_multiple_of_64(value_size)
                     + prefix_offset_bytes
                     + key_offset_bytes
-                    + value_offset_bytes;
+                    + value_offset_bytes
+                    + value_validity_bytes;
 
                 if total_size > split_size {
                     split_key = match iter.next() {
                         None => Some(key.clone()),
                         Some((next_key, _)) => Some(next_key.clone()),
                     };
+                    break;
                 }
                 index += 1;
             }
         }
 
         let mut inner = self.inner.write();
+        let total_prefix_size = inner.size_tracker.get_prefix_size();
+        let total_key_size = inner.size_tracker.get_key_size();
+        let total_value_size = inner.size_tracker.get_value_size();
+        inner
+            .size_tracker
+            .subtract_prefix_size(total_prefix_size - prefix_size);
+        inner
+            .size_tracker
+            .subtract_key_size(total_key_size - key_size);
+        inner
+            .size_tracker
+            .subtract_value_size(total_value_size - value_size);
 
         match split_key {
             None => panic!("A StringValueStorage should have at least one element to be split."),
@@ -168,13 +191,13 @@ impl StringValueStorage {
                 let new_delta = inner.storage.split_off(&split_key);
                 (
                     split_key,
-                    StringValueStorage {
+                    SingleColumnStorage {
                         inner: Arc::new(RwLock::new(Inner {
                             storage: new_delta,
-                            size_tracker: SingleValueSizeTracker::with_values(
-                                self.get_prefix_size() - prefix_size,
-                                self.get_key_size() - key_size,
-                                self.get_value_size() - value_size,
+                            size_tracker: SingleColumnSizeTracker::with_values(
+                                total_prefix_size - prefix_size,
+                                total_key_size - key_size,
+                                total_value_size - value_size,
                             ),
                         })),
                     },
@@ -182,7 +205,9 @@ impl StringValueStorage {
             }
         }
     }
+}
 
+impl SingleColumnStorage<String> {
     pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.len();
         let mut value_builder;
@@ -200,6 +225,102 @@ impl StringValueStorage {
         }
 
         let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
+        let value_arr = value_builder.finish();
+        (
+            value_field,
+            (&value_arr as &dyn Array).slice(0, value_arr.len()),
+        )
+    }
+}
+
+impl SingleColumnStorage<Int32Array> {
+    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
+        let item_capacity = self.len();
+        let inner = self.inner.read();
+        let storage = &inner.storage;
+        let total_value_count = storage.iter().fold(0, |acc, (_, value)| acc + value.len());
+
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = ListBuilder::new(Int32Builder::new());
+        } else {
+            value_builder = ListBuilder::with_capacity(
+                Int32Builder::with_capacity(total_value_count),
+                item_capacity,
+            );
+        }
+
+        for (_, value) in storage.iter() {
+            value_builder.append_value(value);
+        }
+
+        let value_field = Field::new(
+            "value",
+            arrow::datatypes::DataType::List(Arc::new(Field::new(
+                "item",
+                arrow::datatypes::DataType::Int32,
+                true,
+            ))),
+            true,
+        );
+        let value_arr = value_builder.finish();
+        (
+            value_field,
+            (&value_arr as &dyn Array).slice(0, value_arr.len()),
+        )
+    }
+}
+
+impl SingleColumnStorage<u32> {
+    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
+        let inner = self.inner.read();
+        let storage = &inner.storage;
+        let item_capacity = storage.len();
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = UInt32Builder::new();
+        } else {
+            value_builder = UInt32Builder::with_capacity(item_capacity);
+        }
+        for (_, value) in storage.iter() {
+            value_builder.append_value(*value);
+        }
+        let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
+        let value_arr = value_builder.finish();
+        (
+            value_field,
+            (&value_arr as &dyn Array).slice(0, value_arr.len()),
+        )
+    }
+}
+
+impl SingleColumnStorage<RoaringBitmap> {
+    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
+        let inner = self.inner.read();
+        let storage = &inner.storage;
+        let item_capacity = self.len();
+        let total_value_count = storage
+            .iter()
+            .fold(0, |acc, (_, value)| acc + value.get_size());
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = BinaryBuilder::new();
+        } else {
+            value_builder = BinaryBuilder::with_capacity(item_capacity, total_value_count);
+        }
+
+        for (_, value) in storage.iter() {
+            let mut serialized = Vec::with_capacity(value.serialized_size());
+            let res = value.serialize_into(&mut serialized);
+            // TODO: proper error handling
+            let serialized = match res {
+                Ok(_) => serialized,
+                Err(e) => panic!("Failed to serialize RoaringBitmap: {}", e),
+            };
+            value_builder.append_value(serialized);
+        }
+
+        let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = value_builder.finish();
         (
             value_field,

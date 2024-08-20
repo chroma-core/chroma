@@ -328,18 +328,18 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, &RoaringBitmap>();
+        let delta = block_manager.create::<&str, RoaringBitmap>();
 
         let n = 2000;
         for i in 0..n {
             let prefix = "prefix";
             let key = format!("{:04}", i);
             let value = RoaringBitmap::from_iter((0..i).map(|x| x as u32));
-            delta.add(prefix, key.as_str(), &value);
+            delta.add(prefix, key.as_str(), value);
         }
 
-        let size = delta.get_size::<&str, &RoaringBitmap>();
-        let block = block_manager.commit::<&str, &RoaringBitmap>(&delta);
+        let size = delta.get_size::<&str, RoaringBitmap>();
+        let block = block_manager.commit::<&str, RoaringBitmap>(&delta);
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
 
@@ -420,7 +420,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_sizing_uint_key_val() {
+    async fn test_sizing_uint_key_string_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
@@ -444,5 +444,62 @@ mod test {
 
         // test save/load
         test_save_load_size(path, &block);
+    }
+
+    #[tokio::test]
+    async fn test_sizing_uint_key_val() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let delta = block_manager.create::<u32, u32>();
+        let delta_id = delta.id.clone();
+
+        let n = 2000;
+        for i in 0..n {
+            let prefix = "prefix";
+            let key = i as u32;
+            let value = i as u32;
+            delta.add(prefix, key, value);
+        }
+        let size = delta.get_size::<u32, u32>();
+        let block = block_manager.commit::<u32, u32>(&delta);
+        let mut values_before_flush = vec![];
+        for i in 0..n {
+            let key = i as u32;
+            let read = block.get::<u32, u32>("prefix", key);
+            values_before_flush.push(read.unwrap().to_string());
+        }
+        block_manager.flush(&block).await.unwrap();
+
+        let block = block_manager.get(&delta_id).await.unwrap();
+
+        assert_eq!(size, block.get_size());
+        for i in 0..n {
+            let key = i as u32;
+            let read = block.get::<u32, u32>("prefix", key);
+            assert_eq!(read.unwrap().to_string(), values_before_flush[i]);
+        }
+
+        // test save/load
+        let loaded = test_save_load_size(path, &block);
+        for i in 0..n {
+            let key = i as u32;
+            let read = loaded.get::<u32, u32>("prefix", key);
+            assert_eq!(read, Some(i as u32));
+        }
+
+        // test fork
+        let forked_block = block_manager.fork::<u32, u32>(&delta_id).await;
+        let new_id = forked_block.id.clone();
+        let block = block_manager.commit::<u32, u32>(&forked_block);
+        block_manager.flush(&block).await.unwrap();
+        let forked_block = block_manager.get(&new_id).await.unwrap();
+        for i in 0..n {
+            let key = i as u32;
+            let read = forked_block.get::<u32, u32>("prefix", key);
+            assert_eq!(read, Some(i as u32));
+        }
     }
 }

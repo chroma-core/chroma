@@ -9,13 +9,13 @@ use arrow::util::bit_util;
 /// This struct is not thread safe and users are expected to handle
 /// synchronization themselves.
 #[derive(Clone, Debug)]
-pub(super) struct SingleValueSizeTracker {
+pub(super) struct SingleColumnSizeTracker {
     prefix_size: usize,
     key_size: usize,
     value_size: usize,
 }
 
-impl SingleValueSizeTracker {
+impl SingleColumnSizeTracker {
     pub(super) fn new() -> Self {
         Self {
             prefix_size: 0,

@@ -230,7 +230,7 @@ mod tests {
         bitmap.insert(1);
         bitmap.insert(2);
         bitmap.insert(3);
-        let _ = writer.set("prefix", "bitmap1", &bitmap);
+        let _ = writer.set("prefix", "bitmap1", bitmap);
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<&str, roaring::RoaringBitmap> =

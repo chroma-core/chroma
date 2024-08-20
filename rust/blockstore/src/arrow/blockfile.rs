@@ -1088,7 +1088,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .create::<&str, &roaring::RoaringBitmap>()
+            .create::<&str, roaring::RoaringBitmap>()
             .unwrap();
         let id = writer.id();
 
@@ -1097,11 +1097,11 @@ mod tests {
             let key = format!("{:04}", i);
             println!("Setting key: {}", key);
             let value = roaring::RoaringBitmap::from_iter((0..i).map(|x| x as u32));
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, &roaring::RoaringBitmap>().unwrap();
+        let flusher = writer.commit::<&str, roaring::RoaringBitmap>().unwrap();
         flusher
-            .flush::<&str, &roaring::RoaringBitmap>()
+            .flush::<&str, roaring::RoaringBitmap>()
             .await
             .unwrap();
 
@@ -1263,6 +1263,7 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = format!("{:04}", i);
+            println!("Setting key: {}", key);
             writer
                 .set("key", key.as_str(), value.to_string())
                 .await
