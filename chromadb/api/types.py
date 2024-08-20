@@ -31,7 +31,11 @@ URI = str
 URIs = List[URI]
 
 
-def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
+def maybe_cast_one_to_many_uri(target: Optional[OneOrMany[URI]]) -> Optional[URIs]:
+    # No target
+    if target is None:
+        return None
+
     if isinstance(target, str):
         # One URI
         return cast(URIs, [target])
@@ -58,8 +62,12 @@ Embeddings = List[Embedding]
 
 
 def maybe_cast_one_to_many_embedding(
-    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]  # type: ignore[type-arg]
-) -> Embeddings:
+    target: Optional[Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]],
+) -> Optional[Embeddings]:
+    # No target
+    if target is None:
+        return None
+
     if isinstance(target, List):
         # One Embedding
         if isinstance(target[0], (int, float)):
@@ -72,7 +80,13 @@ def maybe_cast_one_to_many_embedding(
 Metadatas = List[Metadata]
 
 
-def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
+def maybe_cast_one_to_many_metadata(
+    target: Optional[OneOrMany[Metadata]],
+) -> Optional[Metadatas]:
+    # No target
+    if target is None:
+        return None
+
     # One Metadata dict
     if isinstance(target, dict):
         return cast(Metadatas, [target])
@@ -94,7 +108,13 @@ def is_document(target: Any) -> bool:
     return True
 
 
-def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
+def maybe_cast_one_to_many_document(
+    target: Optional[OneOrMany[Document]],
+) -> Optional[Documents]:
+    # No target
+    if target is None:
+        return None
+
     # One Document
     if is_document(target):
         return cast(Documents, [target])
@@ -116,7 +136,13 @@ def is_image(target: Any) -> bool:
     return True
 
 
-def maybe_cast_one_to_many_image(target: OneOrMany[Image]) -> Images:
+def maybe_cast_one_to_many_image(
+    target: Optional[OneOrMany[Image]],
+) -> Optional[Images]:
+    # No target
+    if target is None:
+        return None
+
     if is_image(target):
         return cast(Images, [target])
     # Already a sequence
@@ -133,6 +159,16 @@ class IncludeEnum(str, Enum):
     distances = "distances"
     uris = "uris"
     data = "data"
+
+
+# Record set
+class RecordSet(TypedDict):
+    ids: IDs
+    embeddings: Optional[Embeddings]
+    metadatas: Optional[Metadatas]
+    documents: Optional[Documents]
+    images: Optional[Images]
+    uris: Optional[URIs]
 
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
@@ -209,7 +245,10 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-            return validate_embeddings(maybe_cast_one_to_many_embedding(result))
+
+            unpacked_result = maybe_cast_one_to_many_embedding(result)
+
+            return validate_embeddings(unpacked_result)  # type: ignore[arg-type]
 
         setattr(cls, "__call__", __call__)
 
