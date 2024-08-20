@@ -1,4 +1,5 @@
 from typing import (
+    TypedDict,
     TYPE_CHECKING,
     Dict,
     Generic,
@@ -65,6 +66,14 @@ if TYPE_CHECKING:
     from chromadb.api import ServerAPI, AsyncServerAPI
 
 ClientT = TypeVar("ClientT", "ServerAPI", "AsyncServerAPI")
+
+class UnpackedEmbeddingSet(TypedDict):
+    ids: IDs
+    embeddings: Optional[Embeddings]
+    metadatas: Optional[Metadatas]
+    documents: Optional[Documents]
+    images: Optional[Images]
+    uris: Optional[URIs]
 
 
 class CollectionCommon(Generic[ClientT]):
@@ -147,11 +156,11 @@ class CollectionCommon(Generic[ClientT]):
 
     def get_model(self) -> CollectionModel:
         return self._model
-
-    def _validate_embedding_set(
-        self,
+    
+    @staticmethod
+    def _unpack_embedding_set(
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -161,6 +170,31 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
+    ) -> UnpackedEmbeddingSet:
+        upacked_ids = maybe_cast_one_to_many_ids(ids)
+        upacked_embeddings = maybe_cast_one_to_many_embedding(embeddings)
+        upacked_metadatas = maybe_cast_one_to_many_metadata(metadatas)
+        upacked_documents = maybe_cast_one_to_many_document(documents)
+        upacked_images = maybe_cast_one_to_many_image(images)
+        upacked_uris = maybe_cast_one_to_many_uri(uris)
+
+        return {
+            "ids": upacked_ids,
+            "embeddings": upacked_embeddings,
+            "metadatas": upacked_metadatas,
+            "documents": upacked_documents,
+            "images": upacked_images,
+            "uris": upacked_uris,
+        }
+
+    def _validate_embedding_set(
+        self,
+        ids: IDs,
+        embeddings: Optional[Embeddings],
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+        images: Optional[Images],
+        uris: Optional[URIs],
         require_embeddings_or_data: bool = True,
     ) -> Tuple[
         IDs,
@@ -170,29 +204,22 @@ class CollectionCommon(Generic[ClientT]):
         Optional[Images],
         Optional[URIs],
     ]:
-        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids))
+        valid_ids = validate_ids(ids)
         valid_embeddings = (
             validate_embeddings(
-                self._normalize_embeddings(maybe_cast_one_to_many_embedding(embeddings))
-            )
-            if embeddings is not None
-            else None
+                self._normalize_embeddings(embeddings)
+            ) if embeddings is not None else None
         )
         valid_metadatas = (
-            validate_metadatas(maybe_cast_one_to_many_metadata(metadatas))
-            if metadatas is not None
-            else None
+            validate_metadatas(metadatas) if metadatas is not None else None
         )
         valid_documents = (
             maybe_cast_one_to_many_document(documents)
-            if documents is not None
-            else None
         )
         valid_images = (
-            maybe_cast_one_to_many_image(images) if images is not None else None
+            maybe_cast_one_to_many_image(images)
         )
-
-        valid_uris = maybe_cast_one_to_many_uri(uris) if uris is not None else None
+        valid_uris = maybe_cast_one_to_many_uri(uris)
 
         # Check that one of embeddings or ducuments or images is provided
         if require_embeddings_or_data:
@@ -240,38 +267,15 @@ class CollectionCommon(Generic[ClientT]):
             valid_images,
             valid_uris,
         )
-
-    def _validate_and_prepare_embedding_set(
+        
+        
+    def _prepare_embedding_set(
         self,
-        ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
-            Union[
-                OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
-            ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
-    ) -> Tuple[
-        IDs,
-        Embeddings,
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ]:
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-        ) = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
-        )
-
+        embeddings: Optional[Embeddings],
+        documents: Optional[Documents],
+        images: Optional[Images],
+        uris: Optional[URIs],
+    ) -> Embeddings:
         # We need to compute the embeddings if they're not provided
         if embeddings is None:
             # At this point, we know that one of documents or images are provided from the validation above
@@ -289,8 +293,8 @@ class CollectionCommon(Generic[ClientT]):
                         "You must set a data loader on the collection if loading from URIs."
                     )
                 embeddings = self._embed(self._data_loader(uris))
-
-        return ids, embeddings, metadatas, documents, uris
+        
+        return embeddings
 
     def _validate_and_prepare_get_request(
         self,
@@ -367,7 +371,7 @@ class CollectionCommon(Generic[ClientT]):
         valid_query_embeddings = (
             validate_embeddings(
                 self._normalize_embeddings(
-                    maybe_cast_one_to_many_embedding(query_embeddings)
+                    maybe_cast_one_to_many_embedding(query_embeddings) # type: ignore
                 )
             )
             if query_embeddings is not None
@@ -470,6 +474,10 @@ class CollectionCommon(Generic[ClientT]):
         Optional[Documents],
         Optional[URIs],
     ]:
+        upacked_embeddings_set = self._unpack_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
+        )
+        
         (
             ids,
             embeddings,
@@ -478,12 +486,12 @@ class CollectionCommon(Generic[ClientT]):
             images,
             uris,
         ) = self._validate_embedding_set(
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
+            upacked_embeddings_set["ids"],
+            upacked_embeddings_set["embeddings"],
+            upacked_embeddings_set["metadatas"],
+            upacked_embeddings_set["documents"],
+            upacked_embeddings_set["images"],
+            upacked_embeddings_set["uris"],
             require_embeddings_or_data=False,
         )
 
@@ -515,6 +523,10 @@ class CollectionCommon(Generic[ClientT]):
         Optional[Documents],
         Optional[URIs],
     ]:
+        upacked_embeddings_set = self._unpack_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
+        )
+                
         (
             ids,
             embeddings,
@@ -523,7 +535,13 @@ class CollectionCommon(Generic[ClientT]):
             images,
             uris,
         ) = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
+            upacked_embeddings_set["ids"],
+            upacked_embeddings_set["embeddings"],
+            upacked_embeddings_set["metadatas"],
+            upacked_embeddings_set["documents"],
+            upacked_embeddings_set["images"],
+            upacked_embeddings_set["uris"],
+            require_embeddings_or_data=False,
         )
 
         if embeddings is None:
