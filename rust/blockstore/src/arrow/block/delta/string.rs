@@ -59,7 +59,7 @@ impl StringValueStorage {
     pub(super) fn get_size<K: ArrowWriteableKey>(&self) -> usize {
         let inner = self.inner.read();
 
-        let prefix_size = inner.size_tracker.get_prefix_size();
+        let prefix_size = inner.size_tracker.get_arrow_padded_prefix_size();
         let key_size = inner.size_tracker.get_arrow_padded_key_size();
         let value_size = inner.size_tracker.get_arrow_padded_value_size();
 
