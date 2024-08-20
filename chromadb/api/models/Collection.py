@@ -79,8 +79,12 @@ class Collection(CollectionCommon["ServerAPI"]):
             images,
             uris,
         )
-        
-        normalized_embeddings = self._normalize_embeddings(unpacked_embedding_set["embeddings"]) if unpacked_embedding_set["embeddings"] is not None else None
+
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
 
         self._validate_embedding_set(
             unpacked_embedding_set["ids"],
@@ -91,7 +95,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
         )
-        
+
         prepared_embeddings = self._prepare_embeddings(
             normalized_embeddings,
             unpacked_embedding_set["documents"],
