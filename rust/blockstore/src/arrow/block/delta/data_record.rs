@@ -145,6 +145,58 @@ impl DataRecordStorage {
             .fetch_add(document_len, std::sync::atomic::Ordering::SeqCst);
     }
 
+    pub fn delete(&self, prefix: &str, key: KeyWrapper) {
+        let mut id_storage = self.id_storage.write();
+        let mut embedding_storage = self.embedding_storage.write();
+        let mut metadata_storage = self.metadata_storage.write();
+        let mut document_storage = self.document_storage.write();
+
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+
+        let maybe_removed_id = id_storage.remove(&composite_key);
+        let maybe_removed_embedding = embedding_storage.remove(&composite_key);
+        let maybe_removed_metadata = metadata_storage.remove(&composite_key);
+        let maybe_removed_document = document_storage.remove(&composite_key);
+
+        if let Some(id) = maybe_removed_id {
+            self.id_size
+                .fetch_sub(id.len(), std::sync::atomic::Ordering::SeqCst);
+            self.prefix_size.fetch_sub(
+                composite_key.prefix.len(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            self.key_size.fetch_sub(
+                composite_key.key.get_size(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            self.embedding_size.fetch_sub(
+                maybe_removed_embedding.as_ref().map_or(0, |v| v.len() * 4),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            if let Some(metadata) = maybe_removed_metadata {
+                match metadata {
+                    Some(metadata) => {
+                        self.metadata_size
+                            .fetch_sub(metadata.len(), std::sync::atomic::Ordering::SeqCst);
+                    }
+                    None => {}
+                }
+            }
+            if let Some(document) = maybe_removed_document {
+                match document {
+                    Some(document) => {
+                        self.document_size
+                            .fetch_sub(document.len(), std::sync::atomic::Ordering::SeqCst);
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+
     pub fn get_min_key(&self) -> Option<CompositeKey> {
         let id_storage = self.id_storage.read();
         id_storage.keys().next().cloned()

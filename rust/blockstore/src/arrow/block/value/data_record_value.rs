@@ -3,7 +3,7 @@ use crate::{
         block::delta::{data_record::DataRecordStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
-    key::{CompositeKey, KeyWrapper},
+    key::KeyWrapper,
 };
 use arrow::array::BinaryArray;
 use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray};
@@ -22,30 +22,8 @@ impl ArrowWriteableValue for &DataRecord<'_> {
     }
 
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
-        // TODO: remove the size from the atomic counters
         match &delta.builder {
-            BlockStorage::DataRecord(builder) => {
-                let mut id_storage = builder.id_storage.write();
-                let mut embedding_storage = builder.embedding_storage.write();
-                let mut metadata_storage = builder.metadata_storage.write();
-                let mut document_storage = builder.document_storage.write();
-                id_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key: key.clone(),
-                });
-                embedding_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key: key.clone(),
-                });
-                metadata_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key: key.clone(),
-                });
-                document_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key,
-                });
-            }
+            BlockStorage::DataRecord(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type"),
         }
     }

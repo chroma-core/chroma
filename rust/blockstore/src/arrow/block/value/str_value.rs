@@ -20,13 +20,7 @@ impl ArrowWriteableValue for &str {
 
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::String(builder) => {
-                let mut storage = builder.storage.write();
-                storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key,
-                });
-            }
+            BlockStorage::String(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type"),
         }
     }
