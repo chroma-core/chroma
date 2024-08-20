@@ -171,10 +171,6 @@ impl DistributedHNSWSegmentWriter {
             )))
         }
     }
-
-    pub(crate) fn get_index_id(&self) -> Uuid {
-        self.index.read().id
-    }
 }
 
 impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
@@ -293,6 +289,7 @@ impl DistributedHNSWSegmentReader {
                 ));
             }
         };
+        let persist_path = &hnsw_index_provider.temporary_storage_path;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,

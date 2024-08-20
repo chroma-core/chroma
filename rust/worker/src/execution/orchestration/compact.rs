@@ -103,7 +103,6 @@ pub struct CompactOrchestrator {
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
     // Current max offset id.
     curr_max_offset_id: Arc<AtomicU32>,
-    hnsw_index_id: Option<Uuid>,
 }
 
 #[derive(Error, Debug)]
@@ -140,8 +139,6 @@ impl ChromaError for GetSegmentWritersError {
 enum CompactionError {
     #[error(transparent)]
     SystemTimeError(#[from] std::time::SystemTimeError),
-    #[error(transparent)]
-    CleanupFailed(#[from] std::io::Error),
 }
 
 impl ChromaError for CompactionError {
@@ -190,7 +187,6 @@ impl CompactOrchestrator {
             result_channel,
             record_segment,
             curr_max_offset_id,
-            hnsw_index_id: None,
         }
     }
 
@@ -277,10 +273,7 @@ impl CompactOrchestrator {
         let writer_res = self.get_segment_writers().await;
         let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) = match writer_res
         {
-            Ok(writers) => {
-                self.hnsw_index_id = Some(writers.1.get_index_id());
-                writers
-            }
+            Ok(writers) => writers,
             Err(e) => {
                 tracing::error!("Error creating writers for compaction {:?}", e);
                 terminate_with_error(self.result_channel.take(), e, ctx);
