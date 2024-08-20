@@ -79,7 +79,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             images,
             uris,
         )
-                
+
         (
             ids,
             embeddings,
@@ -96,8 +96,10 @@ class Collection(CollectionCommon["ServerAPI"]):
             upacked_embeddings_set["uris"],
             require_embeddings_or_data=False,
         )
-        
-        prepared_embeddings = self._prepare_embedding_set(embeddings, documents, images, uris)
+
+        prepared_embeddings = self._prepare_embedding_set(
+            embeddings, documents, images, uris
+        )
 
         self._client._add(ids, self.id, prepared_embeddings, metadatas, documents, uris)
 

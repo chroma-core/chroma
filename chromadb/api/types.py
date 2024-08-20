@@ -35,7 +35,7 @@ def maybe_cast_one_to_many_uri(target: Optional[OneOrMany[URI]]) -> Optional[URI
     # No target
     if target is None:
         return None
-    
+
     if isinstance(target, str):
         # One URI
         return cast(URIs, [target])
@@ -60,13 +60,14 @@ def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
 Embedding = Vector
 Embeddings = List[Embedding]
 
+
 def maybe_cast_one_to_many_embedding(
     target: Optional[Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]],
 ) -> Optional[Embeddings]:
     # No target
     if target is None:
         return None
-    
+
     if isinstance(target, List):
         # One Embedding
         if isinstance(target[0], (int, float)):
@@ -79,7 +80,9 @@ def maybe_cast_one_to_many_embedding(
 Metadatas = List[Metadata]
 
 
-def maybe_cast_one_to_many_metadata(target: Optional[OneOrMany[Metadata]]) -> Optional[Metadatas]:
+def maybe_cast_one_to_many_metadata(
+    target: Optional[OneOrMany[Metadata]],
+) -> Optional[Metadatas]:
     # No target
     if target is None:
         return None
@@ -105,11 +108,13 @@ def is_document(target: Any) -> bool:
     return True
 
 
-def maybe_cast_one_to_many_document(target: Optional[OneOrMany[Document]]) -> Optional[Documents]:
+def maybe_cast_one_to_many_document(
+    target: Optional[OneOrMany[Document]],
+) -> Optional[Documents]:
     # No target
     if target is None:
         return None
-    
+
     # One Document
     if is_document(target):
         return cast(Documents, [target])
@@ -131,11 +136,13 @@ def is_image(target: Any) -> bool:
     return True
 
 
-def maybe_cast_one_to_many_image(target: Optional[OneOrMany[Image]]) -> Optional[Images]:
+def maybe_cast_one_to_many_image(
+    target: Optional[OneOrMany[Image]],
+) -> Optional[Images]:
     # No target
     if target is None:
         return None
-    
+
     if is_image(target):
         return cast(Images, [target])
     # Already a sequence
@@ -153,6 +160,7 @@ class IncludeEnum(str, Enum):
     uris = "uris"
     data = "data"
 
+
 # Embedding set
 class EmbeddingSet(TypedDict):
     ids: IDs
@@ -161,6 +169,7 @@ class EmbeddingSet(TypedDict):
     documents: Optional[Documents]
     images: Optional[Images]
     uris: Optional[URIs]
+
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
@@ -236,11 +245,10 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-            
+
             unpacked_result = maybe_cast_one_to_many_embedding(result)
             if unpacked_result is None:
                 raise ValueError("Expected embeddings to be returned")
-            
 
             return validate_embeddings(unpacked_result)
 
