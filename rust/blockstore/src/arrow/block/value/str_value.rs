@@ -11,37 +11,9 @@ use std::sync::Arc;
 impl ArrowWriteableValue for &str {
     type ReadableValue<'referred_data> = &'referred_data str;
 
-    // fn offset_size(item_count: usize) -> usize {
-    //     bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
-    // }
-
-    // fn validity_size(_item_count: usize) -> usize {
-    //     0 // We don't support None values for StringArray
-    // }
-
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        // TODO: move into the storage
         match &delta.builder {
-            BlockStorage::String(builder) => {
-                let mut storage = builder.storage.write();
-                let key_len = key.get_size();
-                storage.insert(
-                    CompositeKey {
-                        prefix: prefix.to_string(),
-                        key,
-                    },
-                    value.to_string(),
-                );
-                builder
-                    .prefix_size
-                    .fetch_add(prefix.len(), std::sync::atomic::Ordering::SeqCst);
-                builder
-                    .key_size
-                    .fetch_add(key_len, std::sync::atomic::Ordering::SeqCst);
-                builder
-                    .value_size
-                    .fetch_add(value.len(), std::sync::atomic::Ordering::SeqCst);
-            }
+            BlockStorage::String(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type"),
         }
     }

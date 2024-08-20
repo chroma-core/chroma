@@ -1,4 +1,4 @@
-use super::BlockKeyArrowBuilder;
+use super::{single_value_size_tracker::SingleValueSizeTracker, BlockKeyArrowBuilder};
 use crate::{
     arrow::types::ArrowWriteableKey,
     key::{CompositeKey, KeyWrapper},
@@ -9,42 +9,32 @@ use arrow::{
     util::bit_util,
 };
 use parking_lot::RwLock;
-use prost_types::value;
-use std::{
-    collections::BTreeMap,
-    sync::{atomic::AtomicUsize, Arc},
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone)]
 pub struct StringValueStorage {
     pub(crate) storage: Arc<RwLock<BTreeMap<CompositeKey, String>>>,
-    pub(in crate::arrow::block) prefix_size: Arc<AtomicUsize>,
-    pub(in crate::arrow::block) key_size: Arc<AtomicUsize>,
-    pub(in crate::arrow::block) value_size: Arc<AtomicUsize>,
+    size_tracker: SingleValueSizeTracker,
 }
 
 impl StringValueStorage {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
-
-            // size-tracking variables
-            prefix_size: Arc::new(AtomicUsize::new(0)),
-            key_size: Arc::new(AtomicUsize::new(0)),
-            value_size: Arc::new(AtomicUsize::new(0)),
+            size_tracker: SingleValueSizeTracker::new(),
         }
     }
 
     pub(super) fn get_prefix_size(&self) -> usize {
-        return self.prefix_size.load(std::sync::atomic::Ordering::SeqCst);
+        return self.size_tracker.get_prefix_size();
     }
 
     pub(super) fn get_key_size(&self) -> usize {
-        return self.key_size.load(std::sync::atomic::Ordering::SeqCst);
+        return self.size_tracker.get_key_size();
     }
 
     pub(super) fn get_value_size(&self) -> usize {
-        return self.value_size.load(std::sync::atomic::Ordering::SeqCst);
+        return self.size_tracker.get_value_size();
     }
 
     pub(super) fn len(&self) -> usize {
@@ -52,10 +42,15 @@ impl StringValueStorage {
         storage.len()
     }
 
+    pub fn get_min_key(&self) -> Option<CompositeKey> {
+        let storage = self.storage.read();
+        storage.keys().next().cloned()
+    }
+
     pub(super) fn get_size<K: ArrowWriteableKey>(&self) -> usize {
-        let prefix_size = bit_util::round_upto_multiple_of_64(self.get_prefix_size());
-        let key_size = bit_util::round_upto_multiple_of_64(self.get_key_size());
-        let value_size = bit_util::round_upto_multiple_of_64(self.get_value_size());
+        let prefix_size = self.size_tracker.get_arrow_padded_prefix_size();
+        let key_size = self.size_tracker.get_arrow_padded_key_size();
+        let value_size = self.size_tracker.get_arrow_padded_value_size();
 
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
@@ -77,6 +72,39 @@ impl StringValueStorage {
             builder.add_key(key.clone());
         }
         builder
+    }
+
+    pub fn add(&self, prefix: &str, key: KeyWrapper, value: &str) {
+        let mut storage = self.storage.write();
+
+        let key_len = key.get_size();
+        storage.insert(
+            CompositeKey {
+                prefix: prefix.to_string(),
+                key,
+            },
+            value.to_string(),
+        );
+        self.size_tracker.add_prefix_size(prefix.len());
+        self.size_tracker.add_key_size(key_len);
+        self.size_tracker.add_value_size(value.len());
+    }
+
+    pub fn delete(&self, prefix: &str, key: KeyWrapper) {
+        let mut storage = self.storage.write();
+        let maybe_removed_prefix_len = prefix.len();
+        let maybe_removed_key_len = key.get_size();
+        let maybe_removed_value = storage.remove(&CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        });
+
+        if let Some(value) = maybe_removed_value {
+            self.size_tracker
+                .subtract_prefix_size(maybe_removed_prefix_len);
+            self.size_tracker.subtract_key_size(maybe_removed_key_len);
+            self.size_tracker.subtract_value_size(value.len());
+        }
     }
 
     pub(super) fn split(&self, split_size: usize) -> (CompositeKey, StringValueStorage) {
@@ -123,14 +151,15 @@ impl StringValueStorage {
             None => panic!("A StringValueStorage should have at least one element to be split."),
             Some(split_key) => {
                 let new_delta = storage.split_off(&split_key);
-                // TODO: subtract our sizes from the storage
                 (
                     split_key,
                     StringValueStorage {
                         storage: Arc::new(RwLock::new(new_delta)),
-                        prefix_size: Arc::new(AtomicUsize::new(prefix_size)),
-                        key_size: Arc::new(AtomicUsize::new(key_size)),
-                        value_size: Arc::new(AtomicUsize::new(value_size)),
+                        size_tracker: SingleValueSizeTracker::with_values(
+                            self.get_prefix_size() - prefix_size,
+                            self.get_key_size() - key_size,
+                            self.get_value_size() - value_size,
+                        ),
                     },
                 )
             }

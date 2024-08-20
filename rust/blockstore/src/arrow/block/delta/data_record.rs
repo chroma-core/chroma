@@ -145,6 +145,11 @@ impl DataRecordStorage {
             .fetch_add(document_len, std::sync::atomic::Ordering::SeqCst);
     }
 
+    pub fn get_min_key(&self) -> Option<CompositeKey> {
+        let id_storage = self.id_storage.read();
+        id_storage.keys().next().cloned()
+    }
+
     pub(super) fn get_size<K: ArrowWriteableKey>(&self) -> usize {
         let prefix_size = bit_util::round_upto_multiple_of_64(self.get_prefix_size());
         let key_size = bit_util::round_upto_multiple_of_64(self.get_key_size());

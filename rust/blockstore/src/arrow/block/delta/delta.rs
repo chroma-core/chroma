@@ -14,9 +14,8 @@ use uuid::Uuid;
 /// # Methods
 /// - add: adds a key value pair to the block delta.
 /// - delete: deletes a key from the block delta.
-/// - get_min_key: gets the minimum key in the block delta.
 /// - get_size: gets the size of the block delta.
-/// - split: splits the block delta into two block deltas.
+/// - split: splits the block delta into new block deltas based on a max block size.
 #[derive(Clone)]
 pub struct BlockDelta {
     pub(in crate::arrow) builder: BlockStorage,
@@ -105,10 +104,10 @@ impl BlockDelta {
     /// Splits the block delta into two block deltas. The split point is the last key
     /// that pushes the block over the half size.
     /// # Arguments
-    /// - provider: the arrow block provider to create the new block.
+    /// - max_block_size_bytes: the maximum size of a block in bytes.
     /// # Returns
     /// A tuple containing the the key of the split point and the new block delta.
-    /// The new block delta contains all the key value pairs after, but not including the
+    /// The new block deltas contains all the key value pairs after, but not including the
     /// split point.
     pub(crate) fn split<'referred_data, K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &'referred_data self,
@@ -119,7 +118,7 @@ impl BlockDelta {
         let mut blocks_to_split = Vec::new();
         blocks_to_split.push(self.clone());
         let mut output = Vec::new();
-        // let mut first_iter: bool = true;
+        let mut first_iter: bool = true;
         // iterate over all blocks to split until its empty
         while !blocks_to_split.is_empty() {
             let curr_block = blocks_to_split.pop().unwrap();
@@ -129,12 +128,17 @@ impl BlockDelta {
                 id: Uuid::new_v4(),
             };
 
-            // TODO: add back in
-            // if first_iter {
-            //     first_iter = false;
-            // } else {
-            //     output.push((curr_block.builder.get_key(0).clone(), curr_block));
-            // }
+            if first_iter {
+                first_iter = false;
+            } else {
+                output.push((
+                    curr_block
+                        .builder
+                        .get_min_key()
+                        .expect("Block must be non empty after split"),
+                    curr_block,
+                ));
+            }
 
             if new_block.get_size::<K, V>() > max_block_size_bytes {
                 blocks_to_split.push(new_block);
@@ -251,7 +255,7 @@ mod test {
         block_manager.flush(&block).await.unwrap();
 
         let block = block_manager.get(&delta_id).await.unwrap();
-        // TODO: enable this assertion after the sizing is fixed
+
         assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = format!("key{}", i);
@@ -338,7 +342,7 @@ mod test {
         let block = block_manager.commit::<&str, &RoaringBitmap>(&delta);
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
-        // TODO: enable this assertion after the sizing is fixed
+
         assert_eq!(size, block.get_size());
 
         for i in 0..n {

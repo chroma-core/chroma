@@ -167,6 +167,16 @@ impl BlockStorage {
         }
     }
 
+    pub fn get_min_key(&self) -> Option<CompositeKey> {
+        match self {
+            BlockStorage::String(builder) => builder.get_min_key(),
+            BlockStorage::UInt32(builder) => unimplemented!(), //builder.get_min_key(),
+            BlockStorage::DataRecord(builder) => builder.get_min_key(),
+            BlockStorage::Int32Array(builder) => unimplemented!(), //builder.get_min_key(),
+            BlockStorage::RoaringBitmap(builder) => unimplemented!(), //builder.get_min_key(),
+        }
+    }
+
     /// Returns the arrow-padded (rounded to 64 bytes) size for the delta.
     pub fn get_size<K: ArrowWriteableKey>(&self) -> usize {
         match self {
