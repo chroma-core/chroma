@@ -36,6 +36,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     ID,
     OneOrMany,
+    EmbeddingSet,
     maybe_cast_one_to_many_ids,
     maybe_cast_one_to_many_embedding,
     maybe_cast_one_to_many_metadata,
@@ -66,15 +67,6 @@ if TYPE_CHECKING:
     from chromadb.api import ServerAPI, AsyncServerAPI
 
 ClientT = TypeVar("ClientT", "ServerAPI", "AsyncServerAPI")
-
-class UnpackedEmbeddingSet(TypedDict):
-    ids: IDs
-    embeddings: Optional[Embeddings]
-    metadatas: Optional[Metadatas]
-    documents: Optional[Documents]
-    images: Optional[Images]
-    uris: Optional[URIs]
-
 
 class CollectionCommon(Generic[ClientT]):
     _model: CollectionModel
@@ -170,7 +162,7 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> UnpackedEmbeddingSet:
+    ) -> EmbeddingSet:
         upacked_ids = maybe_cast_one_to_many_ids(ids)
         upacked_embeddings = maybe_cast_one_to_many_embedding(embeddings)
         upacked_metadatas = maybe_cast_one_to_many_metadata(metadatas)
@@ -296,6 +288,7 @@ class CollectionCommon(Generic[ClientT]):
         
         return embeddings
 
+    # TODO: Refactor this into separate functions for validation and preparation
     def _validate_and_prepare_get_request(
         self,
         ids: Optional[OneOrMany[ID]],
@@ -337,6 +330,7 @@ class CollectionCommon(Generic[ClientT]):
 
         return response
 
+    # TODO: Refactor this into separate functions for validation and preparation
     def _validate_and_prepare_query_request(
         self,
         query_embeddings: Optional[  # type: ignore[type-arg]
@@ -454,6 +448,7 @@ class CollectionCommon(Generic[ClientT]):
         if metadata:
             self._model["metadata"] = metadata
 
+    # TODO: Refactor this into separate functions for validation and preparation
     def _validate_and_prepare_update_request(
         self,
         ids: OneOrMany[ID],
@@ -503,6 +498,7 @@ class CollectionCommon(Generic[ClientT]):
 
         return ids, cast(Embeddings, embeddings), metadatas, documents, uris
 
+    # TODO: Refactor this into separate functions for validation and preparation
     def _validate_and_prepare_upsert_request(
         self,
         ids: OneOrMany[ID],
@@ -552,6 +548,7 @@ class CollectionCommon(Generic[ClientT]):
 
         return ids, embeddings, metadatas, documents, uris
 
+    # TODO: Rename this function
     def _validate_and_prepare_delete_request(
         self,
         ids: Optional[IDs],
