@@ -1,4 +1,4 @@
-use super::{calculate_key_size, calculate_prefix_size, BlockKeyArrowBuilder};
+use super::BlockKeyArrowBuilder;
 use crate::{
     key::{CompositeKey, KeyWrapper},
     Value,
@@ -8,48 +8,41 @@ use arrow::{
     datatypes::Field,
 };
 use parking_lot::RwLock;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{atomic::AtomicUsize, Arc},
+};
 
 #[derive(Clone, Debug)]
 pub struct Int32ArrayStorage {
     pub(crate) storage: Arc<RwLock<BTreeMap<CompositeKey, Int32Array>>>,
+
+    // size-tracking variables
+    pub(in crate::arrow::block) prefix_size: Arc<AtomicUsize>,
+    pub(in crate::arrow::block) key_size: Arc<AtomicUsize>,
+    pub(in crate::arrow::block) value_size: Arc<AtomicUsize>,
 }
 
 impl Int32ArrayStorage {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
+            prefix_size: Arc::new(AtomicUsize::new(0)),
+            key_size: Arc::new(AtomicUsize::new(0)),
+            value_size: Arc::new(AtomicUsize::new(0)),
         }
     }
 
-    pub(super) fn get_prefix_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let key_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(key, _)| key);
-        calculate_prefix_size(key_stream)
+    pub(super) fn get_prefix_size(&self) -> usize {
+        return self.prefix_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub(super) fn get_key_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let key_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(key, _)| key);
-        calculate_key_size(key_stream)
+    pub(super) fn get_key_size(&self) -> usize {
+        return self.key_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let value_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(_, value)| value);
-        value_stream.fold(0, |acc, value| acc + value.get_size())
+    pub(super) fn get_value_size(&self) -> usize {
+        return self.value_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
     /// The count of the total number of values in the storage across all arrays.
@@ -66,14 +59,17 @@ impl Int32ArrayStorage {
         });
         Int32ArrayStorage {
             storage: Arc::new(RwLock::new(split)),
+            prefix_size: Arc::new(AtomicUsize::new(0)),
+            key_size: Arc::new(AtomicUsize::new(0)),
+            value_size: Arc::new(AtomicUsize::new(0)),
         }
     }
 
-    pub(super) fn get_key(&self, index: usize) -> CompositeKey {
-        let storage = self.storage.read();
-        let (key, _) = storage.iter().nth(index).unwrap();
-        key.clone()
-    }
+    // pub(super) fn get_key(&self, index: usize) -> CompositeKey {
+    //     let storage = self.storage.read();
+    //     let (key, _) = storage.iter().nth(index).unwrap();
+    //     key.clone()
+    // }
 
     pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
         let storage = self.storage.read();

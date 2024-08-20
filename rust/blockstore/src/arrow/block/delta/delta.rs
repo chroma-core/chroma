@@ -3,7 +3,7 @@ use crate::{
     arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::CompositeKey,
 };
-use arrow::{array::RecordBatch, util::bit_util};
+use arrow::array::RecordBatch;
 use uuid::Uuid;
 
 /// A block delta tracks a source block and represents the new state of a block. Blocks are
@@ -58,44 +58,45 @@ impl BlockDelta {
     ///  the arrow specification. When a block delta is converted into a block data
     ///  the same sizing is used to allocate the memory for the block data.
     pub(in crate::arrow) fn get_size<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> usize {
-        let prefix_data_size = self.builder.get_prefix_size();
-        let key_data_size = self.builder.get_key_size();
-        let value_data_size = self.builder.get_value_size();
+        // let prefix_data_size = self.builder.get_prefix_size();
+        // let key_data_size = self.builder.get_key_size();
+        // let value_data_size = self.builder.get_value_size();
 
-        self.get_block_size::<K, V>(
-            self.builder.len(),
-            prefix_data_size,
-            key_data_size,
-            value_data_size,
-        )
+        // self.get_block_size::<K, V>(
+        //     self.builder.len(),
+        //     prefix_data_size,
+        //     key_data_size,
+        //     value_data_size,
+        // )
+        self.builder.get_size::<K>()
     }
 
-    fn get_block_size<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
-        item_count: usize,
-        prefix_size: usize,
-        key_size: usize,
-        value_size: usize,
-    ) -> usize {
-        let prefix_total_bytes = bit_util::round_upto_multiple_of_64(prefix_size);
-        let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+    // fn get_block_size<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    //     &self,
+    //     item_count: usize,
+    //     prefix_size: usize,
+    //     key_size: usize,
+    //     value_size: usize,
+    // ) -> usize {
+    //     let prefix_total_bytes = bit_util::round_upto_multiple_of_64(prefix_size);
+    //     let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
-        // https://docs.rs/arrow/latest/arrow/array/array/struct.GenericListArray.html
-        let key_total_bytes = bit_util::round_upto_multiple_of_64(key_size);
-        let key_offset_bytes = K::offset_size(item_count);
+    //     // https://docs.rs/arrow/latest/arrow/array/array/struct.GenericListArray.html
+    //     let key_total_bytes = bit_util::round_upto_multiple_of_64(key_size);
+    //     let key_offset_bytes = K::offset_size(item_count);
 
-        let value_total_bytes = bit_util::round_upto_multiple_of_64(value_size);
-        let value_offset_bytes = V::offset_size(item_count);
-        let value_validity_bytes = V::validity_size(item_count);
+    //     let value_total_bytes = bit_util::round_upto_multiple_of_64(value_size);
+    //     let value_offset_bytes = V::offset_size(item_count);
+    //     let value_validity_bytes = V::validity_size(item_count);
 
-        prefix_total_bytes
-            + prefix_offset_bytes
-            + key_total_bytes
-            + key_offset_bytes
-            + value_total_bytes
-            + value_offset_bytes
-            + value_validity_bytes
-    }
+    //     prefix_total_bytes
+    //         + prefix_offset_bytes
+    //         + key_total_bytes
+    //         + key_offset_bytes
+    //         + value_total_bytes
+    //         + value_offset_bytes
+    //         + value_validity_bytes
+    // }
 
     pub fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> RecordBatch {
         self.builder.to_record_batch::<K>()
@@ -117,64 +118,32 @@ impl BlockDelta {
 
         let mut blocks_to_split = Vec::new();
         blocks_to_split.push(self.clone());
-        // let mut output = Vec::new();
-        let mut first_iter = true;
+        let mut output = Vec::new();
+        // let mut first_iter: bool = true;
         // iterate over all blocks to split until its empty
         while !blocks_to_split.is_empty() {
             let curr_block = blocks_to_split.pop().unwrap();
-            let mut curr_split_index = 0;
-            let mut curr_running_prefix_size = 0;
-            let mut curr_running_key_size = 0;
-            let mut curr_running_value_size = 0;
-            let mut curr_running_count = 0;
+            let (new_start_key, new_delta) = curr_block.builder.split(half_size);
+            let new_block = BlockDelta {
+                builder: new_delta,
+                id: Uuid::new_v4(),
+            };
+
+            // TODO: add back in
+            // if first_iter {
+            //     first_iter = false;
+            // } else {
+            //     output.push((curr_block.builder.get_key(0).clone(), curr_block));
+            // }
+
+            if new_block.get_size::<K, V>() > max_block_size_bytes {
+                blocks_to_split.push(new_block);
+            } else {
+                output.push((new_start_key, new_block));
+            }
         }
-        unimplemented!();
-        // TODO: fix to work with new sizing apis
-        //     for i in 1..curr_block.len() {
-        //         curr_running_prefix_size += curr_block.builder.get_prefix_size(i - 1, i);
-        //         curr_running_key_size += curr_block.builder.get_key_size(i - 1, i);
-        //         curr_running_value_size += curr_block.builder.get_value_size(i - 1, i);
-        //         curr_running_count += 1;
 
-        //         let current_size = curr_block.get_block_size::<K, V>(
-        //             curr_running_count,
-        //             curr_running_prefix_size,
-        //             curr_running_key_size,
-        //             curr_running_value_size,
-        //         );
-
-        //         if current_size > half_size {
-        //             break;
-        //         }
-        //         curr_split_index = i;
-        //     }
-
-        //     // The split() method is exclusive of the split index. Meaning
-        //     // the new block will contain the key at the split index. So we increment
-        //     // the split index by 1 to get the correct split point.
-        //     curr_split_index = std::cmp::min(curr_split_index + 1, curr_block.len() - 1);
-
-        //     let split_key = curr_block.builder.get_key(curr_split_index);
-        //     let new_delta = curr_block
-        //         .builder
-        //         .split(&split_key.prefix, split_key.key.clone());
-        //     let new_block = BlockDelta {
-        //         builder: new_delta,
-        //         id: Uuid::new_v4(),
-        //     };
-        //     if first_iter {
-        //         first_iter = false;
-        //     } else {
-        //         output.push((curr_block.builder.get_key(0).clone(), curr_block));
-        //     }
-        //     if new_block.get_size::<K, V>() > max_block_size_bytes {
-        //         blocks_to_split.push(new_block);
-        //     } else {
-        //         output.push((split_key.clone(), new_block));
-        //     }
-        // }
-
-        // return output;
+        return output;
     }
 
     pub(crate) fn len(&self) -> usize {

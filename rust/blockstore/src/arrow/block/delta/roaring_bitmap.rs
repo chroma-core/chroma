@@ -1,52 +1,45 @@
-use super::{calculate_key_size, calculate_prefix_size, BlockKeyArrowBuilder};
+use super::BlockKeyArrowBuilder;
 use crate::key::{CompositeKey, KeyWrapper};
 use arrow::{
     array::{Array, ArrayRef, BinaryBuilder},
     datatypes::Field,
 };
 use parking_lot::RwLock;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{atomic::AtomicUsize, Arc},
+};
 
 #[derive(Clone, Debug)]
 pub struct RoaringBitmapStorage {
     pub(crate) storage: Arc<RwLock<BTreeMap<CompositeKey, Vec<u8>>>>,
+    prefix_size: Arc<AtomicUsize>,
+    key_size: Arc<AtomicUsize>,
+    value_size: Arc<AtomicUsize>,
 }
 
 impl RoaringBitmapStorage {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
+
+            // size-tracking variables
+            prefix_size: Arc::new(AtomicUsize::new(0)),
+            key_size: Arc::new(AtomicUsize::new(0)),
+            value_size: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     pub(super) fn get_prefix_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let key_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(key, _)| key);
-        calculate_prefix_size(key_stream)
+        return self.prefix_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn get_key_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let key_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(key, _)| key);
-        calculate_key_size(key_stream)
+        return self.key_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let value_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(_, value)| value);
-        value_stream.fold(0, |acc, value| acc + value.len())
+        return self.value_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn split(&self, prefix: &str, key: KeyWrapper) -> RoaringBitmapStorage {
@@ -57,6 +50,11 @@ impl RoaringBitmapStorage {
         });
         RoaringBitmapStorage {
             storage: Arc::new(RwLock::new(split)),
+
+            // size-tracking variables
+            prefix_size: Arc::new(AtomicUsize::new(0)),
+            key_size: Arc::new(AtomicUsize::new(0)),
+            value_size: Arc::new(AtomicUsize::new(0)),
         }
     }
 

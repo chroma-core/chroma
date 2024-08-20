@@ -5,41 +5,42 @@ use crate::{
     },
     key::{CompositeKey, KeyWrapper},
 };
-use arrow::{
-    array::{Array, StringArray},
-    util::bit_util,
-};
+use arrow::array::{Array, StringArray};
 use std::sync::Arc;
 
 impl ArrowWriteableValue for &str {
     type ReadableValue<'referred_data> = &'referred_data str;
 
-    fn offset_size(item_count: usize) -> usize {
-        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
-    }
+    // fn offset_size(item_count: usize) -> usize {
+    //     bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
+    // }
 
-    fn validity_size(_item_count: usize) -> usize {
-        0 // We don't support None values for StringArray
-    }
+    // fn validity_size(_item_count: usize) -> usize {
+    //     0 // We don't support None values for StringArray
+    // }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
+        // TODO: move into the storage
         match &delta.builder {
             BlockStorage::String(builder) => {
                 let mut storage = builder.storage.write();
-                match storage.as_mut() {
-                    Some(storage) => {
-                        storage.insert(
-                            CompositeKey {
-                                prefix: prefix.to_string(),
-                                key,
-                            },
-                            value.to_string(),
-                        );
-                    }
-                    None => {
-                        unreachable!("Storage not initialized. This is an invariant violation.")
-                    }
-                }
+                let key_len = key.get_size();
+                storage.insert(
+                    CompositeKey {
+                        prefix: prefix.to_string(),
+                        key,
+                    },
+                    value.to_string(),
+                );
+                builder
+                    .prefix_size
+                    .fetch_add(prefix.len(), std::sync::atomic::Ordering::SeqCst);
+                builder
+                    .key_size
+                    .fetch_add(key_len, std::sync::atomic::Ordering::SeqCst);
+                builder
+                    .value_size
+                    .fetch_add(value.len(), std::sync::atomic::Ordering::SeqCst);
             }
             _ => panic!("Invalid builder type"),
         }
@@ -49,17 +50,10 @@ impl ArrowWriteableValue for &str {
         match &delta.builder {
             BlockStorage::String(builder) => {
                 let mut storage = builder.storage.write();
-                match storage.as_mut() {
-                    Some(storage) => {
-                        storage.remove(&CompositeKey {
-                            prefix: prefix.to_string(),
-                            key,
-                        });
-                    }
-                    None => {
-                        unreachable!("Storage not initialized. This is an invariant violation.")
-                    }
-                }
+                storage.remove(&CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                });
             }
             _ => panic!("Invalid builder type"),
         }

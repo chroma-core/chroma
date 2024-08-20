@@ -5,22 +5,19 @@ use crate::{
     },
     key::{CompositeKey, KeyWrapper},
 };
-use arrow::{
-    array::{Array, Int32Array, ListArray},
-    util::bit_util,
-};
+use arrow::array::{Array, Int32Array, ListArray};
 use std::sync::Arc;
 
 impl ArrowWriteableValue for &Int32Array {
     type ReadableValue<'referred_data> = Int32Array;
 
-    fn offset_size(item_count: usize) -> usize {
-        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
-    }
+    // fn offset_size(item_count: usize) -> usize {
+    //     bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
+    // }
 
-    fn validity_size(_item_count: usize) -> usize {
-        0 // We don't support None values for Int32Array
-    }
+    // fn validity_size(_item_count: usize) -> usize {
+    //     0 // We don't support None values for Int32Array
+    // }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {

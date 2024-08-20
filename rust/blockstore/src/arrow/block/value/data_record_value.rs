@@ -6,10 +6,7 @@ use crate::{
     key::{CompositeKey, KeyWrapper},
 };
 use arrow::array::BinaryArray;
-use arrow::{
-    array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray},
-    util::bit_util,
-};
+use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray};
 use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use prost::Message;
 use std::sync::Arc;
@@ -17,57 +14,15 @@ use std::sync::Arc;
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
 
-    fn offset_size(item_count: usize) -> usize {
-        let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
-        let metdata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
-        let document_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
-
-        id_offset + metdata_offset + document_offset
-    }
-
-    fn validity_size(item_count: usize) -> usize {
-        let validity_bytes = bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count, 8));
-        // Both document and metadata can be null
-        return validity_bytes * 2;
-    }
-
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::DataRecord(builder) => {
-                let mut id_storage = builder.id_storage.write();
-                let mut embedding_storage = builder.embedding_storage.write();
-                let composite_key = CompositeKey {
-                    prefix: prefix.to_string(),
-                    key,
-                };
-
-                id_storage.insert(composite_key.clone(), value.id.to_string());
-                embedding_storage.insert(composite_key.clone(), value.embedding.to_vec());
-
-                match &value.metadata {
-                    Some(metadata) => {
-                        let mut metadata_storage = builder.metadata_storage.write();
-                        let metadata_proto = Into::<UpdateMetadata>::into(metadata.clone());
-                        metadata_storage
-                            .insert(composite_key.clone(), Some(metadata_proto.encode_to_vec()));
-                    }
-                    None => {
-                        let mut metadata_storage = builder.metadata_storage.write();
-                        metadata_storage.insert(composite_key.clone(), None);
-                    }
-                }
-
-                let mut document_storage = builder.document_storage.write();
-                document_storage.insert(
-                    composite_key,
-                    value.document.map_or(None, |doc| Some(doc.to_string())),
-                );
-            }
+            BlockStorage::DataRecord(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type"),
         }
     }
 
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
+        // TODO: remove the size from the atomic counters
         match &delta.builder {
             BlockStorage::DataRecord(builder) => {
                 let mut id_storage = builder.id_storage.write();

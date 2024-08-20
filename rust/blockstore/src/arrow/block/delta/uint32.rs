@@ -1,3 +1,4 @@
+use super::BlockKeyArrowBuilder;
 use crate::{
     key::{CompositeKey, KeyWrapper},
     Value,
@@ -7,50 +8,43 @@ use arrow::{
     datatypes::Field,
 };
 use parking_lot::RwLock;
-use std::{collections::BTreeMap, sync::Arc};
-
-use super::{calculate_key_size, calculate_prefix_size, BlockKeyArrowBuilder};
+use std::{
+    collections::BTreeMap,
+    sync::{atomic::AtomicUsize, Arc},
+};
 
 #[derive(Clone, Debug)]
 pub struct UInt32Storage {
     pub storage: Arc<RwLock<BTreeMap<CompositeKey, u32>>>,
+
+    // size-tracking variables
+    pub(in crate::arrow::block) prefix_size: Arc<AtomicUsize>,
+    pub(in crate::arrow::block) key_size: Arc<AtomicUsize>,
+    pub(in crate::arrow::block) value_size: Arc<AtomicUsize>,
 }
 
 impl UInt32Storage {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             storage: Arc::new(RwLock::new(BTreeMap::new())),
+
+            // size-tracking variables
+            prefix_size: Arc::new(AtomicUsize::new(0)),
+            key_size: Arc::new(AtomicUsize::new(0)),
+            value_size: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     pub(super) fn get_prefix_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let key_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(key, _)| key);
-        calculate_prefix_size(key_stream)
+        return self.prefix_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn get_key_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let key_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(key, _)| key);
-        calculate_key_size(key_stream)
+        return self.key_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn get_value_size(&self, start: usize, end: usize) -> usize {
-        let storage = self.storage.read();
-        let value_stream = storage
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|(_, value)| value);
-        value_stream.fold(0, |acc, value| acc + value.get_size())
+        return self.value_size.load(std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn split(&self, prefix: &str, key: KeyWrapper) -> UInt32Storage {
@@ -61,6 +55,10 @@ impl UInt32Storage {
         });
         UInt32Storage {
             storage: Arc::new(RwLock::new(split)),
+            // TODO: make size based off split
+            prefix_size: Arc::new(AtomicUsize::new(0)),
+            key_size: Arc::new(AtomicUsize::new(0)),
+            value_size: Arc::new(AtomicUsize::new(0)),
         }
     }
 
