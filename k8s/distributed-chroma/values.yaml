@@ -56,7 +56,7 @@ logService:
     tag: 'log-service'
   env:
     - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "jaeger:4317"'
+      value: 'value: "otel-collector:4317"'
   flags:
   replicaCount: 1
 

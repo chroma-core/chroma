@@ -85,9 +85,13 @@ k8s_yaml([
 
 # Extra stuff to make debugging and testing easier
 k8s_yaml([
+  'k8s/test/collector.yaml',
+  'k8s/test/grafana-service.yaml',
+  'k8s/test/grafana.yaml',
   'k8s/test/jaeger-service.yaml',
   'k8s/test/jaeger.yaml',
   'k8s/test/minio.yaml',
+  'k8s/test/prometheus.yaml',
   'k8s/test/test-memberlist-cr.yaml',
 ])
 

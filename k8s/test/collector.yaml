@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: chroma
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+
+    exporters:
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        namespace: default
+      otlp/jaeger:
+        endpoint: jaeger:4317
+        tls:
+          insecure: true
+      debug:
+        verbosity: detailed
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [otlp/jaeger]
+        metrics:
+          receivers: [otlp]
+          exporters: [prometheus]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector:0.107.0
+          ports:
+            - containerPort: 4317
+              name: grpc-port
+            - containerPort: 55678
+              name: http-debug-port
+            - containerPort: 8889
+              name: prometheus-port
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/otelcol
+      volumes:
+        - name: config-volume
+          configMap:
+            name: otel-collector-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: chroma
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4317
+      name: grpc-port
+    - port: 55679
+      name: http-debug-port
+    - port: 8889
+      name: prometheus-port
+  selector:
+    app: otel-collector
