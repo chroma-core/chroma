@@ -49,4 +49,15 @@ pub struct LocalStorageConfig {
 #[derive(Deserialize, Debug, Clone)]
 pub struct AdmissionControlledS3StorageConfig {
     pub s3_config: S3StorageConfig,
+    pub rate_limiting_policy: RateLimitingConfig,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct CountBasedPolicyConfig {
+    pub max_concurrent_requests: usize,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub enum RateLimitingConfig {
+    CountBasedPolicy(CountBasedPolicyConfig),
 }

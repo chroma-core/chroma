@@ -40,9 +40,9 @@ use tracing::Span;
 
 #[derive(Clone)]
 pub struct S3Storage {
-    bucket: String,
-    client: aws_sdk_s3::Client,
-    upload_part_size_bytes: usize,
+    pub(super) bucket: String,
+    pub(super) client: aws_sdk_s3::Client,
+    pub(super) upload_part_size_bytes: usize,
 }
 
 #[derive(Error, Debug)]
@@ -84,7 +84,7 @@ impl S3Storage {
         };
     }
 
-    async fn create_bucket(&self) -> Result<(), String> {
+    pub(super) async fn create_bucket(&self) -> Result<(), String> {
         // Creates a public bucket with default settings in the region.
         // This should only be used for testing and in production
         // the bucket should be provisioned ahead of time.

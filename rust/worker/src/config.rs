@@ -171,6 +171,9 @@ mod tests {
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
                                 upload_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -225,6 +228,9 @@ mod tests {
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
                                 upload_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -305,6 +311,9 @@ mod tests {
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
                                 upload_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -359,6 +368,9 @@ mod tests {
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
                                 upload_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -457,6 +469,9 @@ mod tests {
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
                                 upload_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -511,6 +526,9 @@ mod tests {
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
                                 upload_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -607,6 +625,9 @@ mod tests {
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
                                 upload_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
