@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/pingcap/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelCode "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
@@ -22,6 +26,7 @@ import (
 )
 
 var Tracer trace.Tracer
+var Meter metric.Meter
 
 func decodeTraceID(encodedSpanID string) (t trace.TraceID, err error) {
 	var spanBytes []byte
@@ -142,8 +147,18 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 			semconv.ServiceNameKey.String(config.Service),
 		)),
 	)
-
 	otel.SetTracerProvider(tp)
+
+	var metricExporter *otlpmetricgrpc.Exporter
+	metricExporter, err = otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithInsecure(), otlpmetricgrpc.WithEndpoint(config.Endpoint))
+	if err != nil {
+		return
+	}
+
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(1*time.Second))))
+	otel.SetMeterProvider(mp)
+
 	Tracer = otel.Tracer(config.Service)
+	Meter = otel.Meter(config.Service)
 	return
 }
