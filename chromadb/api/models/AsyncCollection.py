@@ -2,13 +2,16 @@ from typing import (
     TYPE_CHECKING,
     Optional,
     Union,
+    cast,
 )
+
 import numpy as np
 
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
+    Embeddings,
     Include,
     Metadata,
     Document,
@@ -32,7 +35,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def add(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -63,17 +66,23 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
+        record_set = self._process_add_request(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
         )
 
-        await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
+        await self._client._add(
+            collection_id=self.id,
+            ids=record_set["ids"],
+            embeddings=cast(Embeddings, record_set["embeddings"]),
+            metadatas=record_set["metadatas"],
+            documents=record_set["documents"],
+            uris=record_set["uris"],
+        )
 
     async def count(self) -> int:
         """The total number of embeddings added to the database
@@ -91,7 +100,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -141,7 +150,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
     async def query(
         self,
-        query_embeddings: Optional[
+        query_embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -153,7 +162,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -229,7 +238,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def update(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -251,22 +260,29 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_update_request(
-            ids, embeddings, metadatas, documents, images, uris
+        record_set = self._process_upsert_or_update_request(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
+            require_embeddings_or_data=False,
         )
 
-        await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
+        await self._client._update(
+            collection_id=self.id,
+            ids=record_set["ids"],
+            embeddings=cast(Embeddings, record_set["embeddings"]),
+            metadatas=record_set["metadatas"],
+            documents=record_set["documents"],
+            uris=record_set["uris"],
+        )
 
     async def upsert(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -288,23 +304,23 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_upsert_request(
-            ids, embeddings, metadatas, documents, images, uris
-        )
-
-        await self._client._upsert(
-            collection_id=self.id,
+        record_set = self._process_upsert_or_update_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            images=images,
             uris=uris,
+            require_embeddings_or_data=True,
+        )
+
+        await self._client._upsert(
+            collection_id=self.id,
+            ids=record_set["ids"],
+            embeddings=cast(Embeddings, record_set["embeddings"]),
+            metadatas=record_set["metadatas"],
+            documents=record_set["documents"],
+            uris=record_set["uris"],
         )
 
     async def delete(

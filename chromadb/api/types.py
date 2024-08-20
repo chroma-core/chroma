@@ -31,25 +31,21 @@ URI = str
 URIs = List[URI]
 
 
-def maybe_cast_one_to_many_uri(target: OneOrMany[URI]) -> URIs:
-    if isinstance(target, str):
+def maybe_cast_one_to_many(target: Optional[(OneOrMany[T])]) -> Optional[List[T]]:
+    # No target
+    if target is None:
+        return None
+
+    if isinstance(target, str) or isinstance(target, dict) or is_image(target):
         # One URI
-        return cast(URIs, [target])
-    # Already a sequence
-    return cast(URIs, target)
+        return cast(List[T], [target])
+
+    return cast(List[T], target)
 
 
 # IDs
 ID = str
 IDs = List[ID]
-
-
-def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
-    if isinstance(target, str):
-        # One ID
-        return cast(IDs, [target])
-    # Already a sequence
-    return cast(IDs, target)
 
 
 # Embeddings
@@ -58,8 +54,12 @@ Embeddings = List[Embedding]
 
 
 def maybe_cast_one_to_many_embedding(
-    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]  # type: ignore[type-arg]
-) -> Embeddings:
+    target: Optional[Union[OneOrMany[Embedding], OneOrMany[OneOrMany[np.ndarray]]]],  # type: ignore[type-arg]
+) -> Optional[Embeddings]:
+    # No target
+    if target is None:
+        return None
+
     if isinstance(target, List):
         # One Embedding
         if isinstance(target[0], (int, float)):
@@ -70,14 +70,6 @@ def maybe_cast_one_to_many_embedding(
 
 # Metadatas
 Metadatas = List[Metadata]
-
-
-def maybe_cast_one_to_many_metadata(target: OneOrMany[Metadata]) -> Metadatas:
-    # One Metadata dict
-    if isinstance(target, dict):
-        return cast(Metadatas, [target])
-    # Already a sequence
-    return cast(Metadatas, target)
 
 
 CollectionMetadata = Dict[str, Any]
@@ -94,14 +86,6 @@ def is_document(target: Any) -> bool:
     return True
 
 
-def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
-    # One Document
-    if is_document(target):
-        return cast(Documents, [target])
-    # Already a sequence
-    return cast(Documents, target)
-
-
 # Images
 ImageDType = Union[np.uint, np.int_, np.float_]  # type: ignore[name-defined]
 Image = NDArray[ImageDType]
@@ -116,13 +100,6 @@ def is_image(target: Any) -> bool:
     return True
 
 
-def maybe_cast_one_to_many_image(target: OneOrMany[Image]) -> Images:
-    if is_image(target):
-        return cast(Images, [target])
-    # Already a sequence
-    return cast(Images, target)
-
-
 Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
 
@@ -133,6 +110,16 @@ class IncludeEnum(str, Enum):
     distances = "distances"
     uris = "uris"
     data = "data"
+
+
+# Record set
+class RecordSet(TypedDict):
+    ids: IDs
+    embeddings: Optional[Embeddings]
+    metadatas: Optional[Metadatas]
+    documents: Optional[Documents]
+    images: Optional[Images]
+    uris: Optional[URIs]
 
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
@@ -209,7 +196,8 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-            return validate_embeddings(maybe_cast_one_to_many_embedding(result))
+
+            return validate_embeddings(result)
 
         setattr(cls, "__call__", __call__)
 
