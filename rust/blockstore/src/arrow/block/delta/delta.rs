@@ -191,7 +191,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, &Int32Array>();
+        let delta = block_manager.create::<&str, Int32Array>();
 
         let n = 2000;
         for i in 0..n {
@@ -202,14 +202,14 @@ mod test {
             for _ in 0..value_len {
                 new_vec.push(random::<i32>());
             }
-            delta.add::<&str, &Int32Array>(prefix, &key, &Int32Array::from(new_vec));
+            delta.add::<&str, Int32Array>(prefix, &key, Int32Array::from(new_vec));
         }
 
-        let size = delta.get_size::<&str, &Int32Array>();
+        let size = delta.get_size::<&str, Int32Array>();
         // TODO: should commit take ownership of delta?
         // Semantically, that makes sense, since a delta is unsuable after commit
 
-        let block = block_manager.commit::<&str, &Int32Array>(&delta);
+        let block = block_manager.commit::<&str, Int32Array>(&delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
@@ -234,7 +234,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, &str>();
+        let delta = block_manager.create::<&str, String>();
         let delta_id = delta.id.clone();
 
         let n = 2000;
@@ -242,10 +242,10 @@ mod test {
             let prefix = "prefix";
             let key = format!("key{}", i);
             let value = format!("value{}", i);
-            delta.add(prefix, key.as_str(), value.as_str());
+            delta.add(prefix, key.as_str(), value.to_owned());
         }
-        let size = delta.get_size::<&str, &str>();
-        let block = block_manager.commit::<&str, &str>(&delta);
+        let size = delta.get_size::<&str, String>();
+        let block = block_manager.commit::<&str, String>(&delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
@@ -272,9 +272,9 @@ mod test {
         }
 
         // test fork
-        let forked_block = block_manager.fork::<&str, &str>(&delta_id).await;
+        let forked_block = block_manager.fork::<&str, String>(&delta_id).await;
         let new_id = forked_block.id.clone();
-        let block = block_manager.commit::<&str, &str>(&forked_block);
+        let block = block_manager.commit::<&str, String>(&forked_block);
         block_manager.flush(&block).await.unwrap();
         let forked_block = block_manager.get(&new_id).await.unwrap();
         for i in 0..n {
@@ -291,18 +291,18 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<f32, &str>();
+        let delta = block_manager.create::<f32, String>();
 
         let n = 2000;
         for i in 0..n {
             let prefix = "prefix";
             let key = i as f32;
             let value = format!("value{}", i);
-            delta.add(prefix, key, value.as_str());
+            delta.add(prefix, key, value.to_owned());
         }
 
-        let size = delta.get_size::<f32, &str>();
-        let block = block_manager.commit::<f32, &str>(&delta);
+        let size = delta.get_size::<f32, String>();
+        let block = block_manager.commit::<f32, String>(&delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = i as f32;
@@ -426,18 +426,18 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<u32, &str>();
+        let delta = block_manager.create::<u32, String>();
 
         let n = 2000;
         for i in 0..n {
             let prefix = "prefix";
             let key = i as u32;
             let value = format!("value{}", i);
-            delta.add(prefix, key, value.as_str());
+            delta.add(prefix, key, value.to_owned());
         }
 
-        let size = delta.get_size::<u32, &str>();
-        let block = block_manager.commit::<u32, &str>(&delta);
+        let size = delta.get_size::<u32, String>();
+        let block = block_manager.commit::<u32, String>(&delta);
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta.id).await.unwrap();
         assert_eq!(size, block.get_size());

@@ -213,7 +213,7 @@ mod tests {
     fn test_blockfile_string() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", "key1", "value1");
+        let _ = writer.set("prefix", "key1", "value1".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<&str, &str> =
@@ -319,7 +319,7 @@ mod tests {
     fn test_bool_key() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", true, "value1");
+        let _ = writer.set("prefix", true, "value1".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<bool, &str> =
@@ -332,7 +332,7 @@ mod tests {
     fn test_u32_key() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
+        let _ = writer.set("prefix", 1, "value1".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -345,7 +345,7 @@ mod tests {
     fn test_float32_key() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -358,9 +358,9 @@ mod tests {
     fn test_get_by_prefix() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", "key1", "value1");
-        let _ = writer.set("prefix", "key2", "value2");
-        let _ = writer.set("different_prefix", "key3", "value3");
+        let _ = writer.set("prefix", "key1", "value1".to_string());
+        let _ = writer.set("prefix", "key2", "value2".to_string());
+        let _ = writer.set("different_prefix", "key3", "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<&str, &str> =
@@ -379,9 +379,9 @@ mod tests {
     fn test_get_gt_int_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -394,9 +394,9 @@ mod tests {
     fn test_get_gt_int_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -418,9 +418,9 @@ mod tests {
     fn test_get_gt_int_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -439,9 +439,9 @@ mod tests {
     fn test_get_gt_float_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -454,9 +454,9 @@ mod tests {
     fn test_get_gt_float_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -478,9 +478,9 @@ mod tests {
     fn test_get_gt_float_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -499,9 +499,9 @@ mod tests {
     fn test_get_gte_int_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -514,9 +514,9 @@ mod tests {
     fn test_get_gte_int_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -538,9 +538,9 @@ mod tests {
     fn test_get_gte_int_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -559,9 +559,9 @@ mod tests {
     fn test_get_gte_float_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -574,9 +574,9 @@ mod tests {
     fn test_get_gte_float_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -598,9 +598,9 @@ mod tests {
     fn test_get_gte_float_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -619,9 +619,9 @@ mod tests {
     fn test_get_lt_int_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -634,9 +634,9 @@ mod tests {
     fn test_get_lt_int_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -658,9 +658,9 @@ mod tests {
     fn test_get_lt_int_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -679,9 +679,9 @@ mod tests {
     fn test_get_lt_float_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -694,9 +694,9 @@ mod tests {
     fn test_get_lt_float_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -718,9 +718,9 @@ mod tests {
     fn test_get_lt_float_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -739,9 +739,9 @@ mod tests {
     fn test_get_lte_int_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -754,9 +754,9 @@ mod tests {
     fn test_get_lte_int_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -778,9 +778,9 @@ mod tests {
     fn test_get_lte_int_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1, "value1");
-        let _ = writer.set("prefix", 2, "value2");
-        let _ = writer.set("prefix", 3, "value3");
+        let _ = writer.set("prefix", 1, "value1".to_string());
+        let _ = writer.set("prefix", 2, "value2".to_string());
+        let _ = writer.set("prefix", 3, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<u32, &str> =
@@ -799,9 +799,9 @@ mod tests {
     fn test_get_lte_float_none_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -814,9 +814,9 @@ mod tests {
     fn test_get_lte_float_all_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -838,9 +838,9 @@ mod tests {
     fn test_get_lte_float_some_returned() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
-        let _ = writer.set("prefix", 1.0, "value1");
-        let _ = writer.set("prefix", 2.0, "value2");
-        let _ = writer.set("prefix", 3.0, "value3");
+        let _ = writer.set("prefix", 1.0, "value1".to_string());
+        let _ = writer.set("prefix", 2.0, "value2".to_string());
+        let _ = writer.set("prefix", 3.0, "value3".to_string());
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<f32, &str> =
@@ -860,11 +860,11 @@ mod tests {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
         let id = writer.id;
-        let _ = writer.set("prefix", "key1", "value1");
-        let _ = writer.set("prefix", "key2", "value2");
-        let _ = writer.set("different_prefix", "key3", "value3");
+        let _ = writer.set("prefix", "key1", "value1".to_string());
+        let _ = writer.set("prefix", "key2", "value2".to_string());
+        let _ = writer.set("different_prefix", "key3", "value3".to_string());
         // delete
-        let _ = writer.delete::<&str, &str>("prefix", "key1");
+        let _ = writer.delete::<&str, String>("prefix", "key1");
         let _ = writer.commit();
 
         let reader: MemoryBlockfileReader<&str, &str> =
@@ -888,7 +888,7 @@ mod tests {
         for i in 0..n {
             let key = format!("key{:04}", i);
             let value = format!("value{:04}", i);
-            let _ = writer.set("prefix", key.as_str(), value.as_str());
+            let _ = writer.set("prefix", key.as_str(), value.to_string());
         }
         let _ = writer.commit();
 

@@ -8,13 +8,13 @@ use roaring::RoaringBitmap;
 impl ArrowWriteableValue for &RoaringBitmap {
     type ReadableValue<'referred_data> = RoaringBitmap;
 
-    // fn offset_size(item_count: usize) -> usize {
-    //     bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
-    // }
+    fn offset_size(item_count: usize) -> usize {
+        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
+    }
 
-    // fn validity_size(_item_count: usize) -> usize {
-    //     0 // We don't support None values for RoaringBitmap
-    // }
+    fn validity_size(_item_count: usize) -> usize {
+        0 // We don't support None values for RoaringBitmap
+    }
 
     fn add(prefix: &str, key: crate::key::KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {

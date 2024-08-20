@@ -99,6 +99,12 @@ impl Value for &str {
     }
 }
 
+impl Value for String {
+    fn get_size(&self) -> usize {
+        self.len()
+    }
+}
+
 impl Value for u32 {
     fn get_size(&self) -> usize {
         4

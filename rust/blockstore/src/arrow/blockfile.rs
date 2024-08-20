@@ -605,21 +605,21 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
         let key1 = "zzzz";
         let value1 = Int32Array::from(vec![1, 2, 3]);
-        writer.set(prefix_1, key1, &value1).await.unwrap();
+        writer.set(prefix_1, key1, value1.clone()).await.unwrap();
 
         let prefix_2 = "key";
         let key2 = "aaaa";
         let value2 = Int32Array::from(vec![4, 5, 6]);
-        writer.set(prefix_2, key2, &value2).await.unwrap();
+        writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id)
@@ -819,21 +819,21 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
         let key1 = "zzzz";
         let value1 = Int32Array::from(vec![1, 2, 3]);
-        writer.set(prefix_1, key1, &value1).await.unwrap();
+        writer.set(prefix_1, key1, value1).await.unwrap();
 
         let prefix_2 = "key";
         let key2 = "aaaa";
         let value2 = Int32Array::from(vec![4, 5, 6]);
-        writer.set(prefix_2, key2, &value2).await.unwrap();
+        writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id)
@@ -859,18 +859,18 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_1)
@@ -894,18 +894,18 @@ mod tests {
 
         // Add 5 new entries to the first block
         let writer = blockfile_provider
-            .fork::<&str, &Int32Array>(&id_1)
+            .fork::<&str, Int32Array>(&id_1)
             .await
             .unwrap();
         let id_2 = writer.id();
         for i in 0..5 {
             let key = format!("{:05}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_2)
@@ -929,17 +929,17 @@ mod tests {
 
         // Add 1200 more entries, causing splits
         let writer = blockfile_provider
-            .fork::<&str, &Int32Array>(&id_2)
+            .fork::<&str, Int32Array>(&id_2)
             .await
             .unwrap();
         let id_3 = writer.id();
         for i in n..n * 2 {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_3)
@@ -973,7 +973,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
@@ -981,15 +981,15 @@ mod tests {
         for i in n..n * 2 {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_1)
@@ -1016,7 +1016,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider.create::<&str, &str>().unwrap();
+        let writer = blockfile_provider.create::<&str, String>().unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1024,13 +1024,13 @@ mod tests {
             let key = format!("{:04}", i);
             let value = format!("{:04}", i);
             writer
-                .set("key", key.as_str(), value.as_str())
+                .set("key", key.as_str(), value.to_string())
                 .await
                 .unwrap();
         }
 
-        let flusher = writer.commit::<&str, &str>().unwrap();
-        flusher.flush::<&str, &str>().await.unwrap();
+        let flusher = writer.commit::<&str, String>().unwrap();
+        flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
@@ -1053,18 +1053,18 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = provider.create::<f32, &str>().unwrap();
+        let writer = provider.create::<f32, String>().unwrap();
         let id = writer.id();
 
         let n = 2000;
         for i in 0..n {
             let key = i as f32;
             let value = format!("{:04}", i);
-            writer.set("key", key, value.as_str()).await.unwrap();
+            writer.set("key", key, value).await.unwrap();
         }
 
-        let flusher = writer.commit::<f32, &str>().unwrap();
-        flusher.flush::<f32, &str>().await.unwrap();
+        let flusher = writer.commit::<f32, String>().unwrap();
+        flusher.flush::<f32, String>().await.unwrap();
 
         let reader = provider.open::<f32, &str>(&id).await.unwrap();
         for i in 0..n {
@@ -1219,16 +1219,22 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider.create::<&str, &str>().unwrap();
+        let writer = blockfile_provider.create::<&str, String>().unwrap();
         let id = writer.id();
 
         let val_1_small = "a";
         let val_2_large = "a".repeat(TEST_MAX_BLOCK_SIZE_BYTES / 2 + 1);
 
-        writer.set("key", "1", val_1_small).await.unwrap();
-        writer.set("key", "2", val_2_large.as_str()).await.unwrap();
-        let flusher = writer.commit::<&str, &str>().unwrap();
-        flusher.flush::<&str, &str>().await.unwrap();
+        writer
+            .set("key", "1", val_1_small.to_string())
+            .await
+            .unwrap();
+        writer
+            .set("key", "2", val_2_large.to_string())
+            .await
+            .unwrap();
+        let flusher = writer.commit::<&str, String>().unwrap();
+        flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         let val_1 = reader.get("key", "1").await.unwrap();
@@ -1250,7 +1256,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, &str>().unwrap();
+        let writer = blockfile_provider.create::<&str, String>().unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1258,12 +1264,12 @@ mod tests {
             let key = format!("{:04}", i);
             let value = format!("{:04}", i);
             writer
-                .set("key", key.as_str(), value.as_str())
+                .set("key", key.as_str(), value.to_string())
                 .await
                 .unwrap();
         }
-        let flusher = writer.commit::<&str, &str>().unwrap();
-        flusher.flush::<&str, &str>().await.unwrap();
+        let flusher = writer.commit::<&str, String>().unwrap();
+        flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
@@ -1272,7 +1278,7 @@ mod tests {
             assert_eq!(value, format!("{:04}", i));
         }
 
-        let writer = blockfile_provider.fork::<&str, &str>(&id).await.unwrap();
+        let writer = blockfile_provider.fork::<&str, String>(&id).await.unwrap();
         let id = writer.id();
 
         // Delete some keys
@@ -1281,12 +1287,12 @@ mod tests {
         for i in &deleted_keys {
             let key = format!("{:04}", *i);
             writer
-                .delete::<&str, &str>("key", key.as_str())
+                .delete::<&str, String>("key", key.as_str())
                 .await
                 .unwrap();
         }
-        let flusher = writer.commit::<&str, &str>().unwrap();
-        flusher.flush::<&str, &str>().await.unwrap();
+        let flusher = writer.commit::<&str, String>().unwrap();
+        flusher.flush::<&str, String>().await.unwrap();
 
         // Check that the deleted keys are gone
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1313,17 +1319,17 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_1)
@@ -1352,7 +1358,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, &Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
@@ -1360,18 +1366,18 @@ mod tests {
         for i in n..n * 2 {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
-            writer.set("key", key.as_str(), &value).await.unwrap();
+            writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
-            .fork::<&str, &Int32Array>(&id_1)
+            .fork::<&str, Int32Array>(&id_1)
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Delete everything but the last 10 keys.
@@ -1379,13 +1385,13 @@ mod tests {
         for i in 0..delete_end {
             let key = format!("{:04}", i);
             writer
-                .delete::<&str, &Int32Array>("key", key.as_str())
+                .delete::<&str, Int32Array>("key", key.as_str())
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
         let id_2 = flusher.id();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_2)
@@ -1404,7 +1410,7 @@ mod tests {
         }
 
         let writer = blockfile_provider
-            .fork::<&str, &Int32Array>(&id_1)
+            .fork::<&str, Int32Array>(&id_1)
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Add everything back.
@@ -1412,13 +1418,13 @@ mod tests {
             let key = format!("{:04}", i);
             let value = Int32Array::from(vec![i]);
             writer
-                .set::<&str, &Int32Array>("key", key.as_str(), &value)
+                .set::<&str, Int32Array>("key", key.as_str(), value)
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, &Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, Int32Array>().unwrap();
         let id_3 = flusher.id();
-        flusher.flush::<&str, &Int32Array>().await.unwrap();
+        flusher.flush::<&str, Int32Array>().await.unwrap();
 
         let reader = blockfile_provider
             .open::<&str, Int32Array>(&id_3)

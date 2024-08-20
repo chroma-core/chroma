@@ -357,7 +357,7 @@ impl<'me> FullTextIndexWriter<'me> {
             .posting_lists_blockfile_writer
             .commit::<u32, &Int32Array>()?;
         let frequencies_blockfile_flusher =
-            self.frequencies_blockfile_writer.commit::<u32, &str>()?;
+            self.frequencies_blockfile_writer.commit::<u32, String>()?;
         Ok(FullTextIndexFlusher {
             posting_lists_blockfile_flusher,
             frequencies_blockfile_flusher,
@@ -384,7 +384,7 @@ impl FullTextIndexFlusher {
         };
         match self
             .frequencies_blockfile_flusher
-            .flush::<u32, &str>()
+            .flush::<u32, String>()
             .await
         {
             Ok(_) => {}
@@ -640,7 +640,7 @@ mod tests {
     fn test_new_writer() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
@@ -651,7 +651,7 @@ mod tests {
     #[tokio::test]
     async fn test_new_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
         let freq_blockfile_id = freq_blockfile_writer.id();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -680,7 +680,7 @@ mod tests {
     async fn test_index_and_search_single_document() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -719,7 +719,7 @@ mod tests {
     async fn test_repeating_character_in_query() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -752,7 +752,7 @@ mod tests {
     async fn test_query_of_repeating_character() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -786,7 +786,7 @@ mod tests {
     async fn test_repeating_character_in_document() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -819,7 +819,7 @@ mod tests {
     async fn test_search_absent_token() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -852,7 +852,7 @@ mod tests {
     async fn test_multiple_candidates_within_document() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -893,7 +893,7 @@ mod tests {
     async fn test_multiple_simple_documents() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -931,7 +931,7 @@ mod tests {
     async fn test_multiple_complex_documents() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -980,7 +980,7 @@ mod tests {
     async fn test_index_multiple_character_repeating() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1029,7 +1029,7 @@ mod tests {
     async fn test_index_special_characters() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1056,7 +1056,7 @@ mod tests {
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         )));
-        let mut index_reader =
+        let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("!!!!!").await.unwrap();
@@ -1074,7 +1074,7 @@ mod tests {
     async fn test_get_frequencies_for_token() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1117,7 +1117,7 @@ mod tests {
     async fn test_get_all_results_for_token() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1160,7 +1160,7 @@ mod tests {
     async fn test_update_document() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1205,7 +1205,7 @@ mod tests {
     async fn test_delete_document() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, &Int32Array>().unwrap();
-        let freq_blockfile_writer = provider.create::<u32, &str>().unwrap();
+        let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 

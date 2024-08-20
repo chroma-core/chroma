@@ -1,6 +1,6 @@
 use super::{
-    data_record::DataRecordStorage, int32::Int32ArrayStorage, roaring_bitmap::RoaringBitmapStorage,
-    string::StringValueStorage, uint32::UInt32Storage,
+    data_record::DataRecordStorage, roaring_bitmap::RoaringBitmapStorage,
+    single_value_storage::SingleValueStorage, uint32::UInt32Storage,
 };
 use crate::{
     arrow::types::ArrowWriteableKey,
@@ -8,7 +8,8 @@ use crate::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BooleanBuilder, Float32Builder, RecordBatch, StringBuilder, UInt32Builder,
+        Array, ArrayRef, BooleanBuilder, Float32Builder, Int32Array, RecordBatch, StringBuilder,
+        UInt32Builder,
     },
     datatypes::Field,
 };
@@ -20,8 +21,8 @@ use std::{
 
 #[derive(Clone)]
 pub enum BlockStorage {
-    String(StringValueStorage),
-    Int32Array(Int32ArrayStorage),
+    String(SingleValueStorage<String>),
+    Int32Array(SingleValueStorage<Int32Array>),
     UInt32(UInt32Storage),
     RoaringBitmap(RoaringBitmapStorage),
     DataRecord(DataRecordStorage),
@@ -172,7 +173,7 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_min_key(),
             BlockStorage::UInt32(builder) => unimplemented!(), //builder.get_min_key(),
             BlockStorage::DataRecord(builder) => builder.get_min_key(),
-            BlockStorage::Int32Array(builder) => unimplemented!(), //builder.get_min_key(),
+            BlockStorage::Int32Array(builder) => builder.get_min_key(),
             BlockStorage::RoaringBitmap(builder) => unimplemented!(), //builder.get_min_key(),
         }
     }
@@ -183,7 +184,7 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_size::<K>(),
             BlockStorage::UInt32(builder) => unimplemented!(), //builder.get_size(start, end),
             BlockStorage::DataRecord(builder) => builder.get_size::<K>(),
-            BlockStorage::Int32Array(builder) => unimplemented!(), //builder.get_size(),
+            BlockStorage::Int32Array(builder) => builder.get_size::<K>(),
             BlockStorage::RoaringBitmap(builder) => unimplemented!(), //builder.get_size(start, end),
         }
     }
@@ -200,7 +201,8 @@ impl BlockStorage {
                 (split_key, BlockStorage::DataRecord(storage))
             }
             BlockStorage::Int32Array(builder) => {
-                unimplemented!(); //BlockStorage::Int32Array(builder.split(prefix, key))
+                let (split_key, storage) = builder.split(split_size);
+                (split_key, BlockStorage::Int32Array(storage))
             }
             BlockStorage::RoaringBitmap(builder) => {
                 unimplemented!(); //BlockStorage::RoaringBitmap(builder.split(prefix, key))

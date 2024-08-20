@@ -1,10 +1,10 @@
 use super::{single_value_size_tracker::SingleValueSizeTracker, BlockKeyArrowBuilder};
 use crate::{
-    arrow::types::ArrowWriteableKey,
+    arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
 };
 use arrow::{
-    array::{Array, ArrayRef, StringBuilder},
+    array::{Array, ArrayRef, Int32Array, Int32Builder, ListBuilder, StringBuilder},
     datatypes::Field,
     util::bit_util,
 };
@@ -12,16 +12,16 @@ use parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone)]
-pub struct StringValueStorage {
-    inner: Arc<RwLock<Inner>>,
+pub struct SingleValueStorage<T: ArrowWriteableValue> {
+    inner: Arc<RwLock<Inner<T>>>,
 }
 
-struct Inner {
-    storage: BTreeMap<CompositeKey, String>,
+struct Inner<T> {
+    storage: BTreeMap<CompositeKey, T>,
     size_tracker: SingleValueSizeTracker,
 }
 
-impl StringValueStorage {
+impl<T: ArrowWriteableValue> SingleValueStorage<T> {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(Inner {
@@ -66,7 +66,8 @@ impl StringValueStorage {
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
 
-        let value_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
+        let value_offset_bytes = T::offset_size(self.len());
+        let value_validity_bytes = T::validity_size(self.len());
 
         prefix_size
             + key_size
@@ -74,6 +75,7 @@ impl StringValueStorage {
             + prefix_offset_bytes
             + key_offset_bytes
             + value_offset_bytes
+            + value_validity_bytes
     }
 
     pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
@@ -86,21 +88,20 @@ impl StringValueStorage {
         builder
     }
 
-    pub fn add(&self, prefix: &str, key: KeyWrapper, value: String) {
+    pub fn add(&self, prefix: &str, key: KeyWrapper, value: T) {
         let mut inner = self.inner.write();
 
         let key_len = key.get_size();
-        let value_len = value.len();
         inner.storage.insert(
             CompositeKey {
                 prefix: prefix.to_string(),
                 key,
             },
-            value,
+            value.to_owned(),
         );
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
-        inner.size_tracker.add_value_size(value_len);
+        inner.size_tracker.add_value_size(value.get_size());
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
@@ -117,11 +118,11 @@ impl StringValueStorage {
                 .size_tracker
                 .subtract_prefix_size(maybe_removed_prefix_len);
             inner.size_tracker.subtract_key_size(maybe_removed_key_len);
-            inner.size_tracker.subtract_value_size(value.len());
+            inner.size_tracker.subtract_value_size(value.get_size());
         }
     }
 
-    pub(super) fn split(&self, split_size: usize) -> (CompositeKey, StringValueStorage) {
+    pub(super) fn split(&self, split_size: usize) -> (CompositeKey, SingleValueStorage<T>) {
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut value_size = 0;
@@ -136,7 +137,7 @@ impl StringValueStorage {
             while let Some((key, value)) = iter.next() {
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();
-                value_size += value.len();
+                value_size += value.get_size();
 
                 // offset sizing
                 let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((index + 1) * 4);
@@ -168,7 +169,7 @@ impl StringValueStorage {
                 let new_delta = inner.storage.split_off(&split_key);
                 (
                     split_key,
-                    StringValueStorage {
+                    SingleValueStorage {
                         inner: Arc::new(RwLock::new(Inner {
                             storage: new_delta,
                             size_tracker: SingleValueSizeTracker::with_values(
@@ -182,7 +183,9 @@ impl StringValueStorage {
             }
         }
     }
+}
 
+impl SingleValueStorage<String> {
     pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.len();
         let mut value_builder;
@@ -200,6 +203,44 @@ impl StringValueStorage {
         }
 
         let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
+        let value_arr = value_builder.finish();
+        (
+            value_field,
+            (&value_arr as &dyn Array).slice(0, value_arr.len()),
+        )
+    }
+}
+
+impl SingleValueStorage<Int32Array> {
+    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
+        let item_capacity = self.len();
+        let inner = self.inner.read();
+        let storage = &inner.storage;
+        let total_value_count = storage.iter().fold(0, |acc, (_, value)| acc + value.len());
+
+        let mut value_builder;
+        if item_capacity == 0 {
+            value_builder = ListBuilder::new(Int32Builder::new());
+        } else {
+            value_builder = ListBuilder::with_capacity(
+                Int32Builder::with_capacity(total_value_count),
+                item_capacity,
+            );
+        }
+
+        for (_, value) in storage.iter() {
+            value_builder.append_value(value);
+        }
+
+        let value_field = Field::new(
+            "value",
+            arrow::datatypes::DataType::List(Arc::new(Field::new(
+                "item",
+                arrow::datatypes::DataType::Int32,
+                true,
+            ))),
+            true,
+        );
         let value_arr = value_builder.finish();
         (
             value_field,

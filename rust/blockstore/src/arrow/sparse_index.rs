@@ -479,31 +479,31 @@ impl SparseIndex {
 
         // TODO: we could save the uuid not as a string to be more space efficient
         // but given the scale is relatively small, this is fine for now
-        let delta = BlockDelta::new::<K, &str>(self.id);
+        let delta = BlockDelta::new::<K, String>(self.id);
         for (key, block_id) in forward.iter() {
             match key {
                 SparseIndexDelimiter::Start => {
-                    delta.add("START", K::default(), block_id.to_string().as_str());
+                    delta.add("START", K::default(), block_id.to_string());
                 }
                 SparseIndexDelimiter::Key(k) => match &k.key {
                     KeyWrapper::String(s) => {
-                        delta.add(&k.prefix, s.as_str(), block_id.to_string().as_str());
+                        delta.add(&k.prefix, s.as_str(), block_id.to_string());
                     }
                     KeyWrapper::Float32(f) => {
-                        delta.add(&k.prefix, *f, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *f, block_id.to_string());
                     }
                     KeyWrapper::Bool(_b) => {
                         unimplemented!();
                         // delta.add("KEY", b, block_id.to_string().as_str());
                     }
                     KeyWrapper::Uint32(u) => {
-                        delta.add(&k.prefix, *u, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *u, block_id.to_string());
                     }
                 },
             }
         }
 
-        let record_batch = delta.finish::<K, &str>();
+        let record_batch = delta.finish::<K, String>();
         Ok(Block::from_record_batch(delta.id, record_batch))
     }
 

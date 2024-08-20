@@ -1,15 +1,26 @@
 use crate::{
     arrow::{
-        block::delta::{string::StringValueStorage, BlockDelta, BlockStorage},
+        block::delta::{single_value_storage::SingleValueStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
-    key::{CompositeKey, KeyWrapper},
+    key::KeyWrapper,
 };
-use arrow::array::{Array, StringArray};
+use arrow::{
+    array::{Array, StringArray},
+    util::bit_util,
+};
 use std::sync::Arc;
 
-impl ArrowWriteableValue for &str {
+impl ArrowWriteableValue for String {
     type ReadableValue<'referred_data> = &'referred_data str;
+
+    fn offset_size(item_count: usize) -> usize {
+        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
+    }
+
+    fn validity_size(item_count: usize) -> usize {
+        0 // We don't support None values for StringArray
+    }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
@@ -26,7 +37,7 @@ impl ArrowWriteableValue for &str {
     }
 
     fn get_delta_builder() -> BlockStorage {
-        BlockStorage::String(StringValueStorage::new())
+        BlockStorage::String(SingleValueStorage::new())
     }
 }
 
@@ -41,6 +52,6 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str 
         value: Self,
         delta: &mut BlockDelta,
     ) {
-        delta.add(prefix, key, value);
+        delta.add(prefix, key, value.to_string());
     }
 }

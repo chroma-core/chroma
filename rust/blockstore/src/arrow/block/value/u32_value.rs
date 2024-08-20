@@ -11,13 +11,13 @@ use std::sync::Arc;
 impl ArrowWriteableValue for u32 {
     type ReadableValue<'referred_data> = u32;
 
-    // fn offset_size(_item_count: usize) -> usize {
-    //     0
-    // }
+    fn offset_size(_item_count: usize) -> usize {
+        0
+    }
 
-    // fn validity_size(_item_count: usize) -> usize {
-    //     0 // We don't support None values for UInt32Array
-    // }
+    fn validity_size(_item_count: usize) -> usize {
+        0 // We don't support None values for UInt32Array
+    }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {

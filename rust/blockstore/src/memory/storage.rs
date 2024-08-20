@@ -60,7 +60,7 @@ pub trait Readable<'referred_data>: Sized {
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
 }
 
-impl Writeable for &str {
+impl Writeable for String {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
         storage
             .string_value_storage
@@ -72,7 +72,7 @@ impl Writeable for &str {
                     prefix: prefix.to_string(),
                     key,
                 },
-                value.to_string(),
+                value,
             );
     }
 
@@ -195,7 +195,7 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
 }
 
 // TODO: remove this and make this all use a unified storage so we don't have two impls
-impl Writeable for &Int32Array {
+impl Writeable for Int32Array {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
         storage
             .int32_array_storage

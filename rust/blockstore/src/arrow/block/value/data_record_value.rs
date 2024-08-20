@@ -5,14 +5,28 @@ use crate::{
     },
     key::KeyWrapper,
 };
-use arrow::array::BinaryArray;
 use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray};
+use arrow::{array::BinaryArray, util::bit_util};
 use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use prost::Message;
 use std::sync::Arc;
 
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
+
+    fn offset_size(item_count: usize) -> usize {
+        let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+        let metdata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+        let document_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+
+        id_offset + metdata_offset + document_offset
+    }
+
+    fn validity_size(item_count: usize) -> usize {
+        let validity_bytes = bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count, 8));
+        // Both document and metadata can be null
+        return validity_bytes * 2;
+    }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
