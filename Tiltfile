@@ -85,7 +85,7 @@ k8s_yaml([
 
 # Extra stuff to make debugging and testing easier
 k8s_yaml([
-  'k8s/test/collector.yaml',
+  'k8s/test/otel-collector.yaml',
   'k8s/test/grafana-service.yaml',
   'k8s/test/grafana.yaml',
   'k8s/test/jaeger-service.yaml',
@@ -146,7 +146,10 @@ k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_f
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
 
 # I have no idea why these need their own lines but the others don't.
-k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["debug"])
+k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
+k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
+k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
+k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
 
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards='9000:9000')
