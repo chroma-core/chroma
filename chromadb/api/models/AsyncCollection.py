@@ -63,7 +63,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-        upacked_embeddings_set = self._unpack_embedding_set(
+        unpacked_embedding_set = self._unpack_embedding_set(
             ids,
             embeddings,
             metadatas,
@@ -71,30 +71,33 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             images,
             uris,
         )
+        
+        normalized_embeddings = self._normalize_embeddings(unpacked_embedding_set["embeddings"]) if unpacked_embedding_set["embeddings"] is not None else None
 
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-        ) = self._validate_embedding_set(
-            upacked_embeddings_set["ids"],
-            upacked_embeddings_set["embeddings"],
-            upacked_embeddings_set["metadatas"],
-            upacked_embeddings_set["documents"],
-            upacked_embeddings_set["images"],
-            upacked_embeddings_set["uris"],
+        self._validate_embedding_set(
+            unpacked_embedding_set["ids"],
+            normalized_embeddings,
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
         )
 
-        prepared_embeddings = self._prepare_embedding_set(
-            embeddings, documents, images, uris
+        prepared_embeddings = self._prepare_embeddings(
+            unpacked_embedding_set["embeddings"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
         )
 
         await self._client._add(
-            ids, self.id, prepared_embeddings, metadatas, documents, uris
+            unpacked_embedding_set["ids"],
+            self.id,
+            prepared_embeddings,
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["uris"],
         )
 
     async def count(self) -> int:

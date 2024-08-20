@@ -149,8 +149,8 @@ class CollectionCommon(Generic[ClientT]):
     def get_model(self) -> CollectionModel:
         return self._model
 
-    @staticmethod
     def _unpack_embedding_set(
+        self,
         ids: OneOrMany[ID],
         embeddings: Optional[
             Union[
@@ -163,20 +163,20 @@ class CollectionCommon(Generic[ClientT]):
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> EmbeddingSet:
-        upacked_ids = maybe_cast_one_to_many_ids(ids)
-        upacked_embeddings = maybe_cast_one_to_many_embedding(embeddings)
-        upacked_metadatas = maybe_cast_one_to_many_metadata(metadatas)
-        upacked_documents = maybe_cast_one_to_many_document(documents)
-        upacked_images = maybe_cast_one_to_many_image(images)
-        upacked_uris = maybe_cast_one_to_many_uri(uris)
-
+        unpacked_ids = maybe_cast_one_to_many_ids(ids)
+        unpacked_embeddings = maybe_cast_one_to_many_embedding(embeddings)
+        unpacked_metadatas = maybe_cast_one_to_many_metadata(metadatas)
+        unpacked_documents = maybe_cast_one_to_many_document(documents)
+        unpacked_images = maybe_cast_one_to_many_image(images)
+        unpacked_uris = maybe_cast_one_to_many_uri(uris)
+        
         return {
-            "ids": upacked_ids,
-            "embeddings": upacked_embeddings,
-            "metadatas": upacked_metadatas,
-            "documents": upacked_documents,
-            "images": upacked_images,
-            "uris": upacked_uris,
+            "ids": unpacked_ids,
+            "embeddings": unpacked_embeddings,
+            "metadatas": unpacked_metadatas,
+            "documents": unpacked_documents,
+            "images": unpacked_images,
+            "uris": unpacked_uris,
         }
 
     def _validate_embedding_set(
@@ -188,23 +188,15 @@ class CollectionCommon(Generic[ClientT]):
         images: Optional[Images],
         uris: Optional[URIs],
         require_embeddings_or_data: bool = True,
-    ) -> Tuple[
-        IDs,
-        Optional[Embeddings],
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[Images],
-        Optional[URIs],
-    ]:
+    ) -> None:
         valid_ids = validate_ids(ids)
         valid_embeddings = (
-            validate_embeddings(self._normalize_embeddings(embeddings))
-            if embeddings is not None
-            else None
+            validate_embeddings(embeddings) if embeddings is not None else None
         )
         valid_metadatas = (
             validate_metadatas(metadatas) if metadatas is not None else None
         )
+        
         valid_documents = maybe_cast_one_to_many_document(documents)
         valid_images = maybe_cast_one_to_many_image(images)
         valid_uris = maybe_cast_one_to_many_uri(uris)
@@ -213,9 +205,9 @@ class CollectionCommon(Generic[ClientT]):
         if require_embeddings_or_data:
             if (
                 valid_embeddings is None
-                and valid_documents is None
-                and valid_images is None
-                and valid_uris is None
+                and documents is None
+                and images is None
+                and uris is None
             ):
                 raise ValueError(
                     "You must provide embeddings, documents, images, or uris."
@@ -247,16 +239,7 @@ class CollectionCommon(Generic[ClientT]):
                 f"Number of uris {len(valid_uris)} must match number of ids {len(valid_ids)}"
             )
 
-        return (
-            valid_ids,
-            valid_embeddings,
-            valid_metadatas,
-            valid_documents,
-            valid_images,
-            valid_uris,
-        )
-
-    def _prepare_embedding_set(
+    def _prepare_embeddings(
         self,
         embeddings: Optional[Embeddings],
         documents: Optional[Documents],
@@ -464,34 +447,39 @@ class CollectionCommon(Generic[ClientT]):
         Optional[Documents],
         Optional[URIs],
     ]:
-        upacked_embeddings_set = self._unpack_embedding_set(
+        unpacked_embedding_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
+        
+        normalized_embeddings = self._normalize_embeddings(unpacked_embedding_set["embeddings"]) if unpacked_embedding_set["embeddings"] is not None else None
 
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-        ) = self._validate_embedding_set(
-            upacked_embeddings_set["ids"],
-            upacked_embeddings_set["embeddings"],
-            upacked_embeddings_set["metadatas"],
-            upacked_embeddings_set["documents"],
-            upacked_embeddings_set["images"],
-            upacked_embeddings_set["uris"],
+        self._validate_embedding_set(
+            unpacked_embedding_set["ids"],
+            normalized_embeddings,
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
         )
 
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            elif images is not None:
-                embeddings = self._embed(input=images)
+        if normalized_embeddings is None:
+            if unpacked_embedding_set["documents"] is not None:
+                normalized_embeddings = self._embed(
+                    input=unpacked_embedding_set["documents"]
+                )
+            elif unpacked_embedding_set["images"] is not None:
+                normalized_embeddings = self._embed(
+                    input=unpacked_embedding_set["images"]
+                )
 
-        return ids, cast(Embeddings, embeddings), metadatas, documents, uris
+        return (
+            unpacked_embedding_set["ids"],
+            cast(Embeddings, normalized_embeddings),
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["uris"],
+        )
 
     # TODO: Refactor this into separate functions for validation and preparation
     def _validate_and_prepare_upsert_request(
@@ -514,34 +502,39 @@ class CollectionCommon(Generic[ClientT]):
         Optional[Documents],
         Optional[URIs],
     ]:
-        upacked_embeddings_set = self._unpack_embedding_set(
+        unpacked_embedding_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-        ) = self._validate_embedding_set(
-            upacked_embeddings_set["ids"],
-            upacked_embeddings_set["embeddings"],
-            upacked_embeddings_set["metadatas"],
-            upacked_embeddings_set["documents"],
-            upacked_embeddings_set["images"],
-            upacked_embeddings_set["uris"],
+        normalized_embeddings = self._normalize_embeddings(unpacked_embedding_set["embeddings"]) if unpacked_embedding_set["embeddings"] is not None else None
+
+        self._validate_embedding_set(
+            unpacked_embedding_set["ids"],
+            normalized_embeddings,
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
         )
 
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
+        if normalized_embeddings is None:
+            if unpacked_embedding_set["documents"] is not None:
+                normalized_embeddings = self._embed(
+                    input=unpacked_embedding_set["documents"]
+                )
             else:
-                embeddings = self._embed(input=images)
+                normalized_embeddings = self._embed(
+                    input=unpacked_embedding_set["images"]
+                )
 
-        return ids, embeddings, metadatas, documents, uris
+        return (
+            unpacked_embedding_set["ids"],
+            cast(Embeddings, normalized_embeddings),
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["uris"],
+        )
 
     # TODO: Rename this function
     def _validate_and_prepare_delete_request(
