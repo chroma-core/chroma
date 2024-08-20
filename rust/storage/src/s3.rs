@@ -55,7 +55,7 @@ impl ChromaError for S3PutError {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum S3GetError {
     #[error("S3 GET error: {0}")]
     S3GetError(String),

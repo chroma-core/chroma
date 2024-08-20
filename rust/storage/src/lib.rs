@@ -4,6 +4,7 @@ use self::stream::ByteStreamItem;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 
+pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
 pub mod s3;
@@ -17,7 +18,7 @@ pub enum Storage {
     Local(local::LocalStorage),
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum GetError {
     #[error("No such key: {0}")]
     NoSuchKey(String),
