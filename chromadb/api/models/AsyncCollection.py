@@ -74,7 +74,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             images,
             uris,
         )
-
+        
         await self._client._add(
             embedding_set["ids"],
             self.id,
