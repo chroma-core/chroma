@@ -7,7 +7,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub(crate) enum OperatorType {
-    IoOperator,
+    IO,
     Other,
 }
 

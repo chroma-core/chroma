@@ -240,7 +240,7 @@ mod tests {
             id: uuid!("00000000-0000-0000-0000-000000000000"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Some(uuid!("00000000-0000-0000-0000-000000000000")),
+            collection: uuid!("00000000-0000-0000-0000-000000000000"),
             metadata: None,
             file_path: HashMap::new(),
         };

@@ -139,6 +139,13 @@ impl WorkerServer {
             }
         };
 
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
         let mut proto_results_for_all = Vec::new();
 
         let mut query_vectors = Vec::new();
@@ -169,6 +176,7 @@ impl WorkerServer {
                     request.allowed_ids,
                     request.include_embeddings,
                     segment_uuid,
+                    collection_uuid,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.hnsw_index_provider.clone(),
@@ -241,6 +249,13 @@ impl WorkerServer {
             }
         };
 
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
             None => {
@@ -259,6 +274,7 @@ impl WorkerServer {
             system.clone(),
             request.ids,
             segment_uuid,
+            collection_uuid,
             self.log.clone(),
             self.sysdb.clone(),
             dispatcher,
@@ -309,6 +325,13 @@ impl WorkerServer {
             Err(_) => {
                 tracing::error!("Invalid Segment UUID");
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
+            }
+        };
+
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
             }
         };
 
@@ -367,6 +390,7 @@ impl WorkerServer {
         let orchestrator = MetadataQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
+            &collection_uuid,
             query_ids,
             self.log.clone(),
             self.sysdb.clone(),
@@ -474,6 +498,13 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
             }
         };
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
         println!("Querying count for segment {}", segment_uuid);
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
@@ -492,6 +523,7 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         let orchestrator = CountQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
+            &collection_uuid,
             self.log.clone(),
             self.sysdb.clone(),
             dispatcher.clone(),

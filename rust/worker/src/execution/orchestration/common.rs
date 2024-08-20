@@ -28,9 +28,10 @@ impl ChromaError for GetHnswSegmentByIdError {
 pub(super) async fn get_hnsw_segment_by_id(
     mut sysdb: Box<SysDb>,
     hnsw_segment_id: &Uuid,
+    collection_id: &Uuid,
 ) -> Result<Segment, Box<GetHnswSegmentByIdError>> {
     let segments = sysdb
-        .get_segments(Some(*hnsw_segment_id), None, None, None)
+        .get_segments(Some(*hnsw_segment_id), None, None, *collection_id)
         .await;
     let segment = match segments {
         Ok(segments) => {
@@ -122,7 +123,7 @@ pub(super) async fn get_record_segment_by_collection_id(
             None,
             Some(SegmentType::BlockfileRecord.into()),
             None,
-            Some(*collection_id),
+            *collection_id,
         )
         .await;
 

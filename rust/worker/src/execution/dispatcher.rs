@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use std::fmt::Debug;
-use tracing::Span;
+use tracing::{trace_span, Instrument, Span};
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.
@@ -95,9 +95,10 @@ impl Dispatcher {
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, task: TaskMessage) {
         match task.get_type() {
-            OperatorType::IoOperator => {
+            OperatorType::IO => {
+                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
                 tokio::spawn(async move {
-                    task.run().await;
+                    task.run().instrument(child_span).await;
                 });
             }
             OperatorType::Other => {
@@ -292,7 +293,7 @@ mod tests {
         }
 
         fn get_type(&self) -> OperatorType {
-            OperatorType::IoOperator
+            OperatorType::IO
         }
     }
 
@@ -317,7 +318,7 @@ mod tests {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
-                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx);
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx, || None);
         }
     }
     #[async_trait]
@@ -380,7 +381,7 @@ mod tests {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
-                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx);
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx, || None);
         }
     }
     #[async_trait]

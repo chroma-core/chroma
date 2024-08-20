@@ -48,6 +48,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
+use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -227,7 +228,7 @@ impl CompactOrchestrator {
             Some(end_timestamp),
         );
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching pull logs for compaction {:?}", e);
@@ -246,12 +247,12 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Partition;
         // TODO: make this configurable
-        let max_partition_size = 100;
+        let max_partition_size = 10_000;
         let operator = PartitionOperator::new();
         println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, max_partition_size);
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching partition for compaction {:?}", e);
@@ -363,7 +364,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching register for compaction {:?}", e);
@@ -393,7 +394,7 @@ impl CompactOrchestrator {
 
         let segments = self
             .sysdb
-            .get_segments(None, None, None, Some(self.collection_id))
+            .get_segments(None, None, None, self.collection_id)
             .await;
 
         tracing::info!("Retrived segments: {:?}", segments);
@@ -630,7 +631,11 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             // how to do that since commit is per partition but write_to_blockfiles
             // only need to be called once across all partitions combined.
             let mut writer = output.metadata_segment_writer.clone();
-            match writer.write_to_blockfiles().await {
+            match writer
+                .write_to_blockfiles()
+                .instrument(tracing::info_span!("Writing to blockfiles"))
+                .await
+            {
                 Ok(()) => (),
                 Err(e) => {
                     tracing::error!("Error writing metadata segment out to blockfiles: {:?}", e);

@@ -78,10 +78,12 @@ class CreateSegmentResponse(_message.Message):
     def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class DeleteSegmentRequest(_message.Message):
-    __slots__ = ("id",)
+    __slots__ = ("id", "collection")
     ID_FIELD_NUMBER: _ClassVar[int]
+    COLLECTION_FIELD_NUMBER: _ClassVar[int]
     id: str
-    def __init__(self, id: _Optional[str] = ...) -> None: ...
+    collection: str
+    def __init__(self, id: _Optional[str] = ..., collection: _Optional[str] = ...) -> None: ...
 
 class DeleteSegmentResponse(_message.Message):
     __slots__ = ("status",)
@@ -110,18 +112,16 @@ class GetSegmentsResponse(_message.Message):
     def __init__(self, segments: _Optional[_Iterable[_Union[_chroma_pb2.Segment, _Mapping]]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class UpdateSegmentRequest(_message.Message):
-    __slots__ = ("id", "collection", "reset_collection", "metadata", "reset_metadata")
+    __slots__ = ("id", "collection", "metadata", "reset_metadata")
     ID_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
-    RESET_COLLECTION_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     RESET_METADATA_FIELD_NUMBER: _ClassVar[int]
     id: str
     collection: str
-    reset_collection: bool
     metadata: _chroma_pb2.UpdateMetadata
     reset_metadata: bool
-    def __init__(self, id: _Optional[str] = ..., collection: _Optional[str] = ..., reset_collection: bool = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
 
 class UpdateSegmentResponse(_message.Message):
     __slots__ = ("status",)

@@ -83,7 +83,7 @@ impl TestSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> bool {
         if id.is_some() && id.unwrap() != segment.id {
             return false;
@@ -94,9 +94,7 @@ impl TestSysDb {
         if scope.is_some() && scope.unwrap() != segment.scope {
             return false;
         }
-        if collection.is_some()
-            && (segment.collection.is_none() || collection.unwrap() != segment.collection.unwrap())
-        {
+        if collection != segment.collection {
             return false;
         }
         true
@@ -133,7 +131,7 @@ impl TestSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let inner = self.inner.lock();
         let mut segments = Vec::new();

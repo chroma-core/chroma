@@ -25,6 +25,10 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::instrument;
+use tracing::span;
+use tracing::Instrument;
+use tracing::Span;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -84,6 +88,7 @@ impl CompactionManager {
         }
     }
 
+    #[instrument(name = "CompactionManager::compact")]
     async fn compact(
         &self,
         compaction_job: &CompactionJob,
@@ -131,13 +136,17 @@ impl CompactionManager {
     }
 
     // TODO: make the return type more informative
+    #[instrument(name = "CompactionManager::compact_batch")]
     pub(crate) async fn compact_batch(&mut self) -> (u32, u32) {
         self.scheduler.schedule().await;
         let mut jobs = FuturesUnordered::new();
         for job in self.scheduler.get_jobs() {
-            jobs.push(self.compact(job));
+            let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
+            instrumented_span.follows_from(Span::current());
+            jobs.push(self.compact(job).instrument(instrumented_span));
         }
         println!("Compacting {} jobs", jobs.len());
+        tracing::info!("Compacting {} jobs", jobs.len());
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
         while let Some(job) = jobs.next().await {
@@ -254,7 +263,9 @@ impl Component for CompactionManager {
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
         ctx.scheduler
-            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
+                Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction"))
+            });
     }
 }
 
@@ -293,7 +304,9 @@ impl Handler<ScheduleMessage> for CompactionManager {
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler
-            .schedule(ScheduleMessage {}, self.compaction_interval, ctx);
+            .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
+                Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction"))
+            });
     }
 }
 
@@ -413,7 +426,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Some(collection_uuid_1),
+            collection: collection_uuid_1,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -422,7 +435,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Some(collection_uuid_2),
+            collection: collection_uuid_2,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -431,7 +444,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
-            collection: Some(collection_uuid_1),
+            collection: collection_uuid_1,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -440,7 +453,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
-            collection: Some(collection_uuid_2),
+            collection: collection_uuid_2,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -449,7 +462,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Some(collection_uuid_1),
+            collection: collection_uuid_1,
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -458,7 +471,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Some(collection_uuid_2),
+            collection: collection_uuid_2,
             metadata: None,
             file_path: HashMap::new(),
         };

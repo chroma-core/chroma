@@ -46,6 +46,8 @@ pub enum HnswKnnOperatorError {
     InvalidAllowedAndDisallowedIds,
     #[error("Error materializing logs {0}")]
     LogMaterializationError(#[from] LogMaterializerError),
+    #[error("Error querying HNSW {0}")]
+    QueryError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for HnswKnnOperatorError {
@@ -55,6 +57,7 @@ impl ChromaError for HnswKnnOperatorError {
             HnswKnnOperatorError::RecordSegmentReadError => ErrorCodes::Internal,
             HnswKnnOperatorError::InvalidAllowedAndDisallowedIds => ErrorCodes::InvalidArgument,
             HnswKnnOperatorError::LogMaterializationError(e) => e.code(),
+            HnswKnnOperatorError::QueryError(e) => e.code(),
         }
     }
 }
@@ -221,12 +224,20 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         let disallowed_offset_ids: Vec<usize> =
             disallowed_offset_ids.iter().map(|&x| x as usize).collect();
 
-        let (offset_ids, distances) = input.segment.query(
+        let query_results = input.segment.query(
             &input.query,
             input.k,
             &allowed_offset_ids,
             &disallowed_offset_ids,
         );
+        let (offset_ids, distances) = match query_results {
+            Ok(results) => results,
+            Err(e) => {
+                tracing::error!("[HnswKnnOperation]: Error querying HNSW {:?}", e);
+                return Err(Box::new(HnswKnnOperatorError::QueryError(e)));
+            }
+        };
+
         Ok(HnswKnnOperatorOutput {
             offset_ids,
             distances,

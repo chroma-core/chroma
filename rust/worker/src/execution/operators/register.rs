@@ -194,7 +194,7 @@ mod tests {
             id: segment_id_1.clone(),
             r#type: SegmentType::HnswDistributed,
             scope: SegmentScope::VECTOR,
-            collection: Some(collection_uuid_1),
+            collection: collection_uuid_1,
             metadata: None,
             file_path: file_path_1.clone(),
         };
@@ -206,7 +206,7 @@ mod tests {
             id: segment_id_2.clone(),
             r#type: SegmentType::HnswDistributed,
             scope: SegmentScope::VECTOR,
-            collection: Some(collection_uuid_2),
+            collection: collection_uuid_2,
             metadata: None,
             file_path: file_path_2.clone(),
         };
@@ -269,9 +269,20 @@ mod tests {
         let collection = collection[0].clone();
         assert_eq!(collection.log_position, log_position);
 
-        let segments = sysdb.get_segments(None, None, None, None).await;
-        assert!(segments.is_ok());
-        let segments = segments.unwrap();
+        let collection_1_segments = sysdb
+            .get_segments(None, None, None, collection_uuid_1)
+            .await
+            .unwrap();
+        let collection_2_segments = sysdb
+            .get_segments(None, None, None, collection_uuid_2)
+            .await
+            .unwrap();
+
+        let segments = collection_1_segments
+            .iter()
+            .chain(collection_2_segments.iter())
+            .collect::<Vec<&Segment>>();
+
         assert_eq!(segments.len(), 2);
         let segment_1 = segments.iter().find(|s| s.id == segment_id_1).unwrap();
         assert_eq!(segment_1.file_path, file_path_3);

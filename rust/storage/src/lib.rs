@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use self::config::StorageConfig;
 use self::s3::S3GetError;
 use self::stream::ByteStreamItem;
+use admissioncontrolleds3::AdmissionControlledS3StorageError;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 
+pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
 pub mod s3;
@@ -15,9 +19,10 @@ use thiserror::Error;
 pub enum Storage {
     S3(s3::S3Storage),
     Local(local::LocalStorage),
+    AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum GetError {
     #[error("No such key: {0}")]
     NoSuchKey(String),
@@ -55,10 +60,7 @@ impl ChromaError for PutError {
 }
 
 impl Storage {
-    pub async fn get(
-        &self,
-        key: &str,
-    ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, GetError> {
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
         match self {
             Storage::S3(s3) => {
                 let res = s3.get(key).await;
@@ -77,6 +79,56 @@ impl Storage {
                     Err(e) => Err(GetError::LocalError(e)),
                 }
             }
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                let res = admission_controlled_storage.get(key.to_string()).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
+                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                            _ => Err(GetError::S3Error(e)),
+                        },
+                    },
+                }
+            }
+        }
+    }
+
+    // TODO: Remove this once the upstream switches to consume non-streaming.
+    pub async fn get_stream(
+        &self,
+        key: &str,
+    ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, GetError> {
+        match self {
+            Storage::S3(s3) => {
+                let res = s3.get_stream(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                        _ => Err(GetError::S3Error(e)),
+                    },
+                }
+            }
+            Storage::Local(local) => {
+                let res = local.get_stream(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => Err(GetError::LocalError(e)),
+                }
+            }
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                let res = admission_controlled_storage.get_stream(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
+                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                            _ => Err(GetError::S3Error(e)),
+                        },
+                    },
+                }
+            }
         }
     }
 
@@ -90,6 +142,10 @@ impl Storage {
                 .put_file(key, path)
                 .await
                 .map_err(|e| PutError::LocalError(e)),
+            Storage::AdmissionControlledS3(as3) => as3
+                .put_file(key, path)
+                .await
+                .map_err(|e| PutError::S3Error(e)),
         }
     }
 
@@ -103,6 +159,10 @@ impl Storage {
                 .put_bytes(key, &bytes)
                 .await
                 .map_err(|e| PutError::LocalError(e)),
+            Storage::AdmissionControlledS3(as3) => as3
+                .put_bytes(key, bytes)
+                .await
+                .map_err(|e| PutError::S3Error(e)),
         }
     }
 }
@@ -112,6 +172,9 @@ pub async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn Chro
         StorageConfig::S3(_) => Ok(Storage::S3(s3::S3Storage::try_from_config(config).await?)),
         StorageConfig::Local(_) => Ok(Storage::Local(
             local::LocalStorage::try_from_config(config).await?,
+        )),
+        StorageConfig::AdmissionControlledS3(_) => Ok(Storage::AdmissionControlledS3(
+            admissioncontrolleds3::AdmissionControlledS3Storage::try_from_config(config).await?,
         )),
     }
 }

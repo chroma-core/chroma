@@ -288,10 +288,10 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         add_attributes_to_current_span(
             {
@@ -342,14 +342,14 @@ class SqlSysDB(SqlDB, SysDB):
                 rows = list(segment_rows)
                 type = str(rows[0][1])
                 scope = SegmentScope(str(rows[0][2]))
-                collection = self.uuid_from_db(rows[0][3]) if rows[0][3] else None
+                collection = self.uuid_from_db(rows[0][3])
                 metadata = self._metadata_from_rows(rows)
                 segments.append(
                     Segment(
                         id=cast(UUID, id),
                         type=type,
                         scope=scope,
-                        collection=collection,
+                        collection=cast(UUID, collection),
                         metadata=metadata,
                     )
                 )
@@ -474,7 +474,7 @@ class SqlSysDB(SqlDB, SysDB):
 
     @trace_method("SqlSysDB.delete_segment", OpenTelemetryGranularity.ALL)
     @override
-    def delete_segment(self, id: UUID) -> None:
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
         """Delete a segment from the SysDB"""
         add_attributes_to_current_span(
             {
@@ -540,8 +540,8 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         add_attributes_to_current_span(
@@ -557,13 +557,8 @@ class SqlSysDB(SqlDB, SysDB):
             self.querybuilder()
             .update(segments_t)
             .where(segments_t.id == ParameterValue(self.uuid_to_db(id)))
+            .set(segments_t.collection, ParameterValue(self.uuid_to_db(collection)))
         )
-
-        if not collection == Unspecified():
-            collection = cast(Optional[UUID], collection)
-            q = q.set(
-                segments_t.collection, ParameterValue(self.uuid_to_db(collection))
-            )
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())

@@ -13,7 +13,7 @@ type Segment struct {
 	   This requires us to push down CollectionID from the caller. We don't think there is
 	   need to modify CollectionID in the near future. Each Segment should always have a
 	   collection as a parent and cannot be modified. */
-	CollectionID *string             `gorm:"collection_id;primaryKey"`
+	CollectionID *string             `gorm:"collection_id;primaryKey;not null"`
 	ID           string              `gorm:"id;primaryKey"`
 	Type         string              `gorm:"type;type:string;not null"`
 	Scope        string              `gorm:"scope"`

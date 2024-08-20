@@ -51,11 +51,16 @@ func (s *segmentDb) Insert(in *dbmodel.Segment) error {
 }
 
 func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*dbmodel.SegmentAndMetadata, error) {
+	if collectionID == types.NilUniqueID() {
+		return nil, common.ErrMissingCollectionID
+	}
+
 	var segments []*dbmodel.SegmentAndMetadata
 
 	query := s.db.Table("segments").
 		Select("segments.id, segments.collection_id, segments.type, segments.scope, segments.file_paths, segment_metadata.key, segment_metadata.str_value, segment_metadata.int_value, segment_metadata.float_value, segment_metadata.bool_value").
 		Joins("LEFT JOIN segment_metadata ON segments.id = segment_metadata.segment_id").
+		Where("segments.collection_id = ?", collectionID.String()).
 		Order("segments.id")
 
 	if id != types.NilUniqueID() {
@@ -66,9 +71,6 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 	}
 	if scope != nil {
 		query = query.Where("scope = ?", scope)
-	}
-	if collectionID != types.NilUniqueID() {
-		query = query.Where("collection_id = ?", collectionID.String())
 	}
 
 	if query.Error != nil {

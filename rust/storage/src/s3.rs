@@ -11,6 +11,7 @@
 use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
+use crate::GetError;
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -28,17 +29,20 @@ use chroma_error::ErrorCodes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::Stream;
+use futures::StreamExt;
 use std::clone::Clone;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::Instrument;
+use tracing::Span;
 
 #[derive(Clone)]
 pub struct S3Storage {
-    bucket: String,
-    client: aws_sdk_s3::Client,
-    upload_part_size_bytes: usize,
+    pub(super) bucket: String,
+    pub(super) client: aws_sdk_s3::Client,
+    pub(super) upload_part_size_bytes: usize,
 }
 
 #[derive(Error, Debug)]
@@ -55,7 +59,7 @@ impl ChromaError for S3PutError {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum S3GetError {
     #[error("S3 GET error: {0}")]
     S3GetError(String),
@@ -80,7 +84,7 @@ impl S3Storage {
         };
     }
 
-    async fn create_bucket(&self) -> Result<(), String> {
+    pub(super) async fn create_bucket(&self) -> Result<(), String> {
         // Creates a public bucket with default settings in the region.
         // This should only be used for testing and in production
         // the bucket should be provisioned ahead of time.
@@ -118,7 +122,7 @@ impl S3Storage {
         }
     }
 
-    pub async fn get(
+    pub(super) async fn get_stream(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, S3GetError> {
@@ -161,6 +165,47 @@ impl S3Storage {
                     _ => {}
                 }
                 return Err(S3GetError::S3GetError(e.to_string()));
+            }
+        }
+    }
+
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
+        let mut stream = self
+            .get_stream(key)
+            .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
+            .await?;
+        let read_block_span = tracing::trace_span!(parent: Span::current(), "S3 read bytes to end");
+        let buf = read_block_span
+            .in_scope(|| async {
+                let mut buf: Vec<u8> = Vec::new();
+                while let Some(res) = stream.next().await {
+                    match res {
+                        Ok(chunk) => {
+                            buf.extend(chunk);
+                        }
+                        Err(err) => {
+                            tracing::error!("Error reading from S3: {}", err);
+                            match err {
+                                GetError::S3Error(e) => {
+                                    return Err(e);
+                                }
+                                GetError::NoSuchKey(e) => {
+                                    return Err(S3GetError::NoSuchKey(e));
+                                }
+                                GetError::LocalError(_) => unreachable!(),
+                            }
+                        }
+                    }
+                }
+                tracing::info!("Read {:?} bytes from s3", buf.len());
+                Ok(Some(buf))
+            })
+            .await?;
+        match buf {
+            Some(buf) => Ok(Arc::new(buf)),
+            None => {
+                // Buffer is empty. Nothing interesting to do.
+                Ok(Arc::new(vec![]))
             }
         }
     }
@@ -374,6 +419,15 @@ impl Configurable<StorageConfig> for S3Storage {
                     }
                     super::config::S3CredentialsConfig::AWS => {
                         let config = aws_config::load_from_env().await;
+                        let timeout_config_builder = TimeoutConfigBuilder::default()
+                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
+                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
+                        let retry_config = RetryConfig::standard();
+                        let config = config
+                            .to_builder()
+                            .timeout_config(timeout_config_builder.build())
+                            .retry_config(retry_config)
+                            .build();
                         aws_sdk_s3::Client::new(&config)
                     }
                 };
@@ -496,7 +550,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut stream = storage.get("test").await.unwrap();
+        let mut stream = storage.get_stream("test").await.unwrap();
 
         let mut buf = Vec::new();
         while let Some(chunk) = stream.next().await {
