@@ -68,6 +68,7 @@ if TYPE_CHECKING:
 
 ClientT = TypeVar("ClientT", "ServerAPI", "AsyncServerAPI")
 
+
 class CollectionCommon(Generic[ClientT]):
     _model: CollectionModel
     _client: ClientT
@@ -148,7 +149,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def get_model(self) -> CollectionModel:
         return self._model
-    
+
     @staticmethod
     def _unpack_embedding_set(
         ids: OneOrMany[ID],
@@ -198,19 +199,15 @@ class CollectionCommon(Generic[ClientT]):
     ]:
         valid_ids = validate_ids(ids)
         valid_embeddings = (
-            validate_embeddings(
-                self._normalize_embeddings(embeddings)
-            ) if embeddings is not None else None
+            validate_embeddings(self._normalize_embeddings(embeddings))
+            if embeddings is not None
+            else None
         )
         valid_metadatas = (
             validate_metadatas(metadatas) if metadatas is not None else None
         )
-        valid_documents = (
-            maybe_cast_one_to_many_document(documents)
-        )
-        valid_images = (
-            maybe_cast_one_to_many_image(images)
-        )
+        valid_documents = maybe_cast_one_to_many_document(documents)
+        valid_images = maybe_cast_one_to_many_image(images)
         valid_uris = maybe_cast_one_to_many_uri(uris)
 
         # Check that one of embeddings or ducuments or images is provided
@@ -259,8 +256,7 @@ class CollectionCommon(Generic[ClientT]):
             valid_images,
             valid_uris,
         )
-        
-        
+
     def _prepare_embedding_set(
         self,
         embeddings: Optional[Embeddings],
@@ -285,7 +281,7 @@ class CollectionCommon(Generic[ClientT]):
                         "You must set a data loader on the collection if loading from URIs."
                     )
                 embeddings = self._embed(self._data_loader(uris))
-        
+
         return embeddings
 
     # TODO: Refactor this into separate functions for validation and preparation
@@ -365,7 +361,7 @@ class CollectionCommon(Generic[ClientT]):
         valid_query_embeddings = (
             validate_embeddings(
                 self._normalize_embeddings(
-                    maybe_cast_one_to_many_embedding(query_embeddings) # type: ignore
+                    maybe_cast_one_to_many_embedding(query_embeddings)  # type: ignore
                 )
             )
             if query_embeddings is not None
@@ -472,7 +468,7 @@ class CollectionCommon(Generic[ClientT]):
         upacked_embeddings_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
-        
+
         (
             ids,
             embeddings,
@@ -522,7 +518,7 @@ class CollectionCommon(Generic[ClientT]):
         upacked_embeddings_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
-                
+
         (
             ids,
             embeddings,

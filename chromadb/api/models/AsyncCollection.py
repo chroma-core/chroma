@@ -71,7 +71,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             images,
             uris,
         )
-                
+
         (
             ids,
             embeddings,
@@ -88,10 +88,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             upacked_embeddings_set["uris"],
             require_embeddings_or_data=False,
         )
-        
-        prepared_embeddings = self._prepare_embedding_set(embeddings, documents, images, uris)
 
-        await self._client._add(ids, self.id, prepared_embeddings, metadatas, documents, uris)
+        prepared_embeddings = self._prepare_embedding_set(
+            embeddings, documents, images, uris
+        )
+
+        await self._client._add(
+            ids, self.id, prepared_embeddings, metadatas, documents, uris
+        )
 
     async def count(self) -> int:
         """The total number of embeddings added to the database
