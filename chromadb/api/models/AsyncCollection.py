@@ -66,11 +66,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-<<<<<<< HEAD
         embedding_set = self._process_add_request(
-=======
-        unpacked_embedding_set = self._unpack_embedding_set(
->>>>>>> 2d270eb0 (fix issue related to failing vacuum test)
             ids,
             embeddings,
             metadatas,
@@ -78,8 +74,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             images,
             uris,
         )
-<<<<<<< HEAD
-<<<<<<< HEAD
         
         await self._client._add(
             embedding_set["ids"],
@@ -88,41 +82,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             embedding_set["metadatas"],
             embedding_set["documents"],
             embedding_set["uris"],
-=======
-=======
-        
-        normalized_embeddings = self._normalize_embeddings(unpacked_embedding_set["embeddings"]) if unpacked_embedding_set["embeddings"] is not None else None
->>>>>>> 2d270eb0 (fix issue related to failing vacuum test)
-
-        self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
-            normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-            require_embeddings_or_data=False,
-        )
-
-        prepared_embeddings = self._prepare_embeddings(
-            unpacked_embedding_set["embeddings"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-        )
-
-        await self._client._add(
-<<<<<<< HEAD
-            ids, self.id, prepared_embeddings, metadatas, documents, uris
->>>>>>> d55461a4 (lint)
-=======
-            unpacked_embedding_set["ids"],
-            self.id,
-            prepared_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["uris"],
->>>>>>> 2d270eb0 (fix issue related to failing vacuum test)
         )
 
     async def count(self) -> int:

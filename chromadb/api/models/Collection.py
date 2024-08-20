@@ -82,8 +82,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris,
         )
         
-        normalized_embeddings = self._normalize_embeddings(embedding_set["embeddings"]) if embedding_set["embeddings"] is not None else None
-
         self._client._add(
             embedding_set["ids"],
             self.id,
