@@ -67,7 +67,6 @@ if TYPE_CHECKING:
 
 ClientT = TypeVar("ClientT", "ServerAPI", "AsyncServerAPI")
 
-
 class CollectionCommon(Generic[ClientT]):
     _model: CollectionModel
     _client: ClientT

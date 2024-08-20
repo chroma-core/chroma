@@ -164,6 +164,14 @@ class IncludeEnum(str, Enum):
     uris = "uris"
     data = "data"
 
+# Embedding set
+class EmbeddingSet(TypedDict):
+    ids: IDs
+    embeddings: Optional[Embeddings]
+    metadatas: Optional[Metadatas]
+    documents: Optional[Documents]
+    images: Optional[Images]
+    uris: Optional[URIs]
 
 # Record set
 class RecordSet(TypedDict):
