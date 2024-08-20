@@ -216,7 +216,7 @@ impl BlockManager {
                 // TODO: NAC register/deregister/validation goes here.
                 async {
                     let key = format!("block/{}", id);
-                    let stream = self.storage.get(&key).instrument(
+                    let stream = self.storage.get_stream(&key).instrument(
                         tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
                     ).await;
                     match stream {
@@ -341,7 +341,7 @@ impl SparseIndexManager {
                 tracing::info!("Cache miss - fetching sparse index from storage");
                 let key = format!("sparse_index/{}", id);
                 tracing::debug!("Reading sparse index from storage with key: {}", key);
-                let stream = self.storage.get(&key).await;
+                let stream = self.storage.get_stream(&key).await;
                 let mut buf: Vec<u8> = Vec::new();
                 match stream {
                     Ok(mut bytes) => {

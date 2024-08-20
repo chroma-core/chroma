@@ -164,12 +164,13 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -217,12 +218,13 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -296,12 +298,13 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -349,12 +352,13 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -446,12 +450,13 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -499,12 +504,13 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"
@@ -594,12 +600,13 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
                     log:
                         Grpc:
                             host: "localhost"

@@ -1,7 +1,12 @@
-use super::GetError;
-use crate::s3::{S3GetError, S3Storage};
+use crate::{
+    config::StorageConfig,
+    s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
+    stream::ByteStreamItem,
+};
+use async_trait::async_trait;
+use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::{future::Shared, FutureExt, StreamExt};
+use futures::{future::Shared, FutureExt, Stream};
 use parking_lot::Mutex;
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
@@ -56,57 +61,39 @@ impl AdmissionControlledS3Storage {
         }
     }
 
+    // TODO: Remove this once the upstream consumers switch to non-streaming APIs.
+    pub async fn get_stream(
+        &self,
+        key: &str,
+    ) -> Result<
+        Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
+        AdmissionControlledS3StorageError,
+    > {
+        match self
+            .storage
+            .get_stream(key)
+            .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
+            .await
+        {
+            Ok(res) => Ok(res),
+            Err(e) => {
+                tracing::error!("Error reading from storage: {}", e);
+                return Err(AdmissionControlledS3StorageError::S3GetError(e));
+            }
+        }
+    }
+
     async fn read_from_storage(
         storage: S3Storage,
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
-        let stream = storage
+        let bytes_res = storage
             .get(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
             .await;
-        match stream {
-            Ok(mut bytes) => {
-                let read_block_span =
-                    tracing::trace_span!(parent: Span::current(), "Read bytes to end");
-                let buf = read_block_span
-                    .in_scope(|| async {
-                        let mut buf: Vec<u8> = Vec::new();
-                        while let Some(res) = bytes.next().await {
-                            match res {
-                                Ok(chunk) => {
-                                    buf.extend(chunk);
-                                }
-                                Err(err) => {
-                                    tracing::error!("Error reading from storage: {}", err);
-                                    match err {
-                                        GetError::S3Error(e) => {
-                                            return Err(
-                                                AdmissionControlledS3StorageError::S3GetError(e),
-                                            );
-                                        }
-                                        GetError::NoSuchKey(e) => {
-                                            return Err(
-                                                AdmissionControlledS3StorageError::S3GetError(
-                                                    S3GetError::NoSuchKey(e),
-                                                ),
-                                            );
-                                        }
-                                        GetError::LocalError(_) => unreachable!(),
-                                    }
-                                }
-                            }
-                        }
-                        tracing::info!("Read {:?} bytes from s3", buf.len());
-                        Ok(Some(buf))
-                    })
-                    .await?;
-                match buf {
-                    Some(buf) => Ok(Arc::new(buf)),
-                    None => {
-                        // Buffer is empty. Nothing interesting to do.
-                        Ok(Arc::new(vec![]))
-                    }
-                }
+        match bytes_res {
+            Ok(bytes) => {
+                return Ok(bytes);
             }
             Err(e) => {
                 tracing::error!("Error reading from storage: {}", e);
@@ -143,5 +130,30 @@ impl AdmissionControlledS3Storage {
             requests.remove(&key);
         }
         res
+    }
+
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
+        self.storage.put_file(key, path).await
+    }
+
+    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+        self.storage.put_bytes(key, bytes).await
+    }
+}
+
+#[async_trait]
+impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
+    async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            StorageConfig::AdmissionControlledS3(nacconfig) => {
+                let s3_storage =
+                    S3Storage::try_from_config(&StorageConfig::S3(nacconfig.s3_config.clone()))
+                        .await?;
+                return Ok(Self::new(s3_storage));
+            }
+            _ => {
+                return Err(Box::new(StorageConfigError::InvalidStorageConfig));
+            }
+        }
     }
 }

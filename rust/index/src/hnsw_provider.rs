@@ -161,7 +161,7 @@ impl HnswIndexProvider {
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
             tracing::info!("Loading hnsw index file: {}", key);
-            let stream = self.storage.get(&key).await;
+            let stream = self.storage.get_stream(&key).await;
             let reader = match stream {
                 Ok(reader) => reader,
                 Err(e) => {

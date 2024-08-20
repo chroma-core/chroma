@@ -11,6 +11,7 @@
 use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
+use crate::GetError;
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -28,11 +29,14 @@ use chroma_error::ErrorCodes;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::Stream;
+use futures::StreamExt;
 use std::clone::Clone;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::Instrument;
+use tracing::Span;
 
 #[derive(Clone)]
 pub struct S3Storage {
@@ -118,7 +122,7 @@ impl S3Storage {
         }
     }
 
-    pub async fn get(
+    pub(super) async fn get_stream(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, S3GetError> {
@@ -161,6 +165,47 @@ impl S3Storage {
                     _ => {}
                 }
                 return Err(S3GetError::S3GetError(e.to_string()));
+            }
+        }
+    }
+
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
+        let mut stream = self
+            .get_stream(key)
+            .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
+            .await?;
+        let read_block_span = tracing::trace_span!(parent: Span::current(), "Read bytes to end");
+        let buf = read_block_span
+            .in_scope(|| async {
+                let mut buf: Vec<u8> = Vec::new();
+                while let Some(res) = stream.next().await {
+                    match res {
+                        Ok(chunk) => {
+                            buf.extend(chunk);
+                        }
+                        Err(err) => {
+                            tracing::error!("Error reading from storage: {}", err);
+                            match err {
+                                GetError::S3Error(e) => {
+                                    return Err(e);
+                                }
+                                GetError::NoSuchKey(e) => {
+                                    return Err(S3GetError::NoSuchKey(e));
+                                }
+                                GetError::LocalError(_) => unreachable!(),
+                            }
+                        }
+                    }
+                }
+                tracing::info!("Read {:?} bytes from s3", buf.len());
+                Ok(Some(buf))
+            })
+            .await?;
+        match buf {
+            Some(buf) => Ok(Arc::new(buf)),
+            None => {
+                // Buffer is empty. Nothing interesting to do.
+                Ok(Arc::new(vec![]))
             }
         }
     }
@@ -505,7 +550,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut stream = storage.get("test").await.unwrap();
+        let mut stream = storage.get_stream("test").await.unwrap();
 
         let mut buf = Vec::new();
         while let Some(chunk) = stream.next().await {

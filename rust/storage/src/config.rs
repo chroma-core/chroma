@@ -13,15 +13,17 @@ pub enum StorageConfig {
     S3(S3StorageConfig),
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
+    #[serde(alias = "admissioncontrolleds3")]
+    AdmissionControlledS3(AdmissionControlledS3StorageConfig),
 }
 
-#[derive(Deserialize, PartialEq, Debug)]
+#[derive(Deserialize, PartialEq, Debug, Clone)]
 pub enum S3CredentialsConfig {
     Minio,
     AWS,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 /// The configuration for the s3 storage type
 /// # Fields
 /// - bucket: The name of the bucket to use.
@@ -33,7 +35,7 @@ pub struct S3StorageConfig {
     pub upload_part_size_bytes: usize,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 /// The configuration for the local storage type
 /// # Fields
 /// - root: The root directory to use for storage.
@@ -42,4 +44,9 @@ pub struct S3StorageConfig {
 /// This is not intended to be used in production.
 pub struct LocalStorageConfig {
     pub root: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AdmissionControlledS3StorageConfig {
+    pub s3_config: S3StorageConfig,
 }
