@@ -1,5 +1,4 @@
 from typing import (
-    TypedDict,
     TYPE_CHECKING,
     Dict,
     Generic,
