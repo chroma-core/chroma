@@ -1540,6 +1540,7 @@ def test_collection_upsert_with_invalid_collection_throws(client):
     ):
         collection.upsert(**initial_records)
 
+
 # test to make sure add, query, update, upsert error on invalid embeddings input
 
 
