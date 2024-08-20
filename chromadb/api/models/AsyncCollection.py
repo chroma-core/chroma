@@ -63,17 +63,35 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
+        upacked_embeddings_set = self._unpack_embedding_set(
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        )
+                
         (
             ids,
             embeddings,
             metadatas,
             documents,
+            images,
             uris,
-        ) = self._validate_and_prepare_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
+        ) = self._validate_embedding_set(
+            upacked_embeddings_set["ids"],
+            upacked_embeddings_set["embeddings"],
+            upacked_embeddings_set["metadatas"],
+            upacked_embeddings_set["documents"],
+            upacked_embeddings_set["images"],
+            upacked_embeddings_set["uris"],
+            require_embeddings_or_data=False,
         )
+        
+        prepared_embeddings = self._prepare_embedding_set(embeddings, documents, images, uris)
 
-        await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
+        await self._client._add(ids, self.id, prepared_embeddings, metadatas, documents, uris)
 
     async def count(self) -> int:
         """The total number of embeddings added to the database
