@@ -21,6 +21,7 @@ from chromadb.api.types import (
     Embeddings,
     PyEmbedding,
     Embeddable,
+    RecordSet,
     GetResult,
     Include,
     Loadable,
@@ -36,12 +37,8 @@ from chromadb.api.types import (
     EmbeddingFunction,
     ID,
     OneOrMany,
-    maybe_cast_one_to_many_ids,
+    maybe_cast_one_to_many,
     maybe_cast_one_to_many_embedding,
-    maybe_cast_one_to_many_metadata,
-    maybe_cast_one_to_many_document,
-    maybe_cast_one_to_many_image,
-    maybe_cast_one_to_many_uri,
     validate_ids,
     validate_include,
     validate_metadata,
@@ -149,7 +146,7 @@ class CollectionCommon(Generic[ClientT]):
     def get_model(self) -> CollectionModel:
         return self._model
 
-    def _validate_embedding_set(
+    def _unpack_record_set(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -162,38 +159,44 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
+    ) -> RecordSet:
+        unpacked_ids = maybe_cast_one_to_many(ids)
+        unpacked_embeddings = maybe_cast_one_to_many_embedding(embeddings)
+        unpacked_metadatas = maybe_cast_one_to_many(metadatas)
+        unpacked_documents = maybe_cast_one_to_many(documents)
+        unpacked_images = maybe_cast_one_to_many(images)
+        unpacked_uris = maybe_cast_one_to_many(uris)
+        return {
+            "ids": cast(IDs, unpacked_ids),
+            "embeddings": unpacked_embeddings,
+            "metadatas": unpacked_metadatas,
+            "documents": unpacked_documents,
+            "images": unpacked_images,
+            "uris": unpacked_uris,
+        }
+
+    def _validate_embedding_set(
+        self,
+        ids: IDs,
+        embeddings: Optional[Embeddings],
+        metadatas: Optional[Metadatas],
+        documents: Optional[Documents],
+        images: Optional[Images],
+        uris: Optional[URIs],
         require_embeddings_or_data: bool = True,
-    ) -> Tuple[
-        IDs,
-        Optional[Embeddings],
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[Images],
-        Optional[URIs],
-    ]:
-        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids))
+    ) -> None:
+        valid_ids = validate_ids(ids)
         valid_embeddings = (
-            validate_embeddings(
-                self._normalize_embeddings(maybe_cast_one_to_many_embedding(embeddings))
-            )
-            if embeddings is not None
-            else None
+            validate_embeddings(embeddings) if embeddings is not None else None
         )
         valid_metadatas = (
-            validate_metadatas(maybe_cast_one_to_many_metadata(metadatas))
-            if metadatas is not None
-            else None
-        )
-        valid_documents = (
-            maybe_cast_one_to_many_document(documents)
-            if documents is not None
-            else None
-        )
-        valid_images = (
-            maybe_cast_one_to_many_image(images) if images is not None else None
+            validate_metadatas(metadatas) if metadatas is not None else None
         )
 
-        valid_uris = maybe_cast_one_to_many_uri(uris) if uris is not None else None
+        # No additional validation needed for documents, images, or uris
+        valid_documents = documents
+        valid_images = images
+        valid_uris = uris
 
         # Check that one of embeddings or ducuments or images is provided
         if require_embeddings_or_data:
@@ -233,65 +236,30 @@ class CollectionCommon(Generic[ClientT]):
                 f"Number of uris {len(valid_uris)} must match number of ids {len(valid_ids)}"
             )
 
-        return (
-            valid_ids,
-            valid_embeddings,
-            valid_metadatas,
-            valid_documents,
-            valid_images,
-            valid_uris,
-        )
-
-    def _validate_and_prepare_embedding_set(
+    def _compute_embeddings(
         self,
-        ids: OneOrMany[ID],
-        embeddings: Optional[
-            Union[
-                OneOrMany[Embedding],
-                OneOrMany[PyEmbedding],
-            ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
-    ) -> Tuple[
-        IDs,
-        Embeddings,
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ]:
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-        ) = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
-        )
-
+        documents: Optional[Documents],
+        images: Optional[Images],
+        uris: Optional[URIs],
+    ) -> Embeddings:
         # We need to compute the embeddings if they're not provided
-        if embeddings is None:
-            # At this point, we know that one of documents or images are provided from the validation above
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            elif images is not None:
-                embeddings = self._embed(input=images)
-            else:
-                if uris is None:
-                    raise ValueError(
-                        "You must provide either embeddings, documents, images, or uris."
-                    )
-                if self._data_loader is None:
-                    raise ValueError(
-                        "You must set a data loader on the collection if loading from URIs."
-                    )
-                embeddings = self._embed(self._data_loader(uris))
 
-        return ids, embeddings, metadatas, documents, uris
+        if documents is not None:
+            embeddings = self._embed(input=documents)
+        elif images is not None:
+            embeddings = self._embed(input=images)
+        else:
+            if uris is None:
+                raise ValueError(
+                    "You must provide either embeddings, documents, images, or uris."
+                )
+            if self._data_loader is None:
+                raise ValueError(
+                    "You must set a data loader on the collection if loading from URIs."
+                )
+            embeddings = self._embed(self._data_loader(uris))
+
+        return embeddings
 
     def _validate_and_prepare_get_request(
         self,
@@ -304,7 +272,9 @@ class CollectionCommon(Generic[ClientT]):
         valid_where_document = (
             validate_where_document(where_document) if where_document else None
         )
-        valid_ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
+        valid_ids = (
+            validate_ids(cast(IDs, maybe_cast_one_to_many(ids))) if ids else None
+        )
         valid_include = validate_include(include, allow_distances=False)
 
         if "data" in include and self._data_loader is None:
@@ -377,46 +347,34 @@ class CollectionCommon(Generic[ClientT]):
         valid_query_embeddings = (
             validate_embeddings(
                 self._normalize_embeddings(
-                    maybe_cast_one_to_many_embedding(query_embeddings)
+                    cast(Embeddings, maybe_cast_one_to_many_embedding(query_embeddings))
                 )
             )
             if query_embeddings is not None
             else None
         )
         valid_query_texts = (
-            maybe_cast_one_to_many_document(query_texts)
-            if query_texts is not None
-            else None
+            maybe_cast_one_to_many(query_texts) if query_texts is not None else None
         )
         valid_query_images = (
-            maybe_cast_one_to_many_image(query_images)
-            if query_images is not None
-            else None
+            maybe_cast_one_to_many(query_images) if query_images is not None else None
         )
         valid_query_uris = (
-            maybe_cast_one_to_many_uri(query_uris) if query_uris is not None else None
+            maybe_cast_one_to_many(query_uris) if query_uris is not None else None
         )
         valid_include = validate_include(include, allow_distances=True)
         valid_n_results = validate_n_results(n_results)
 
         # If query_embeddings are not provided, we need to compute them from the inputs
-        if valid_query_embeddings is None:
-            if query_texts is not None:
-                valid_query_embeddings = self._embed(input=valid_query_texts)
-            elif query_images is not None:
-                valid_query_embeddings = self._embed(input=valid_query_images)
-            else:
-                if valid_query_uris is None:
-                    raise ValueError(
-                        "You must provide either query_embeddings, query_texts, query_images, or query_uris."
-                    )
-                if self._data_loader is None:
-                    raise ValueError(
-                        "You must set a data loader on the collection if loading from URIs."
-                    )
-                valid_query_embeddings = self._embed(
-                    self._data_loader(valid_query_uris)
-                )
+        valid_query_embeddings = (
+            self._compute_embeddings(
+                documents=valid_query_texts,
+                images=valid_query_images,
+                uris=valid_query_uris,
+            )
+            if valid_query_embeddings is None
+            else valid_query_embeddings
+        )
 
         if "data" in include and "uris" not in include:
             valid_include.append("uris")  # type: ignore[arg-type]
@@ -465,7 +423,7 @@ class CollectionCommon(Generic[ClientT]):
         if metadata:
             self._model["metadata"] = metadata
 
-    def _validate_and_prepare_update_request(
+    def _process_add_request(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
@@ -476,41 +434,53 @@ class CollectionCommon(Generic[ClientT]):
         ],
         metadatas: Optional[OneOrMany[Metadata]],
         documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
-    ) -> Tuple[
-        IDs,
-        Embeddings,
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ]:
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-        ) = self._validate_embedding_set(
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-            require_embeddings_or_data=False,
+        images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
+    ) -> RecordSet:
+        unpacked_embedding_set = self._unpack_record_set(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
         )
 
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            elif images is not None:
-                embeddings = self._embed(input=images)
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
 
-        return ids, cast(Embeddings, embeddings), metadatas, documents, uris
+        self._validate_embedding_set(
+            ids=unpacked_embedding_set["ids"],
+            embeddings=normalized_embeddings,
+            metadatas=unpacked_embedding_set["metadatas"],
+            documents=unpacked_embedding_set["documents"],
+            images=unpacked_embedding_set["images"],
+            uris=unpacked_embedding_set["uris"],
+        )
 
-    def _validate_and_prepare_upsert_request(
+        prepared_embeddings = (
+            self._compute_embeddings(
+                documents=unpacked_embedding_set["documents"],
+                images=unpacked_embedding_set["images"],
+                uris=unpacked_embedding_set["uris"],
+            )
+            if normalized_embeddings is None
+            else normalized_embeddings
+        )
+
+        return {
+            "ids": unpacked_embedding_set["ids"],
+            "embeddings": prepared_embeddings,
+            "metadatas": unpacked_embedding_set["metadatas"],
+            "documents": unpacked_embedding_set["documents"],
+            "images": unpacked_embedding_set["images"],
+            "uris": unpacked_embedding_set["uris"],
+        }
+
+    def _process_upsert_or_update_request(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -523,31 +493,58 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]],
         uris: Optional[OneOrMany[URI]],
-    ) -> Tuple[
-        IDs,
-        Embeddings,
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ]:
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            images,
-            uris,
-        ) = self._validate_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
+        require_embeddings_or_data: bool = True,
+    ) -> RecordSet:
+        unpacked_embedding_set = self._unpack_record_set(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
         )
 
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            else:
-                embeddings = self._embed(input=images)
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
 
-        return ids, embeddings, metadatas, documents, uris
+        self._validate_embedding_set(
+            ids=unpacked_embedding_set["ids"],
+            embeddings=normalized_embeddings,
+            metadatas=unpacked_embedding_set["metadatas"],
+            documents=unpacked_embedding_set["documents"],
+            images=unpacked_embedding_set["images"],
+            uris=unpacked_embedding_set["uris"],
+            require_embeddings_or_data=require_embeddings_or_data,
+        )
+
+        prepared_embeddings = normalized_embeddings
+        try:
+            prepared_embeddings = (
+                self._compute_embeddings(
+                    documents=unpacked_embedding_set["documents"],
+                    images=unpacked_embedding_set["images"],
+                    uris=None,
+                )
+                if prepared_embeddings is None
+                else prepared_embeddings
+            )
+        except ValueError:
+            # update doesn't require the presence of data
+            # Therefore, we don't error out when data is not provided for update
+            if require_embeddings_or_data:
+                raise ValueError("You must provide either documents or images")
+
+        return {
+            "ids": unpacked_embedding_set["ids"],
+            "embeddings": prepared_embeddings,
+            "metadatas": unpacked_embedding_set["metadatas"],
+            "documents": unpacked_embedding_set["documents"],
+            "images": unpacked_embedding_set["images"],
+            "uris": unpacked_embedding_set["uris"],
+        }
 
     def _validate_and_prepare_delete_request(
         self,
@@ -555,7 +552,7 @@ class CollectionCommon(Generic[ClientT]):
         where: Optional[Where],
         where_document: Optional[WhereDocument],
     ) -> Tuple[Optional[IDs], Optional[Where], Optional[WhereDocument]]:
-        ids = validate_ids(maybe_cast_one_to_many_ids(ids)) if ids else None
+        ids = validate_ids(cast(IDs, maybe_cast_one_to_many(ids))) if ids else None
         where = validate_where(where) if where else None
         where_document = (
             validate_where_document(where_document) if where_document else None
