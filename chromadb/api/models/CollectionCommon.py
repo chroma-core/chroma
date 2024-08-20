@@ -67,6 +67,7 @@ if TYPE_CHECKING:
 
 ClientT = TypeVar("ClientT", "ServerAPI", "AsyncServerAPI")
 
+
 class CollectionCommon(Generic[ClientT]):
     _model: CollectionModel
     _client: ClientT
@@ -148,8 +149,8 @@ class CollectionCommon(Generic[ClientT]):
     def get_model(self) -> CollectionModel:
         return self._model
 
+    @staticmethod
     def _unpack_embedding_set(
-        self,
         ids: OneOrMany[ID],
         embeddings: Optional[
             Union[
