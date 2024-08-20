@@ -169,7 +169,7 @@ class CollectionCommon(Generic[ClientT]):
         unpacked_documents = maybe_cast_one_to_many_document(documents)
         unpacked_images = maybe_cast_one_to_many_image(images)
         unpacked_uris = maybe_cast_one_to_many_uri(uris)
-        
+
         return {
             "ids": unpacked_ids,
             "embeddings": unpacked_embeddings,
@@ -196,7 +196,7 @@ class CollectionCommon(Generic[ClientT]):
         valid_metadatas = (
             validate_metadatas(metadatas) if metadatas is not None else None
         )
-        
+
         valid_documents = maybe_cast_one_to_many_document(documents)
         valid_images = maybe_cast_one_to_many_image(images)
         valid_uris = maybe_cast_one_to_many_uri(uris)
@@ -450,8 +450,12 @@ class CollectionCommon(Generic[ClientT]):
         unpacked_embedding_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
-        
-        normalized_embeddings = self._normalize_embeddings(unpacked_embedding_set["embeddings"]) if unpacked_embedding_set["embeddings"] is not None else None
+
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
 
         self._validate_embedding_set(
             unpacked_embedding_set["ids"],
@@ -506,7 +510,11 @@ class CollectionCommon(Generic[ClientT]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        normalized_embeddings = self._normalize_embeddings(unpacked_embedding_set["embeddings"]) if unpacked_embedding_set["embeddings"] is not None else None
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
 
         self._validate_embedding_set(
             unpacked_embedding_set["ids"],
