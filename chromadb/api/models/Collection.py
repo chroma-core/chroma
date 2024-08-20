@@ -71,7 +71,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-        
         upacked_embeddings_set = self._unpack_embedding_set(
             ids,
             embeddings,
