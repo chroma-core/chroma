@@ -149,8 +149,8 @@ class CollectionCommon(Generic[ClientT]):
     def get_model(self) -> CollectionModel:
         return self._model
 
-    @staticmethod
     def _unpack_embedding_set(
+        self,
         ids: OneOrMany[ID],
         embeddings: Optional[
             Union[
@@ -169,7 +169,6 @@ class CollectionCommon(Generic[ClientT]):
         unpacked_documents = maybe_cast_one_to_many_document(documents)
         unpacked_images = maybe_cast_one_to_many_image(images)
         unpacked_uris = maybe_cast_one_to_many_uri(uris)
-
         return {
             "ids": unpacked_ids,
             "embeddings": unpacked_embeddings,
@@ -206,9 +205,9 @@ class CollectionCommon(Generic[ClientT]):
         if require_embeddings_or_data:
             if (
                 valid_embeddings is None
-                and valid_documents is None
-                and valid_images is None
-                and valid_uris is None
+                and documents is None
+                and images is None
+                and uris is None
             ):
                 raise ValueError(
                     "You must provide embeddings, documents, images, or uris."

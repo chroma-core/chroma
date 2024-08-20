@@ -170,7 +170,6 @@ class EmbeddingSet(TypedDict):
     images: Optional[Images]
     uris: Optional[URIs]
 
-<<<<<<< HEAD
 # Record set
 class RecordSet(TypedDict):
     ids: IDs
@@ -180,8 +179,6 @@ class RecordSet(TypedDict):
     images: Optional[Images]
     uris: Optional[URIs]
 
-=======
->>>>>>> d55461a4 (lint)
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
@@ -257,13 +254,6 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-<<<<<<< HEAD
-=======
-
-            unpacked_result = maybe_cast_one_to_many_embedding(result)
-            if unpacked_result is None:
-                raise ValueError("Expected embeddings to be returned")
->>>>>>> d55461a4 (lint)
 
             unpacked_result = maybe_cast_one_to_many_embedding(result)
 
