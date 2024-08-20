@@ -153,6 +153,14 @@ class IncludeEnum(str, Enum):
     uris = "uris"
     data = "data"
 
+# Embedding set
+class EmbeddingSet(TypedDict):
+    ids: IDs
+    embeddings: Optional[Embeddings]
+    metadatas: Optional[Metadatas]
+    documents: Optional[Documents]
+    images: Optional[Images]
+    uris: Optional[URIs]
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
