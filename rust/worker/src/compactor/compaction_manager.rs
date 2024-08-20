@@ -288,19 +288,7 @@ impl Handler<ScheduleMessage> for CompactionManager {
         println!("CompactionManager: Performing compaction");
         self.compact_batch().await;
 
-        while let Some((_, index)) = self.hnsw_index_provider.cache.pop() {
-            let index_id = index.read().id;
-            match self
-                .hnsw_index_provider
-                .remove_temporary_files(&index_id)
-                .await
-            {
-                Ok(_) => (),
-                Err(e) => {
-                    println!("Failed to remove temporary files for index: {:?}", e);
-                }
-            }
-        }
+        self.hnsw_index_provider.purge_all_entries().await;
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler

@@ -36,7 +36,7 @@ const FILES: [&'static str; 4] = [
 
 #[derive(Clone)]
 pub struct HnswIndexProvider {
-    pub cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
+    cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
 }
@@ -353,8 +353,20 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    pub async fn remove_temporary_files(&self, id: &Uuid) -> tokio::io::Result<()> {
-        self.cache.remove(id);
+    /// Purge all entries from the cache and remove temporary files from disk.
+    pub async fn purge_all_entries(&mut self) {
+        while let Some((_, index)) = self.cache.pop() {
+            let index_id = index.read().id;
+            match self.remove_temporary_files(&index_id).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to remove temporary files: {}", e);
+                }
+            }
+        }
+    }
+
+    async fn remove_temporary_files(&self, id: &Uuid) -> tokio::io::Result<()> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         tokio::fs::remove_dir_all(index_storage_path).await
     }

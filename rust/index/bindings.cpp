@@ -227,6 +227,11 @@ extern "C"
         return new Index<float>(space_name, dim);
     }
 
+    void free_index(Index<float> *index)
+    {
+        delete index;
+    }
+
     // Can throw std::exception
     void init_index(Index<float> *index, const size_t max_elements, const size_t M, const size_t ef_construction, const size_t random_seed, const bool allow_replace_deleted, const bool is_persistent_index, const char *persistence_location)
     {
