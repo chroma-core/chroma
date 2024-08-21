@@ -465,11 +465,11 @@ def recordsets(
     ids = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
-    
+
     # This probablistic event is used to mimic user behavior when they don't provide ids
     if for_add and np.random.rand() < 0.5:
         ids = []
-        
+
     n = len(ids)
     if len(ids) == 0:
         n = int(draw(st.integers(min_value=min_size, max_value=max_size)))
@@ -493,9 +493,7 @@ def recordsets(
 
     documents: Optional[Documents] = None
     if collection.has_documents:
-        documents = draw(
-            st.lists(document(collection), min_size=n, max_size=n)
-        )
+        documents = draw(st.lists(document(collection), min_size=n, max_size=n))
 
     # in the case where we have a single record, sometimes exercise
     # the code that handles individual values rather than lists.

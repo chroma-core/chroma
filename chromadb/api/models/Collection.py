@@ -90,7 +90,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
-        
+
         return {
             "ids": embedding_set["ids"],
         }

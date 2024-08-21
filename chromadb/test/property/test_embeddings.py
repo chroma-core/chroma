@@ -8,7 +8,13 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-from chromadb.api.types import ID, Embeddings, Include, IDs, validate_embeddings, maybe_cast_one_to_many_ids
+from chromadb.api.types import (
+    ID,
+    Embeddings,
+    Include,
+    IDs,
+    validate_embeddings,
+)
 from chromadb.config import System
 import chromadb.errors as errors
 from chromadb.api import ClientAPI
@@ -114,7 +120,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             record_set
         )
 
-        if normalized_record_set["metadatas"] is not None and len(normalized_record_set["metadatas"]) > 0:
+        if (
+            normalized_record_set["metadatas"] is not None
+            and len(normalized_record_set["metadatas"]) > 0
+        ):
             trace("add_more_embeddings")
 
         intersection = set(normalized_record_set["ids"]).intersection(
@@ -144,9 +153,9 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
             ids = result["ids"]
             normalized_record_set["ids"] = ids
-        
+
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
-            
+
             return multiple(*ids)
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
@@ -688,6 +697,8 @@ def test_add_delete_add(client: ClientAPI) -> None:
     state.fields_match()
     if not NOT_CLUSTER_ONLY:
         state.wait_for_compaction()
+
+
 def test_multi_add(client: ClientAPI) -> None:
     reset(client)
     coll = client.create_collection(name="foo")
