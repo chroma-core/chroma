@@ -349,6 +349,12 @@ impl HnswIndex {
     }
 }
 
+impl Drop for HnswIndex {
+    fn drop(&mut self) {
+        unsafe { free_index(self.ffi_ptr) }
+    }
+}
+
 fn read_and_return_hnsw_error(ffi_ptr: *const IndexPtrFFI) -> Result<(), Box<dyn ChromaError>> {
     let err = unsafe { get_last_error(ffi_ptr) };
     if !err.is_null() {
@@ -363,6 +369,8 @@ fn read_and_return_hnsw_error(ffi_ptr: *const IndexPtrFFI) -> Result<(), Box<dyn
 #[link(name = "bindings", kind = "static")]
 extern "C" {
     fn create_index(space_name: *const c_char, dim: c_int) -> *const IndexPtrFFI;
+
+    fn free_index(index: *const IndexPtrFFI);
 
     fn init_index(
         index: *const IndexPtrFFI,
