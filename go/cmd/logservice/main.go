@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"net"
+
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
+	"github.com/chroma-core/chroma/go/pkg/log/metrics"
 	"github.com/chroma-core/chroma/go/pkg/log/purging"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
 	"github.com/chroma-core/chroma/go/pkg/log/server"
@@ -15,7 +18,6 @@ import (
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"net"
 )
 
 func main() {
@@ -51,6 +53,7 @@ func main() {
 	logservicepb.RegisterLogServiceServer(s, server)
 	log.Info("log service started", zap.String("address", listener.Addr().String()))
 	go purging.RunPurging(ctx, lr)
+	go metrics.RunMetrics(ctx, lr)
 	if err := s.Serve(listener); err != nil {
 		log.Fatal("failed to serve", zap.Error(err))
 	}

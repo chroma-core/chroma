@@ -120,6 +120,14 @@ func (r *LogRepository) PurgeRecords(ctx context.Context) (err error) {
 	return
 }
 
+func (r *LogRepository) GetTotalUncompactedRecordsCount(ctx context.Context) (totalUncompactedDepth int64, err error) {
+	totalUncompactedDepth, err = r.queries.GetTotalUncompactedRecordsCount(ctx)
+	if err != nil {
+		trace_log.Error("Error in getting total uncompacted records count from collection table", zap.Error(err))
+	}
+	return
+}
+
 func NewLogRepository(conn *pgxpool.Pool) *LogRepository {
 	return &LogRepository{
 		conn:    conn,
