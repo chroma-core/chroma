@@ -74,7 +74,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             images,
             uris,
         )
-        
+
         await self._client._add(
             embedding_set["ids"],
             self.id,
@@ -83,10 +83,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
-
-        return {
-            "ids": embedding_set["ids"],
-        }
 
     async def count(self) -> int:
         """The total number of embeddings added to the database

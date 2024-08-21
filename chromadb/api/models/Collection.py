@@ -91,10 +91,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             embedding_set["uris"],
         )
 
-        return {
-            "ids": embedding_set["ids"],
-        }
-
     def get(
         self,
         ids: Optional[OneOrMany[ID]] = None,

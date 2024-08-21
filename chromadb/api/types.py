@@ -174,15 +174,6 @@ class RecordSet(TypedDict):
     images: Optional[Images]
     uris: Optional[URIs]
 
-# Record set
-class RecordSet(TypedDict):
-    ids: IDs
-    embeddings: Optional[Embeddings]
-    metadatas: Optional[Metadatas]
-    documents: Optional[Documents]
-    images: Optional[Images]
-    uris: Optional[URIs]
-
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7

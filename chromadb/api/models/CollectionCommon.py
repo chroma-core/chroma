@@ -151,7 +151,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _unpack_embedding_set(
         self,
-        ids: Optional[OneOrMany[ID]],
+        ids: OneOrMany[ID],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -180,16 +180,15 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_embedding_set(
         self,
-        ids: Optional[IDs],
+        ids: IDs,
         embeddings: Optional[Embeddings],
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
         images: Optional[Images],
         uris: Optional[URIs],
         require_embeddings_or_data: bool = True,
-        can_ids_be_empty: bool = False,
     ) -> None:
-        valid_ids = validate_ids(ids, can_ids_be_empty=can_ids_be_empty)
+        valid_ids = validate_ids(ids)
         valid_embeddings = (
             validate_embeddings(embeddings) if embeddings is not None else None
         )
@@ -428,7 +427,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _process_add_request(
         self,
-        ids: Optional[OneOrMany[ID]],
+        ids: OneOrMany[ID],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -463,7 +462,6 @@ class CollectionCommon(Generic[ClientT]):
             unpacked_embedding_set["images"],
             unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
-            can_ids_be_empty=True,
         )
 
         prepared_embeddings = self._compute_embeddings(
