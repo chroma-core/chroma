@@ -106,7 +106,13 @@ impl Storage {
                     },
                 }
             }
-            Storage::Local(_) => unimplemented!(),
+            Storage::Local(local) => {
+                let res = local.get(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => Err(GetError::LocalError(e)),
+                }
+            }
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 let res = admission_controlled_storage
                     .get_parallel(key.to_string())
