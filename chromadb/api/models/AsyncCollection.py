@@ -8,7 +8,6 @@ import numpy as np
 
 from chromadb.api.types import (
     URI,
-    AddResult,
     CollectionMetadata,
     Embedding,
     Include,
@@ -34,7 +33,7 @@ if TYPE_CHECKING:
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def add(
         self,
-        ids: Optional[OneOrMany[ID]] = None,
+        ids: OneOrMany[ID],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -45,7 +44,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> AddResult:
+    ) -> None:
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
@@ -76,17 +75,13 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         )
 
         await self._client._add(
-            cast(IDs, embedding_set["ids"]),
+            embedding_set["ids"],
             self.id,
             cast(Embeddings, embedding_set["embeddings"]),
             embedding_set["metadatas"],
             embedding_set["documents"],
             embedding_set["uris"],
         )
-
-        return {
-            "ids": embedding_set["ids"],
-        }
 
     async def count(self) -> int:
         """The total number of embeddings added to the database
@@ -264,7 +259,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_upsert_or_update_request(
+        embedding_set = self._process_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
@@ -302,13 +297,13 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_upsert_or_update_request(
+        embedding_set = self._process_upsert_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
         await self._client._upsert(
             collection_id=self.id,
-            ids=cast(IDs, embedding_set["ids"]),
+            ids=embedding_set["ids"],
             embeddings=cast(Embeddings, embedding_set["embeddings"]),
             metadatas=embedding_set["metadatas"],
             documents=embedding_set["documents"],

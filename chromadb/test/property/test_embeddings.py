@@ -8,13 +8,7 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-from chromadb.api.types import (
-    ID,
-    Embeddings,
-    Include,
-    IDs,
-    validate_embeddings,
-)
+from chromadb.api.types import ID, Embeddings, Include, IDs, validate_embeddings
 from chromadb.config import System
 import chromadb.errors as errors
 from chromadb.api import ClientAPI
@@ -110,7 +104,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @rule(
         target=embedding_ids,
-        record_set=strategies.recordsets(collection_st, for_add=True),
+        record_set=strategies.recordsets(collection_st),
     )
     def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         trace("add_embeddings")
@@ -120,10 +114,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             record_set
         )
 
-        if (
-            normalized_record_set["metadatas"] is not None
-            and len(normalized_record_set["metadatas"]) > 0
-        ):
+        if len(normalized_record_set["ids"]) > 0:
             trace("add_more_embeddings")
 
         intersection = set(normalized_record_set["ids"]).intersection(
@@ -150,13 +141,9 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             return multiple(*filtered_record_set["ids"])
 
         else:
-            result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
-            ids = result["ids"]
-            normalized_record_set["ids"] = ids
-
+            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
-
-            return multiple(*ids)
+            return multiple(*normalized_record_set["ids"])
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
     def delete_by_ids(self, ids: IDs) -> None:

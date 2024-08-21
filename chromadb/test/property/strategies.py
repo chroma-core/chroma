@@ -458,26 +458,17 @@ def recordsets(
     num_unique_metadata: Optional[int] = None,
     min_metadata_size: int = 0,
     max_metadata_size: Optional[int] = None,
-    # ids can only be optional for add operations
-    for_add: bool = False,
 ) -> RecordSet:
     collection = draw(collection_strategy)
+
     ids = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
 
-    # This probablistic event is used to mimic user behavior when they don't provide ids
-    if for_add and np.random.rand() < 0.5:
-        ids = []
-
-    n = len(ids)
-    if len(ids) == 0:
-        n = int(draw(st.integers(min_value=min_size, max_value=max_size)))
-
     embeddings: Optional[Embeddings] = None
     if collection.has_embeddings:
-        embeddings = create_embeddings(collection.dimension, n, collection.dtype)
-    num_metadata = num_unique_metadata if num_unique_metadata is not None else n
+        embeddings = create_embeddings(collection.dimension, len(ids), collection.dtype)
+    num_metadata = num_unique_metadata if num_unique_metadata is not None else len(ids)
     generated_metadatas = draw(
         st.lists(
             metadata(
@@ -488,18 +479,20 @@ def recordsets(
         )
     )
     metadatas = []
-    for i in range(n):
+    for i in range(len(ids)):
         metadatas.append(generated_metadatas[i % len(generated_metadatas)])
 
     documents: Optional[Documents] = None
     if collection.has_documents:
-        documents = draw(st.lists(document(collection), min_size=n, max_size=n))
+        documents = draw(
+            st.lists(document(collection), min_size=len(ids), max_size=len(ids))
+        )
 
     # in the case where we have a single record, sometimes exercise
     # the code that handles individual values rather than lists.
     # In this case, any field may be a list or a single value.
-    if n == 1:
-        single_id: Union[str, List[str]] = ids[0] if len(ids) == 1 else ids
+    if len(ids) == 1:
+        single_id: Union[str, List[str]] = ids[0] if draw(st.booleans()) else ids
         single_embedding = (
             embeddings[0]
             if embeddings is not None and draw(st.booleans())

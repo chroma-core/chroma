@@ -1207,11 +1207,6 @@ def test_invalid_id(client):
         collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
     assert "ID" in str(e.value)
 
-    # Upsert with an empty id
-    with pytest.raises(ValueError) as e:
-        collection.upsert(embeddings=[0, 0, 0], ids=[""])
-    assert "non-empty" in str(e.value)
-
     # Get with non-list id
     with pytest.raises(ValueError) as e:
         collection.get(ids=1)
