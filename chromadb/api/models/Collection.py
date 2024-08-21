@@ -80,7 +80,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             images,
             uris,
         )
-        
+
         self._client._add(
             embedding_set["ids"],
             self.id,
@@ -89,7 +89,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
-        
 
     def get(
         self,
