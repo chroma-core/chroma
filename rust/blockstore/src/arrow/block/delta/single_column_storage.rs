@@ -173,10 +173,6 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                     + value_validity_bytes;
 
                 if total_size > split_size {
-                    println!(
-                    "[HAMMAD SINGLE VALUE] the total size is: {} and we are splitting at item: {} in a block of length: {}",
-                    total_size, item_count, self.len()
-                );
                     split_key = match iter.next() {
                         None => {
                             // Remove the last item since we are splitting at the end
