@@ -26,6 +26,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
+        **kwargs: Any,
     ):
         if model_name not in self.models:
             try:
@@ -34,7 +35,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction):
                 raise ValueError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
-            self.models[model_name] = SentenceTransformer(model_name, device=device)
+            self.models[model_name] = SentenceTransformer(model_name, device=device, **kwargs)
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
 
