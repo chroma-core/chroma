@@ -30,6 +30,7 @@ use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::BoxFuture;
+use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
@@ -265,6 +266,7 @@ impl S3Storage {
         let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut get_futures = Vec::new();
+        let num_parts = range_and_output_slices.len();
         for (range, output_slice) in range_and_output_slices {
             let range_str = format!("bytes={}-{}", range.0, range.1);
             let fut = self
@@ -288,7 +290,10 @@ impl S3Storage {
             get_futures.push(fut);
         }
         // Await all futures and return the result.
-        futures::future::join_all(get_futures).await;
+        let _ = stream::iter(get_futures)
+            .buffer_unordered(num_parts)
+            .collect::<Vec<_>>()
+            .await;
         Ok(Arc::new(output_buffer))
     }
 
