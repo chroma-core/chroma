@@ -33,6 +33,7 @@ pub struct S3StorageConfig {
     pub connect_timeout_ms: u64,
     pub request_timeout_ms: u64,
     pub upload_part_size_bytes: usize,
+    pub download_part_size_bytes: usize,
 }
 
 #[derive(Deserialize, Debug, Clone)]

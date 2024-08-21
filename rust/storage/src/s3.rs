@@ -16,8 +16,11 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
+use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
+use aws_sdk_s3::operation::get_object::GetObjectError;
+use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::CompletedMultipartUpload;
 use aws_sdk_s3::types::CompletedPart;
@@ -27,6 +30,7 @@ use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::BoxFuture;
+use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
@@ -35,6 +39,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 use tracing::Span;
 
@@ -43,6 +48,7 @@ pub struct S3Storage {
     pub(super) bucket: String,
     pub(super) client: aws_sdk_s3::Client,
     pub(super) upload_part_size_bytes: usize,
+    pub(super) download_part_size_bytes: usize,
 }
 
 #[derive(Error, Debug)]
@@ -76,11 +82,17 @@ impl ChromaError for S3GetError {
 }
 
 impl S3Storage {
-    fn new(bucket: &str, client: aws_sdk_s3::Client, upload_part_size_bytes: usize) -> S3Storage {
+    fn new(
+        bucket: &str,
+        client: aws_sdk_s3::Client,
+        upload_part_size_bytes: usize,
+        download_part_size_bytes: usize,
+    ) -> S3Storage {
         return S3Storage {
             bucket: bucket.to_string(),
             client,
             upload_part_size_bytes,
+            download_part_size_bytes,
         };
     }
 
@@ -167,6 +179,125 @@ impl S3Storage {
                 return Err(S3GetError::S3GetError(e.to_string()));
             }
         }
+    }
+
+    pub(super) async fn get_key_ranges(
+        &self,
+        key: &str,
+    ) -> Result<(i64, Vec<(i64, i64)>), S3GetError> {
+        let part_size = self.download_part_size_bytes as i64;
+        let head_res = self
+            .client
+            .head_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+        let content_length = match head_res {
+            Ok(res) => match res.content_length {
+                Some(len) => len,
+                None => {
+                    return Err(S3GetError::S3GetError("No content length".to_string()));
+                }
+            },
+            Err(e) => {
+                return Err(S3GetError::S3GetError(e.to_string()));
+            }
+        };
+        // Round up.
+        let num_parts = (content_length as f64 / part_size as f64).ceil() as i64;
+        let mut ranges = Vec::new();
+        for i in 0..num_parts {
+            let start = i * part_size;
+            let end = if i == num_parts - 1 {
+                content_length - 1
+            } else {
+                (i + 1) * part_size - 1
+            };
+            ranges.push((start, end));
+        }
+        Ok((content_length, ranges))
+    }
+
+    pub(super) async fn fetch_range(
+        &self,
+        key: String,
+        range_str: String,
+    ) -> Result<GetObjectOutput, S3GetError> {
+        let res = self
+            .client
+            .get_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .range(range_str)
+            .send()
+            .await;
+        match res {
+            Ok(output) => Ok(output),
+            Err(e) => {
+                tracing::error!("Error fetching range: {:?}", e);
+                match e {
+                    SdkError::ServiceError(err) => {
+                        let inner = err.into_err();
+                        match inner {
+                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
+                                return Err(S3GetError::NoSuchKey(msg.to_string()));
+                            }
+                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
+                                return Err(S3GetError::S3GetError(msg.to_string()));
+                            }
+                            aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) => {
+                                return Err(S3GetError::S3GetError("unhandled error".to_string()));
+                            }
+                            _ => {
+                                return Err(S3GetError::S3GetError(inner.to_string()));
+                            }
+                        };
+                    }
+                    _ => {
+                        return Err(S3GetError::S3GetError(e.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
+        let (content_length, ranges) = self.get_key_ranges(key).await?;
+        let part_size = self.download_part_size_bytes;
+        let mut output_buffer: Vec<u8> = vec![0; content_length as usize];
+        let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
+        let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
+        let mut get_futures = Vec::new();
+        let num_parts = range_and_output_slices.len();
+        for (range, output_slice) in range_and_output_slices {
+            let range_str = format!("bytes={}-{}", range.0, range.1);
+            let fut = self
+                .fetch_range(key.to_string(), range_str)
+                .then(|res| async move {
+                    match res {
+                        Ok(res) => {
+                            let body = res.body;
+                            let mut reader = body.into_async_read();
+                            match reader.read_exact(output_slice).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    tracing::error!("Error reading range: {:?}", e);
+                                    Err(S3GetError::ByteStreamError(e.to_string()))
+                                }
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                });
+            get_futures.push(fut);
+        }
+        // Await all futures and return the result.
+        let _ = stream::iter(get_futures)
+            .buffer_unordered(num_parts)
+            .collect::<Vec<_>>()
+            .await;
+        Ok(Arc::new(output_buffer))
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
@@ -431,8 +562,12 @@ impl Configurable<StorageConfig> for S3Storage {
                         aws_sdk_s3::Client::new(&config)
                     }
                 };
-                let storage =
-                    S3Storage::new(&s3_config.bucket, client, s3_config.upload_part_size_bytes);
+                let storage = S3Storage::new(
+                    &s3_config.bucket,
+                    client,
+                    s3_config.upload_part_size_bytes,
+                    s3_config.download_part_size_bytes,
+                );
                 // for minio we create the bucket since it is only used for testing
                 match &s3_config.credentials {
                     super::config::S3CredentialsConfig::Minio => {
@@ -495,6 +630,7 @@ mod tests {
             bucket: "test".to_string(),
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
+            download_part_size_bytes: 1024 * 1024 * 8,
         };
         storage.create_bucket().await.unwrap();
 
@@ -522,13 +658,18 @@ mod tests {
         assert_eq!(buf, test_data);
     }
 
-    async fn test_put_file(file_size: usize, upload_part_size_bytes: usize) {
+    async fn test_put_file(
+        file_size: usize,
+        upload_part_size_bytes: usize,
+        download_part_size_bytes: usize,
+    ) {
         let client = get_s3_client();
 
         let storage = S3Storage {
             bucket: "test".to_string(),
             client,
             upload_part_size_bytes,
+            download_part_size_bytes,
         };
         storage.create_bucket().await.unwrap();
 
@@ -572,19 +713,27 @@ mod tests {
     #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
     async fn test_put_file_scenarios() {
         let test_upload_part_size_bytes = 1024 * 1024 * 8; // 8MB
+        let test_download_part_size_bytes = 1024 * 1024 * 8; // 8MB
 
         // Under part size
-        test_put_file(1024, test_upload_part_size_bytes).await;
+        test_put_file(
+            1024,
+            test_upload_part_size_bytes,
+            test_download_part_size_bytes,
+        )
+        .await;
         // At part size
         test_put_file(
             test_upload_part_size_bytes as usize,
             test_upload_part_size_bytes,
+            test_download_part_size_bytes,
         )
         .await;
         // Over part size
         test_put_file(
             (test_upload_part_size_bytes as f64 * 2.5) as usize,
             test_upload_part_size_bytes,
+            test_download_part_size_bytes,
         )
         .await;
     }
