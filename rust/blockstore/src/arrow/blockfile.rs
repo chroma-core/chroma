@@ -1438,4 +1438,35 @@ mod tests {
             assert_eq!(value.values(), &[i]);
         }
     }
+
+    #[tokio::test]
+    async fn test_write_to_same_key_many_times() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+
+        let writer = blockfile_provider.create::<&str, u32>().unwrap();
+        let id = writer.id();
+
+        let n = 20000;
+        let fixed_key = "key";
+        for i in 0..n {
+            let value = i as u32;
+            writer.set("prefix", fixed_key, value).await.unwrap();
+        }
+
+        let flusher = writer.commit::<&str, u32>().unwrap();
+        flusher.flush::<&str, u32>().await.unwrap();
+
+        let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
+        let value = reader.get("prefix", fixed_key).await.unwrap();
+        assert_eq!(value, n - 1);
+    }
 }

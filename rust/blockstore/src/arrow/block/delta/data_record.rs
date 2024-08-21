@@ -102,6 +102,47 @@ impl DataRecordStorage {
             key,
         };
 
+        if id_storage.contains_key(&composite_key) {
+            // key already exists, subtract the old size
+            // unwraps are safe because we just checked if the key exists
+            let old_id_size = id_storage.get(&composite_key).unwrap().len();
+            self.id_size
+                .fetch_sub(old_id_size, std::sync::atomic::Ordering::SeqCst);
+
+            let old_embedding_size = embedding_storage.get(&composite_key).unwrap().len() * 4;
+            self.embedding_size
+                .fetch_sub(old_embedding_size, std::sync::atomic::Ordering::SeqCst);
+
+            let old_metadata_size = self
+                .metadata_storage
+                .read()
+                .get(&composite_key)
+                .unwrap()
+                .as_ref()
+                .map_or(0, |v| v.len());
+            self.metadata_size
+                .fetch_sub(old_metadata_size, std::sync::atomic::Ordering::SeqCst);
+
+            let old_document_size = self
+                .document_storage
+                .read()
+                .get(&composite_key)
+                .unwrap()
+                .as_ref()
+                .map_or(0, |v| v.len());
+            self.document_size
+                .fetch_sub(old_document_size, std::sync::atomic::Ordering::SeqCst);
+
+            self.prefix_size.fetch_sub(
+                composite_key.prefix.len(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            self.key_size.fetch_sub(
+                composite_key.key.get_size(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+        }
+
         id_storage.insert(composite_key.clone(), value.id.to_string());
         self.id_size
             .fetch_add(value.id.len(), std::sync::atomic::Ordering::SeqCst);
@@ -237,25 +278,28 @@ impl DataRecordStorage {
         total_size
     }
 
-    fn split_internal(&self, split_size: usize) -> SplitInformation {
+    fn split_internal<K: ArrowWriteableKey>(&self, split_size: usize) -> SplitInformation {
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut id_size = 0;
         let mut embedding_size = 0;
         let mut metadata_size = 0;
         let mut document_size = 0;
+        let mut item_count = 0;
+        let mut split_key = None;
 
         let id_storage = self.id_storage.read();
         let embedding_storage = self.embedding_storage.read();
         let metadata_storage = self.metadata_storage.read();
         let document_storage = self.document_storage.read();
 
-        let mut index = 0;
-        for ((((key, id), (_, embedding)), (_, metadata)), (_, document)) in id_storage
+        let mut iter = id_storage
             .iter()
             .zip(embedding_storage.iter())
             .zip(metadata_storage.iter())
-            .zip(document_storage.iter())
+            .zip(document_storage.iter());
+
+        while let Some(((((key, id), (_, embedding)), (_, metadata)), (_, document))) = iter.next()
         {
             prefix_size += key.prefix.len();
             key_size += key.key.get_size();
@@ -263,15 +307,18 @@ impl DataRecordStorage {
             embedding_size += embedding.len() * 4;
             metadata_size += metadata.as_ref().map_or(0, |v| v.len());
             document_size += document.as_ref().map_or(0, |v| v.len());
+            item_count += 1;
 
             // offset sizing
-            let id_offset = bit_util::round_upto_multiple_of_64((index + 1 + 1) * 4);
-            let metdata_offset = bit_util::round_upto_multiple_of_64((index + 1 + 1) * 4);
-            let document_offset = bit_util::round_upto_multiple_of_64((index + 1 + 1) * 4);
+            let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+            let key_offset_bytes: usize = K::offset_size(item_count);
+            let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+            let metdata_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+            let document_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
             // validity sizing both document and metadata can be null
             let validity_bytes =
-                bit_util::round_upto_multiple_of_64(bit_util::ceil(index + 1, 8)) * 2;
+                bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count + 1, 8)) * 2;
 
             // round all running sizes to 64 and add them together
             let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
@@ -280,22 +327,75 @@ impl DataRecordStorage {
                 + bit_util::round_upto_multiple_of_64(embedding_size)
                 + bit_util::round_upto_multiple_of_64(metadata_size)
                 + bit_util::round_upto_multiple_of_64(document_size)
+                + prefix_offset_bytes
+                + key_offset_bytes
                 + id_offset
                 + metdata_offset
                 + document_offset
                 + validity_bytes;
 
             if total_size > split_size {
+                println!(
+                    "[HAMMAD DATA RECORD] the total size is: {} and we are splitting at item: {} in a block of length: {}",
+                    total_size, item_count, self.len()
+                );
+                println!(
+                    "The prefix size in the left half is: {} and the overall size is: {}",
+                    prefix_size,
+                    self.get_prefix_size()
+                );
+                println!(
+                    "The key size in the left half is: {} and the overall size is: {}",
+                    key_size,
+                    self.get_key_size()
+                );
+                println!(
+                    "The id size in the left half is: {} and the overall size is: {}",
+                    id_size,
+                    self.get_id_size()
+                );
+                println!(
+                    "The embedding size in the left half is: {} and the overall size is: {}",
+                    embedding_size,
+                    self.get_embedding_size()
+                );
+                println!(
+                    "The metadata size in the left half is: {} and the overall size is: {}",
+                    metadata_size,
+                    self.get_metadata_size()
+                );
+                println!(
+                    "The document size in the left half is: {} and the overall size is: {}",
+                    document_size,
+                    self.get_document_size()
+                );
+                let iterated_document_size = document_storage
+                    .iter()
+                    .map(|(_, v)| v.clone().unwrap_or("".to_string()).len())
+                    .sum::<usize>();
+                println!("The GT document size is: {}", iterated_document_size);
+                split_key = match iter.next() {
+                    Some((
+                        (((next_key, _id), (_, _embedding)), (_, _metadata)),
+                        (_, _document),
+                    )) => Some(next_key.clone()),
+                    None => {
+                        // Remove the last item since we are splitting at the end
+                        prefix_size -= key.prefix.len();
+                        key_size -= key.key.get_size();
+                        id_size -= id.len();
+                        embedding_size -= embedding.len() * 4;
+                        metadata_size -= metadata.as_ref().map_or(0, |v| v.len());
+                        document_size -= document.as_ref().map_or(0, |v| v.len());
+                        Some(key.clone())
+                    }
+                };
                 break;
             }
-            index += 1;
         }
 
-        let curr_split_index = std::cmp::min(index + 1, self.len() - 1);
-        let split_key = self.get_key(curr_split_index);
-
         return SplitInformation {
-            split_key,
+            split_key: split_key.expect("split key should be set"),
             remaining_prefix_size: self.get_prefix_size() - prefix_size,
             remaining_key_size: self.get_key_size() - key_size,
             remaining_id_size: self.get_id_size() - id_size,
@@ -305,8 +405,12 @@ impl DataRecordStorage {
         };
     }
 
-    pub(super) fn split(&self, split_size: usize) -> (CompositeKey, DataRecordStorage) {
-        let split_info = self.split_internal(split_size);
+    pub(super) fn split<K: ArrowWriteableKey>(
+        &self,
+        split_size: usize,
+    ) -> (CompositeKey, DataRecordStorage) {
+        let pre_split_document_size = self.document_size.load(std::sync::atomic::Ordering::SeqCst);
+        let split_info = self.split_internal::<K>(split_size);
         let split_id = self.id_storage.write().split_off(&split_info.split_key);
         let split_embedding = self
             .embedding_storage
@@ -321,7 +425,58 @@ impl DataRecordStorage {
             .write()
             .split_off(&split_info.split_key);
 
-        // split should reduce MY storage size by the removed amount
+        self.prefix_size.fetch_sub(
+            split_info.remaining_prefix_size,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.key_size.fetch_sub(
+            split_info.remaining_key_size,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.id_size.fetch_sub(
+            split_info.remaining_id_size,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.embedding_size.fetch_sub(
+            split_info.remaining_embedding_size,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.metadata_size.fetch_sub(
+            split_info.remaining_metadata_size,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.document_size.fetch_sub(
+            split_info.remaining_document_size,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+
+        let left_half_new_document_size =
+            self.document_size.load(std::sync::atomic::Ordering::SeqCst);
+        let right_half_new_document_size = split_info.remaining_document_size;
+        println!(
+            "[HAMMAD] The left half document size is: {} and the right half document size is: {}, the pre split document size is: {}",
+            left_half_new_document_size, right_half_new_document_size, pre_split_document_size
+        );
+        if left_half_new_document_size + right_half_new_document_size != pre_split_document_size {
+            println!(
+                "[HAMMAD] The left half document size is: {} and the right half document size is: {}, the pre split document size is: {}",
+                left_half_new_document_size, right_half_new_document_size, pre_split_document_size
+            );
+            panic!("The document size is not correct");
+        }
+
+        let split_documents_size = split_document
+            .iter()
+            .map(|(_, v)| v.clone().unwrap_or("".to_string()).len())
+            .sum::<usize>();
+        if split_documents_size != right_half_new_document_size {
+            println!(
+                "[HAMMAD] The split document size is: {} and the right half document size is: {}",
+                split_documents_size, right_half_new_document_size
+            );
+            panic!("The split document size is not correct");
+        }
+
         let drs = DataRecordStorage {
             id_storage: Arc::new(RwLock::new(split_id)),
             embedding_storage: Arc::new(RwLock::new(split_embedding)),
@@ -342,13 +497,6 @@ impl DataRecordStorage {
     pub(super) fn len(&self) -> usize {
         let id_storage = self.id_storage.read();
         id_storage.len()
-    }
-
-    fn get_key(&self, index: usize) -> CompositeKey {
-        // TODO: this is another inner N^2 loop
-        let id_storage = self.id_storage.read();
-        let (key, _) = id_storage.iter().nth(index).unwrap();
-        key.clone()
     }
 
     pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {

@@ -122,7 +122,12 @@ impl BlockDelta {
         // iterate over all blocks to split until its empty
         while !blocks_to_split.is_empty() {
             let curr_block = blocks_to_split.pop().unwrap();
-            let (new_start_key, new_delta) = curr_block.builder.split(half_size);
+            println!(
+                "[HAMMAD] Splitting block with size: {} and len {}",
+                curr_block.get_size::<K, V>(),
+                curr_block.len()
+            );
+            let (new_start_key, new_delta) = curr_block.builder.split::<K>(half_size);
             let new_block = BlockDelta {
                 builder: new_delta,
                 id: Uuid::new_v4(),

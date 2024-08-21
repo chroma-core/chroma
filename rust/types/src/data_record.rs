@@ -1,4 +1,6 @@
+use crate::chroma_proto;
 use crate::Metadata;
+use prost::Message;
 
 #[derive(Debug, Clone)]
 pub struct DataRecord<'a> {
@@ -12,8 +14,14 @@ impl DataRecord<'_> {
     pub fn get_size(&self) -> usize {
         let id_size = self.id.len();
         let embedding_size = self.embedding.len() * std::mem::size_of::<f32>();
-        // TODO: use serialized_metadata size to calculate the size
-        let metadata_size = 0;
+        let metadata_size = match &self.metadata {
+            Some(metadata) => {
+                let metadata_proto = Into::<chroma_proto::UpdateMetadata>::into(metadata.clone());
+                let metadata_as_bytes = metadata_proto.encode_to_vec();
+                metadata_as_bytes.len()
+            }
+            None => 0,
+        };
         let document_size = match self.document {
             Some(document) => document.len(),
             None => 0,

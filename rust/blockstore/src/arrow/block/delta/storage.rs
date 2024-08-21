@@ -187,26 +187,26 @@ impl BlockStorage {
         }
     }
 
-    pub fn split(&self, split_size: usize) -> (CompositeKey, BlockStorage) {
+    pub fn split<K: ArrowWriteableKey>(&self, split_size: usize) -> (CompositeKey, BlockStorage) {
         match self {
             BlockStorage::String(builder) => {
-                let (split_key, storage) = builder.split(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::String(storage))
             }
             BlockStorage::UInt32(builder) => {
-                let (split_key, storage) = builder.split(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::UInt32(storage))
             }
             BlockStorage::DataRecord(builder) => {
-                let (split_key, storage) = builder.split(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::DataRecord(storage))
             }
             BlockStorage::Int32Array(builder) => {
-                let (split_key, storage) = builder.split(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::Int32Array(storage))
             }
             BlockStorage::RoaringBitmap(builder) => {
-                let (split_key, storage) = builder.split(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::RoaringBitmap(storage))
             }
         }

@@ -95,15 +95,23 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: T) {
         let mut inner = self.inner.write();
-
         let key_len = key.get_size();
-        inner.storage.insert(
-            CompositeKey {
-                prefix: prefix.to_string(),
-                key,
-            },
-            value.to_owned(),
-        );
+
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+
+        if inner.storage.contains_key(&composite_key) {
+            // subtract the old value size
+            // unwrap is safe here because we just checked if the key exists
+            let old_value_size = inner.storage.remove(&composite_key).unwrap().get_size();
+            inner.size_tracker.subtract_value_size(old_value_size);
+            inner.size_tracker.subtract_key_size(key_len);
+            inner.size_tracker.subtract_prefix_size(prefix.len());
+        }
+
+        inner.storage.insert(composite_key, value.to_owned());
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(value.get_size());
@@ -127,30 +135,38 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         }
     }
 
-    pub(super) fn split(&self, split_size: usize) -> (CompositeKey, SingleColumnStorage<T>) {
+    pub(super) fn split<K: ArrowWriteableKey>(
+        &self,
+        split_size: usize,
+    ) -> (CompositeKey, SingleColumnStorage<T>) {
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut value_size = 0;
         let mut split_key = None;
 
+        let remove_prefix_size = 0;
+        let remove_key_size = 0;
+        let remove_value_size = 0;
+
         {
             let inner = self.inner.read();
             let storage = &inner.storage;
 
-            let mut index = 0;
+            let mut item_count = 0;
             let mut iter = storage.iter();
             while let Some((key, value)) = iter.next() {
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();
                 value_size += value.get_size();
+                item_count += 1;
 
                 // offset sizing
-                let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((index + 1) * 4);
-                let key_offset_bytes = bit_util::round_upto_multiple_of_64((index + 1) * 4);
-                let value_offset_bytes = bit_util::round_upto_multiple_of_64((index + 1) * 4);
+                let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
+                let key_offset_bytes = K::offset_size(item_count);
+                let value_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
                 // validitiy sizing
-                let value_validity_bytes = T::validity_size(index);
+                let value_validity_bytes = T::validity_size(item_count);
 
                 let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
                     + bit_util::round_upto_multiple_of_64(key_size)
@@ -161,17 +177,27 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                     + value_validity_bytes;
 
                 if total_size > split_size {
+                    println!(
+                    "[HAMMAD SINGLE VALUE] the total size is: {} and we are splitting at item: {} in a block of length: {}",
+                    total_size, item_count, self.len()
+                );
                     split_key = match iter.next() {
-                        None => Some(key.clone()),
+                        None => {
+                            // Remove the last item since we are splitting at the end
+                            prefix_size -= key.prefix.len();
+                            key_size -= key.key.get_size();
+                            value_size -= value.get_size();
+                            Some(key.clone())
+                        }
                         Some((next_key, _)) => Some(next_key.clone()),
                     };
                     break;
                 }
-                index += 1;
             }
         }
 
         let mut inner = self.inner.write();
+
         let total_prefix_size = inner.size_tracker.get_prefix_size();
         let total_key_size = inner.size_tracker.get_key_size();
         let total_value_size = inner.size_tracker.get_value_size();
@@ -186,7 +212,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             .subtract_value_size(total_value_size - value_size);
 
         match split_key {
-            None => panic!("A StringValueStorage should have at least one element to be split."),
+            None => panic!("A storage should have at least one element to be split."),
             Some(split_key) => {
                 let new_delta = inner.storage.split_off(&split_key);
                 (

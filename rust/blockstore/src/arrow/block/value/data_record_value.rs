@@ -29,6 +29,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
     }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
+        println!("[HAMMAD] CALLING ADD");
         match &delta.builder {
             BlockStorage::DataRecord(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type"),
