@@ -1207,6 +1207,11 @@ def test_invalid_id(client):
         collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
     assert "ID" in str(e.value)
 
+    # Upsert with an empty id
+    with pytest.raises(ValueError) as e:
+        collection.upsert(embeddings=[0, 0, 0], ids=[""])
+    assert "non-empty" in str(e.value)
+
     # Get with non-list id
     with pytest.raises(ValueError) as e:
         collection.get(ids=1)
@@ -1534,7 +1539,6 @@ def test_collection_upsert_with_invalid_collection_throws(client):
         InvalidCollectionException, match=r"Collection .* does not exist."
     ):
         collection.upsert(**initial_records)
-
 
 # test to make sure add, query, update, upsert error on invalid embeddings input
 
