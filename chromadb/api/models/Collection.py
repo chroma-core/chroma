@@ -90,6 +90,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
+        
 
     def get(
         self,
