@@ -39,6 +39,8 @@ pub enum ErrorCodes {
     Unavailable = 14,
     // DATA_LOSS indicates unrecoverable data loss or corruption.
     DataLoss = 15,
+    // VERSION_MISMATCH indicates a version mismatch.
+    VersionMismatch = 17,
 }
 
 pub trait ChromaError: Error + Send {

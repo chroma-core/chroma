@@ -137,6 +137,8 @@ def from_proto_segment(segment: proto.Segment) -> Segment:
         metadata=from_proto_metadata(segment.metadata)
         if segment.HasField("metadata")
         else None,
+        log_position=segment.log_position,
+        collection_version=segment.collection_version,
     )
 
 
@@ -214,6 +216,7 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
         database=collection.database,
         tenant=collection.tenant,
         version=collection.version,
+        log_position=collection.log_position,
     )
 
 
@@ -229,6 +232,7 @@ def to_proto_collection(collection: Collection) -> proto.Collection:
         tenant=collection["tenant"],
         database=collection["database"],
         version=collection["version"],
+        log_position=collection["log_position"],
     )
 
 
