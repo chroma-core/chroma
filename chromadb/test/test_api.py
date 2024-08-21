@@ -5,7 +5,7 @@ import httpx
 import chromadb
 from chromadb.errors import ChromaError
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import QueryResult, EmbeddingFunction, Document, Image
+from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
 from chromadb.errors import InvalidCollectionException
 import chromadb.server.fastapi
