@@ -102,7 +102,13 @@ impl AdmissionControlledS3Storage {
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
-        let (content_length, ranges) = storage.get_key_ranges(&key).await;
+        let (content_length, ranges) = match storage.get_key_ranges(&key).await {
+            Ok(ranges) => ranges,
+            Err(e) => {
+                tracing::error!("Error heading s3: {}", e);
+                return Err(AdmissionControlledS3StorageError::S3GetError(e));
+            }
+        };
         let part_size = storage.download_part_size_bytes;
         tracing::info!(
             "[AdmissionControlledS3][Parallel fetch] Content length: {}, key ranges: {:?}",

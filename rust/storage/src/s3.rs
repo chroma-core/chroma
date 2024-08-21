@@ -181,7 +181,10 @@ impl S3Storage {
         }
     }
 
-    pub(super) async fn get_key_ranges(&self, key: &str) -> (i64, Vec<(i64, i64)>) {
+    pub(super) async fn get_key_ranges(
+        &self,
+        key: &str,
+    ) -> Result<(i64, Vec<(i64, i64)>), S3GetError> {
         let part_size = self.download_part_size_bytes as i64;
         let head_res = self
             .client
@@ -194,11 +197,11 @@ impl S3Storage {
             Ok(res) => match res.content_length {
                 Some(len) => len,
                 None => {
-                    panic!("No content length in head response");
+                    return Err(S3GetError::S3GetError("No content length".to_string()));
                 }
             },
             Err(e) => {
-                panic!("Error in head request: {:?}", e);
+                return Err(S3GetError::S3GetError(e.to_string()));
             }
         };
         // Round up.
@@ -213,7 +216,7 @@ impl S3Storage {
             };
             ranges.push((start, end));
         }
-        (content_length, ranges)
+        Ok((content_length, ranges))
     }
 
     pub(super) async fn fetch_range(
@@ -260,7 +263,7 @@ impl S3Storage {
     }
 
     pub(super) async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
-        let (content_length, ranges) = self.get_key_ranges(key).await;
+        let (content_length, ranges) = self.get_key_ranges(key).await?;
         let part_size = self.download_part_size_bytes;
         let mut output_buffer: Vec<u8> = vec![0; content_length as usize];
         let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
