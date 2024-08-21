@@ -425,7 +425,7 @@ class CollectionCommon(Generic[ClientT]):
             self._model["name"] = name
         if metadata:
             self._model["metadata"] = metadata
-            
+
     def _process_add_request(
         self,
         ids: OneOrMany[ID],
@@ -439,8 +439,7 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-        ) -> EmbeddingSet:
-        
+    ) -> EmbeddingSet:
         unpacked_embedding_set = self._unpack_embedding_set(
             ids,
             embeddings,
@@ -472,14 +471,14 @@ class CollectionCommon(Generic[ClientT]):
             unpacked_embedding_set["images"],
             unpacked_embedding_set["uris"],
         )
-        
+
         return {
             "ids": unpacked_embedding_set["ids"],
             "embeddings": prepared_embeddings,
-            "metadatas":  unpacked_embedding_set["metadatas"],
+            "metadatas": unpacked_embedding_set["metadatas"],
             "documents": unpacked_embedding_set["documents"],
             "images": unpacked_embedding_set["images"],
-            "uris":  unpacked_embedding_set["uris"],
+            "uris": unpacked_embedding_set["uris"],
         }
 
     def _prepare_update_request(
@@ -488,19 +487,14 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[Documents],
         images: Optional[Images],
     ) -> Embeddings:
-
         if embeddings is None:
             if documents is not None:
-                embeddings = self._embed(
-                    input=documents
-                )
+                embeddings = self._embed(input=documents)
             elif images is not None:
-                embeddings = self._embed(
-                    input=images
-                )
+                embeddings = self._embed(input=images)
 
         return cast(Embeddings, embeddings)
-        
+
     def _process_update_request(
         self,
         ids: OneOrMany[ID],
@@ -513,7 +507,7 @@ class CollectionCommon(Generic[ClientT]):
         metadatas: Optional[OneOrMany[Metadata]],
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]]
+        uris: Optional[OneOrMany[URI]],
     ) -> EmbeddingSet:
         unpacked_embedding_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
@@ -534,20 +528,20 @@ class CollectionCommon(Generic[ClientT]):
             unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
         )
-        
+
         prepared_embeddings = self._prepare_update_request(
             normalized_embeddings,
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],
         )
-        
+
         return {
             "ids": unpacked_embedding_set["ids"],
             "embeddings": prepared_embeddings,
-            "metadatas":  unpacked_embedding_set["metadatas"],
+            "metadatas": unpacked_embedding_set["metadatas"],
             "documents": unpacked_embedding_set["documents"],
             "images": unpacked_embedding_set["images"],
-            "uris":  unpacked_embedding_set["uris"],
+            "uris": unpacked_embedding_set["uris"],
         }
 
     def _prepare_upsert_request(
@@ -556,16 +550,11 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[Documents],
         images: Optional[Images],
     ) -> Embeddings:
-
         if embeddings is None:
             if documents is not None:
-                embeddings = self._embed(
-                    input=documents
-                )
+                embeddings = self._embed(input=documents)
             elif images is not None:
-                embeddings = self._embed(
-                    input=images
-                )
+                embeddings = self._embed(input=images)
 
         return cast(Embeddings, embeddings)
 
@@ -612,10 +601,10 @@ class CollectionCommon(Generic[ClientT]):
         return {
             "ids": unpacked_embedding_set["ids"],
             "embeddings": prepared_embeddings,
-            "metadatas":  unpacked_embedding_set["metadatas"],
+            "metadatas": unpacked_embedding_set["metadatas"],
             "documents": unpacked_embedding_set["documents"],
             "images": unpacked_embedding_set["images"],
-            "uris":  unpacked_embedding_set["uris"],
+            "uris": unpacked_embedding_set["uris"],
         }
 
     # TODO: Rename this function
