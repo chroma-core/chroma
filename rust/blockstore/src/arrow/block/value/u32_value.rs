@@ -3,7 +3,7 @@ use crate::{
         block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
-    key::{CompositeKey, KeyWrapper},
+    key::KeyWrapper,
 };
 use arrow::array::{Array, UInt32Array};
 use std::sync::Arc;

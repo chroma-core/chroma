@@ -335,45 +335,6 @@ impl DataRecordStorage {
                 + validity_bytes;
 
             if total_size > split_size {
-                println!(
-                    "[HAMMAD DATA RECORD] the total size is: {} and we are splitting at item: {} in a block of length: {}",
-                    total_size, item_count, self.len()
-                );
-                println!(
-                    "The prefix size in the left half is: {} and the overall size is: {}",
-                    prefix_size,
-                    self.get_prefix_size()
-                );
-                println!(
-                    "The key size in the left half is: {} and the overall size is: {}",
-                    key_size,
-                    self.get_key_size()
-                );
-                println!(
-                    "The id size in the left half is: {} and the overall size is: {}",
-                    id_size,
-                    self.get_id_size()
-                );
-                println!(
-                    "The embedding size in the left half is: {} and the overall size is: {}",
-                    embedding_size,
-                    self.get_embedding_size()
-                );
-                println!(
-                    "The metadata size in the left half is: {} and the overall size is: {}",
-                    metadata_size,
-                    self.get_metadata_size()
-                );
-                println!(
-                    "The document size in the left half is: {} and the overall size is: {}",
-                    document_size,
-                    self.get_document_size()
-                );
-                let iterated_document_size = document_storage
-                    .iter()
-                    .map(|(_, v)| v.clone().unwrap_or("".to_string()).len())
-                    .sum::<usize>();
-                println!("The GT document size is: {}", iterated_document_size);
                 split_key = match iter.next() {
                     Some((
                         (((next_key, _id), (_, _embedding)), (_, _metadata)),
@@ -409,7 +370,6 @@ impl DataRecordStorage {
         &self,
         split_size: usize,
     ) -> (CompositeKey, DataRecordStorage) {
-        let pre_split_document_size = self.document_size.load(std::sync::atomic::Ordering::SeqCst);
         let split_info = self.split_internal::<K>(split_size);
         let split_id = self.id_storage.write().split_off(&split_info.split_key);
         let split_embedding = self
@@ -449,33 +409,6 @@ impl DataRecordStorage {
             split_info.remaining_document_size,
             std::sync::atomic::Ordering::SeqCst,
         );
-
-        let left_half_new_document_size =
-            self.document_size.load(std::sync::atomic::Ordering::SeqCst);
-        let right_half_new_document_size = split_info.remaining_document_size;
-        println!(
-            "[HAMMAD] The left half document size is: {} and the right half document size is: {}, the pre split document size is: {}",
-            left_half_new_document_size, right_half_new_document_size, pre_split_document_size
-        );
-        if left_half_new_document_size + right_half_new_document_size != pre_split_document_size {
-            println!(
-                "[HAMMAD] The left half document size is: {} and the right half document size is: {}, the pre split document size is: {}",
-                left_half_new_document_size, right_half_new_document_size, pre_split_document_size
-            );
-            panic!("The document size is not correct");
-        }
-
-        let split_documents_size = split_document
-            .iter()
-            .map(|(_, v)| v.clone().unwrap_or("".to_string()).len())
-            .sum::<usize>();
-        if split_documents_size != right_half_new_document_size {
-            println!(
-                "[HAMMAD] The split document size is: {} and the right half document size is: {}",
-                split_documents_size, right_half_new_document_size
-            );
-            panic!("The split document size is not correct");
-        }
 
         let drs = DataRecordStorage {
             id_storage: Arc::new(RwLock::new(split_id)),

@@ -144,10 +144,6 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         let mut value_size = 0;
         let mut split_key = None;
 
-        let remove_prefix_size = 0;
-        let remove_key_size = 0;
-        let remove_value_size = 0;
-
         {
             let inner = self.inner.read();
             let storage = &inner.storage;
