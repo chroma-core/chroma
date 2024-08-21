@@ -17,13 +17,13 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-var meter = otel.Meter("log")
+var meter = otel.Meter("github.com/chroma-core/chroma/go/pkg/log/metrics")
 var uncompactedEntriesCnt metric.Int64Gauge
 
 func RunMetrics(ctx context.Context, lg *repository.LogRepository) {
 	// Create metrics
 	var err error
-	uncompactedEntriesCnt, err = meter.Int64Gauge("log.uncompacted_entries_count", metric.WithDescription("Number of uncompacted entries in the log"), metric.WithUnit("{entries}"))
+	uncompactedEntriesCnt, err = meter.Int64Gauge("log_total_uncompacted_records_count", metric.WithDescription("Number of uncompacted records in the log"), metric.WithUnit("{records}"))
 	if err != nil {
 		log.Error("failed to create metric", zap.Error(err))
 		return
@@ -82,11 +82,11 @@ func setupLeaderElection(client *kubernetes.Clientset, namespace, podName string
 		RetryPeriod:     2 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				log.Info("started leading")
+				log.Info("started leading metrics collection")
 				performMetricsLoop(ctx, lr, lg)
 			},
 			OnStoppedLeading: func() {
-				log.Info("stopped leading")
+				log.Info("stopped leading metrics collection")
 			},
 		},
 	})
@@ -105,14 +105,14 @@ func performMetricsLoop(ctx context.Context, le *leaderelection.LeaderElector, l
 			if le.IsLeader() {
 				totalUncompactedDepth, err := lg.GetTotalUncompactedRecordsCount(ctx)
 				if err != nil {
-					log.Error("failed to get collection info", zap.Error(err))
+					log.Error("failed to get uncompacted record count", zap.Error(err))
 					continue
 				}
 
 				uncompactedEntriesCnt.Record(ctx, int64(totalUncompactedDepth))
 			} else {
 				log.Info("leader is inactive")
-				break
+				continue
 			}
 		}
 	}

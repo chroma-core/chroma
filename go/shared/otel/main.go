@@ -155,7 +155,7 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 		return
 	}
 
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(1*time.Second))))
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(5*time.Second))))
 	otel.SetMeterProvider(mp)
 
 	Tracer = otel.Tracer(config.Service)

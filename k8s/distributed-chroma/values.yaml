@@ -1,12 +1,12 @@
 # Default values for distributed-chroma.
 # Strongly prefer single quotes.
 
-namespace: "chroma"
+namespace: 'chroma'
 
 frontendService:
   image:
-    repository: "local"
-    tag: "frontend-service"
+    repository: 'local'
+    tag: 'frontend-service'
 
   # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
   # populated from secrets or configMaps. So we let consumers fill these directly.
@@ -28,32 +28,32 @@ frontendService:
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: |
-    - name: CHROMA_OTEL_COLLECTION_ENDPOINT
-      value: "http://jaeger:4317"
-    - name: CHROMA_OTEL_GRANULARITY
-      value: all
+      - name: CHROMA_OTEL_COLLECTION_ENDPOINT
+        value: "http://jaeger:4317"
+      - name: CHROMA_OTEL_GRANULARITY
+        value: all
   replicaCount: 2
 sysdb:
   image:
-    repository: "local"
-    tag: "sysdb"
+    repository: 'local'
+    tag: 'sysdb'
   replicaCount: 1
   env:
     - name: OPTL_TRACING_ENDPOINT
       value: 'value: "jaeger:4317"'
   resources:
     limits:
-      cpu: "2000m"
-      memory: "1Gi"
+      cpu: '2000m'
+      memory: '1Gi'
     requests:
-      cpu: "1000m"
-      memory: "512Mi"
+      cpu: '1000m'
+      memory: '512Mi'
   flags:
 
 logService:
   image:
-    repository: "local"
-    tag: "log-service"
+    repository: 'local'
+    tag: 'log-service'
   env:
     - name: OPTL_TRACING_ENDPOINT
       value: 'value: "otel-collector:4317"'
@@ -62,21 +62,21 @@ logService:
 
 queryService:
   image:
-    repository: "local"
-    tag: "query-service"
+    repository: 'local'
+    tag: 'query-service'
   env:
 
 compactionService:
   image:
-    repository: "local"
-    tag: "compaction-service"
+    repository: 'local'
+    tag: 'compaction-service'
   env:
   replicaCount: 1
 
 sysdbMigration:
   image:
-    repository: "local"
-    tag: "sysdb-migration"
+    repository: 'local'
+    tag: 'sysdb-migration'
   username: chroma
   password: chroma
   netloc: postgres
@@ -86,8 +86,8 @@ sysdbMigration:
 
 logServiceMigration:
   image:
-    repository: "local"
-    tag: "logservice-migration"
+    repository: 'local'
+    tag: 'logservice-migration'
   env:
-    - name: CHROMA_DB_LOG_URL
-      value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
+  - name: CHROMA_DB_LOG_URL
+    value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
