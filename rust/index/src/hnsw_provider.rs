@@ -1,9 +1,11 @@
+use crate::PersistentIndex;
+
 use super::config::HnswProviderConfig;
 use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
-use crate::types::PersistentIndex;
+
 use async_trait::async_trait;
 use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
@@ -11,6 +13,7 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
 use chroma_types::Segment;
+use chroma_types::Value;
 use parking_lot::RwLock;
 use rand::seq::index;
 use std::fmt::Debug;
@@ -46,10 +49,22 @@ const FILES: [&'static str; 4] = [
 // their ref count goes to 0.
 #[derive(Clone)]
 pub struct HnswIndexProvider {
-    cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
+    cache: Cache<Uuid, HnswIndexRef>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
+}
+
+#[derive(Clone)]
+pub struct HnswIndexRef {
+    inner: Arc<RwLock<HnswIndex>>,
+}
+
+impl Value for HnswIndexRef {
+    fn size(&self) -> usize {
+        let index = self.inner.read();
+        index.len() * std::mem::size_of::<f32>() * index.dimensionality as usize
+    }
 }
 
 impl Debug for HnswIndexProvider {
@@ -79,11 +94,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
 }
 
 impl HnswIndexProvider {
-    pub fn new(
-        storage: Storage,
-        storage_path: PathBuf,
-        cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
-    ) -> Self {
+    pub fn new(storage: Storage, storage_path: PathBuf, cache: Cache<Uuid, HnswIndexRef>) -> Self {
         Self {
             cache,
             storage,
@@ -95,10 +106,10 @@ impl HnswIndexProvider {
     pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
         match self.cache.get(collection_id) {
             Some(index) => {
-                let index_with_lock = index.read();
+                let index_with_lock = index.inner.read();
                 if index_with_lock.id == *index_id {
                     // Clone is cheap because we are just cloning the Arc.
-                    return Some(index.clone());
+                    return Some(index.inner.clone());
                 }
                 return None;
             }
@@ -172,7 +183,12 @@ impl HnswIndexProvider {
                     }
                     None => {
                         let index = Arc::new(RwLock::new(index));
-                        self.cache.insert(segment.collection, index.clone());
+                        self.cache.insert(
+                            segment.collection,
+                            HnswIndexRef {
+                                inner: index.clone(),
+                            },
+                        );
                         Ok(index)
                     }
                 }
@@ -302,7 +318,12 @@ impl HnswIndexProvider {
                     }
                     None => {
                         let index = Arc::new(RwLock::new(index));
-                        self.cache.insert(segment.collection, index.clone());
+                        self.cache.insert(
+                            segment.collection,
+                            HnswIndexRef {
+                                inner: index.clone(),
+                            },
+                        );
                         Ok(index)
                     }
                 }
@@ -365,7 +386,12 @@ impl HnswIndexProvider {
             }
             None => {
                 let index = Arc::new(RwLock::new(index));
-                self.cache.insert(segment.collection, index.clone());
+                self.cache.insert(
+                    segment.collection,
+                    HnswIndexRef {
+                        inner: index.clone(),
+                    },
+                );
                 Ok(index)
             }
         }
@@ -406,7 +432,7 @@ impl HnswIndexProvider {
     /// Purge all entries from the cache and remove temporary files from disk.
     pub async fn purge_all_entries(&mut self) {
         while let Some((_, index)) = self.cache.pop() {
-            let index_id = index.read().id;
+            let index_id = index.inner.read().id;
             match self.remove_temporary_files(&index_id).await {
                 Ok(_) => {}
                 Err(e) => {

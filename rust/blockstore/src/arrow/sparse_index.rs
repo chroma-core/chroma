@@ -1,5 +1,6 @@
 use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
+use chroma_types::Value;
 use core::panic;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
@@ -78,6 +79,12 @@ pub struct SparseIndex {
     pub(super) forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
     reverse: Arc<Mutex<HashMap<Uuid, SparseIndexDelimiter>>>,
     pub(super) id: Uuid,
+}
+
+impl Value for SparseIndex {
+    fn size(&self) -> usize {
+        self.forward.lock().len()
+    }
 }
 
 impl SparseIndex {

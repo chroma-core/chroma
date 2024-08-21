@@ -2,6 +2,7 @@ use crate::config::CacheConfig;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Value;
 use core::hash::Hash;
 use foyer::{Cache as FoyerCache, CacheBuilder, LfuConfig, LruConfig};
 use parking_lot::RwLock;
@@ -13,13 +14,13 @@ use thiserror::Error;
 pub enum Cache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     Unbounded(UnboundedCache<K, V>),
     Foyer(FoyerCacheWrapper<K, V>),
 }
 
-impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cache<K, V> {
+impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Value> Cache<K, V> {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
             CacheConfig::Unbounded(_) => Cache::Unbounded(UnboundedCache::new(config)),
@@ -91,7 +92,7 @@ impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'sta
 pub struct UnboundedCache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     cache: Arc<RwLock<HashMap<K, V>>>,
 }
@@ -99,7 +100,7 @@ where
 impl<K, V> UnboundedCache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
@@ -140,7 +141,7 @@ where
 pub struct FoyerCacheWrapper<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     cache: FoyerCache<K, V>,
 }
@@ -148,15 +149,16 @@ where
 impl<K, V> FoyerCacheWrapper<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
             CacheConfig::Lru(lru) => {
                 // TODO: add more eviction config
                 let eviction_config = LruConfig::default();
-                let cache_builder =
-                    CacheBuilder::new(lru.capacity).with_eviction_config(eviction_config);
+                let cache_builder = CacheBuilder::new(lru.capacity)
+                    .with_eviction_config(eviction_config)
+                    .with_weighter(|_key: &_, value: &V| value.size());
                 FoyerCacheWrapper {
                     cache: cache_builder.build(),
                 }
@@ -164,8 +166,9 @@ where
             CacheConfig::Lfu(lfu) => {
                 // TODO: add more eviction config
                 let eviction_config = LfuConfig::default();
-                let cache_builder =
-                    CacheBuilder::new(lfu.capacity).with_eviction_config(eviction_config);
+                let cache_builder = CacheBuilder::new(lfu.capacity)
+                    .with_eviction_config(eviction_config)
+                    .with_weighter(|_key: &_, value: &V| value.size());
                 FoyerCacheWrapper {
                     cache: cache_builder.build(),
                 }
@@ -198,7 +201,7 @@ where
 impl<K, V> Configurable<CacheConfig> for UnboundedCache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     async fn try_from_config(config: &CacheConfig) -> Result<Self, Box<dyn ChromaError>> {
         match config {
@@ -212,7 +215,7 @@ where
 impl<K, V> Configurable<CacheConfig> for FoyerCacheWrapper<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     async fn try_from_config(config: &CacheConfig) -> Result<Self, Box<dyn ChromaError>> {
         match config {

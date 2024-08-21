@@ -125,7 +125,7 @@ impl HnswIndexConfig {
 /// synchronize access to the index between reads and writes.
 pub struct HnswIndex {
     ffi_ptr: *const IndexPtrFFI,
-    dimensionality: i32,
+    pub dimensionality: i32,
     pub id: Uuid,
 }
 

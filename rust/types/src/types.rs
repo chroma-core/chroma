@@ -31,3 +31,9 @@ impl ChromaError for ConversionError {
         }
     }
 }
+
+pub trait Value: Send + Sync + Clone + 'static {
+    fn size(&self) -> usize {
+        return 1;
+    }
+}

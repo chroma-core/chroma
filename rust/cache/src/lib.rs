@@ -5,12 +5,13 @@ use crate::cache::Cache;
 use crate::config::CacheConfig;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_types::Value;
 use std::hash::Hash;
 
 pub async fn from_config<K, V>(config: &CacheConfig) -> Result<Cache<K, V>, Box<dyn ChromaError>>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Value,
 {
     match config {
         CacheConfig::Unbounded(_) => Ok(Cache::Unbounded(

@@ -10,6 +10,7 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Value;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::io::SeekFrom;
 use thiserror::Error;
@@ -34,6 +35,12 @@ pub struct Block {
     // These are stored in sorted order by prefix and key for efficient lookups.
     pub data: RecordBatch,
     pub id: Uuid,
+}
+
+impl Value for Block {
+    fn size(&self) -> usize {
+        self.get_size()
+    }
 }
 
 impl Block {
