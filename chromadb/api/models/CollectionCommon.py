@@ -422,8 +422,6 @@ class CollectionCommon(Generic[ClientT]):
         if metadata:
             self._model["metadata"] = metadata
 
-<<<<<<< HEAD
-=======
     @staticmethod
     def _generate_ids_when_not_present(
         ids: Optional[IDs],
@@ -450,8 +448,7 @@ class CollectionCommon(Generic[ClientT]):
             generated_ids.append(str(uuid4()))
 
         return generated_ids
-    
->>>>>>> b7728942 (resolve merge conflicts)
+
     def _process_add_request(
         self,
         ids: Optional[OneOrMany[ID]],
@@ -480,7 +477,7 @@ class CollectionCommon(Generic[ClientT]):
             if unpacked_embedding_set["embeddings"] is not None
             else None
         )
-        
+
         generated_ids = self._generate_ids_when_not_present(
             unpacked_embedding_set["ids"],
             unpacked_embedding_set["documents"],
@@ -529,12 +526,7 @@ class CollectionCommon(Generic[ClientT]):
 
         return cast(Embeddings, embeddings)
 
-<<<<<<< HEAD
-    def _process_update_request(
-=======
-
     def _process_upsert_or_update_request(
->>>>>>> b7728942 (resolve merge conflicts)
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
@@ -567,76 +559,8 @@ class CollectionCommon(Generic[ClientT]):
             unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
         )
-<<<<<<< HEAD
-
-        prepared_embeddings = self._prepare_update_request(
-            normalized_embeddings,
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-        )
-
-        return {
-            "ids": unpacked_embedding_set["ids"],
-            "embeddings": prepared_embeddings,
-            "metadatas": unpacked_embedding_set["metadatas"],
-            "documents": unpacked_embedding_set["documents"],
-            "images": unpacked_embedding_set["images"],
-            "uris": unpacked_embedding_set["uris"],
-        }
-
-    def _prepare_upsert_request(
-        self,
-        embeddings: Optional[Embeddings],
-        documents: Optional[Documents],
-        images: Optional[Images],
-    ) -> Embeddings:
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            elif images is not None:
-                embeddings = self._embed(input=images)
-
-        return cast(Embeddings, embeddings)
-
-    def _process_upsert_request(
-        self,
-        ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
-            Union[
-                OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
-            ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
-    ) -> EmbeddingSet:
-        unpacked_embedding_set = self._unpack_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
-        )
-
-        normalized_embeddings = (
-            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
-            if unpacked_embedding_set["embeddings"] is not None
-            else None
-        )
-
-        self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
-            normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-            require_embeddings_or_data=False,
-        )
-
-        prepared_embeddings = self._prepare_upsert_request(
-=======
 
         prepared_embeddings = self._prepare_upsert_or_update_request(
->>>>>>> b7728942 (resolve merge conflicts)
             normalized_embeddings,
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],

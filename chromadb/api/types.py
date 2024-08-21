@@ -295,7 +295,7 @@ def validate_ids(ids: IDs) -> IDs:
 
         if len(id_) == 0:
             raise ValueError("Expected ID to be a non-empty str, got an empty string")
-        
+
         if id_ in seen:
             dups.add(id_)
         else:

@@ -261,18 +261,14 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-<<<<<<< HEAD
         self._client._update(
             self.id,
-            embedding_set["ids"],
+            cast(IDs, embedding_set["ids"]),
             cast(Embeddings, embedding_set["embeddings"]),
             embedding_set["metadatas"],
             embedding_set["documents"],
             embedding_set["uris"],
         )
-=======
-        self._client._update(self.id, cast(IDs, embedding_set["ids"]), cast(Embeddings, embedding_set["embeddings"]), embedding_set["metadatas"], embedding_set["documents"], embedding_set["uris"])
->>>>>>> b7728942 (resolve merge conflicts)
 
     def upsert(
         self,
