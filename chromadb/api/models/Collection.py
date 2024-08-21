@@ -9,6 +9,7 @@ from chromadb.api.types import (
     Include,
     Metadata,
     Document,
+    AddResult,
     Image,
     Where,
     IDs,
@@ -40,7 +41,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def add(
         self,
-        ids: Optional[OneOrMany[ID]],
+        ids: Optional[OneOrMany[ID]] = None,
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -51,7 +52,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+    ) -> AddResult:
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
@@ -89,6 +90,10 @@ class Collection(CollectionCommon["ServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
+        
+        return {
+            "ids": embedding_set["ids"],
+        }
 
     def get(
         self,
