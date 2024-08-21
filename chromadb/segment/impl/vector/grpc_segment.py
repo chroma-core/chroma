@@ -86,6 +86,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             include_embeddings=query["include_embeddings"],
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            query_metadata=query["request_metadata"],
         )
         response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
             request, timeout=self._request_timeout_seconds
