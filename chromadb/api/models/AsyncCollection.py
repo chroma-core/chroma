@@ -2,6 +2,7 @@ from typing import (
     TYPE_CHECKING,
     Optional,
     Union,
+    cast,
 )
 import numpy as np
 
@@ -16,6 +17,7 @@ from chromadb.api.types import (
     Where,
     IDs,
     GetResult,
+    Embeddings,
     QueryResult,
     ID,
     OneOrMany,
@@ -63,7 +65,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-        unpacked_embedding_set = self._unpack_embedding_set(
+        embedding_set = self._process_add_request(
             ids,
             embeddings,
             metadatas,
@@ -72,36 +74,13 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             uris,
         )
 
-        normalized_embeddings = (
-            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
-            if unpacked_embedding_set["embeddings"] is not None
-            else None
-        )
-
-        self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
-            normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-            require_embeddings_or_data=False,
-        )
-
-        prepared_embeddings = self._prepare_embeddings(
-            unpacked_embedding_set["embeddings"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-        )
-
         await self._client._add(
-            unpacked_embedding_set["ids"],
+            embedding_set["ids"],
             self.id,
-            prepared_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["uris"],
+            cast(Embeddings, embedding_set["embeddings"]),
+            embedding_set["metadatas"],
+            embedding_set["documents"],
+            embedding_set["uris"],
         )
 
     async def count(self) -> int:
@@ -280,17 +259,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_update_request(
+        embedding_set = self._process_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
+        await self._client._update(self.id,  embedding_set["ids"], cast(Embeddings, embedding_set["embeddings"]), embedding_set["metadatas"], embedding_set["documents"], embedding_set["uris"])
 
     async def upsert(
         self,
@@ -317,23 +290,17 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_upsert_request(
+        embedding_set = self._process_upsert_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
         await self._client._upsert(
             collection_id=self.id,
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=documents,
-            uris=uris,
+            ids=embedding_set["ids"],
+            embeddings=cast(Embeddings, embedding_set["embeddings"]),
+            metadatas=embedding_set["metadatas"],
+            documents=embedding_set["documents"],
+            uris=embedding_set["uris"],
         )
 
     async def delete(
