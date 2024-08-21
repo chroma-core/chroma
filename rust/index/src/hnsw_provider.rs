@@ -192,7 +192,7 @@ impl HnswIndexProvider {
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
             tracing::info!("Loading hnsw index file: {}", key);
-            let bytes_res = self.storage.get(&key).await;
+            let bytes_res = self.storage.get_parallel(&key).await;
             let bytes_read;
             let buf = match bytes_res {
                 Ok(buf) => {

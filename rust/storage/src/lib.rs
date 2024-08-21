@@ -94,6 +94,36 @@ impl Storage {
         }
     }
 
+    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+        match self {
+            Storage::S3(s3) => {
+                let res = s3.get_parallel(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                        _ => Err(GetError::S3Error(e)),
+                    },
+                }
+            }
+            Storage::Local(_) => unimplemented!(),
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                let res = admission_controlled_storage
+                    .get_parallel(key.to_string())
+                    .await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
+                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                            _ => Err(GetError::S3Error(e)),
+                        },
+                    },
+                }
+            }
+        }
+    }
+
     // TODO: Remove this once the upstream switches to consume non-streaming.
     pub async fn get_stream(
         &self,
