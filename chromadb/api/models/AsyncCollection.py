@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -74,8 +74,42 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             uris,
         )
 
+<<<<<<< HEAD
+=======
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
+
+        updated_ids = self._generate_ids_when_not_present(
+            unpacked_embedding_set["ids"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["uris"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["embeddings"],
+        )
+
+        self._validate_embedding_set(
+            updated_ids,
+            normalized_embeddings,
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
+            require_embeddings_or_data=False,
+        )
+
+        prepared_embeddings = self._prepare_embeddings(
+            unpacked_embedding_set["embeddings"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
+        )
+
+>>>>>>> da00cd7b (minor fixes and add tests)
         await self._client._add(
-            embedding_set["ids"],
+            cast(IDs, embedding_set["ids"]),
             self.id,
             cast(Embeddings, embedding_set["embeddings"]),
             embedding_set["metadatas"],
@@ -259,10 +293,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_update_request(
+        embedding_set = self._process_upsert_or_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
+<<<<<<< HEAD
         await self._client._update(
             self.id,
             embedding_set["ids"],
@@ -271,6 +306,9 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
+=======
+        await self._client._update(self.id, cast(IDs, embedding_set["ids"]), cast(Embeddings, embedding_set["embeddings"]), embedding_set["metadatas"], embedding_set["documents"], embedding_set["uris"])
+>>>>>>> b7728942 (resolve merge conflicts)
 
     async def upsert(
         self,
@@ -297,13 +335,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_upsert_request(
+        embedding_set = self._process_upsert_or_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
+
         await self._client._upsert(
             collection_id=self.id,
-            ids=embedding_set["ids"],
+            ids=cast(IDs, embedding_set["ids"]),
             embeddings=cast(Embeddings, embedding_set["embeddings"]),
             metadatas=embedding_set["metadatas"],
             documents=embedding_set["documents"],

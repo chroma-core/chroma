@@ -40,7 +40,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -82,7 +82,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
         self._client._add(
-            embedding_set["ids"],
+            cast(IDs, embedding_set["ids"]),
             self.id,
             cast(Embeddings, embedding_set["embeddings"]),
             embedding_set["metadatas"],
@@ -257,10 +257,11 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_update_request(
+        embedding_set = self._process_upsert_or_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
+<<<<<<< HEAD
         self._client._update(
             self.id,
             embedding_set["ids"],
@@ -269,6 +270,9 @@ class Collection(CollectionCommon["ServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
+=======
+        self._client._update(self.id, cast(IDs, embedding_set["ids"]), cast(Embeddings, embedding_set["embeddings"]), embedding_set["metadatas"], embedding_set["documents"], embedding_set["uris"])
+>>>>>>> b7728942 (resolve merge conflicts)
 
     def upsert(
         self,
@@ -295,13 +299,13 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_upsert_request(
+        embedding_set = self._process_upsert_or_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
         self._client._upsert(
             collection_id=self.id,
-            ids=embedding_set["ids"],
+            ids=cast(IDs, embedding_set["ids"]),
             embeddings=cast(Embeddings, embedding_set["embeddings"]),
             metadatas=embedding_set["metadatas"],
             documents=embedding_set["documents"],

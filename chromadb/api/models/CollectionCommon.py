@@ -10,7 +10,7 @@ from typing import (
     cast,
 )
 import numpy as np
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import chromadb.utils.embedding_functions as ef
 from chromadb.api.types import (
@@ -151,7 +151,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _unpack_embedding_set(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -181,7 +181,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_embedding_set(
         self,
-        ids: IDs,
+        ids: Optional[IDs],
         embeddings: Optional[Embeddings],
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
@@ -197,10 +197,6 @@ class CollectionCommon(Generic[ClientT]):
             validate_metadatas(metadatas) if metadatas is not None else None
         )
 
-        valid_documents = maybe_cast_one_to_many_document(documents)
-        valid_images = maybe_cast_one_to_many_image(images)
-        valid_uris = maybe_cast_one_to_many_uri(uris)
-
         # Check that one of embeddings or ducuments or images is provided
         if require_embeddings_or_data:
             if (
@@ -214,7 +210,7 @@ class CollectionCommon(Generic[ClientT]):
                 )
 
         # Only one of documents or images can be provided
-        if valid_documents is not None and valid_images is not None:
+        if documents is not None and images is not None:
             raise ValueError("You can only provide documents or images, not both.")
 
         # Check that, if they're provided, the lengths of the arrays match the length of ids
@@ -226,17 +222,17 @@ class CollectionCommon(Generic[ClientT]):
             raise ValueError(
                 f"Number of metadatas {len(valid_metadatas)} must match number of ids {len(valid_ids)}"
             )
-        if valid_documents is not None and len(valid_documents) != len(valid_ids):
+        if documents is not None and len(documents) != len(valid_ids):
             raise ValueError(
-                f"Number of documents {len(valid_documents)} must match number of ids {len(valid_ids)}"
+                f"Number of documents {len(documents)} must match number of ids {len(valid_ids)}"
             )
-        if valid_images is not None and len(valid_images) != len(valid_ids):
+        if images is not None and len(images) != len(valid_ids):
             raise ValueError(
-                f"Number of images {len(valid_images)} must match number of ids {len(valid_ids)}"
+                f"Number of images {len(images)} must match number of ids {len(valid_ids)}"
             )
-        if valid_uris is not None and len(valid_uris) != len(valid_ids):
+        if uris is not None and len(uris) != len(valid_ids):
             raise ValueError(
-                f"Number of uris {len(valid_uris)} must match number of ids {len(valid_ids)}"
+                f"Number of uris {len(uris)} must match number of ids {len(valid_ids)}"
             )
 
     def _prepare_embeddings(
@@ -426,9 +422,39 @@ class CollectionCommon(Generic[ClientT]):
         if metadata:
             self._model["metadata"] = metadata
 
+<<<<<<< HEAD
+=======
+    @staticmethod
+    def _generate_ids_when_not_present(
+        ids: Optional[IDs],
+        documents: Optional[Documents],
+        uris: Optional[URIs],
+        images: Optional[Images],
+        embeddings: Optional[Embeddings],
+    ) -> IDs:
+        if ids is not None and len(ids) > 0:
+            return ids
+
+        n = 0
+        if documents is not None:
+            n = len(documents)
+        elif uris is not None:
+            n = len(uris)
+        elif images is not None:
+            n = len(images)
+        elif embeddings is not None:
+            n = len(embeddings)
+
+        generated_ids = []
+        for _ in range(n):
+            generated_ids.append(str(uuid4()))
+
+        return generated_ids
+    
+>>>>>>> b7728942 (resolve merge conflicts)
     def _process_add_request(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -454,9 +480,17 @@ class CollectionCommon(Generic[ClientT]):
             if unpacked_embedding_set["embeddings"] is not None
             else None
         )
+        
+        generated_ids = self._generate_ids_when_not_present(
+            unpacked_embedding_set["ids"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["uris"],
+            unpacked_embedding_set["images"],
+            normalized_embeddings,
+        )
 
         self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
+            generated_ids,
             normalized_embeddings,
             unpacked_embedding_set["metadatas"],
             unpacked_embedding_set["documents"],
@@ -473,7 +507,7 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         return {
-            "ids": unpacked_embedding_set["ids"],
+            "ids": generated_ids,
             "embeddings": prepared_embeddings,
             "metadatas": unpacked_embedding_set["metadatas"],
             "documents": unpacked_embedding_set["documents"],
@@ -481,7 +515,7 @@ class CollectionCommon(Generic[ClientT]):
             "uris": unpacked_embedding_set["uris"],
         }
 
-    def _prepare_update_request(
+    def _prepare_upsert_or_update_request(
         self,
         embeddings: Optional[Embeddings],
         documents: Optional[Documents],
@@ -495,7 +529,12 @@ class CollectionCommon(Generic[ClientT]):
 
         return cast(Embeddings, embeddings)
 
+<<<<<<< HEAD
     def _process_update_request(
+=======
+
+    def _process_upsert_or_update_request(
+>>>>>>> b7728942 (resolve merge conflicts)
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
@@ -528,6 +567,7 @@ class CollectionCommon(Generic[ClientT]):
             unpacked_embedding_set["uris"],
             require_embeddings_or_data=False,
         )
+<<<<<<< HEAD
 
         prepared_embeddings = self._prepare_update_request(
             normalized_embeddings,
@@ -593,6 +633,10 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         prepared_embeddings = self._prepare_upsert_request(
+=======
+
+        prepared_embeddings = self._prepare_upsert_or_update_request(
+>>>>>>> b7728942 (resolve merge conflicts)
             normalized_embeddings,
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],
