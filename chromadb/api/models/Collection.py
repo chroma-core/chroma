@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, cast
 import numpy as np
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -13,6 +13,7 @@ from chromadb.api.types import (
     Where,
     IDs,
     GetResult,
+    Embeddings,
     QueryResult,
     ID,
     OneOrMany,
@@ -71,7 +72,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-        unpacked_embedding_set = self._unpack_embedding_set(
+        embedding_set = self._process_add_request(
             ids,
             embeddings,
             metadatas,
@@ -79,38 +80,16 @@ class Collection(CollectionCommon["ServerAPI"]):
             images,
             uris,
         )
-
-        normalized_embeddings = (
-            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
-            if unpacked_embedding_set["embeddings"] is not None
-            else None
-        )
-
-        self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
-            normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-            require_embeddings_or_data=False,
-        )
-
-        prepared_embeddings = self._prepare_embeddings(
-            normalized_embeddings,
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-        )
-
+        
         self._client._add(
-            unpacked_embedding_set["ids"],
+            embedding_set["ids"],
             self.id,
-            prepared_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["uris"],
+            cast(Embeddings, embedding_set["embeddings"]),
+            embedding_set["metadatas"],
+            embedding_set["documents"],
+            embedding_set["uris"],
         )
+        
 
     def get(
         self,
@@ -279,17 +258,11 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_update_request(
+        embedding_set = self._process_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
+        self._client._update(self.id, embedding_set["ids"], cast(Embeddings, embedding_set["embeddings"]), embedding_set["metadatas"], embedding_set["documents"], embedding_set["uris"])
 
     def upsert(
         self,
@@ -316,23 +289,17 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_upsert_request(
+        embedding_set = self._process_upsert_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
         self._client._upsert(
             collection_id=self.id,
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=documents,
-            uris=uris,
+            ids=embedding_set["ids"],
+            embeddings=cast(Embeddings, embedding_set["embeddings"]),
+            metadatas=embedding_set["metadatas"],
+            documents=embedding_set["documents"],
+            uris=embedding_set["uris"],
         )
 
     def delete(

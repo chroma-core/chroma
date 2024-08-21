@@ -425,9 +425,151 @@ class CollectionCommon(Generic[ClientT]):
             self._model["name"] = name
         if metadata:
             self._model["metadata"] = metadata
+            
+    def _process_add_request(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+            ]
+        ],
+        metadatas: Optional[OneOrMany[Metadata]],
+        documents: Optional[OneOrMany[Document]],
+        images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
+        ) -> EmbeddingSet:
+        
+        unpacked_embedding_set = self._unpack_embedding_set(
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            images,
+            uris,
+        )
 
-    # TODO: Refactor this into separate functions for validation and preparation
-    def _validate_and_prepare_update_request(
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
+
+        self._validate_embedding_set(
+            unpacked_embedding_set["ids"],
+            normalized_embeddings,
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
+            require_embeddings_or_data=False,
+        )
+
+        prepared_embeddings = self._prepare_embeddings(
+            normalized_embeddings,
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
+        )
+        
+        return {
+            "ids": unpacked_embedding_set["ids"],
+            "embeddings": prepared_embeddings,
+            "metadatas":  unpacked_embedding_set["metadatas"],
+            "documents": unpacked_embedding_set["documents"],
+            "images": unpacked_embedding_set["images"],
+            "uris":  unpacked_embedding_set["uris"],
+        }
+
+    def _prepare_update_request(
+        self,
+        embeddings: Optional[Embeddings],
+        documents: Optional[Documents],
+        images: Optional[Images],
+    ) -> Embeddings:
+
+        if embeddings is None:
+            if documents is not None:
+                embeddings = self._embed(
+                    input=documents
+                )
+            elif images is not None:
+                embeddings = self._embed(
+                    input=images
+                )
+
+        return cast(Embeddings, embeddings)
+        
+    def _process_update_request(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[  # type: ignore[type-arg]
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+            ]
+        ],
+        metadatas: Optional[OneOrMany[Metadata]],
+        documents: Optional[OneOrMany[Document]],
+        images: Optional[OneOrMany[Image]],
+        uris: Optional[OneOrMany[URI]]
+    ) -> EmbeddingSet:
+        unpacked_embedding_set = self._unpack_embedding_set(
+            ids, embeddings, metadatas, documents, images, uris
+        )
+
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
+            if unpacked_embedding_set["embeddings"] is not None
+            else None
+        )
+
+        self._validate_embedding_set(
+            unpacked_embedding_set["ids"],
+            normalized_embeddings,
+            unpacked_embedding_set["metadatas"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+            unpacked_embedding_set["uris"],
+            require_embeddings_or_data=False,
+        )
+        
+        prepared_embeddings = self._prepare_update_request(
+            normalized_embeddings,
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["images"],
+        )
+        
+        return {
+            "ids": unpacked_embedding_set["ids"],
+            "embeddings": prepared_embeddings,
+            "metadatas":  unpacked_embedding_set["metadatas"],
+            "documents": unpacked_embedding_set["documents"],
+            "images": unpacked_embedding_set["images"],
+            "uris":  unpacked_embedding_set["uris"],
+        }
+
+    def _prepare_upsert_request(
+        self,
+        embeddings: Optional[Embeddings],
+        documents: Optional[Documents],
+        images: Optional[Images],
+    ) -> Embeddings:
+
+        if embeddings is None:
+            if documents is not None:
+                embeddings = self._embed(
+                    input=documents
+                )
+            elif images is not None:
+                embeddings = self._embed(
+                    input=images
+                )
+
+        return cast(Embeddings, embeddings)
+
+    def _process_upsert_request(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
@@ -440,13 +582,7 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]],
         uris: Optional[OneOrMany[URI]],
-    ) -> Tuple[
-        IDs,
-        Embeddings,
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ]:
+    ) -> EmbeddingSet:
         unpacked_embedding_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
@@ -467,82 +603,20 @@ class CollectionCommon(Generic[ClientT]):
             require_embeddings_or_data=False,
         )
 
-        if normalized_embeddings is None:
-            if unpacked_embedding_set["documents"] is not None:
-                normalized_embeddings = self._embed(
-                    input=unpacked_embedding_set["documents"]
-                )
-            elif unpacked_embedding_set["images"] is not None:
-                normalized_embeddings = self._embed(
-                    input=unpacked_embedding_set["images"]
-                )
-
-        return (
-            unpacked_embedding_set["ids"],
-            cast(Embeddings, normalized_embeddings),
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["uris"],
-        )
-
-    # TODO: Refactor this into separate functions for validation and preparation
-    def _validate_and_prepare_upsert_request(
-        self,
-        ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
-            Union[
-                OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
-            ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
-    ) -> Tuple[
-        IDs,
-        Embeddings,
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ]:
-        unpacked_embedding_set = self._unpack_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
-        )
-
-        normalized_embeddings = (
-            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
-            if unpacked_embedding_set["embeddings"] is not None
-            else None
-        )
-
-        self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
+        prepared_embeddings = self._prepare_upsert_request(
             normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-            require_embeddings_or_data=False,
         )
 
-        if normalized_embeddings is None:
-            if unpacked_embedding_set["documents"] is not None:
-                normalized_embeddings = self._embed(
-                    input=unpacked_embedding_set["documents"]
-                )
-            else:
-                normalized_embeddings = self._embed(
-                    input=unpacked_embedding_set["images"]
-                )
-
-        return (
-            unpacked_embedding_set["ids"],
-            cast(Embeddings, normalized_embeddings),
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["uris"],
-        )
+        return {
+            "ids": unpacked_embedding_set["ids"],
+            "embeddings": prepared_embeddings,
+            "metadatas":  unpacked_embedding_set["metadatas"],
+            "documents": unpacked_embedding_set["documents"],
+            "images": unpacked_embedding_set["images"],
+            "uris":  unpacked_embedding_set["uris"],
+        }
 
     # TODO: Rename this function
     def _validate_and_prepare_delete_request(
