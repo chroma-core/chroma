@@ -263,7 +263,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        await self._client._update(self.id,  embedding_set["ids"], cast(Embeddings, embedding_set["embeddings"]), embedding_set["metadatas"], embedding_set["documents"], embedding_set["uris"])
+        await self._client._update(
+            self.id,
+            embedding_set["ids"],
+            cast(Embeddings, embedding_set["embeddings"]),
+            embedding_set["metadatas"],
+            embedding_set["documents"],
+            embedding_set["uris"],
+        )
 
     async def upsert(
         self,

@@ -80,7 +80,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             images,
             uris,
         )
-        
+
         self._client._add(
             embedding_set["ids"],
             self.id,
@@ -89,7 +89,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             embedding_set["documents"],
             embedding_set["uris"],
         )
-        
 
     def get(
         self,
@@ -262,7 +261,14 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        self._client._update(self.id, embedding_set["ids"], cast(Embeddings, embedding_set["embeddings"]), embedding_set["metadatas"], embedding_set["documents"], embedding_set["uris"])
+        self._client._update(
+            self.id,
+            embedding_set["ids"],
+            cast(Embeddings, embedding_set["embeddings"]),
+            embedding_set["metadatas"],
+            embedding_set["documents"],
+            embedding_set["uris"],
+        )
 
     def upsert(
         self,
