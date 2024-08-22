@@ -165,8 +165,8 @@ class IncludeEnum(str, Enum):
     data = "data"
 
 
-# Embedding set
-class EmbeddingSet(TypedDict):
+# Record set
+class RecordSet(TypedDict):
     ids: IDs
     embeddings: Optional[Embeddings]
     metadatas: Optional[Metadatas]

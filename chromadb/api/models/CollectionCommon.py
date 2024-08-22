@@ -205,9 +205,9 @@ class CollectionCommon(Generic[ClientT]):
         if require_embeddings_or_data:
             if (
                 valid_embeddings is None
-                and documents is None
-                and images is None
-                and uris is None
+                and valid_documents is None
+                and valid_images is None
+                and valid_uris is None
             ):
                 raise ValueError(
                     "You must provide embeddings, documents, images, or uris."
