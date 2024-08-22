@@ -52,7 +52,7 @@ def maybe_cast_one_to_many_ids(target: Optional[OneOrMany[ID]]) -> Optional[IDs]
     # No target
     if target is None:
         return None
-    
+
     if isinstance(target, str):
         # One ID
         return cast(IDs, [target])
