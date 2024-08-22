@@ -324,7 +324,7 @@ impl DistributedHNSWSegmentReader {
             };
 
             let index =
-                match hnsw_index_provider.get(&index_uuid) {
+                match hnsw_index_provider.get(&index_uuid, &segment.collection) {
                     Some(index) => index,
                     None => {
                         match hnsw_index_provider
