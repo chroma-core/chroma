@@ -248,7 +248,7 @@ class EmbeddingFunction(Protocol[D]):
 
             unpacked_result = maybe_cast_one_to_many_embedding(result)
 
-            return validate_embeddings(unpacked_result) # type: ignore[arg-type]
+            return validate_embeddings(unpacked_result)  # type: ignore[arg-type]
 
         setattr(cls, "__call__", __call__)
 
