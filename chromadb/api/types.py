@@ -210,6 +210,10 @@ Loadable = List[Optional[Image]]
 L = TypeVar("L", covariant=True, bound=Loadable)
 
 
+class AddResult(TypedDict):
+    ids: IDs
+
+
 class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[List[Embedding]]
@@ -299,6 +303,10 @@ def validate_ids(ids: IDs) -> IDs:
     for id_ in ids:
         if not isinstance(id_, str):
             raise ValueError(f"Expected ID to be a str, got {id_}")
+
+        if len(id_) == 0:
+            raise ValueError("Expected ID to be a non-empty str, got an empty string")
+
         if id_ in seen:
             dups.add(id_)
         else:
