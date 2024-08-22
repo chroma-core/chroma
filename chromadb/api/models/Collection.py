@@ -14,6 +14,7 @@ from chromadb.api.types import (
     Where,
     IDs,
     GetResult,
+    AddResult,
     QueryResult,
     ID,
     OneOrMany,
@@ -40,7 +41,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def add(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -51,7 +52,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> None:
+    ) -> AddResult:
         """Add embeddings to the data store.
         Args:
             ids: The ids of the embeddings you wish to add
@@ -81,7 +82,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris,
         )
 
-        self._client._add(
+        result = self._client._add(
             record_set["ids"],
             self.id,
             cast(Embeddings, record_set["embeddings"]),
@@ -89,6 +90,8 @@ class Collection(CollectionCommon["ServerAPI"]):
             record_set["documents"],
             record_set["uris"],
         )
+
+        return result
 
     def get(
         self,
@@ -264,7 +267,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             documents,
             images,
             uris,
-            require_embeddings_or_data=False,
         )
 
         self._client._update(
@@ -308,7 +310,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             documents,
             images,
             uris,
-            require_embeddings_or_data=True,
         )
 
         self._client._upsert(

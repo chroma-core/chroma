@@ -34,6 +34,17 @@ class InvalidCollectionException(ChromaError):
         return "InvalidCollection"
 
 
+class InvalidInputError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 400  # Bad Request
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "InvalidInput"
+
+
 class IDAlreadyExistsError(ChromaError):
     @overrides
     def code(self) -> int:

@@ -137,6 +137,14 @@ describe("add collections", () => {
     }
   });
 
+  test("It should generate IDs if not provided", async () => {
+    const collection = await client.createCollection({ name: "test" });
+    const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
+    const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
+    const resp = await client.addRecords(collection, { embeddings, metadatas });
+    expect(resp.ids.length).toEqual(4);
+  });
+
   test("should error on empty embedding", async () => {
     const collection = await client.createCollection({ name: "test" });
     const ids = ["id1"];

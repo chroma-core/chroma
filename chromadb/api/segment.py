@@ -15,7 +15,11 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
 from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
-from chromadb.errors import InvalidDimensionException, InvalidCollectionException
+from chromadb.errors import (
+    InvalidDimensionException,
+    InvalidCollectionException,
+    InvalidInputError,
+)
 
 from chromadb.api.types import (
     URI,
@@ -31,6 +35,7 @@ from chromadb.api.types import (
     WhereDocument,
     Include,
     GetResult,
+    AddResult,
     QueryResult,
     validate_metadata,
     validate_update_metadata,
@@ -339,10 +344,17 @@ class SegmentAPI(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> AddResult:
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
+
+        ids = self.generate_ids_when_not_present(
+            ids=ids,
+            n_documents=len(documents) if documents is not None else 0,
+            n_uris=len(uris) if uris is not None else 0,
+            n_embeddings=len(embeddings),
+        )
 
         self._validate_embedding_record_set(
             collection=coll,
@@ -375,7 +387,7 @@ class SegmentAPI(ServerAPI):
                 with_uris=len(ids) if uris is not None else 0,
             )
         )
-        return True
+        return AddResult(ids=ids)
 
     @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)
     @override
@@ -814,6 +826,30 @@ class SegmentAPI(ServerAPI):
     def get_max_batch_size(self) -> int:
         return self._producer.max_batch_size
 
+    @staticmethod
+    def generate_ids_when_not_present(
+        ids: Optional[IDs],
+        n_documents: int,
+        n_uris: int,
+        n_embeddings: int,
+    ) -> IDs:
+        if ids is not None and len(ids) != 0:
+            return ids
+
+        n = 0
+        if n_documents > 0:
+            n = n_documents
+        elif n_uris > 0:
+            n = n_uris
+        elif n_embeddings > 0:
+            n = n_embeddings
+
+        generated_ids: List[str] = []
+        for _ in range(n):
+            generated_ids.append(str(uuid4()))
+
+        return generated_ids
+
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
     # TODO: promote collection -> topic to a base class method so that it can be
@@ -838,17 +874,20 @@ class SegmentAPI(ServerAPI):
 
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
 
-        validate_ids(ids)
-        validate_embeddings(embeddings) if embeddings is not None else None
-        validate_metadatas(metadatas) if metadatas is not None else None
-
         if (
             require_embeddings_or_data
-            and embeddings is None
-            and documents is None
-            and uris is None
+            and (embeddings is None or len(embeddings) == 0)
+            and (documents is None or len(documents) == 0)
+            and (uris is None or len(uris) == 0)
         ):
-            raise ValueError("You must provide embeddings, documents, or uris.")
+            raise InvalidInputError("You must provide embeddings, documents, or uris.")
+
+        try:
+            validate_ids(ids)
+            validate_embeddings(embeddings) if embeddings is not None else None
+            validate_metadatas(metadatas) if metadatas is not None else None
+        except ValueError as e:
+            raise InvalidInputError(str(e)) from e
 
         entities: List[Tuple[Any, str]] = [
             (embeddings, "embeddings"),
@@ -866,7 +905,7 @@ class SegmentAPI(ServerAPI):
             n = len(entity[0])
 
             if n != len(ids):
-                raise ValueError(
+                raise InvalidInputError(
                     f"Number of {name} ({n}) does not match number of ids ({n_ids})"
                 )
 

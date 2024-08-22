@@ -30,6 +30,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     GetResult,
+    AddResult,
     QueryResult,
     CollectionMetadata,
     validate_batch,
@@ -448,11 +449,25 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> AddResult:
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
-        await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
-        return True
+
+        resp_json = await self._make_request(
+            "post",
+            "/collections/" + str(collection_id) + "/add",
+            json={
+                "ids": batch[0],
+                "embeddings": batch[1],
+                "metadatas": batch[2],
+                "documents": batch[3],
+                "uris": batch[4],
+            },
+        )
+
+        return AddResult(
+            ids=resp_json["ids"],
+        )
 
     @trace_method("AsyncFastAPI._update", OpenTelemetryGranularity.ALL)
     @override

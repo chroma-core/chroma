@@ -22,6 +22,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     GetResult,
+    AddResult,
     QueryResult,
     CollectionMetadata,
     validate_batch,
@@ -413,15 +414,29 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> AddResult:
         """
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
-        self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
-        return True
+
+        resp_json = self._make_request(
+            "post",
+            "/collections/" + str(collection_id) + "/add",
+            json={
+                "ids": batch[0],
+                "embeddings": batch[1],
+                "metadatas": batch[2],
+                "documents": batch[3],
+                "uris": batch[4],
+            },
+        )
+
+        return AddResult(
+            ids=resp_json["ids"],
+        )
 
     @trace_method("FastAPI._update", OpenTelemetryGranularity.ALL)
     @override

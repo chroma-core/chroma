@@ -27,7 +27,7 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 # record sets so we explicitly create a large record set without using Hypothesis
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=1, max_size=500),
+    record_set=strategies.recordsets(collection_st, min_size=0, max_size=500),
     should_compact=st.booleans(),
 )
 @settings(
@@ -105,9 +105,12 @@ def _test_add(
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
-    coll.add(**record_set)  # type: ignore
+    result = coll.add(**record_set)  # type: ignore
     # Only wait for compaction if the size of the collection is
     # some minimal size
+
+    normalized_record_set["ids"] = result["ids"]
+
     if (
         not NOT_CLUSTER_ONLY
         and should_compact
@@ -287,3 +290,62 @@ def test_add_partial(client: ClientAPI) -> None:
     assert results["ids"] == ["1", "2", "3"]
     assert results["metadatas"] == [{"a": 1}, None, {"a": 3}]
     assert results["documents"] == ["a", "b", None]
+
+
+def test_add_with_no_ids(client: ClientAPI) -> None:
+    """Tests adding a record set with some of the fields set to None."""
+    reset(client)
+
+    coll = client.create_collection("test")
+    # TODO: We need to clean up the api types to support this typing
+    coll.add(
+        ids=[],
+        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
+        documents=["a", "b", None],  # type: ignore
+    )
+
+    results = coll.get()
+    assert len(results["ids"]) == 3
+
+
+def test_add_with_partial_ids(client: ClientAPI) -> None:
+    """Tests adding a record set with some of the fields set to None."""
+    reset(client)
+
+    coll = client.create_collection("test")
+    # TODO: We need to clean up the api types to support this typing
+
+    with pytest.raises(Exception, match="Expected ID to be a non-empty str"):
+        coll.add(
+            ids=["1", ""],
+            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+            metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
+            documents=["a", "b", None],  # type: ignore
+        )
+
+    with pytest.raises(Exception, match="does not match number of ids"):
+        coll.add(
+            ids=["1", "2"],
+            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+            metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
+            documents=["a", "b", None],  # type: ignore
+        )
+
+
+def test_add_with_no_data(client: ClientAPI) -> None:
+    """Tests adding a record set with some of the fields set to None."""
+    reset(client)
+
+    coll = client.create_collection("test")
+    # TODO: We need to clean up the api types to support this typing
+
+    with pytest.raises(
+        Exception, match="You must provide embeddings, documents, or uris."
+    ):
+        coll.add(
+            ids=["1"],
+            embeddings=[],  # type: ignore
+            metadatas=[{"a": 1}],  # type: ignore
+            documents=[],  # type: ignore
+        )

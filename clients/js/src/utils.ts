@@ -4,6 +4,7 @@ import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import {
   AddRecordsParams,
   BaseRecordOperationParams,
+  BaseRecordOperationParamsWithIDsOptional,
   Collection,
   Metadata,
   MultiRecordOperationParams,
@@ -82,10 +83,10 @@ export function isBrowser() {
 }
 
 function arrayifyParams(
-  params: BaseRecordOperationParams,
+  params: BaseRecordOperationParamsWithIDsOptional,
 ): MultiRecordOperationParams {
   return {
-    ids: toArray(params.ids),
+    ids: params.ids !== undefined ? toArray(params.ids) : [],
     embeddings: params.embeddings
       ? toArrayOfArrays(params.embeddings)
       : undefined,
@@ -123,16 +124,6 @@ export async function prepareRecordRequest(
         `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
       );
     }
-  }
-
-  if (
-    (embeddingsArray !== undefined && ids.length !== embeddingsArray.length) ||
-    (metadatas !== undefined && ids.length !== metadatas.length) ||
-    (documents !== undefined && ids.length !== documents.length)
-  ) {
-    throw new Error(
-      "ids, embeddings, metadatas, and documents must all be the same length",
-    );
   }
 
   const uniqueIds = new Set(ids);
