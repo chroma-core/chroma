@@ -25,8 +25,8 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
-    validate_batch,
     convert_np_embeddings_to_list,
+    validate_batch,
 )
 from chromadb.auth import (
     ClientAuthProvider,

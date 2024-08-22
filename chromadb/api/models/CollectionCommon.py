@@ -41,13 +41,13 @@ from chromadb.api.types import (
     validate_ids,
     validate_include,
     validate_metadata,
-    validate_metadatas,
     validate_embeddings,
     validate_embedding_function,
     validate_n_results,
     validate_where,
     validate_where_document,
     record_set_contains_one_of,
+    validate_record_set,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -168,37 +168,6 @@ class CollectionCommon(Generic[ClientT]):
             "images": maybe_cast_one_to_many(images),
             "uris": maybe_cast_one_to_many(uris),
         }
-
-    @staticmethod
-    def _validate_record_set(
-        record_set: RecordSet,
-        require_data: bool,
-    ) -> None:
-        validate_ids(record_set["ids"])
-        validate_embeddings(record_set["embeddings"]) if record_set[
-            "embeddings"
-        ] is not None else None
-        validate_metadatas(record_set["metadatas"]) if record_set[
-            "metadatas"
-        ] is not None else None
-
-        # Only one of documents or images can be provided
-        if record_set["documents"] is not None and record_set["images"] is not None:
-            raise ValueError("You can only provide documents or images, not both.")
-
-        required_fields: Include = ["embeddings", "documents", "images", "uris"]  # type: ignore[list-item]
-        if not require_data:
-            required_fields += ["metadatas"]  # type: ignore[list-item]
-
-        if not record_set_contains_one_of(record_set, include=required_fields):
-            raise ValueError(f"You must provide one of {', '.join(required_fields)}")
-
-        valid_ids = record_set["ids"]
-        for key in ["embeddings", "metadatas", "documents", "images", "uris"]:
-            if record_set[key] is not None and len(record_set[key]) != len(valid_ids):  # type: ignore[literal-required]
-                raise ValueError(
-                    f"Number of {key} {len(record_set[key])} must match number of ids {len(valid_ids)}"  # type: ignore[literal-required]
-                )
 
     def _compute_embeddings(
         self,
@@ -406,7 +375,7 @@ class CollectionCommon(Generic[ClientT]):
             uris=uris,
         )
 
-        self._validate_record_set(
+        validate_record_set(
             record_set,
             require_data=True,
         )
@@ -443,7 +412,7 @@ class CollectionCommon(Generic[ClientT]):
             uris=uris,
         )
 
-        self._validate_record_set(
+        validate_record_set(
             record_set,
             require_data=True,
         )
@@ -481,7 +450,7 @@ class CollectionCommon(Generic[ClientT]):
             uris=uris,
         )
 
-        self._validate_record_set(
+        validate_record_set(
             record_set,
             require_data=False,
         )

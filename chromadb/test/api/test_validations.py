@@ -4,6 +4,8 @@ from chromadb.api.types import (
     RecordSet,
     record_set_contains_one_of,
     maybe_cast_one_to_many_embedding,
+    validate_embeddings,
+    Embeddings,
 )
 
 
@@ -53,13 +55,13 @@ def test_maybe_cast_one_to_many_embedding() -> None:
     assert maybe_cast_one_to_many_embedding(None) is None
 
     # Test with a single embedding as a list
-    single_embedding = [1.0, 2.0, 3.0]
+    single_embedding = np.array([1.0, 2.0, 3.0])
     result = maybe_cast_one_to_many_embedding(single_embedding)
     assert result == [single_embedding]
 
     # Test with multiple embeddings as a list of lists
-    multiple_embeddings = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
-    result = maybe_cast_one_to_many_embedding(multiple_embeddings)  # type: ignore[arg-type]
+    multiple_embeddings = [np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0])]
+    result = maybe_cast_one_to_many_embedding(multiple_embeddings)
     assert result == multiple_embeddings
 
     # Test with a numpy array (single embedding)
@@ -96,3 +98,31 @@ def test_maybe_cast_one_to_many_embedding() -> None:
         match="Expected embeddings to be a list or a numpy array, got str",
     ):
         maybe_cast_one_to_many_embedding("")  # type: ignore[arg-type]
+
+
+def test_embeddings_validation() -> None:
+    invalid_embeddings = [[0, 0, True], [1.2, 2.24, 3.2]]
+
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(invalid_embeddings)  # type: ignore[arg-type]
+
+    assert "Expected each value in the embedding to be a int or float" in str(e)
+
+    invalid_embeddings = [[0, 0, "invalid"], [1.2, 2.24, 3.2]]
+
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(invalid_embeddings)  # type: ignore[arg-type]
+
+    assert "Expected each value in the embedding to be a int or float" in str(e)
+
+    with pytest.raises(ValueError) as e:
+        validate_embeddings("invalid")  # type: ignore[arg-type]
+
+    assert "Expected embeddings to be a list, got str" in str(e)
+
+
+def test_0dim_embedding_validation() -> None:
+    embds: Embeddings = [[]]  # type: ignore[list-item]
+    with pytest.raises(ValueError) as e:
+        validate_embeddings(embds)
+    assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)

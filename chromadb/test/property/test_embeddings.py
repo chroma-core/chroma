@@ -10,9 +10,9 @@ from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import (
     ID,
-    Embeddings,
     Include,
     IDs,
+    Embeddings,
     validate_embeddings,
     maybe_cast_one_to_many_embedding,
 )
@@ -803,7 +803,6 @@ def test_autocasting_validate_embeddings_for_compatible_types(
     supported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings(10, 10, supported_types)
-
     validated_embeddings = validate_embeddings(maybe_cast_one_to_many_embedding(embds))  # type: ignore[arg-type]
     assert all(
         [
