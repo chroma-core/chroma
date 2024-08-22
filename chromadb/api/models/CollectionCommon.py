@@ -25,7 +25,6 @@ from chromadb.api.types import (
     Include,
     Loadable,
     Metadata,
-    Metadatas,
     Document,
     Documents,
     Image,
@@ -45,7 +44,6 @@ from chromadb.api.types import (
     validate_ids,
     validate_include,
     validate_metadata,
-    validate_metadatas,
     validate_embeddings,
     validate_embedding_function,
     validate_n_results,
@@ -180,64 +178,12 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_embedding_set(
         self,
-        ids: IDs,
-        embeddings: Optional[Embeddings],
-        metadatas: Optional[Metadatas],
         documents: Optional[Documents],
         images: Optional[Images],
-        uris: Optional[URIs],
-        require_embeddings_or_data: bool = True,
     ) -> None:
-        valid_ids = validate_ids(ids)
-        valid_embeddings = (
-            validate_embeddings(embeddings) if embeddings is not None else None
-        )
-        valid_metadatas = (
-            validate_metadatas(metadatas) if metadatas is not None else None
-        )
-
-        # Already validated from being unpacked from OneOrMany data types
-        valid_documents = documents
-        valid_images = images
-        valid_uris = uris
-
-        # Check that one of embeddings or ducuments or images is provided
-        if require_embeddings_or_data:
-            if (
-                valid_embeddings is None
-                and valid_documents is None
-                and valid_images is None
-                and valid_uris is None
-            ):
-                raise ValueError(
-                    "You must provide embeddings, documents, images, or uris."
-                )
-
         # Only one of documents or images can be provided
         if documents is not None and images is not None:
             raise ValueError("You can only provide documents or images, not both.")
-
-        # Check that, if they're provided, the lengths of the arrays match the length of ids
-        if valid_embeddings is not None and len(valid_embeddings) != len(valid_ids):
-            raise ValueError(
-                f"Number of embeddings {len(valid_embeddings)} must match number of ids {len(valid_ids)}"
-            )
-        if valid_metadatas is not None and len(valid_metadatas) != len(valid_ids):
-            raise ValueError(
-                f"Number of metadatas {len(valid_metadatas)} must match number of ids {len(valid_ids)}"
-            )
-        if documents is not None and len(documents) != len(valid_ids):
-            raise ValueError(
-                f"Number of documents {len(documents)} must match number of ids {len(valid_ids)}"
-            )
-        if images is not None and len(images) != len(valid_ids):
-            raise ValueError(
-                f"Number of images {len(images)} must match number of ids {len(valid_ids)}"
-            )
-        if uris is not None and len(uris) != len(valid_ids):
-            raise ValueError(
-                f"Number of uris {len(uris)} must match number of ids {len(valid_ids)}"
-            )
 
     def _compute_embeddings(
         self,
@@ -453,12 +399,8 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
-            normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
         )
 
         prepared_embeddings = self._compute_embeddings(
@@ -517,13 +459,8 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
-            normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-            require_embeddings_or_data,
         )
 
         prepared_embeddings = self._compute_embeddings_upsert_or_update_request(

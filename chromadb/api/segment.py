@@ -37,6 +37,9 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    validate_ids,
+    validate_embeddings,
+    validate_metadatas,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -48,7 +51,7 @@ from chromadb.telemetry.product.events import (
 )
 
 import chromadb.types as t
-from typing import Optional, Sequence, Generator, List, cast, Set, Dict
+from typing import Optional, Sequence, Generator, List, cast, Set, Dict, Tuple, Any
 from overrides import override
 from uuid import UUID, uuid4
 import time
@@ -340,10 +343,17 @@ class SegmentAPI(ServerAPI):
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
-        validate_batch(
-            (ids, embeddings, metadatas, documents, uris),
-            {"max_batch_size": self.get_max_batch_size()},
+
+        self._validate_embedding_record_set(
+            collection=coll,
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            uris=uris,
+            metadatas=metadatas,
+            require_embeddings_or_data=True,
         )
+
         records_to_submit = list(
             _records(
                 t.Operation.ADD,
@@ -354,7 +364,6 @@ class SegmentAPI(ServerAPI):
                 uris=uris,
             )
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -382,10 +391,17 @@ class SegmentAPI(ServerAPI):
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
-        validate_batch(
-            (ids, embeddings, metadatas, documents, uris),
-            {"max_batch_size": self.get_max_batch_size()},
+
+        self._validate_embedding_record_set(
+            collection=coll,
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            uris=uris,
+            metadatas=metadatas,
+            require_embeddings_or_data=False,
         )
+
         records_to_submit = list(
             _records(
                 t.Operation.UPDATE,
@@ -396,7 +412,6 @@ class SegmentAPI(ServerAPI):
                 uris=uris,
             )
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -426,10 +441,17 @@ class SegmentAPI(ServerAPI):
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
-        validate_batch(
-            (ids, embeddings, metadatas, documents, uris),
-            {"max_batch_size": self.get_max_batch_size()},
+
+        self._validate_embedding_record_set(
+            collection=coll,
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            uris=uris,
+            metadatas=metadatas,
+            require_embeddings_or_data=True,
         )
+
         records_to_submit = list(
             _records(
                 t.Operation.UPSERT,
@@ -440,7 +462,6 @@ class SegmentAPI(ServerAPI):
                 uris=uris,
             )
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         return True
@@ -606,10 +627,12 @@ class SegmentAPI(ServerAPI):
         if len(ids_to_delete) == 0:
             return []
 
+        self._validate_embedding_record_set(
+            collection=coll, ids=ids_to_delete, require_embeddings_or_data=False
+        )
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -799,15 +822,61 @@ class SegmentAPI(ServerAPI):
         "SegmentAPI._validate_embedding_record_set", OpenTelemetryGranularity.ALL
     )
     def _validate_embedding_record_set(
-        self, collection: t.Collection, records: List[t.OperationRecord]
+        self,
+        ids: IDs,
+        collection: t.Collection,
+        require_embeddings_or_data: bool,
+        embeddings: Optional[Embeddings] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        metadatas: Optional[Metadatas] = None,
     ) -> None:
-        """Validate the dimension of an embedding record before submitting it to the system."""
+        validate_batch(
+            (ids, embeddings, metadatas, documents, uris),
+            {"max_batch_size": self.get_max_batch_size()},
+        )
+
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
-        for record in records:
-            if record["embedding"]:
-                self._validate_dimension(
-                    collection, len(record["embedding"]), update=True
+
+        validate_ids(ids)
+        validate_embeddings(embeddings) if embeddings is not None else None
+        validate_metadatas(metadatas) if metadatas is not None else None
+
+        if (
+            require_embeddings_or_data
+            and embeddings is None
+            and documents is None
+            and uris is None
+        ):
+            raise ValueError("You must provide embeddings, documents, or uris.")
+
+        entities: List[Tuple[Any, str]] = [
+            (embeddings, "embeddings"),
+            (metadatas, "metadatas"),
+            (documents, "documents"),
+            (uris, "uris"),
+        ]
+
+        n_ids = len(ids)
+        for entity in entities:
+            if entity[0] is None:
+                continue
+
+            name = entity[1]
+            n = len(entity[0])
+
+            if n != len(ids):
+                raise ValueError(
+                    f"Number of {name} ({n}) does not match number of ids ({n_ids})"
                 )
+
+        if embeddings is None:
+            return
+
+        """Validate the dimension of an embedding record before submitting it to the system."""
+        for embedding in embeddings:
+            if embedding:
+                self._validate_dimension(collection, len(embedding), update=True)
 
     # This method is intentionally left untraced because otherwise it can emit thousands of spans for requests containing many embeddings.
     def _validate_dimension(
