@@ -200,6 +200,8 @@ impl DataRecordStorage {
         let document_size = bit_util::round_upto_multiple_of_64(self.get_document_size());
 
         // offset sizing
+        // https://docs.rs/arrow-buffer/52.2.0/arrow_buffer/buffer/struct.OffsetBuffer.html
+        // 4 bytes per offset entry, n+1 entries
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
         let id_offset = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
@@ -207,6 +209,7 @@ impl DataRecordStorage {
         let document_offset = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
 
         // validity sizing both document and metadata can be null
+        // https://docs.rs/arrow-buffer/52.2.0/src/arrow_buffer/buffer/null.rs.html#153-155
         let validity_bytes = bit_util::round_upto_multiple_of_64(bit_util::ceil(self.len(), 8)) * 2;
 
         let total_size = prefix_size
@@ -248,6 +251,8 @@ impl DataRecordStorage {
             item_count += 1;
 
             // offset sizing
+            // https://docs.rs/arrow-buffer/52.2.0/arrow_buffer/buffer/struct.OffsetBuffer.html
+            // 4 bytes per offset entry, n+1 entries
             let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
             let key_offset_bytes: usize = K::offset_size(item_count);
             let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
@@ -256,7 +261,7 @@ impl DataRecordStorage {
 
             // validity sizing both document and metadata can be null
             let validity_bytes =
-                bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count + 1, 8)) * 2;
+                bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count, 8)) * 2;
 
             // round all running sizes to 64 and add them together
             let total_size = bit_util::round_upto_multiple_of_64(prefix_size)

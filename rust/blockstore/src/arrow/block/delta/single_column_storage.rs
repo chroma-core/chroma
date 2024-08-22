@@ -68,6 +68,9 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         let key_size = inner.size_tracker.get_arrow_padded_key_size();
         let value_size = inner.size_tracker.get_arrow_padded_value_size();
 
+        // offset sizing
+        // https://docs.rs/arrow-buffer/52.2.0/arrow_buffer/buffer/struct.OffsetBuffer.html
+        // 4 bytes per offset entry, n+1 entries
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
 

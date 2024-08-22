@@ -57,45 +57,8 @@ impl BlockDelta {
     ///  the arrow specification. When a block delta is converted into a block data
     ///  the same sizing is used to allocate the memory for the block data.
     pub(in crate::arrow) fn get_size<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> usize {
-        // let prefix_data_size = self.builder.get_prefix_size();
-        // let key_data_size = self.builder.get_key_size();
-        // let value_data_size = self.builder.get_value_size();
-
-        // self.get_block_size::<K, V>(
-        //     self.builder.len(),
-        //     prefix_data_size,
-        //     key_data_size,
-        //     value_data_size,
-        // )
         self.builder.get_size::<K>()
     }
-
-    // fn get_block_size<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-    //     &self,
-    //     item_count: usize,
-    //     prefix_size: usize,
-    //     key_size: usize,
-    //     value_size: usize,
-    // ) -> usize {
-    //     let prefix_total_bytes = bit_util::round_upto_multiple_of_64(prefix_size);
-    //     let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
-
-    //     // https://docs.rs/arrow/latest/arrow/array/array/struct.GenericListArray.html
-    //     let key_total_bytes = bit_util::round_upto_multiple_of_64(key_size);
-    //     let key_offset_bytes = K::offset_size(item_count);
-
-    //     let value_total_bytes = bit_util::round_upto_multiple_of_64(value_size);
-    //     let value_offset_bytes = V::offset_size(item_count);
-    //     let value_validity_bytes = V::validity_size(item_count);
-
-    //     prefix_total_bytes
-    //         + prefix_offset_bytes
-    //         + key_total_bytes
-    //         + key_offset_bytes
-    //         + value_total_bytes
-    //         + value_offset_bytes
-    //         + value_validity_bytes
-    // }
 
     pub fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> RecordBatch {
         self.builder.to_record_batch::<K>()
