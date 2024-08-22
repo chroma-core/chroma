@@ -171,7 +171,8 @@ collection_st = st.shared(
     key="coll",
 )
 recordset_st = st.shared(
-    strategies.recordsets(collection_st, max_size=1000), key="recordset"
+    strategies.recordsets(collection_st, max_size=1000),
+    key="recordset",
 )
 
 

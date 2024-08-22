@@ -24,6 +24,7 @@ from chromadb.api.types import (
     URIs,
     Where,
     QueryResult,
+    AddResult,
     GetResult,
     WhereDocument,
 )
@@ -121,7 +122,7 @@ class BaseAPI(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> AddResult:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
 

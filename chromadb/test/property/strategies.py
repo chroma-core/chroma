@@ -17,6 +17,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Metadata,
+    IDs,
 )
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
@@ -461,14 +462,21 @@ def recordsets(
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
-    ids = list(
+    ids: IDs = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
 
+    n_records = len(ids)
+
+    if len(ids) == 0:
+        n_records += 1
+
     embeddings: Optional[Embeddings] = None
     if collection.has_embeddings:
-        embeddings = create_embeddings(collection.dimension, len(ids), collection.dtype)
-    num_metadata = num_unique_metadata if num_unique_metadata is not None else len(ids)
+        embeddings = create_embeddings(
+            collection.dimension, n_records, collection.dtype
+        )
+    num_metadata = num_unique_metadata if num_unique_metadata is not None else n_records
     generated_metadatas = draw(
         st.lists(
             metadata(
@@ -479,20 +487,22 @@ def recordsets(
         )
     )
     metadatas = []
-    for i in range(len(ids)):
+    for i in range(n_records):
         metadatas.append(generated_metadatas[i % len(generated_metadatas)])
 
     documents: Optional[Documents] = None
     if collection.has_documents:
         documents = draw(
-            st.lists(document(collection), min_size=len(ids), max_size=len(ids))
+            st.lists(document(collection), min_size=n_records, max_size=n_records)
         )
 
     # in the case where we have a single record, sometimes exercise
     # the code that handles individual values rather than lists.
     # In this case, any field may be a list or a single value.
-    if len(ids) == 1:
-        single_id: Union[str, List[str]] = ids[0] if draw(st.booleans()) else ids
+    if n_records == 1:
+        single_id: Union[str, List[str]] = (
+            ids[0] if draw(st.booleans()) and len(ids) == 1 else ids
+        )
         single_embedding = (
             embeddings[0]
             if embeddings is not None and draw(st.booleans())
