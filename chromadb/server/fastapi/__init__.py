@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from chromadb.api.configuration import CollectionConfigurationInternal
 from pydantic import BaseModel
@@ -35,6 +35,7 @@ from chromadb.auth import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.api import ServerAPI
 from chromadb.errors import (
+    NoRecordsError,
     ChromaError,
     InvalidDimensionException,
     InvalidHTTPVersion,
@@ -744,6 +745,34 @@ class FastAPI(Server):
             limiter=self._capacity_limiter,
         )
 
+    @staticmethod
+    def _generate_ids_when_not_present(
+        ids: Optional[List[str]],
+        documents: Optional[List[Optional[str]]],
+        uris: Optional[List[Optional[str]]],
+        embeddings: Optional[List[Any]],
+    ) -> List[str]:
+        if ids is not None and len(ids) > 0:
+            return ids
+
+        n = 0
+        if documents is not None:
+            n = len(documents)
+        elif uris is not None:
+            n = len(uris)
+        elif embeddings is not None:
+            n = len(embeddings)
+
+        generated_ids = []
+        for _ in range(n):
+            generated_ids.append(str(uuid4()))
+
+        return generated_ids
+
+    def _validate_add_embedding(self, add: AddEmbedding):
+        if len(add.ids) == 0:
+            raise NoRecordsError("No records to add")
+
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     async def add(
         self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
@@ -759,6 +788,13 @@ class FastAPI(Server):
                     None,
                     collection_id,
                 )
+
+                ids = self._generate_ids_when_not_present(
+                    add.ids, add.documents, add.uris, add.embeddings
+                )
+                add.ids = ids
+                self._validate_add_embedding(add)
+
                 return self._api._add(
                     collection_id=_uuid(collection_id),
                     ids=add.ids,

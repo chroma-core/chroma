@@ -45,6 +45,17 @@ class IDAlreadyExistsError(ChromaError):
         return "IDAlreadyExists"
 
 
+class NoRecordsError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 400  # Bad Request
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "NoRecordsError"
+
+
 class ChromaAuthError(ChromaError):
     @overrides
     def code(self) -> int:

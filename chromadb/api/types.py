@@ -48,7 +48,11 @@ ID = str
 IDs = List[ID]
 
 
-def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
+def maybe_cast_one_to_many_ids(target: Optional[OneOrMany[ID]]) -> Optional[IDs]:
+    # No target
+    if target is None:
+        return None
+    
     if isinstance(target, str):
         # One ID
         return cast(IDs, [target])
@@ -283,12 +287,14 @@ class DataLoader(Protocol[L]):
         ...
 
 
-def validate_ids(ids: IDs) -> IDs:
+def validate_ids(ids: Optional[IDs], can_ids_be_empty: bool = False) -> IDs:
     """Validates ids to ensure it is a list of strings"""
+
+    if can_ids_be_empty and (ids is None or len(ids) == 0):
+        return []
+
     if not isinstance(ids, list):
         raise ValueError(f"Expected IDs to be a list, got {type(ids).__name__} as IDs")
-    if len(ids) == 0:
-        raise ValueError(f"Expected IDs to be a non-empty list, got {len(ids)} IDs")
     seen = set()
     dups = set()
     for id_ in ids:
