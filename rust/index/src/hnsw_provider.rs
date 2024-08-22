@@ -35,6 +35,19 @@ const FILES: [&'static str; 4] = [
     "link_lists.bin",
 ];
 
+// The key of the cache is the collection id and the value is
+// the HNSW index for that collection. This restricts the cache to
+// contain atmost one index per collection. Ideally, we would like
+// this index to be the latest index for that collection but rn it
+// is not guaranteed. For e.g. one case could be:
+// 1. get index version v1
+// 2. get index version v2 (> v1)
+// 3. get index version v1 (can happen due to an inflight query
+//    that started before compaction of v2 occured) -- this will
+//    evict v2 even though it is more recent and will be used again in future.
+// Once we have versioning propagated throughout the system we can make
+// this better. We can also do a deferred eviction for such entries when
+// their ref count goes to 0.
 #[derive(Clone)]
 pub struct HnswIndexProvider {
     cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
