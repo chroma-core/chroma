@@ -76,13 +76,17 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         )
         
         await self._client._add(
-            embedding_set["ids"],
+            cast(IDs, embedding_set["ids"]),
             self.id,
             cast(Embeddings, embedding_set["embeddings"]),
             embedding_set["metadatas"],
             embedding_set["documents"],
             embedding_set["uris"],
         )
+
+        return {
+            "ids": embedding_set["ids"],
+        }
 
     async def count(self) -> int:
         """The total number of embeddings added to the database
@@ -304,7 +308,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         await self._client._upsert(
             collection_id=self.id,
-            ids=embedding_set["ids"],
+            ids=cast(IDs, embedding_set["ids"]),
             embeddings=cast(Embeddings, embedding_set["embeddings"]),
             metadatas=embedding_set["metadatas"],
             documents=embedding_set["documents"],

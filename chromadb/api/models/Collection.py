@@ -83,13 +83,17 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
         self._client._add(
-            embedding_set["ids"],
+            cast(IDs, embedding_set["ids"]),
             self.id,
             cast(Embeddings, embedding_set["embeddings"]),
             embedding_set["metadatas"],
             embedding_set["documents"],
             embedding_set["uris"],
         )
+
+        return {
+            "ids": embedding_set["ids"],
+        }
 
     def get(
         self,
@@ -264,7 +268,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         self._client._update(
             self.id,
-            embedding_set["ids"],
+            cast(IDs, embedding_set["ids"]),
             cast(Embeddings, embedding_set["embeddings"]),
             embedding_set["metadatas"],
             embedding_set["documents"],
@@ -302,7 +306,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         self._client._upsert(
             collection_id=self.id,
-            ids=embedding_set["ids"],
+            ids=cast(IDs, embedding_set["ids"]),
             embeddings=cast(Embeddings, embedding_set["embeddings"]),
             metadatas=embedding_set["metadatas"],
             documents=embedding_set["documents"],

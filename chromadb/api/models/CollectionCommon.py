@@ -151,7 +151,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _unpack_embedding_set(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -180,7 +180,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_embedding_set(
         self,
-        ids: IDs,
+        ids: Optional[IDs],
         embeddings: Optional[Embeddings],
         metadatas: Optional[Metadatas],
         documents: Optional[Documents],
@@ -425,9 +425,36 @@ class CollectionCommon(Generic[ClientT]):
         if metadata:
             self._model["metadata"] = metadata
 
+    @staticmethod
+    def _generate_ids_when_not_present(
+        ids: Optional[IDs],
+        documents: Optional[Documents],
+        uris: Optional[URIs],
+        images: Optional[Images],
+        embeddings: Optional[Embeddings],
+    ) -> IDs:
+        if ids is not None and len(ids) > 0:
+            return ids
+
+        n = 0
+        if documents is not None:
+            n = len(documents)
+        elif uris is not None:
+            n = len(uris)
+        elif images is not None:
+            n = len(images)
+        elif embeddings is not None:
+            n = len(embeddings)
+
+        generated_ids = []
+        for _ in range(n):
+            generated_ids.append(str(uuid4()))
+
+        return generated_ids
+
     def _process_add_request(
         self,
-        ids: OneOrMany[ID],
+        ids: Optional[OneOrMany[ID]],
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
@@ -454,8 +481,16 @@ class CollectionCommon(Generic[ClientT]):
             else None
         )
 
-        self._validate_embedding_set(
+        generated_ids = self._generate_ids_when_not_present(
             unpacked_embedding_set["ids"],
+            unpacked_embedding_set["documents"],
+            unpacked_embedding_set["uris"],
+            unpacked_embedding_set["images"],
+            normalized_embeddings,
+        )
+
+        self._validate_embedding_set(
+            generated_ids,
             normalized_embeddings,
             unpacked_embedding_set["metadatas"],
             unpacked_embedding_set["documents"],
@@ -472,7 +507,7 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         return {
-            "ids": unpacked_embedding_set["ids"],
+            "ids": generated_ids,
             "embeddings": prepared_embeddings,
             "metadatas": unpacked_embedding_set["metadatas"],
             "documents": unpacked_embedding_set["documents"],
