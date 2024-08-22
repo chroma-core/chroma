@@ -5,6 +5,7 @@ import (
 	"net"
 
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
+	"github.com/chroma-core/chroma/go/pkg/log/leader"
 	"github.com/chroma-core/chroma/go/pkg/log/metrics"
 	"github.com/chroma-core/chroma/go/pkg/log/purging"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
@@ -52,8 +53,10 @@ func main() {
 	s := grpc.NewServer(grpc.UnaryInterceptor(otel.ServerGrpcInterceptor))
 	logservicepb.RegisterLogServiceServer(s, server)
 	log.Info("log service started", zap.String("address", listener.Addr().String()))
-	go purging.RunPurging(ctx, lr)
-	go metrics.RunMetrics(ctx, lr)
+	go leader.AcquireLeaderLock(ctx, func(ctx context.Context) {
+		go purging.PerformPurgingLoop(ctx, lr)
+		go metrics.PerformMetricsLoop(ctx, lr)
+	})
 	if err := s.Serve(listener); err != nil {
 		log.Fatal("failed to serve", zap.Error(err))
 	}

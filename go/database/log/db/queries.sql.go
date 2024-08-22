@@ -110,7 +110,7 @@ func (q *Queries) GetRecordsForCollection(ctx context.Context, arg GetRecordsFor
 }
 
 const getTotalUncompactedRecordsCount = `-- name: GetTotalUncompactedRecordsCount :one
-SELECT SUM(record_enumeration_offset_position - record_compaction_offset_position) AS total_uncompacted_depth FROM collection
+SELECT CAST(COALESCE(SUM(record_enumeration_offset_position - record_compaction_offset_position), 0) AS bigint) AS total_uncompacted_depth FROM collection
 `
 
 func (q *Queries) GetTotalUncompactedRecordsCount(ctx context.Context) (int64, error) {
