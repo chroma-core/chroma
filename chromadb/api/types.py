@@ -52,7 +52,6 @@ def maybe_cast_one_to_many_ids(target: Optional[OneOrMany[ID]]) -> Optional[IDs]
     # No target
     if target is None:
         return None
-
     if isinstance(target, str):
         # One ID
         return cast(IDs, [target])
@@ -163,16 +162,6 @@ class IncludeEnum(str, Enum):
     distances = "distances"
     uris = "uris"
     data = "data"
-
-
-# Record set
-class RecordSet(TypedDict):
-    ids: IDs
-    embeddings: Optional[Embeddings]
-    metadatas: Optional[Metadatas]
-    documents: Optional[Documents]
-    images: Optional[Images]
-    uris: Optional[URIs]
 
 # Record set
 class RecordSet(TypedDict):
