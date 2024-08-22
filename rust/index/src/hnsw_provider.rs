@@ -16,6 +16,7 @@ use chroma_types::Segment;
 use futures::stream;
 use futures::stream::StreamExt;
 use parking_lot::RwLock;
+use rand::seq::index;
 use std::fmt::Debug;
 use std::path::Path;
 use std::{path::PathBuf, sync::Arc};
@@ -79,9 +80,16 @@ impl HnswIndexProvider {
         }
     }
 
-    pub fn get(&self, id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
-        match self.cache.get(id) {
-            Some(index) => Some(index.clone()),
+    pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
+        match self.cache.get(collection_id) {
+            Some(index) => {
+                let index_with_lock = index.read();
+                if index_with_lock.id == *index_id {
+                    // Clone is cheap because we are just cloning the Arc.
+                    return Some(index.clone());
+                }
+                return None;
+            }
             None => None,
         }
     }
@@ -144,7 +152,7 @@ impl HnswIndexProvider {
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let index = Arc::new(RwLock::new(index));
-                self.cache.insert(new_id, index.clone());
+                self.cache.insert(segment.collection, index.clone());
                 Ok(index)
             }
             Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
@@ -262,7 +270,7 @@ impl HnswIndexProvider {
         match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
             Ok(index) => {
                 let index = Arc::new(RwLock::new(index));
-                self.cache.insert(*id, index.clone());
+                self.cache.insert(segment.collection, index.clone());
                 Ok(index)
             }
             Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
@@ -316,7 +324,7 @@ impl HnswIndexProvider {
             }
         };
         let index = Arc::new(RwLock::new(index));
-        self.cache.insert(id, index.clone());
+        self.cache.insert(segment.collection, index.clone());
         Ok(index)
     }
 
