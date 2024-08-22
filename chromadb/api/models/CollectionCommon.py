@@ -343,7 +343,7 @@ class CollectionCommon(Generic[ClientT]):
         valid_query_embeddings = (
             validate_embeddings(
                 self._normalize_embeddings(
-                    maybe_cast_one_to_many_embedding(query_embeddings)  # type: ignore
+                    maybe_cast_one_to_many_embedding(query_embeddings)  # type: ignore[arg-type]
                 )
             )
             if query_embeddings is not None
