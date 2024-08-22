@@ -227,6 +227,10 @@ class GetResult(TypedDict):
     included: Include
 
 
+class AddResult(TypedDict):
+    ids: List[ID]
+
+
 class QueryResult(TypedDict):
     ids: List[IDs]
     embeddings: Optional[
@@ -314,11 +318,16 @@ def validate_ids(ids: IDs) -> IDs:
         raise ValueError(f"Expected IDs to be a list, got {type(ids).__name__} as IDs")
     if len(ids) == 0:
         raise ValueError(f"Expected IDs to be a non-empty list, got {len(ids)} IDs")
+
     seen = set()
     dups = set()
     for id_ in ids:
         if not isinstance(id_, str):
             raise ValueError(f"Expected ID to be a str, got {id_}")
+
+        if len(id_) == 0:
+            raise ValueError("Expected ID to be a non-empty str, got empty string")
+
         if id_ in seen:
             dups.add(id_)
         else:

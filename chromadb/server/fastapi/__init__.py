@@ -31,7 +31,7 @@ from chromadb.api.types import (
     QueryResult,
     Embeddings,
     convert_list_embeddings_to_np,
-)
+), AddResult
 from chromadb.auth import (
     AuthzAction,
     AuthzResource,
@@ -768,10 +768,10 @@ class FastAPI(Server):
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
     async def add(
         self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
-    ) -> bool:
+    ) -> AddResult:
         try:
 
-            def process_add(request: Request, raw_body: bytes) -> bool:
+            def process_add(request: Request, raw_body: bytes) -> AddResult:
                 add = validate_model(AddEmbedding, orjson.loads(raw_body))
                 self.auth_and_get_tenant_and_database_for_request(
                     request.headers,
@@ -795,7 +795,7 @@ class FastAPI(Server):
                 )
 
             return cast(
-                bool,
+                AddResult,
                 await to_thread.run_sync(
                     process_add,
                     request,

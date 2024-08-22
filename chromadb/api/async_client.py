@@ -14,6 +14,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     GetResult,
+    AddResult,
     IDs,
     Include,
     Loadable,
@@ -262,7 +263,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> AddResult:
         return await self._server._add(
             ids=ids,
             collection_id=collection_id,

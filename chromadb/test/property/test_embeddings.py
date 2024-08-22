@@ -111,7 +111,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @rule(
         target=embedding_ids,
-        record_set=strategies.recordsets(collection_st),
+        record_set=strategies.recordsets(collection_st, min_size=0),
     )
     def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         trace("add_embeddings")
@@ -148,7 +148,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             return multiple(*filtered_record_set["ids"])
 
         else:
-            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
+            result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
+
+            print(result)
+            normalized_record_set["ids"] = result["ids"]
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
             return multiple(*normalized_record_set["ids"])
 
@@ -373,7 +376,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
 
     @rule(
         target=embedding_ids,
-        record_set=strategies.recordsets(collection_st),
+        record_set=strategies.recordsets(collection_st, min_size=0),
     )
     def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         res = super().add_embeddings(record_set)

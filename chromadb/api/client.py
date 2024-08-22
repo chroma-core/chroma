@@ -19,6 +19,7 @@ from chromadb.api.types import (
     Loadable,
     Metadatas,
     QueryResult,
+    AddResult,
     URIs,
 )
 from chromadb.config import Settings, System
@@ -214,7 +215,7 @@ class Client(SharedSystemClient, ClientAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> AddResult:
         return self._server._add(
             ids=ids,
             collection_id=collection_id,

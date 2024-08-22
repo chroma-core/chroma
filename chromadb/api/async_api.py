@@ -24,6 +24,7 @@ from chromadb.api.types import (
     Where,
     QueryResult,
     GetResult,
+    AddResult,
     WhereDocument,
 )
 from chromadb.config import Component, Settings
@@ -112,7 +113,7 @@ class AsyncBaseAPI(ABC):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
-    ) -> bool:
+    ) -> AddResult:
         """[Internal] Add embeddings to a collection specified by UUID.
         If (some) ids already exist, only the new embeddings will be added.
 

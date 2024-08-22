@@ -257,7 +257,7 @@ def persist_generated_data_with_old_version(
             # In order to test old versions, we can't rely on the not_implemented function
             embedding_function=not_implemented_ef(),
         )
-        coll.add(**embeddings_strategy)
+        result = coll.add(**embeddings_strategy)
 
         # Just use some basic checks for sanity and manual testing where you break the new
         # version
@@ -301,7 +301,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 
 @given(
     collection_strategy=collection_st,
-    embeddings_strategy=strategies.recordsets(collection_st),
+    embeddings_strategy=strategies.recordsets(collection_st, min_size=1),
 )
 @settings(deadline=None)
 def test_cycle_versions(

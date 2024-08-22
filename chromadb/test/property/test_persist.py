@@ -75,7 +75,7 @@ collection_st = st.shared(
 
 @given(
     collection_strategy=collection_st,
-    embeddings_strategy=strategies.recordsets(collection_st),
+    embeddings_strategy=strategies.recordsets(collection_st, min_size=0),
 )
 def test_persist(
     settings: Settings,
@@ -93,7 +93,8 @@ def test_persist(
         embedding_function=collection_strategy.embedding_function,
     )
 
-    coll.add(**embeddings_strategy)  # type: ignore[arg-type]
+    result = coll.add(**embeddings_strategy)  # type: ignore[arg-type]
+    embeddings_strategy["ids"] = result["ids"]
 
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
