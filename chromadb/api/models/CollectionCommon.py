@@ -35,7 +35,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     ID,
     OneOrMany,
-    EmbeddingSet,
+    RecordSet,
     maybe_cast_one_to_many_ids,
     maybe_cast_one_to_many_embedding,
     maybe_cast_one_to_many_metadata,
@@ -162,7 +162,7 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> EmbeddingSet:
+    ) -> RecordSet:
         unpacked_ids = maybe_cast_one_to_many_ids(ids)
         unpacked_embeddings = maybe_cast_one_to_many_embedding(embeddings)
         unpacked_metadatas = maybe_cast_one_to_many_metadata(metadatas)
@@ -197,17 +197,18 @@ class CollectionCommon(Generic[ClientT]):
             validate_metadatas(metadatas) if metadatas is not None else None
         )
 
-        valid_documents = maybe_cast_one_to_many_document(documents)
-        valid_images = maybe_cast_one_to_many_image(images)
-        valid_uris = maybe_cast_one_to_many_uri(uris)
+        # Already validated from being unpacked from OneOrMany data types
+        valid_documents = documents
+        valid_images = images
+        valid_uris = uris
 
         # Check that one of embeddings or ducuments or images is provided
         if require_embeddings_or_data:
             if (
                 valid_embeddings is None
-                and documents is None
-                and images is None
-                and uris is None
+                and valid_documents is None
+                and valid_images is None
+                and valid_uris is None
             ):
                 raise ValueError(
                     "You must provide embeddings, documents, images, or uris."
@@ -239,7 +240,7 @@ class CollectionCommon(Generic[ClientT]):
                 f"Number of uris {len(valid_uris)} must match number of ids {len(valid_ids)}"
             )
 
-    def _prepare_embeddings(
+    def _compute_embeddings(
         self,
         embeddings: Optional[Embeddings],
         documents: Optional[Documents],
@@ -248,7 +249,6 @@ class CollectionCommon(Generic[ClientT]):
     ) -> Embeddings:
         # We need to compute the embeddings if they're not provided
         if embeddings is None:
-            # At this point, we know that one of documents or images are provided from the validation above
             if documents is not None:
                 embeddings = self._embed(input=documents)
             elif images is not None:
@@ -439,7 +439,7 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> EmbeddingSet:
+    ) -> RecordSet:
         unpacked_embedding_set = self._unpack_embedding_set(
             ids,
             embeddings,
@@ -465,7 +465,7 @@ class CollectionCommon(Generic[ClientT]):
             require_embeddings_or_data=False,
         )
 
-        prepared_embeddings = self._prepare_embeddings(
+        prepared_embeddings = self._compute_embeddings(
             normalized_embeddings,
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],
@@ -481,7 +481,7 @@ class CollectionCommon(Generic[ClientT]):
             "uris": unpacked_embedding_set["uris"],
         }
 
-    def _prepare_update_request(
+    def _compute_embeddings_upsert_or_update_request(
         self,
         embeddings: Optional[Embeddings],
         documents: Optional[Documents],
@@ -495,7 +495,7 @@ class CollectionCommon(Generic[ClientT]):
 
         return cast(Embeddings, embeddings)
 
-    def _process_update_request(
+    def _process_upsert_or_update_request(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
@@ -508,7 +508,7 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]],
         uris: Optional[OneOrMany[URI]],
-    ) -> EmbeddingSet:
+    ) -> RecordSet:
         unpacked_embedding_set = self._unpack_embedding_set(
             ids, embeddings, metadatas, documents, images, uris
         )
@@ -529,70 +529,7 @@ class CollectionCommon(Generic[ClientT]):
             require_embeddings_or_data=False,
         )
 
-        prepared_embeddings = self._prepare_update_request(
-            normalized_embeddings,
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-        )
-
-        return {
-            "ids": unpacked_embedding_set["ids"],
-            "embeddings": prepared_embeddings,
-            "metadatas": unpacked_embedding_set["metadatas"],
-            "documents": unpacked_embedding_set["documents"],
-            "images": unpacked_embedding_set["images"],
-            "uris": unpacked_embedding_set["uris"],
-        }
-
-    def _prepare_upsert_request(
-        self,
-        embeddings: Optional[Embeddings],
-        documents: Optional[Documents],
-        images: Optional[Images],
-    ) -> Embeddings:
-        if embeddings is None:
-            if documents is not None:
-                embeddings = self._embed(input=documents)
-            elif images is not None:
-                embeddings = self._embed(input=images)
-
-        return cast(Embeddings, embeddings)
-
-    def _process_upsert_request(
-        self,
-        ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
-            Union[
-                OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
-            ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
-    ) -> EmbeddingSet:
-        unpacked_embedding_set = self._unpack_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
-        )
-
-        normalized_embeddings = (
-            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
-            if unpacked_embedding_set["embeddings"] is not None
-            else None
-        )
-
-        self._validate_embedding_set(
-            unpacked_embedding_set["ids"],
-            normalized_embeddings,
-            unpacked_embedding_set["metadatas"],
-            unpacked_embedding_set["documents"],
-            unpacked_embedding_set["images"],
-            unpacked_embedding_set["uris"],
-            require_embeddings_or_data=False,
-        )
-
-        prepared_embeddings = self._prepare_upsert_request(
+        prepared_embeddings = self._compute_embeddings_upsert_or_update_request(
             normalized_embeddings,
             unpacked_embedding_set["documents"],
             unpacked_embedding_set["images"],

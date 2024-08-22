@@ -161,8 +161,8 @@ class IncludeEnum(str, Enum):
     data = "data"
 
 
-# Embedding set
-class EmbeddingSet(TypedDict):
+# Record set
+class RecordSet(TypedDict):
     ids: IDs
     embeddings: Optional[Embeddings]
     metadatas: Optional[Metadatas]
@@ -247,10 +247,8 @@ class EmbeddingFunction(Protocol[D]):
             result = call(self, input)
 
             unpacked_result = maybe_cast_one_to_many_embedding(result)
-            if unpacked_result is None:
-                raise ValueError("Expected embeddings to be returned")
 
-            return validate_embeddings(unpacked_result)
+            return validate_embeddings(unpacked_result) # type: ignore[arg-type]
 
         setattr(cls, "__call__", __call__)
 

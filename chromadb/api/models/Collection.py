@@ -257,7 +257,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_update_request(
+        embedding_set = self._process_upsert_or_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
@@ -295,7 +295,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        embedding_set = self._process_upsert_request(
+        embedding_set = self._process_upsert_or_update_request(
             ids, embeddings, metadatas, documents, images, uris
         )
 
