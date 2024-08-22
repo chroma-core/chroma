@@ -288,10 +288,7 @@ impl<'me> FullTextIndexWriter<'me> {
             }
         }
 
-        let mut y = 0;
-        let mut total = uncommitted_postings.positional_postings.len();
         for (key, mut value) in uncommitted_postings.positional_postings.drain() {
-            println!("Writing to blockfile: {}/{}", y, total);
             let built_list = value.build();
             for doc_id in built_list.doc_ids.iter() {
                 match doc_id {
@@ -318,7 +315,6 @@ impl<'me> FullTextIndexWriter<'me> {
                     }
                 }
             }
-            y += 1;
         }
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
         for (key, value) in uncommitted_frequencies.drain() {
