@@ -264,7 +264,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             documents=documents,
             images=images,
             uris=uris,
-            require_embeddings_or_data=False,
         )
 
         self._client._update(
@@ -308,7 +307,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             documents=documents,
             images=images,
             uris=uris,
-            require_embeddings_or_data=True,
         )
 
         self._client._upsert(

@@ -20,6 +20,13 @@ class ChromaError(Exception, EnforceOverrides):
         pass
 
 
+class InvalidInputException(ChromaError):
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "InvalidInput"
+
+
 class InvalidDimensionException(ChromaError):
     @classmethod
     @overrides
@@ -93,6 +100,7 @@ class AuthorizationError(ChromaError):
 
 
 error_types: Dict[str, Type[ChromaError]] = {
+    "InvalidInput": InvalidInputException,
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
     "IDAlreadyExists": IDAlreadyExistsError,

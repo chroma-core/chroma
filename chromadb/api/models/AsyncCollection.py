@@ -267,7 +267,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             documents=documents,
             images=images,
             uris=uris,
-            require_embeddings_or_data=False,
         )
 
         await self._client._update(
@@ -311,7 +310,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             documents=documents,
             images=images,
             uris=uris,
-            require_embeddings_or_data=True,
         )
 
         await self._client._upsert(
