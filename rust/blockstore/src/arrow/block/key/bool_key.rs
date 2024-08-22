@@ -1,5 +1,7 @@
-use super::delta_storage::BlockKeyArrowBuilder;
-use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
+use crate::arrow::{
+    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
+};
 use arrow::array::{Array, BooleanArray, BooleanBuilder, StringBuilder};
 use std::sync::Arc;
 
@@ -33,7 +35,7 @@ impl ArrowReadableKey<'_> for bool {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut super::delta::BlockDelta,
+        delta: &mut BlockDelta,
     ) {
         V::add_to_delta(prefix, key, value, delta);
     }

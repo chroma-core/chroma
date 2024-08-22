@@ -83,7 +83,7 @@ impl From<&KeyWrapper> for u32 {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CompositeKey {
+pub struct CompositeKey {
     pub(super) prefix: String,
     pub(super) key: KeyWrapper,
 }

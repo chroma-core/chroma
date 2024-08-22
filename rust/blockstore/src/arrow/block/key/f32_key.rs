@@ -1,8 +1,9 @@
-use std::sync::Arc;
-
-use super::delta_storage::BlockKeyArrowBuilder;
-use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
+use crate::arrow::{
+    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
+};
 use arrow::array::{Array, Float32Array, Float32Builder, StringBuilder};
+use std::sync::Arc;
 
 impl ArrowWriteableKey for f32 {
     type ReadableKey<'referred_data> = f32;
@@ -34,7 +35,7 @@ impl ArrowReadableKey<'_> for f32 {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut super::delta::BlockDelta,
+        delta: &mut BlockDelta,
     ) {
         V::add_to_delta(prefix, key, value, delta);
     }
