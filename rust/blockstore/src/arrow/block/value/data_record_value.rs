@@ -3,13 +3,10 @@ use crate::{
         block::delta::{data_record::DataRecordStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
-    key::{CompositeKey, KeyWrapper},
+    key::KeyWrapper,
 };
-use arrow::array::BinaryArray;
-use arrow::{
-    array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray},
-    util::bit_util,
-};
+use arrow::array::{Array, FixedSizeListArray, Float32Array, StringArray, StructArray};
+use arrow::{array::BinaryArray, util::bit_util};
 use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use prost::Message;
 use std::sync::Arc;
@@ -33,64 +30,14 @@ impl ArrowWriteableValue for &DataRecord<'_> {
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::DataRecord(builder) => {
-                let mut id_storage = builder.id_storage.write();
-                let mut embedding_storage = builder.embedding_storage.write();
-                let composite_key = CompositeKey {
-                    prefix: prefix.to_string(),
-                    key,
-                };
-
-                id_storage.insert(composite_key.clone(), value.id.to_string());
-                embedding_storage.insert(composite_key.clone(), value.embedding.to_vec());
-
-                match &value.metadata {
-                    Some(metadata) => {
-                        let mut metadata_storage = builder.metadata_storage.write();
-                        let metadata_proto = Into::<UpdateMetadata>::into(metadata.clone());
-                        metadata_storage
-                            .insert(composite_key.clone(), Some(metadata_proto.encode_to_vec()));
-                    }
-                    None => {
-                        let mut metadata_storage = builder.metadata_storage.write();
-                        metadata_storage.insert(composite_key.clone(), None);
-                    }
-                }
-
-                let mut document_storage = builder.document_storage.write();
-                document_storage.insert(
-                    composite_key,
-                    value.document.map_or(None, |doc| Some(doc.to_string())),
-                );
-            }
+            BlockStorage::DataRecord(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type"),
         }
     }
 
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::DataRecord(builder) => {
-                let mut id_storage = builder.id_storage.write();
-                let mut embedding_storage = builder.embedding_storage.write();
-                let mut metadata_storage = builder.metadata_storage.write();
-                let mut document_storage = builder.document_storage.write();
-                id_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key: key.clone(),
-                });
-                embedding_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key: key.clone(),
-                });
-                metadata_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key: key.clone(),
-                });
-                document_storage.remove(&CompositeKey {
-                    prefix: prefix.to_string(),
-                    key,
-                });
-            }
+            BlockStorage::DataRecord(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type"),
         }
     }

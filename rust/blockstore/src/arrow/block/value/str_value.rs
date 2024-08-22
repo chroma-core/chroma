@@ -1,9 +1,9 @@
 use crate::{
     arrow::{
-        block::delta::{string::StringValueStorage, BlockDelta, BlockStorage},
+        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
-    key::{CompositeKey, KeyWrapper},
+    key::KeyWrapper,
 };
 use arrow::{
     array::{Array, StringArray},
@@ -11,7 +11,7 @@ use arrow::{
 };
 use std::sync::Arc;
 
-impl ArrowWriteableValue for &str {
+impl ArrowWriteableValue for String {
     type ReadableValue<'referred_data> = &'referred_data str;
 
     fn offset_size(item_count: usize) -> usize {
@@ -24,49 +24,20 @@ impl ArrowWriteableValue for &str {
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::String(builder) => {
-                let mut storage = builder.storage.write();
-                match storage.as_mut() {
-                    Some(storage) => {
-                        storage.insert(
-                            CompositeKey {
-                                prefix: prefix.to_string(),
-                                key,
-                            },
-                            value.to_string(),
-                        );
-                    }
-                    None => {
-                        unreachable!("Storage not initialized. This is an invariant violation.")
-                    }
-                }
-            }
+            BlockStorage::String(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type"),
         }
     }
 
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
         match &delta.builder {
-            BlockStorage::String(builder) => {
-                let mut storage = builder.storage.write();
-                match storage.as_mut() {
-                    Some(storage) => {
-                        storage.remove(&CompositeKey {
-                            prefix: prefix.to_string(),
-                            key,
-                        });
-                    }
-                    None => {
-                        unreachable!("Storage not initialized. This is an invariant violation.")
-                    }
-                }
-            }
+            BlockStorage::String(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type"),
         }
     }
 
     fn get_delta_builder() -> BlockStorage {
-        BlockStorage::String(StringValueStorage::new())
+        BlockStorage::String(SingleColumnStorage::new())
     }
 }
 
@@ -81,6 +52,6 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str 
         value: Self,
         delta: &mut BlockDelta,
     ) {
-        delta.add(prefix, key, value);
+        delta.add(prefix, key, value.to_string());
     }
 }

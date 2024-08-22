@@ -1,7 +1,6 @@
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
 use async_trait::async_trait;
-use chroma_blockstore::arrow::types::ArrowReadableKey;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -113,7 +112,7 @@ impl RecordSegmentWriter {
                             return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
                         }
                     };
-                    let id_to_user_id = match blockfile_provider.create::<u32, &str>() {
+                    let id_to_user_id = match blockfile_provider.create::<u32, String>() {
                         Ok(id_to_user_id) => id_to_user_id,
                         Err(e) => {
                             return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
@@ -240,7 +239,7 @@ impl RecordSegmentWriter {
                         }
                     };
                     let id_to_user_id = match blockfile_provider
-                        .fork::<u32, &str>(&id_to_user_id_bf_uuid)
+                        .fork::<u32, String>(&id_to_user_id_bf_uuid)
                         .await
                     {
                         Ok(id_to_user_id) => id_to_user_id,
@@ -353,7 +352,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .set::<u32, &str>("", log_record.offset_id, log_record.user_id.unwrap())
+                        .set::<u32, String>("", log_record.offset_id, log_record.user_id.unwrap().to_string())
                         .await
                     {
                         Ok(()) => (),
@@ -440,7 +439,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .delete::<u32, &str>("", log_record.offset_id)
+                        .delete::<u32, String>("", log_record.offset_id)
                         .await
                     {
                         Ok(()) => (),
@@ -473,7 +472,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
     fn commit(mut self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
         // Commit all the blockfiles
         let flusher_user_id_to_id = self.user_id_to_id.take().unwrap().commit::<&str, u32>();
-        let flusher_id_to_user_id = self.id_to_user_id.take().unwrap().commit::<u32, &str>();
+        let flusher_id_to_user_id = self.id_to_user_id.take().unwrap().commit::<u32, String>();
         let flusher_id_to_data = self.id_to_data.take().unwrap().commit::<u32, &DataRecord>();
         let flusher_max_offset_id = self.max_offset_id.take().unwrap().commit::<&str, u32>();
 
@@ -536,7 +535,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         let id_to_data_bf_id = self.id_to_data_flusher.id();
         let max_offset_id_bf_id = self.max_offset_id_flusher.id();
         let res_user_id_to_id = self.user_id_to_id_flusher.flush::<&str, u32>().await;
-        let res_id_to_user_id = self.id_to_user_id_flusher.flush::<u32, &str>().await;
+        let res_id_to_user_id = self.id_to_user_id_flusher.flush::<u32, String>().await;
         let res_id_to_data = self.id_to_data_flusher.flush::<u32, &DataRecord>().await;
         let res_max_offset_id = self.max_offset_id_flusher.flush::<&str, u32>().await;
 

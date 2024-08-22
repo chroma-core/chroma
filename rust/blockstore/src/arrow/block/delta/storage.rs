@@ -1,17 +1,16 @@
-use super::{
-    data_record::DataRecordStorage, int32::Int32ArrayStorage, roaring_bitmap::RoaringBitmapStorage,
-    string::StringValueStorage, uint32::UInt32Storage,
-};
+use super::{data_record::DataRecordStorage, single_column_storage::SingleColumnStorage};
 use crate::{
     arrow::types::ArrowWriteableKey,
     key::{CompositeKey, KeyWrapper},
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BooleanBuilder, Float32Builder, RecordBatch, StringBuilder, UInt32Builder,
+        Array, ArrayRef, BooleanBuilder, Float32Builder, Int32Array, RecordBatch, StringBuilder,
+        UInt32Builder,
     },
     datatypes::Field,
 };
+use roaring::RoaringBitmap;
 use std::{
     fmt,
     fmt::{Debug, Formatter},
@@ -20,10 +19,10 @@ use std::{
 
 #[derive(Clone)]
 pub enum BlockStorage {
-    String(StringValueStorage),
-    Int32Array(Int32ArrayStorage),
-    UInt32(UInt32Storage),
-    RoaringBitmap(RoaringBitmapStorage),
+    String(SingleColumnStorage<String>),
+    Int32Array(SingleColumnStorage<Int32Array>),
+    UInt32(SingleColumnStorage<u32>),
+    RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
     DataRecord(DataRecordStorage),
 }
 
@@ -147,71 +146,69 @@ impl BlockKeyArrowBuilder {
 }
 
 impl BlockStorage {
-    pub fn get_prefix_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_prefix_size(&self) -> usize {
         match self {
-            BlockStorage::String(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::UInt32(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::DataRecord(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::Int32Array(builder) => builder.get_prefix_size(start, end),
-            BlockStorage::RoaringBitmap(builder) => builder.get_prefix_size(start, end),
+            BlockStorage::String(builder) => builder.get_prefix_size(),
+            BlockStorage::UInt32(builder) => builder.get_prefix_size(),
+            BlockStorage::DataRecord(builder) => builder.get_prefix_size(),
+            BlockStorage::Int32Array(builder) => builder.get_prefix_size(),
+            BlockStorage::RoaringBitmap(builder) => builder.get_prefix_size(),
         }
     }
 
-    pub fn get_key_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_key_size(&self) -> usize {
         match self {
-            BlockStorage::String(builder) => builder.get_key_size(start, end),
-            BlockStorage::UInt32(builder) => builder.get_key_size(start, end),
-            BlockStorage::DataRecord(builder) => builder.get_key_size(start, end),
-            BlockStorage::Int32Array(builder) => builder.get_key_size(start, end),
-            BlockStorage::RoaringBitmap(builder) => builder.get_key_size(start, end),
+            BlockStorage::String(builder) => builder.get_key_size(),
+            BlockStorage::UInt32(builder) => builder.get_key_size(),
+            BlockStorage::DataRecord(builder) => builder.get_key_size(),
+            BlockStorage::Int32Array(builder) => builder.get_key_size(),
+            BlockStorage::RoaringBitmap(builder) => builder.get_key_size(),
         }
     }
 
-    /// Returns the arrow-padded (rounded to 64 bytes) size of the value data for the given range.
-    pub fn get_value_size(&self, start: usize, end: usize) -> usize {
+    pub fn get_min_key(&self) -> Option<CompositeKey> {
         match self {
-            BlockStorage::String(builder) => builder.get_value_size(start, end),
-            BlockStorage::UInt32(builder) => builder.get_value_size(start, end),
-            BlockStorage::DataRecord(builder) => builder.get_value_size(start, end),
-            BlockStorage::Int32Array(builder) => builder.get_value_size(start, end),
-            BlockStorage::RoaringBitmap(builder) => builder.get_value_size(start, end),
+            BlockStorage::String(builder) => builder.get_min_key(),
+            BlockStorage::UInt32(builder) => builder.get_min_key(),
+            BlockStorage::DataRecord(builder) => builder.get_min_key(),
+            BlockStorage::Int32Array(builder) => builder.get_min_key(),
+            BlockStorage::RoaringBitmap(builder) => builder.get_min_key(),
         }
     }
 
-    pub fn split(&self, prefix: &str, key: KeyWrapper) -> BlockStorage {
+    /// Returns the arrow-padded (rounded to 64 bytes) size for the delta.
+    pub fn get_size<K: ArrowWriteableKey>(&self) -> usize {
         match self {
-            BlockStorage::String(builder) => BlockStorage::String(builder.split(prefix, key)),
-            BlockStorage::UInt32(builder) => BlockStorage::UInt32(builder.split(prefix, key)),
-            BlockStorage::DataRecord(builder) => {
-                BlockStorage::DataRecord(builder.split(prefix, key))
-            }
-            BlockStorage::Int32Array(builder) => {
-                BlockStorage::Int32Array(builder.split(prefix, key))
-            }
-            BlockStorage::RoaringBitmap(builder) => {
-                BlockStorage::RoaringBitmap(builder.split(prefix, key))
-            }
+            BlockStorage::String(builder) => builder.get_size::<K>(),
+            BlockStorage::UInt32(builder) => builder.get_size::<K>(),
+            BlockStorage::DataRecord(builder) => builder.get_size::<K>(),
+            BlockStorage::Int32Array(builder) => builder.get_size::<K>(),
+            BlockStorage::RoaringBitmap(builder) => builder.get_size::<K>(),
         }
     }
 
-    pub fn get_key(&self, index: usize) -> CompositeKey {
+    pub fn split<K: ArrowWriteableKey>(&self, split_size: usize) -> (CompositeKey, BlockStorage) {
         match self {
             BlockStorage::String(builder) => {
-                let storage = builder.storage.read();
-                match storage.as_ref() {
-                    None => unreachable!(
-                        "Invariant violation. A StringValueBuilder should have storage."
-                    ),
-                    Some(storage) => {
-                        let (key, _) = storage.iter().nth(index).unwrap();
-                        key.clone()
-                    }
-                }
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::String(storage))
             }
-            BlockStorage::UInt32(builder) => builder.get_key(index),
-            BlockStorage::DataRecord(builder) => builder.get_key(index),
-            BlockStorage::Int32Array(builder) => builder.get_key(index),
-            BlockStorage::RoaringBitmap(builder) => builder.get_key(index),
+            BlockStorage::UInt32(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::UInt32(storage))
+            }
+            BlockStorage::DataRecord(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::DataRecord(storage))
+            }
+            BlockStorage::Int32Array(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::Int32Array(storage))
+            }
+            BlockStorage::RoaringBitmap(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::RoaringBitmap(storage))
+            }
         }
     }
 
@@ -226,11 +223,8 @@ impl BlockStorage {
     }
 
     pub fn to_record_batch<K: ArrowWriteableKey>(&self) -> RecordBatch {
-        let mut key_builder = K::get_arrow_builder(
-            self.len(),
-            self.get_prefix_size(0, self.len()),
-            self.get_key_size(0, self.len()),
-        );
+        let mut key_builder =
+            K::get_arrow_builder(self.len(), self.get_prefix_size(), self.get_key_size());
         match self {
             BlockStorage::String(builder) => {
                 key_builder = builder.build_keys(key_builder);
@@ -266,16 +260,4 @@ impl BlockStorage {
         // TODO: handle error
         record_batch.unwrap()
     }
-}
-
-pub(super) fn calculate_prefix_size<'a>(
-    composite_key_iter: impl Iterator<Item = &'a CompositeKey>,
-) -> usize {
-    composite_key_iter.fold(0, |acc, key| acc + key.prefix.len())
-}
-
-pub(super) fn calculate_key_size<'a>(
-    composite_key_iter: impl Iterator<Item = &'a CompositeKey>,
-) -> usize {
-    composite_key_iter.fold(0, |acc, key| acc + key.key.get_size())
 }
