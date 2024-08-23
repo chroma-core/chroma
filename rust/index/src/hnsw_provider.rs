@@ -166,7 +166,7 @@ impl HnswIndexProvider {
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.cache.get(&segment.collection) {
+                match self.get(&new_id, &segment.collection) {
                     Some(index) => {
                         return Ok(index.clone());
                     }
@@ -296,7 +296,7 @@ impl HnswIndexProvider {
         match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.cache.get(&segment.collection) {
+                match self.get(id, &segment.collection) {
                     Some(index) => {
                         return Ok(index.clone());
                     }
@@ -359,7 +359,7 @@ impl HnswIndexProvider {
         };
 
         let _guard = self.write_mutex.lock().await;
-        match self.cache.get(&segment.collection) {
+        match self.get(&id, &segment.collection) {
             Some(index) => {
                 return Ok(index.clone());
             }
