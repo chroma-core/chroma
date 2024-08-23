@@ -105,6 +105,48 @@ impl Block {
         None
     }
 
+    fn binary_search_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> Option<Vec<(&str, K, V)>> {
+        let prefix_arr = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut size = prefix_arr.len();
+        let mut left = 0;
+        let mut right = size;
+        while left < right {
+            let mid = left + size / 2;
+
+            let predicate = prefix_arr.value(mid) < prefix;
+
+            // This control flow produces conditional moves, which results in
+            // fewer branches and instructions than if/else or matching on
+            // boolean.
+            // This is x86 asm for u8: https://rust.godbolt.org/z/698eYffTx.
+            left = if predicate == true { mid + 1 } else { left };
+            right = if predicate == false { mid } else { right };
+
+            size = right - left;
+        }
+
+        let mut start_idx = left;
+        let mut res = vec![];
+        while start_idx < prefix_arr.len() && prefix_arr.value(start_idx) == prefix {
+            res.push((
+                prefix_arr.value(start_idx),
+                K::get(self.data.column(1), start_idx),
+                V::get(self.data.column(2), start_idx),
+            ));
+            start_idx += 1;
+        }
+
+        Some(res)
+    }
+
     /*
         ===== Block Queries =====
     */
@@ -127,24 +169,7 @@ impl Block {
         &'me self,
         prefix: &str,
     ) -> Option<Vec<(&str, K, V)>> {
-        let prefix_array = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let mut res: Vec<(&str, K, V)> = vec![];
-        for i in 0..self.data.num_rows() {
-            let curr_prefix = prefix_array.value(i);
-            if curr_prefix == prefix {
-                res.push((
-                    curr_prefix,
-                    K::get(self.data.column(1), i),
-                    V::get(self.data.column(2), i),
-                ));
-            }
-        }
-        return Some(res);
+        self.binary_search_prefix(prefix)
     }
 
     /// Get all the values for a given prefix in the block where the key is greater than the given key
