@@ -39,7 +39,7 @@ pub(crate) struct CountQueryOrchestrator {
 }
 
 #[derive(Error, Debug)]
-enum MetadataSegmentQueryError {
+enum CountQueryOrchestratorError {
     #[error("Blockfile metadata segment with id: {0} not found")]
     BlockfileMetadataSegmentNotFound(Uuid),
     #[error("Get segments error: {0}")]
@@ -54,15 +54,17 @@ enum MetadataSegmentQueryError {
     GetCollectionError(#[from] GetCollectionsError),
 }
 
-impl ChromaError for MetadataSegmentQueryError {
+impl ChromaError for CountQueryOrchestratorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::GetSegmentsError(e) => e.code(),
-            MetadataSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::SystemTimeError(_) => ErrorCodes::Internal,
-            MetadataSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::GetCollectionError(e) => e.code(),
+            CountQueryOrchestratorError::BlockfileMetadataSegmentNotFound(_) => {
+                ErrorCodes::NotFound
+            }
+            CountQueryOrchestratorError::GetSegmentsError(e) => e.code(),
+            CountQueryOrchestratorError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
+            CountQueryOrchestratorError::SystemTimeError(_) => ErrorCodes::Internal,
+            CountQueryOrchestratorError::CollectionNotFound(_) => ErrorCodes::NotFound,
+            CountQueryOrchestratorError::GetCollectionError(e) => e.code(),
         }
     }
 }
@@ -142,6 +144,7 @@ impl CountQueryOrchestrator {
         self.collection = Some(collection);
     }
 
+    // shared
     async fn pull_logs(&mut self, ctx: &ComponentContext<Self>) {
         println!("Count query orchestrator pulling logs");
 
@@ -153,7 +156,7 @@ impl CountQueryOrchestrator {
                 tracing::error!("Error getting system time: {:?}", e);
                 terminate_with_error(
                     self.result_channel.take(),
-                    Box::new(MetadataSegmentQueryError::SystemTimeError(e)),
+                    Box::new(CountQueryOrchestratorError::SystemTimeError(e)),
                     ctx,
                 );
                 return;
@@ -184,6 +187,7 @@ impl CountQueryOrchestrator {
         }
     }
 
+    // shared
     async fn get_metadata_segment_from_id(
         &self,
         mut sysdb: Box<SysDb>,
@@ -197,7 +201,7 @@ impl CountQueryOrchestrator {
             Ok(segments) => {
                 if segments.is_empty() {
                     return Err(Box::new(
-                        MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(
+                        CountQueryOrchestratorError::BlockfileMetadataSegmentNotFound(
                             *metadata_segment_id,
                         ),
                     ));
@@ -205,18 +209,19 @@ impl CountQueryOrchestrator {
                 segments[0].clone()
             }
             Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
+                return Err(Box::new(CountQueryOrchestratorError::GetSegmentsError(e)));
             }
         };
 
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(Box::new(
-                MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(*metadata_segment_id),
+                CountQueryOrchestratorError::BlockfileMetadataSegmentNotFound(*metadata_segment_id),
             ));
         }
         Ok(segment)
     }
 
+    // shared
     async fn get_record_segment_from_collection_id(
         &self,
         mut sysdb: Box<SysDb>,
@@ -234,20 +239,21 @@ impl CountQueryOrchestrator {
         match segments {
             Ok(segments) => {
                 if segments.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::RecordSegmentNotFound(
-                        *collection_id,
-                    )));
+                    return Err(Box::new(
+                        CountQueryOrchestratorError::RecordSegmentNotFound(*collection_id),
+                    ));
                 }
                 // Unwrap is safe as we know at least one segment exists from
                 // the check above
                 return Ok(segments.into_iter().next().unwrap());
             }
             Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
+                return Err(Box::new(CountQueryOrchestratorError::GetSegmentsError(e)));
             }
         };
     }
 
+    // shared
     async fn get_collection_from_id(
         &self,
         mut sysdb: Box<SysDb>,
@@ -261,7 +267,7 @@ impl CountQueryOrchestrator {
         match collections {
             Ok(collections) => {
                 if collections.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::CollectionNotFound(
+                    return Err(Box::new(CountQueryOrchestratorError::CollectionNotFound(
                         *collection_id,
                     )));
                 }
@@ -270,7 +276,7 @@ impl CountQueryOrchestrator {
                 return Ok(collections.into_iter().next().unwrap());
             }
             Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetCollectionError(e)));
+                return Err(Box::new(CountQueryOrchestratorError::GetCollectionError(e)));
             }
         };
     }

@@ -65,7 +65,7 @@ pub(crate) struct MetadataQueryOrchestrator {
 }
 
 #[derive(Error, Debug)]
-enum MetadataSegmentQueryError {
+enum MetadataQueryOrchestratorError {
     #[error("Blockfile metadata segment with id: {0} not found")]
     BlockfileMetadataSegmentNotFound(Uuid),
     #[error("Get segments error: {0}")]
@@ -80,15 +80,17 @@ enum MetadataSegmentQueryError {
     GetCollectionError(#[from] GetCollectionsError),
 }
 
-impl ChromaError for MetadataSegmentQueryError {
+impl ChromaError for MetadataQueryOrchestratorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::GetSegmentsError(e) => e.code(),
-            MetadataSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::SystemTimeError(_) => ErrorCodes::Internal,
-            MetadataSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::GetCollectionError(e) => e.code(),
+            MetadataQueryOrchestratorError::BlockfileMetadataSegmentNotFound(_) => {
+                ErrorCodes::NotFound
+            }
+            MetadataQueryOrchestratorError::GetSegmentsError(e) => e.code(),
+            MetadataQueryOrchestratorError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
+            MetadataQueryOrchestratorError::SystemTimeError(_) => ErrorCodes::Internal,
+            MetadataQueryOrchestratorError::CollectionNotFound(_) => ErrorCodes::NotFound,
+            MetadataQueryOrchestratorError::GetCollectionError(e) => e.code(),
         }
     }
 }
@@ -186,7 +188,7 @@ impl MetadataQueryOrchestrator {
             Err(e) => {
                 terminate_with_error(
                     self.result_channel.take(),
-                    Box::new(MetadataSegmentQueryError::SystemTimeError(e)),
+                    Box::new(MetadataQueryOrchestratorError::SystemTimeError(e)),
                     ctx,
                 );
                 return;
@@ -262,7 +264,7 @@ impl MetadataQueryOrchestrator {
             Ok(segments) => {
                 if segments.is_empty() {
                     return Err(Box::new(
-                        MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(
+                        MetadataQueryOrchestratorError::BlockfileMetadataSegmentNotFound(
                             *metadata_segment_id,
                         ),
                     ));
@@ -270,13 +272,17 @@ impl MetadataQueryOrchestrator {
                 segments[0].clone()
             }
             Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
+                return Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
+                    e,
+                )));
             }
         };
 
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(Box::new(
-                MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(*metadata_segment_id),
+                MetadataQueryOrchestratorError::BlockfileMetadataSegmentNotFound(
+                    *metadata_segment_id,
+                ),
             ));
         }
         Ok(segment)
@@ -299,16 +305,18 @@ impl MetadataQueryOrchestrator {
         match segments {
             Ok(segments) => {
                 if segments.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::RecordSegmentNotFound(
-                        *collection_id,
-                    )));
+                    return Err(Box::new(
+                        MetadataQueryOrchestratorError::RecordSegmentNotFound(*collection_id),
+                    ));
                 }
                 // Unwrap is safe as we know at least one segment exists from
                 // the check above
                 return Ok(segments.into_iter().next().unwrap());
             }
             Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
+                return Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
+                    e,
+                )));
             }
         };
     }
@@ -326,16 +334,18 @@ impl MetadataQueryOrchestrator {
         match collections {
             Ok(collections) => {
                 if collections.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::CollectionNotFound(
-                        *collection_id,
-                    )));
+                    return Err(Box::new(
+                        MetadataQueryOrchestratorError::CollectionNotFound(*collection_id),
+                    ));
                 }
                 // Unwrap is safe as we know at least one collection exists from
                 // the check above
                 return Ok(collections.into_iter().next().unwrap());
             }
             Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetCollectionError(e)));
+                return Err(Box::new(
+                    MetadataQueryOrchestratorError::GetCollectionError(e),
+                ));
             }
         };
     }
