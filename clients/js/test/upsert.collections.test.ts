@@ -29,8 +29,8 @@ describe("upsert records", () => {
       [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
     ];
-    await client.addRecords(collection, { ids, embeddings });
-    const count = await client.countRecords(collection);
+    await collection.add({ ids, embeddings });
+    const count = await collection.count();
     expect(count).toBe(2);
 
     const ids2 = ["test2", "test3"];
@@ -39,12 +39,12 @@ describe("upsert records", () => {
       [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     ];
 
-    await client.upsertRecords(collection, {
+    await collection.upsert({
       ids: ids2,
       embeddings: embeddings2,
     });
 
-    const count2 = await client.countRecords(collection);
+    const count2 = await collection.count();
     expect(count2).toBe(3);
   });
 
@@ -52,7 +52,7 @@ describe("upsert records", () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
-      await client.upsertRecords(collection, {
+      await collection.upsert({
         ids: ["test1"],
         embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
         metadatas: [{ test: "meta1" }],

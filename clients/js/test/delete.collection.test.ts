@@ -25,20 +25,20 @@ describe("delete collection", () => {
 
   test("it should delete documents from a collection", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
-    let count = await client.countRecords(collection);
+    let count = await collection.count();
     expect(count).toBe(3);
-    await client.deleteRecords(collection, {
+    await collection.delete({
       where: { test: "test1" },
     });
-    count = await client.countRecords(collection);
+    count = await collection.count();
     expect(count).toBe(2);
 
-    const remainingEmbeddings = await client.getRecords(collection);
+    const remainingEmbeddings = await collection.get();
     expect(remainingEmbeddings?.ids).toEqual(
       expect.arrayContaining(["test2", "test3"]),
     );
@@ -48,7 +48,7 @@ describe("delete collection", () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
-      await client.deleteRecords(collection, { where: { test: "test1" } });
+      await collection.delete({ where: { test: "test1" } });
     }).rejects.toThrow(InvalidCollectionError);
   });
 });

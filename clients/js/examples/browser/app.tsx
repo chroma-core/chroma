@@ -49,7 +49,7 @@ const useDocuments = (query?: string) => {
         }
 
         if (query) {
-          const results = await chroma.queryRecords(collection, {
+          const results = await collection.query({
             queryTexts: query,
           });
           if (abortSignal?.aborted) {
@@ -69,7 +69,7 @@ const useDocuments = (query?: string) => {
             }),
           );
         } else {
-          const results = await chroma.getRecords(collection);
+          const results = await collection.get();
           if (abortSignal?.aborted) {
             return;
           }
@@ -120,7 +120,7 @@ export function App() {
 
     setIsMutating(true);
     try {
-      await chroma.upsertRecords(collection, {
+      await collection.upsert({
         ids: await hashString(document),
         documents: document,
       });
@@ -141,7 +141,7 @@ export function App() {
 
     setIsMutating(true);
     try {
-      await chroma.upsertRecords(collection, {
+      await collection.upsert({
         ids: await Promise.all(SAMPLE_DOCUMENTS.map((d) => hashString(d))),
         documents: SAMPLE_DOCUMENTS,
       });

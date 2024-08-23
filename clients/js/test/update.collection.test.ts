@@ -26,14 +26,14 @@ describe("update records", () => {
 
   test("it should get embedding with matching documents", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
 
-    const results = await client.getRecords(collection, {
+    const results = await collection.get({
       ids: "test1",
       include: [
         IncludeEnum.Embeddings,
@@ -44,14 +44,14 @@ describe("update records", () => {
 
     expect(results?.embeddings?.[0]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
-    await client.updateRecords(collection, {
+    await collection.update({
       ids: ["test1"],
       embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
       metadatas: [{ test: "test1new" }],
       documents: ["doc1new"],
     });
 
-    const results2 = await client.getRecords(collection, {
+    const results2 = await collection.get({
       ids: "test1",
       include: [
         IncludeEnum.Embeddings,
@@ -71,7 +71,7 @@ describe("update records", () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
-      await client.updateRecords(collection, {
+      await collection.update({
         ids: ["test1"],
         embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
         metadatas: [{ test: "meta1" }],
@@ -82,18 +82,18 @@ describe("update records", () => {
 
   test("should support updating records without a document or an embedding", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: "test1",
       documents: "doc1",
       embeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       metadatas: { test: "test1", float_value: 0.1 },
     });
-    await client.updateRecords(collection, {
+    await collection.update({
       ids: ["test1"],
       metadatas: [{ test: "meta1" }],
     });
 
-    const results = await client.getRecords(collection, {
+    const results = await collection.get({
       ids: "test1",
       include: [IncludeEnum.Metadatas],
     });

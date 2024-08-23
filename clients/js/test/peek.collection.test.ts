@@ -25,8 +25,8 @@ describe("peek records", () => {
 
   test("it should peek a collection", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, { ids: IDS, embeddings: EMBEDDINGS });
-    const results = await client.peekRecords(collection, { limit: 2 });
+    await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
+    const results = await collection.peek({ limit: 2 });
     expect(results).toBeDefined();
     expect(typeof results).toBe("object");
     expect(results.ids.length).toBe(2);
@@ -37,7 +37,7 @@ describe("peek records", () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
-      await client.peekRecords(collection);
+      await collection.peek({});
     }).rejects.toThrow(InvalidCollectionError);
   });
 });

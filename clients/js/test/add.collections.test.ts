@@ -31,14 +31,14 @@ describe("add collections", () => {
     const id = "test1";
     const embedding = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const metadata = { test: "test" };
-    await client.addRecords(collection, {
+    await collection.add({
       ids: id,
       embeddings: embedding,
       metadatas: metadata,
     });
-    const count = await client.countRecords(collection);
+    const count = await collection.count();
     expect(count).toBe(1);
-    var res = await client.getRecords(collection, {
+    var res = await collection.get({
       ids: id,
       include: [IncludeEnum.Embeddings],
     });
@@ -47,14 +47,14 @@ describe("add collections", () => {
 
   test("it should add batch embeddings to a collection", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       documents: DOCUMENTS,
     });
-    const count = await client.countRecords(collection);
+    const count = await collection.count();
     expect(count).toBe(3);
-    var res = await client.getRecords(collection, {
+    var res = await collection.get({
       include: [IncludeEnum.Embeddings],
     });
     expect(res.embeddings).toEqual(EMBEDDINGS);
@@ -72,10 +72,10 @@ describe("add collections", () => {
         embeddingFunction: embedder,
       });
       const embeddings = await embedder.generate(DOCUMENTS);
-      await client.addRecords(collection, { ids: IDS, embeddings: embeddings });
-      const count = await client.countRecords(collection);
+      await collection.add({ ids: IDS, embeddings: embeddings });
+      const count = await collection.count();
       expect(count).toBe(3);
-      var res = await client.getRecords(collection, {
+      var res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
@@ -95,10 +95,10 @@ describe("add collections", () => {
         embeddingFunction: embedder,
       });
       const embeddings = await embedder.generate(DOCUMENTS);
-      await client.addRecords(collection, { ids: IDS, embeddings: embeddings });
-      const count = await client.countRecords(collection);
+      await collection.add({ ids: IDS, embeddings: embeddings });
+      const count = await collection.count();
       expect(count).toBe(3);
-      var res = await client.getRecords(collection, {
+      var res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
@@ -108,12 +108,12 @@ describe("add collections", () => {
 
   test("add documents", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       documents: DOCUMENTS,
     });
-    const results = await client.getRecords(collection, { ids: "test1" });
+    const results = await collection.get({ ids: "test1" });
     expect(results.documents[0]).toBe("This is a test");
   });
 
@@ -121,7 +121,7 @@ describe("add collections", () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
-      await client.addRecords(collection, { ids: IDS, embeddings: EMBEDDINGS });
+      await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
     }).rejects.toThrow(InvalidCollectionError);
   });
 
@@ -131,7 +131,7 @@ describe("add collections", () => {
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
     try {
-      await client.addRecords(collection, { ids, embeddings, metadatas });
+      await collection.add({ ids, embeddings, metadatas });
     } catch (e: any) {
       expect(e.message).toMatch("duplicates");
     }
@@ -143,7 +143,7 @@ describe("add collections", () => {
     const embeddings = [[]];
     const metadatas = [{ test: "test1", float_value: 0.1 }];
     try {
-      await client.addRecords(collection, { ids, embeddings, metadatas });
+      await collection.add({ ids, embeddings, metadatas });
     } catch (e: any) {
       expect(e.message).toMatch("got empty embedding at pos");
     }
@@ -164,10 +164,10 @@ describe("add collections", () => {
         embeddingFunction: embedder,
       });
       const embeddings = await embedder.generate(DOCUMENTS);
-      await client.addRecords(collection, { ids: IDS, embeddings: embeddings });
-      const count = await client.countRecords(collection);
+      await collection.add({ ids: IDS, embeddings: embeddings });
+      const count = await collection.count();
       expect(count).toBe(3);
-      var res = await client.getRecords(collection, {
+      var res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });

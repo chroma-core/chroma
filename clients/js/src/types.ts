@@ -93,7 +93,7 @@ export type QueryResponse = SingleQueryResponse | MultiQueryResponse;
 
 export type AddResponse = {};
 
-export interface Collection {
+export interface CollectionParams {
   name: string;
   id: string;
   metadata: CollectionMetadata | undefined;
