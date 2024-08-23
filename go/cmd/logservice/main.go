@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/log/purging"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
 	"github.com/chroma-core/chroma/go/pkg/log/server"
+	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/utils"
 	libs "github.com/chroma-core/chroma/go/shared/libs"
@@ -43,7 +44,8 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to connect to postgres", zap.Error(err))
 	}
-	lr := repository.NewLogRepository(conn)
+	sysDb := sysdb.NewSysDB(config.SYSDB_CONN)
+	lr := repository.NewLogRepository(conn, sysDb)
 	server := server.NewLogServer(lr)
 	var listener net.Listener
 	listener, err = net.Listen("tcp", ":"+config.PORT)
