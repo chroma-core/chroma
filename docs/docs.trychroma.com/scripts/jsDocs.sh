@@ -6,12 +6,13 @@ rm pages/reference/js-collection.md
 npx typedoc --disableSources --hideBreadcrumbs true --hideInPageTOC true
 
 # move the generated docs to the correct location
-cd ./pages/reference
+cd ./pages/reference/temp-js
 
-mv classes/ChromaClient.md js-client.md 
-mv classes/Collection.md js-collection.md 
+mv classes/ChromaClient.ChromaClient.md ../js-client.md 
+mv classes/Collection.Collection.md ../js-collection.md 
 
-
+# go to reference folder
+cd .. 
 
 FILE="js-client.md"
 TEMP_FILE=$(mktemp)
@@ -38,7 +39,4 @@ mv $TEMP_FILE $FILE
 
 
 # cleanup extra generation files we dont need
-rm README.md
-rm modules.md
-rm -rf interfaces
-rm -rf classes
+rm -rf temp-js

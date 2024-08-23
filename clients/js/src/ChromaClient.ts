@@ -24,10 +24,25 @@ export class ChromaClient {
    * @ignore
    */
   public api: DefaultApi & ConfigOptions;
+  /**
+   * @ignore
+   */
   private tenant: string;
+  /**
+   * @ignore
+   */
   private database: string;
+  /**
+   * @ignore
+   */
   private _adminClient: AdminClient;
+  /**
+   * @ignore
+   */
   private authProvider: ClientAuthProvider | undefined;
+  /**
+   * @ignore
+   */
   private _initPromise: Promise<void> | undefined;
 
   /**
