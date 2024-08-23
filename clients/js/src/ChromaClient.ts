@@ -343,33 +343,6 @@ export class ChromaClient {
     });
   }
 
-  // /**
-  //  * Modify the collection name or metadata
-  //  * @param {Object} params - The parameters for the query.
-  //  * @param {string} [params.name] - Optional new name for the collection.
-  //  * @param {CollectionMetadata} [params.metadata] - Optional new metadata for the collection.
-  //  * @returns {Promise<void>} - The response from the API.
-  //  *
-  //  * @example
-  //  * ```typescript
-  //  * const response = await client.updateCollection({
-  //  *   name: "new name",
-  //  *   metadata: { "key": "value" },
-  //  * });
-  //  * ```
-  //  */
-  // async updateCollection(collection: Collection): Promise<CollectionParams> {
-  //   await this.init();
-  //   return (await this.api.updateCollection(
-  //     collection.id,
-  //     {
-  //       new_name: collection.name,
-  //       new_metadata: collection.metadata,
-  //     },
-  //     this.api.options,
-  //   )) as CollectionParams;
-  // }
-
   /**
    * Deletes a collection with the specified name.
    * @param {Object} params - The parameters for deleting a collection.
