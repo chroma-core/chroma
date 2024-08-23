@@ -219,7 +219,7 @@ impl MetadataQueryOrchestrator {
         }
     }
 
-    async fn filter(&mut self, mut logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
+    async fn filter(&mut self, logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
         tracing::debug!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
