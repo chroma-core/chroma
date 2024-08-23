@@ -1,6 +1,6 @@
 use super::delta::BlockDelta;
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
-use arrow::array::{ArrayAccessor, ArrayData};
+use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
 use arrow::ipc::reader::read_footer_length;
 use arrow::ipc::{root_as_footer, root_as_message, MessageHeader, MetadataVersion};
@@ -131,10 +131,6 @@ impl Block {
             right = if predicate == false { mid } else { right };
 
             size = right - left;
-        }
-
-        if left == prefix_arr.len() {
-            return None;
         }
 
         let mut start_idx = left;
