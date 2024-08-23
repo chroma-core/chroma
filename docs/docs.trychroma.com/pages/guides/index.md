@@ -112,8 +112,7 @@ async def main():
     collection = await client.create_collection(name="my_collection")
 
     await collection.add(
-        documents=["hello world"],
-        ids=["id1"]
+        documents=["hello world"]
     )
 
 asyncio.run(main())
@@ -358,8 +357,7 @@ Raw documents:
 ```python
 collection.add(
     documents=["lorem ipsum...", "doc2", "doc3", ...],
-    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-    ids=["id1", "id2", "id3", ...]
+    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...]
 )
 ```
 
@@ -372,7 +370,6 @@ Raw documents:
 
 ```javascript
 await client.addRecords(collection, {
-    ids: ["id1", "id2", "id3", ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
     documents: ["lorem ipsum...", "doc2", "doc3", ...],
 })
@@ -401,7 +398,6 @@ collection.add(
     documents=["doc1", "doc2", "doc3", ...],
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-    ids=["id1", "id2", "id3", ...]
 )
 ```
 
@@ -410,7 +406,6 @@ collection.add(
 
 ```javascript
 await client.addRecords(collection, {
-    ids: ["id1", "id2", "id3", ...],
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
     documents: ["lorem ipsum...", "doc2", "doc3", ...],
@@ -433,7 +428,6 @@ You can also store documents elsewhere, and just supply a list of `embeddings` a
 collection.add(
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-    ids=["id1", "id2", "id3", ...]
 )
 ```
 
@@ -442,7 +436,6 @@ collection.add(
 
 ```javascript
 await client.addRecords(collection, {
-    ids: ["id1", "id2", "id3", ...],
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
 })

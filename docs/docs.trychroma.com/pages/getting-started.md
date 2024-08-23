@@ -153,8 +153,7 @@ collection.add(
     documents=[
         "This is a document about pineapple",
         "This is a document about oranges"
-    ],
-    ids=["id1", "id2"]
+    ]
 )
 ```
 
@@ -167,7 +166,6 @@ await client.addRecords(collection, {
     "This is a document about pineapple",
     "This is a document about oranges",
   ],
-  ids: ["id1", "id2"],
 });
 ```
 

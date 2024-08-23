@@ -101,18 +101,15 @@ collection.add(
     embeddings=[1.5, 2.9, 3.4],
     metadatas={"uri": "img9.png", "style": "style1"},
     documents="doc1000101",
-    ids="uri9",
 )
 # or many, up to 100k+!
 collection.add(
     embeddings=[[1.5, 2.9, 3.4], [9.8, 2.3, 2.9]],
     metadatas=[{"style": "style1"}, {"style": "style2"}],
-    ids=["uri9", "uri10"],
 )
 collection.add(
     documents=["doc1000101", "doc288822"],
     metadatas=[{"style": "style1"}, {"style": "style2"}],
-    ids=["uri9", "uri10"],
 )
 
 # update items in a collection
