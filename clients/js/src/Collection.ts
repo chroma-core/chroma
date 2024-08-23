@@ -1,10 +1,22 @@
 import { ChromaClient } from "./ChromaClient";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
-import { CollectionMetadata, AddRecordsParams, UpsertRecordsParams, BaseGetParams, GetResponse, UpdateRecordsParams, QueryRecordsParams, MultiQueryResponse, PeekParams, MultiGetResponse, DeleteParams, Embeddings, CollectionParams } from "./types";
-import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
 import {
-  Api as GeneratedApi,
-} from "./generated";
+  CollectionMetadata,
+  AddRecordsParams,
+  UpsertRecordsParams,
+  BaseGetParams,
+  GetResponse,
+  UpdateRecordsParams,
+  QueryRecordsParams,
+  MultiQueryResponse,
+  PeekParams,
+  MultiGetResponse,
+  DeleteParams,
+  Embeddings,
+  CollectionParams,
+} from "./types";
+import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
+import { Api as GeneratedApi } from "./generated";
 
 export class Collection {
   public name: string;
@@ -55,9 +67,7 @@ export class Collection {
    * });
    * ```
    */
-  async add(
-    params: AddRecordsParams,
-  ): Promise<void> {
+  async add(params: AddRecordsParams): Promise<void> {
     await this.client.init();
 
     await this.client.api.add(
@@ -71,7 +81,7 @@ export class Collection {
     );
   }
 
-   /**
+  /**
    * Upsert items to the collection
    * @param {Object} params - The parameters for the query.
    * @param {ID | IDs} [params.ids] - IDs of the items to add.
@@ -90,9 +100,7 @@ export class Collection {
    * });
    * ```
    */
-  async upsert(
-    params: UpsertRecordsParams,
-  ): Promise<void> {
+  async upsert(params: UpsertRecordsParams): Promise<void> {
     await this.client.init();
 
     await this.client.api.upsert(
@@ -109,7 +117,7 @@ export class Collection {
   /**
    * Count the number of items in the collection
    * @returns {Promise<number>} - The number of items in the collection.
-   * 
+   *
    * @example
    * ```typescript
    * const count = await collection.count();
@@ -117,7 +125,10 @@ export class Collection {
    */
   async count(): Promise<number> {
     await this.client.init();
-    return (await this.client.api.count(this.id, this.client.api.options)) as number;
+    return (await this.client.api.count(
+      this.id,
+      this.client.api.options,
+    )) as number;
   }
 
   /**
@@ -143,9 +154,14 @@ export class Collection {
    * });
    * ```
    */
-  async get(
-    { ids, where, limit, offset, include, whereDocument }: BaseGetParams = {},
-  ): Promise<GetResponse> {
+  async get({
+    ids,
+    where,
+    limit,
+    offset,
+    include,
+    whereDocument,
+  }: BaseGetParams = {}): Promise<GetResponse> {
     await this.client.init();
 
     const idsArray = ids ? toArray(ids) : undefined;
@@ -185,9 +201,7 @@ export class Collection {
    * });
    * ```
    */
-  async update(
-    params: UpdateRecordsParams,
-  ): Promise<void> {
+  async update(params: UpdateRecordsParams): Promise<void> {
     await this.client.init();
 
     await this.client.api.update(
@@ -230,16 +244,14 @@ export class Collection {
    * ```
    *
    */
-  async query(
-    {
-      nResults = 10,
-      where,
-      whereDocument,
-      include,
-      queryTexts,
-      queryEmbeddings,
-    }: QueryRecordsParams,
-  ): Promise<MultiQueryResponse> {
+  async query({
+    nResults = 10,
+    where,
+    whereDocument,
+    include,
+    queryTexts,
+    queryEmbeddings,
+  }: QueryRecordsParams): Promise<MultiQueryResponse> {
     if ((queryTexts && queryEmbeddings) || (!queryTexts && !queryEmbeddings)) {
       throw new Error(
         "You must supply exactly one of queryTexts or queryEmbeddings.",
@@ -281,30 +293,38 @@ export class Collection {
    * });
    * ```
    */
-  async modify({ name, metadata }: { name?: string; metadata?: CollectionMetadata }): Promise<CollectionParams> {
+  async modify({
+    name,
+    metadata,
+  }: {
+    name?: string;
+    metadata?: CollectionMetadata;
+  }): Promise<CollectionParams> {
     await this.client.init();
-    return this.client.api.updateCollection(
-      this.id,
-      {
-        new_name: name,
-        new_metadata: metadata,
-      },
-      this.client.api.options
-    ).then(() => {
-      if (name !== undefined) {
-        this.name = name;
-      }
-      if (metadata !== undefined) {
-        this.metadata = metadata;
-      }
-      return {
-        name: this.name,
-        metadata: this.metadata,
-      } as CollectionParams;
-    });
+    return this.client.api
+      .updateCollection(
+        this.id,
+        {
+          new_name: name,
+          new_metadata: metadata,
+        },
+        this.client.api.options,
+      )
+      .then(() => {
+        if (name !== undefined) {
+          this.name = name;
+        }
+        if (metadata !== undefined) {
+          this.metadata = metadata;
+        }
+        return {
+          name: this.name,
+          metadata: this.metadata,
+        } as CollectionParams;
+      });
   }
 
-   /**
+  /**
    * Peek inside the collection
    * @param {Object} params - The parameters for the query.
    * @param {PositiveInteger} [params.limit] - Optional number of results to return (default is 10).
@@ -318,9 +338,7 @@ export class Collection {
    * });
    * ```
    */
-  async peek(
-    { limit = 10 }: PeekParams = {},
-  ): Promise<MultiGetResponse> {
+  async peek({ limit = 10 }: PeekParams = {}): Promise<MultiGetResponse> {
     await this.client.init();
     return (await this.client.api.aGet(
       this.id,
@@ -349,9 +367,9 @@ export class Collection {
    * });
    * ```
    */
-  async delete(
-    { ids, where, whereDocument }: DeleteParams = {},
-  ): Promise<string[]> {
+  async delete({ ids, where, whereDocument }: DeleteParams = {}): Promise<
+    string[]
+  > {
     await this.client.init();
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
@@ -361,5 +379,4 @@ export class Collection {
       this.client.api.options,
     )) as string[];
   }
-
 }

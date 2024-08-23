@@ -1,27 +1,14 @@
 import { AdminClient } from "./AdminClient";
 import { ChromaClient } from "./ChromaClient";
 import { ChromaConnectionError } from "./Errors";
-import {
-  Api as GeneratedApi,
-} from "./generated";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import {
   AddRecordsParams,
-  BaseGetParams,
   BaseRecordOperationParams,
-  CollectionMetadata,
   CollectionParams,
-  ConfigOptions,
-  DeleteParams,
-  GetResponse,
   Metadata,
-  MultiGetResponse,
-  MultiQueryResponse,
   MultiRecordOperationParams,
-  PeekParams,
-  QueryRecordsParams,
   UpdateRecordsParams,
-  UpsertRecordsParams,
 } from "./types";
 import { Collection } from "./Collection";
 
@@ -168,7 +155,10 @@ export async function prepareRecordRequest(
   };
 }
 
-export function wrapCollection(api: ChromaClient, collection: CollectionParams): Collection {
+export function wrapCollection(
+  api: ChromaClient,
+  collection: CollectionParams,
+): Collection {
   return new Collection(
     collection.name,
     collection.id,
@@ -177,4 +167,3 @@ export function wrapCollection(api: ChromaClient, collection: CollectionParams):
     collection.metadata,
   );
 }
-

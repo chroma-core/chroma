@@ -27,7 +27,7 @@ describe("collections", () => {
     expect(collection.name).toBe("test");
     expect(collection.metadata).toBeNull();
 
-    await collection.modify({name: "test2"});
+    await collection.modify({ name: "test2" });
     expect(collection.name).toBe("test2");
     expect(collection.metadata).toBeNull();
 
@@ -52,7 +52,7 @@ describe("collections", () => {
     expect(collection3.name).toBe(original_name);
     expect(collection3.metadata).toEqual(original_metadata);
 
-    await collection3.modify({name: new_name});
+    await collection3.modify({ name: new_name });
     expect(collection3.name).toBe(new_name);
     expect(collection3.metadata).toEqual(original_metadata);
 
@@ -64,7 +64,7 @@ describe("collections", () => {
     expect(collection4.metadata).toEqual(original_metadata);
 
     collection3.metadata = new_metadata;
-    await collection3.modify({metadata: new_metadata});
+    await collection3.modify({ metadata: new_metadata });
     expect(collection3.name).toBe(new_name);
     expect(collection3.metadata).toEqual(new_metadata);
 
@@ -95,7 +95,7 @@ describe("collections", () => {
     expect(collection3.metadata).toEqual({ test: "test" });
 
     // modify
-    await collection3.modify({metadata: { test: "test2" }});
+    await collection3.modify({ metadata: { test: "test2" } });
     expect(collection3.metadata).toEqual({ test: "test2" });
 
     // get it again

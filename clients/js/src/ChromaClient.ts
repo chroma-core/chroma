@@ -3,42 +3,18 @@ import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { chromaFetch } from "./ChromaFetch";
 import { Collection } from "./Collection";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
-import { ChromaConnectionError, ChromaServerError } from "./Errors";
-import {
-  Configuration,
-  ApiApi as DefaultApi,
-  Api as GeneratedApi,
-} from "./generated";
+import { Configuration, ApiApi as DefaultApi } from "./generated";
 import type {
-  AddRecordsParams,
-  AddResponse,
-  BaseGetParams,
   ChromaClientParams,
   CollectionParams,
   ConfigOptions,
   CreateCollectionParams,
   DeleteCollectionParams,
-  DeleteParams,
-  Embedding,
-  Embeddings,
   GetCollectionParams,
   GetOrCreateCollectionParams,
-  GetResponse,
   ListCollectionsParams,
-  MultiGetResponse,
-  MultiQueryResponse,
-  PeekParams,
-  QueryRecordsParams,
-  UpdateRecordsParams,
-  UpsertRecordsParams,
 } from "./types";
-import {
-  prepareRecordRequest,
-  toArray,
-  toArrayOfArrays,
-  validateTenantDatabase,
-  wrapCollection,
-} from "./utils";
+import { validateTenantDatabase, wrapCollection } from "./utils";
 
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
@@ -367,5 +343,4 @@ export class ChromaClient {
       this.api.options,
     );
   }
- 
 }
