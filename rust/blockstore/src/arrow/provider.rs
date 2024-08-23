@@ -18,6 +18,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use core::panic;
 use futures::StreamExt;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -144,6 +145,7 @@ pub(super) struct BlockManager {
     block_cache: Cache<Uuid, Block>,
     storage: Storage,
     max_block_size_bytes: usize,
+    write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl BlockManager {
@@ -156,6 +158,7 @@ impl BlockManager {
             block_cache,
             storage,
             max_block_size_bytes,
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -228,8 +231,16 @@ impl BlockManager {
                             deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
                         match block {
                             Ok(block) => {
-                                self.block_cache.insert(*id, block.clone());
-                                Some(block)
+                                let _guard = self.write_mutex.lock().await;
+                                match self.block_cache.get(id) {
+                                    Some(b) => {
+                                        return Some(b);
+                                    }
+                                    None => {
+                                        self.block_cache.insert(*id, block.clone());
+                                        Some(block)
+                                    }
+                                }
                             }
                             Err(e) => {
                                 // TODO: Return an error to callsite instead of None.
