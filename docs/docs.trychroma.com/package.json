@@ -6,7 +6,7 @@
     "start": "next start",
     "index": "node scripts/indexContent.mjs",
     "gen-js": "sh scripts/jsDocs.sh",
-    "gen-python": "scripts/pythonDocs.sh"
+    "gen-python": "sh scripts/pythonDocs.sh"
   },
   "dependencies": {
     "@docsearch/react": "^3.6.0",

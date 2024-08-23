@@ -7,18 +7,16 @@ remove_block() {
 }
 
 # Remove the block from each file
-file1="docs/reference/__init__/__init__.md"
-file2="docs/reference/api/__init__.md"
-file_out="docs/reference/Client.md"
+file1="pages/reference/__init__/__init__.md"
+file2="pages/reference/api/__init__.md"
+file_out="pages/reference/py-client.md"
 remove_block $file1
 remove_block $file2
 
 # Concatenate the files into three.md
 cat > "$file_out" << EOF
 ---
-sidebar_label: Client
 title: Client
-sidebar_position: 1
 ---
 
 EOF
@@ -34,9 +32,7 @@ rm $file2
 
 new_section2=$(cat <<EOF
 ---
-sidebar_label: Collection
 title: Collection
-sidebar_position: 2
 ---
 EOF
 )
@@ -45,7 +41,7 @@ EOF
 new_section2=${new_section2//$'\n'/\\n}
 
 # Define the file
-file2="docs/reference/Collection.md"
+file2="pages/reference/py-collection.md"
 
 # Check if file2 exists
 if [ ! -f "$file2" ]; then
