@@ -356,10 +356,10 @@ def log_size_below_max(
         )
 
         # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
-        # And if the batch_size != sync_threshold, the queue can have up to batch_size - 1 more entries.
+        # And if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
         assert (
             _total_embedding_queue_log_size(sqlite) - 1
-            <= sync_threshold_sum + batch_size_sum - 1
+            <= sync_threshold_sum + batch_size_sum
         )
     else:
         assert _total_embedding_queue_log_size(sqlite) == 0
