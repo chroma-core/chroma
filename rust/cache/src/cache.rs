@@ -36,6 +36,19 @@ impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'sta
         }
     }
 
+    pub fn debug_cache(&self) {
+        match self {
+            Cache::Unbounded(cache) => {
+                // no-op
+            }
+            Cache::Foyer(cache) => {
+                let usage = cache.cache.usage();
+                let capacity = cache.cache.capacity();
+                println!("Cache usage: {}/{}", usage, capacity);
+            }
+        }
+    }
+
     pub fn get(&self, key: &K) -> Option<V> {
         match self {
             Cache::Unbounded(cache) => cache.get(key),

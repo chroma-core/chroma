@@ -29,6 +29,12 @@ pub struct ArrowBlockfileWriter {
 }
 // TODO: method visibility should not be pub(crate)
 
+impl Drop for ArrowBlockfileWriter {
+    fn drop(&mut self) {
+        println!("[DROP] ArrowBlockfileWriter");
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum ArrowBlockfileError {
     #[error("Block not found")]
@@ -96,6 +102,7 @@ impl ArrowBlockfileWriter {
     pub(crate) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
+        println!("[DROP] Committing blockfile writer");
         let mut blocks = Vec::new();
         for delta in self.block_deltas.lock().values() {
             let mut removed = false;
@@ -112,10 +119,10 @@ impl ArrowBlockfileWriter {
         }
 
         let flusher = ArrowBlockfileFlusher::new(
-            self.block_manager,
-            self.sparse_index_manager,
-            blocks,
-            self.sparse_index,
+            self.block_manager.clone(),
+            self.sparse_index_manager.clone(),
+            blocks.clone(),
+            self.sparse_index.clone(),
             self.id,
         );
 
@@ -173,12 +180,12 @@ impl ArrowBlockfileWriter {
         // Then check if its over size and split as needed
         delta.add(prefix, key, value);
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-            let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
-            for (split_key, new_delta) in new_blocks {
-                self.sparse_index.add_block(split_key, new_delta.id);
-                let mut deltas = self.block_deltas.lock();
-                deltas.insert(new_delta.id, new_delta);
-            }
+            // let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+            // for (split_key, new_delta) in new_blocks {
+            //     self.sparse_index.add_block(split_key, new_delta.id);
+            //     let mut deltas = self.block_deltas.lock();
+            //     deltas.insert(new_delta.id, new_delta);
+            // }
         }
 
         Ok(())
@@ -506,6 +513,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix: &str,
     ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+        let start_time = std::time::Instant::now();
         let block_ids = self.sparse_index.get_block_ids_prefix(prefix);
         let mut result: Vec<(&str, K, V)> = vec![];
         for block_id in block_ids {
@@ -525,6 +533,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             };
         }
+        // println!("[PERF] get_by_prefix took {:?}", start_time.elapsed());
         Ok(result)
     }
 

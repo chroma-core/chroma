@@ -48,6 +48,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
+use tokio::runtime::Runtime;
 use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
@@ -592,6 +593,12 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
             }
         };
         self.write(records, ctx.receiver(), ctx).await;
+        // let response = CompactionResponse {
+        //     id: self.id,
+        //     compaction_job: self.compaction_job.clone(),
+        //     message: "Compaction Complete".to_string(),
+        // };
+        // let _ = self.result_channel.take().unwrap().send(Ok(response));
     }
 }
 

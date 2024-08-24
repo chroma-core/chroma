@@ -6,7 +6,8 @@ use crate::{
     key::KeyWrapper,
 };
 use arrow::{
-    array::{Array, Int32Array, ListArray},
+    array::{Array, Int32Array, ListArray, PrimitiveArray},
+    datatypes::Int32Type,
     util::bit_util,
 };
 use std::sync::Arc;
@@ -59,6 +60,12 @@ impl ArrowReadableValue<'_> for Int32Array {
             .unwrap()
             .value(index);
         // Cloning an arrow array is cheap, since they are immutable and backed by Arc'ed data
+        // let as_int_32 = arr.as_any().downcast_ref::<Int32Array>().unwrap();
+        // let mut new_vec = Vec::new();
+        // for i in 0..as_int_32.len() {
+        //     new_vec.push(as_int_32.value(i));
+        // }
+        // Int32Array::from(new_vec)
         arr.as_any().downcast_ref::<Int32Array>().unwrap().clone()
     }
 
@@ -68,6 +75,12 @@ impl ArrowReadableValue<'_> for Int32Array {
         value: Self,
         delta: &mut BlockDelta,
     ) {
-        delta.add(prefix, key, value.clone());
+        // let mut new_vec = Vec::new();
+        // for i in 0..value.len() {
+        //     new_vec.push(value.value(i));
+        // }
+        // let new_arr = Int32Array::from(new_vec);
+        // delta.add(prefix, key, new_arr);
+        delta.add(prefix, key, value);
     }
 }

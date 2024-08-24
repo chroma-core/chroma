@@ -301,6 +301,8 @@ impl S3Storage {
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
+        let request_time_to_mock_ms = 35;
+        let start_time = std::time::Instant::now();
         let mut stream = self
             .get_stream(key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
@@ -332,6 +334,13 @@ impl S3Storage {
                 Ok(Some(buf))
             })
             .await?;
+        let elapsed = start_time.elapsed().as_millis();
+        if elapsed < request_time_to_mock_ms {
+            tokio::time::sleep(Duration::from_millis(
+                (request_time_to_mock_ms - elapsed) as u64,
+            ))
+            .await;
+        }
         match buf {
             Some(buf) => Ok(Arc::new(buf)),
             None => {

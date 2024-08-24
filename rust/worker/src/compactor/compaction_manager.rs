@@ -161,6 +161,11 @@ impl CompactionManager {
                 }
             }
         }
+        let blockfile_provider = match self.blockfile_provider {
+            BlockfileProvider::ArrowBlockfileProvider(ref provider) => provider,
+            _ => panic!("Invalid blockfile provider"),
+        };
+        blockfile_provider.debug_block_sizes();
         (num_completed_jobs, num_failed_jobs)
     }
 

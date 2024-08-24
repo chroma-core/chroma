@@ -2,7 +2,7 @@ FROM rust:1.79.0 as builder
 ARG CHROMA_KUBERNETES_INTEGRATION=0
 ENV CHROMA_KUBERNETES_INTEGRATION $CHROMA_KUBERNETES_INTEGRATION
 
-ARG RELEASE_MODE=
+ARG RELEASE_MODE=1
 
 WORKDIR /
 RUN git clone https://github.com/chroma-core/hnswlib.git
@@ -78,5 +78,8 @@ FROM debian:bookworm-slim as compaction_service
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates
 COPY --from=compaction_service_builder /chroma/compaction_service .
 COPY --from=compaction_service_builder /chroma/rust/worker/chroma_config.yaml .
+
+# ENV export _RJEM_MALLOC_CONF=prof:true,lg_prof_interval:30,lg_prof_sample:21,prof_prefix:/tmp/jeprof
+ENV _RJEM_MALLOC_CONF "prof:true,lg_prof_interval:30,lg_prof_sample:21,prof_prefix:/tmp/jeprof"
 
 ENTRYPOINT [ "./compaction_service" ]

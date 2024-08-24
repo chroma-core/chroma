@@ -73,6 +73,14 @@ pub struct FullTextIndexWriter<'me> {
     uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
 }
 
+impl Drop for FullTextIndexWriter<'_> {
+    fn drop(&mut self) {
+        // TODO we should probably panic here if there are uncommitted postings
+        // or frequencies. This is a bug in the code.
+        println!("[DROP] Dropping FullTextIndexWriter");
+    }
+}
+
 impl<'me> FullTextIndexWriter<'me> {
     pub fn new(
         full_text_index_reader: Option<FullTextIndexReader<'me>>,
@@ -112,6 +120,7 @@ impl<'me> FullTextIndexWriter<'me> {
                     .insert(token.to_string(), (frequency as i32, frequency as i32));
             }
         }
+        let start_time = std::time::Instant::now();
         let mut uncommitted_postings = self.uncommitted_postings.lock().await;
         match uncommitted_postings.positional_postings.get(token) {
             Some(_) => {
@@ -146,6 +155,10 @@ impl<'me> FullTextIndexWriter<'me> {
                 uncommitted_postings
                     .positional_postings
                     .insert(token.to_string(), builder);
+                // println!(
+                //     "[PERF] Populate frequencies and posting lists from previous version took: {:?}",
+                //     start_time.elapsed()
+                // );
             }
         }
         Ok(())
@@ -162,17 +175,49 @@ impl<'me> FullTextIndexWriter<'me> {
         document: &str,
         offset_id: i32,
     ) -> Result<(), FullTextIndexError> {
+        let start_time = std::time::Instant::now();
+        let debug = offset_id % 1000 == 0;
+
         let tokens = self.encode_tokens(document);
+        // println!("[PERF] Tokenization took: {:?}", start_time.elapsed());
+        // println!(
+        //     "[PERF] Token count: {:?} and document length: {:?}",
+        //     tokens.get_tokens().len(),
+        //     document.len()
+        // );
         for token in tokens.get_tokens() {
+            let populate_start_time = std::time::Instant::now();
             self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
                 .await?;
+            // println!(
+            //     "[PERF] Populate frequencies and posting lists took: {:?}",
+            //     populate_start_time.elapsed()
+            // );
+            // if debug {
+            //     println!(
+            //         "[PERF] Populate frequencies and posting lists took: {:?}",
+            //         populate_start_time.elapsed()
+            //     );
+            // }
+            let uncomiited_freq_start = std::time::Instant::now();
             let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
             // The entry should always exist because self.populate_frequencies_and_posting_lists_from_previous_version
             // will have created it if this token is new to the system.
             uncommitted_frequencies
                 .entry(token.text.to_string())
                 .and_modify(|e| (*e).0 += 1);
+            // if debug {
+            //     println!(
+            //         "[PERF] Update frequencies took: {:?}",
+            //         uncomiited_freq_start.elapsed()
+            //     );
+            // }
+            let uncomitted_postings_start = std::time::Instant::now();
             let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+            // println!(
+            //     "[PERF] Lock took: {:?}",
+            //     uncomitted_postings_start.elapsed()
+            // );
             // For a new token, the uncommitted list will not contain any entry so insert
             // an empty builder in that case.
             let builder = uncommitted_postings
@@ -201,6 +246,15 @@ impl<'me> FullTextIndexWriter<'me> {
                     }
                 }
             }
+            // if debug {
+            //     println!(
+            //         "[PERF] Update postings took: {:?}",
+            //         uncomitted_postings_start.elapsed()
+            //     );
+            // }
+        }
+        if debug {
+            println!("[PERF] Add document took: {:?}", start_time.elapsed());
         }
         Ok(())
     }
@@ -288,8 +342,26 @@ impl<'me> FullTextIndexWriter<'me> {
             }
         }
 
+        let total_postings = uncommitted_postings.positional_postings.len();
+        let mut counter = 0;
+        println!(
+            "[PERF] Writing {} postings lists to blockfile",
+            total_postings
+        );
         for (key, mut value) in uncommitted_postings.positional_postings.drain() {
+            if counter % 1 == 0 {
+                println!(
+                    "[PERF] Writing postings list {}/{}",
+                    counter, total_postings
+                );
+            }
             let built_list = value.build();
+            if counter % 1 == 0 {
+                println!(
+                    "[PERF] Current posting list has {} docs",
+                    built_list.doc_ids.len()
+                );
+            }
             for doc_id in built_list.doc_ids.iter() {
                 match doc_id {
                     Some(doc_id) => {
@@ -297,24 +369,34 @@ impl<'me> FullTextIndexWriter<'me> {
                             built_list.get_positions_for_doc_id(doc_id).unwrap();
                         // Don't add if postings list is empty for this (token, doc) combo.
                         // This can happen with deletes.
+                        let start_time = std::time::Instant::now();
                         if positional_posting_list.len() > 0 {
+                            // println!("[PERF] Writing postings list for doc ID: {}", doc_id);
                             match self
                                 .posting_lists_blockfile_writer
                                 .set(key.as_str(), doc_id as u32, positional_posting_list)
                                 .await
                             {
-                                Ok(_) => {}
+                                Ok(_) => {
+                                    // println!(
+                                    //     "[PERF] Writing postings list for doc ID: {} took: {:?}",
+                                    //     doc_id,
+                                    //     start_time.elapsed()
+                                    // );
+                                }
                                 Err(e) => {
                                     return Err(FullTextIndexError::BlockfileWriteError(e));
                                 }
                             }
                         }
+                        tokio::task::yield_now().await;
                     }
                     None => {
                         panic!("Positions for doc ID not found in positional posting list -- should never happen")
                     }
                 }
             }
+            counter += 1;
         }
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
         for (key, value) in uncommitted_frequencies.drain() {
@@ -356,9 +438,12 @@ impl<'me> FullTextIndexWriter<'me> {
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
+            .clone()
             .commit::<u32, Int32Array>()?;
-        let frequencies_blockfile_flusher =
-            self.frequencies_blockfile_writer.commit::<u32, String>()?;
+        let frequencies_blockfile_flusher = self
+            .frequencies_blockfile_writer
+            .clone()
+            .commit::<u32, String>()?;
         Ok(FullTextIndexFlusher {
             posting_lists_blockfile_flusher,
             frequencies_blockfile_flusher,

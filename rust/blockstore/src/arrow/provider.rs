@@ -43,6 +43,10 @@ impl ArrowBlockfileProvider {
         }
     }
 
+    pub fn debug_block_sizes(&self) {
+        self.block_manager.debug_sizes();
+    }
+
     pub async fn open<
         'new,
         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
@@ -53,9 +57,12 @@ impl ArrowBlockfileProvider {
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         let sparse_index = self.sparse_index_manager.get::<K>(id).await;
         match sparse_index {
-            Some(sparse_index) => Ok(BlockfileReader::ArrowBlockfileReader(
-                ArrowBlockfileReader::new(*id, self.block_manager.clone(), sparse_index),
-            )),
+            Some(sparse_index) => {
+                println!("[PERF] [BF] Sparse index length: {}", sparse_index.len());
+                Ok(BlockfileReader::ArrowBlockfileReader(
+                    ArrowBlockfileReader::new(*id, self.block_manager.clone(), sparse_index),
+                ))
+            }
             None => {
                 return Err(Box::new(OpenError::NotFound));
             }
@@ -163,6 +170,10 @@ impl BlockManager {
         let new_block_id = Uuid::new_v4();
         let block = BlockDelta::new::<K, V>(new_block_id);
         block
+    }
+
+    pub fn debug_sizes(&self) {
+        self.block_cache.debug_cache();
     }
 
     pub(super) async fn fork<KeyWrite: ArrowWriteableKey, ValueWrite: ArrowWriteableValue>(

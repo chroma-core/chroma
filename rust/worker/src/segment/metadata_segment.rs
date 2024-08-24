@@ -571,6 +571,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         &self,
         records: Chunk<MaterializedLogRecord<'log_records>>,
     ) -> Result<(), ApplyMaterializedLogError> {
+        let mut add_document_times = Vec::new();
+        let start_time_overall = std::time::Instant::now();
         for record in records.iter() {
             let segment_offset_id = record.0.offset_id;
             match record.0.final_operation {
@@ -593,9 +595,11 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                     match &record.0.final_document {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
+                                let start_time = std::time::Instant::now();
                                 let _ = writer
                                     .add_document(document, segment_offset_id as i32)
                                     .await;
+                                add_document_times.push(start_time.elapsed());
                             }
                             None => panic!(
                                 "Invariant violation. Expected full text index writer to be set"
@@ -814,6 +818,24 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                 MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
         }
+        // print time p50, p95, p99
+        let mut add_document_times = add_document_times
+            .iter()
+            .map(|x| x.as_micros())
+            .collect::<Vec<u128>>();
+        add_document_times.sort();
+        let p50 = add_document_times[add_document_times.len() / 2];
+        let p95 = add_document_times[(add_document_times.len() as f64 * 0.95) as usize];
+        let p99 = add_document_times[(add_document_times.len() as f64 * 0.99) as usize];
+        println!(
+            "[PERF] [ROLLUP] Add document times p50: {} p95: {} p99: {}",
+            p50, p95, p99
+        );
+        println!(
+            "[PERF] [ROLLUP] Overall time: {} for {} records",
+            start_time_overall.elapsed().as_secs(),
+            records.len()
+        );
         Ok(())
     }
 
@@ -984,6 +1006,7 @@ impl MetadataSegmentReader<'_> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
+                    println!("[PERF] [BF] Opening pls blockfile");
                     let pls_reader =
                         match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
                             Ok(reader) => Some(reader),
@@ -1006,6 +1029,7 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
+                    println!("[PERF] [BF] Opening freqs blockfile");
                     let freqs_reader = match blockfile_provider.open::<u32, u32>(&freqs_uuid).await
                     {
                         Ok(reader) => Some(reader),

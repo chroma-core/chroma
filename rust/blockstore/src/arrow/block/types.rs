@@ -53,6 +53,8 @@ impl Block {
             .as_any()
             .downcast_ref::<StringArray>()
             .unwrap();
+        println!("Starting to convert block to delta");
+        let start_time = std::time::Instant::now();
         for i in 0..self.data.num_rows() {
             let prefix = prefix_arr.value(i);
             let key = K::get(self.data.column(1), i);
@@ -60,6 +62,10 @@ impl Block {
 
             K::add_to_delta(prefix, key, value, &mut delta);
         }
+        println!(
+            "Finished converting block to delta in {}ms",
+            start_time.elapsed().as_millis()
+        );
         delta
     }
 

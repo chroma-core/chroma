@@ -14,7 +14,10 @@ use arrow::{
 };
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct SingleColumnStorage<T: ArrowWriteableValue> {
@@ -23,6 +26,7 @@ pub struct SingleColumnStorage<T: ArrowWriteableValue> {
 
 struct Inner<T> {
     storage: BTreeMap<CompositeKey, T>,
+    h_storage: HashMap<CompositeKey, T>,
     size_tracker: SingleColumnSizeTracker,
 }
 
@@ -31,6 +35,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         Self {
             inner: Arc::new(RwLock::new(Inner {
                 storage: BTreeMap::new(),
+                h_storage: HashMap::new(),
                 size_tracker: SingleColumnSizeTracker::new(),
             })),
         }
@@ -114,10 +119,15 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             inner.size_tracker.subtract_prefix_size(prefix.len());
         }
 
-        inner.storage.insert(composite_key, value.to_owned());
+        let clone: T = value.clone();
+        inner.storage.insert(composite_key, clone);
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(value.get_size());
+        let len = inner.storage.len();
+        // if len > 5000 && len % 10000 == 0 {
+        //     println!("[PERF] Single column storage len: {}", len);
+        // }
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
@@ -142,6 +152,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         &self,
         split_size: usize,
     ) -> (CompositeKey, SingleColumnStorage<T>) {
+        unimplemented!();
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut value_size = 0;
@@ -215,6 +226,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                     SingleColumnStorage {
                         inner: Arc::new(RwLock::new(Inner {
                             storage: new_delta,
+                            h_storage: HashMap::new(),
                             size_tracker: SingleColumnSizeTracker::with_values(
                                 total_prefix_size - prefix_size,
                                 total_key_size - key_size,
@@ -270,6 +282,9 @@ impl SingleColumnStorage<Int32Array> {
                 item_capacity,
             );
         }
+
+        // let mut pre_sorted = storage.iter().collect::<Vec<_>>();
+        // pre_sorted.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (_, value) in storage.iter() {
             value_builder.append_value(value);
