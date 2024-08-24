@@ -143,12 +143,23 @@ const collection = await client.createCollection({
 
 ### 4. Add some text documents to the collection
 
-Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model.
+Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. When you add documents, IDs are optional. If you don't provide `ids`, Chroma will automatically generate `ids` using uuid v4 for you.
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
 ```python
+# Add docs without IDs
+result = collection.add(
+    documents=[
+        "This is a document about pineapple",
+        "This is a document about oranges"
+    ]
+)
+
+ids = result["ids"]
+
+# Add docs with IDs
 collection.add(
     documents=[
         "This is a document about pineapple",
@@ -162,6 +173,17 @@ collection.add(
 {% tab label="Javascript" %}
 
 ```js
+// Add docs without Ids
+result = await client.addRecords(collection, {
+  documents: [
+    "This is a document about pineapple",
+    "This is a document about oranges",
+  ]
+});
+
+ids = result.ids
+
+// Add docs with Ids
 await client.addRecords(collection, {
   documents: [
     "This is a document about pineapple",

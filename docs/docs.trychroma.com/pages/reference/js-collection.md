@@ -34,7 +34,6 @@ Add items to the collection
 
 ```javascript
 const response = await collection.add({
-  ids: ["id1", "id2"],
   embeddings: [
     [1, 2, 3],
     [4, 5, 6],
@@ -51,7 +50,7 @@ const response = await collection.add({
 | `params`             | `Object`                    | The parameters for the query.            |
 | `params.documents?`  | `string` \| `Documents`     | Optional documents of the items to add.  |
 | `params.embeddings?` | `Embedding` \| `Embeddings` | Optional embeddings of the items to add. |
-| `params.ids`         | `string` \| `IDs`           | IDs of the items to add.                 |
+| `params.ids`         | `string` \| `IDs`           | Optional IDs of the items to add.        |
 | `params.metadatas?`  | `Metadata` \| `Metadatas`   | Optional metadata of the items to add.   |
 
 #### Returns

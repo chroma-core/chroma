@@ -101,18 +101,15 @@ collection.add(
     embeddings=[1.5, 2.9, 3.4],
     metadatas={"uri": "img9.png", "style": "style1"},
     documents="doc1000101",
-    ids="uri9",
 )
 # or many, up to 100k+!
 collection.add(
     embeddings=[[1.5, 2.9, 3.4], [9.8, 2.3, 2.9]],
     metadatas=[{"style": "style1"}, {"style": "style2"}],
-    ids=["uri9", "uri10"],
 )
 collection.add(
     documents=["doc1000101", "doc288822"],
     metadatas=[{"style": "style1"}, {"style": "style2"}],
-    ids=["uri9", "uri10"],
 )
 
 # update items in a collection
@@ -200,21 +197,18 @@ await collection.count()
 // add new items to a collection
 // either one at a time
 await collection.add({
-    ids: "id1",
     embeddings: [1.5, 2.9, 3.4],
     metadatas: {"source": "my_source"},
     documents: "This is a document",
 })
 // or many, up to 100k+!
 await collection.add({
-    ids: ["uri9", "uri10"],
     embeddings: [[1.5, 2.9, 3.4], [9.8, 2.3, 2.9]],
     metadatas: [{"style": "style1"}, {"style": "style2"}],
     documents: ["This is a document", 'that is a document']
 })
 // including just documents
 await collection.add({
-    ids: ["uri9", "uri10"],
     metadatas: [{"style": "style1"}, {"style": "style2"}],
     documents: ["doc1000101", "doc288822"],
 })
