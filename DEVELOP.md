@@ -13,6 +13,7 @@ and dev requirements:
 python3 -m venv venv      # Only need to do this once
 source venv/bin/activate  # Do this each time you use a new shell for the project
 pip install -r requirements.txt
+pip install -r requirements_optional.txt
 pip install -r requirements_dev.txt
 pre-commit install # install the precommit hooks
 ```
