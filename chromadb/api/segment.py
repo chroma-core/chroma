@@ -57,6 +57,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
+SQL_BATCH_SIZE = 30000
 
 # mimics s3 bucket requirements for naming
 def check_index_name(index_name: str) -> None:
@@ -731,7 +732,13 @@ class SegmentAPI(ServerAPI):
                 metadata_reader = self._manager.get_segment(
                     collection_id, MetadataReader
                 )
-                records = metadata_reader.get_metadata(ids=list(all_ids))
+                records = []
+                all_ids_list = list(all_ids)
+                record_len = len(all_ids)
+                for idx in range(0, record_len, SQL_BATCH_SIZE):
+                    id_batch = all_ids_list[idx : min(idx + SQL_BATCH_SIZE, record_len)]
+                    record_batch = metadata_reader.get_metadata(ids=list(id_batch))
+                    records.extend(list(record_batch))
                 metadata_by_id = {r["id"]: r["metadata"] for r in records}
                 for id_list in ids:
                     # In the segment based architecture, it is possible for one segment
