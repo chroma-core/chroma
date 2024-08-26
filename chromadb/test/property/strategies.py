@@ -1,7 +1,7 @@
 import hashlib
 import hypothesis
 import hypothesis.strategies as st
-from typing import Any, Optional, List, Dict, Union, cast
+from typing import Any, Optional, List, Dict, Union, cast, Tuple
 from typing_extensions import TypedDict
 import uuid
 import numpy as np
@@ -195,7 +195,7 @@ def create_embeddings_ndarray(
     dim: int,
     count: int,
     dtype: npt.DTypeLike,
-) -> np.typing.NDArray[Any]:
+) -> npt.NDArray[Any]:
     return np.random.uniform(
         low=-1.0,
         high=1.0,
@@ -377,7 +377,10 @@ def collections(
 
 @st.composite
 def metadata(
-    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+    draw: st.DrawFn,
+    collection: Collection,
+    min_size: int = 0,
+    max_size: Optional[int] = None,
 ) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
@@ -409,6 +412,8 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     # For cluster tests, we want to avoid generating documents of length < 3.
     # We also don't want them to contain certan special
     # characters like _ and % that implicitly involve searching for a regex in sqlite.
+
+    blacklist_categories: Tuple[str, ...] = ()
     if not NOT_CLUSTER_ONLY:
         # Blacklist certain unicode characters that affect sqlite processing.
         # For example, the null (/x00) character makes sqlite stop processing a string.
@@ -563,7 +568,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     if not NOT_CLUSTER_ONLY:
         legal_ops: List[Optional[str]] = [None, "$eq"]
     else:
-        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+        legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
 
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
@@ -615,10 +620,10 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     else:
         op = draw(st.sampled_from(["$contains", "$not_contains"]))
 
-    if op == "$contains":
+    if op == "$contains":  # type: ignore[comparison-overlap]
         return {"$contains": word}
     else:
-        assert op == "$not_contains"
+        assert op == "$not_contains"  # type: ignore[comparison-overlap]
         return {"$not_contains": word}
 
 

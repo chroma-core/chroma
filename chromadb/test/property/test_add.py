@@ -99,7 +99,7 @@ def _test_add(
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    initial_version = coll.get_model()["version"]
+    initial_version = cast(int, coll.get_model()["version"])
 
     normalized_record_set = invariants.wrap_all(record_set)
 
@@ -182,7 +182,7 @@ def test_add_large(
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
-    initial_version = coll.get_model()["version"]
+    initial_version = cast(int, coll.get_model()["version"])
 
     for batch in create_batches(
         api=client,
@@ -355,7 +355,7 @@ def test_add_with_no_data(client: ClientAPI) -> None:
     ):
         coll.add(
             ids=["1"],
-            embeddings=[],  # type: ignore
-            metadatas=[{"a": 1}],  # type: ignore
-            documents=[],  # type: ignore
+            embeddings=[],
+            metadatas=[{"a": 1}],
+            documents=[],
         )

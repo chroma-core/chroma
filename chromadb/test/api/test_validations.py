@@ -31,7 +31,7 @@ def test_0dim_embedding_validation() -> None:
     assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)
 
 
-def test_ids_validation():
+def test_ids_validation() -> None:
     ids = ["id1", "id2", "id3"]
     assert validate_ids(ids) == ids
 
