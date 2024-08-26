@@ -54,6 +54,46 @@ metadata_records = {
     ],
 }
 
+batch_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "ids": ["https://example.com/1", "https://example.com/2"],
+}
+
+bad_metadata_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "ids": ["id1", "id2"],
+    "metadatas": [{"value": {"nested": "5"}}, {"value": [1, 2, 3]}],
+}
+
+contains_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [4.5, 6.7, 8.9]],
+    "ids": ["id1", "id2"],
+    "metadatas": [{"key": "value1"}, {"key": "value2"}],
+    "documents": ["this is doc1", "this is doc2 and it's great!"]
+}
+
+logical_operator_records = {
+    "embeddings": [
+        [1.1, 2.3, 3.2],
+        [1.2, 2.24, 3.2],
+        [1.3, 2.25, 3.2],
+        [1.4, 2.26, 3.2],
+    ],
+    "ids": ["id1", "id2", "id3", "id4"],
+    "metadatas": [
+        {"int_value": 1, "string_value": "one", "float_value": 1.001, "is": "doc"},
+        {"int_value": 2, "float_value": 2.002, "string_value": "two", "is": "doc"},
+        {"int_value": 3, "float_value": 3.003, "string_value": "three", "is": "doc"},
+        {"int_value": 4, "float_value": 4.004, "string_value": "four", "is": "doc"},
+    ],
+    "documents": [
+        "this document is first and great",
+        "this document is second and great",
+        "this document is third and great",
+        "this document is fourth and great",
+    ],
+}
+
 records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],

@@ -889,21 +889,6 @@ contains_records = {
 }
 
 
-def test_get_where_document(client):
-    client.reset()
-    collection = client.create_collection("test_get_where_document")
-    collection.add(**contains_records)
-
-    items = collection.get(where_document={"$contains": "doc1"})
-    assert len(items["metadatas"]) == 1
-
-    items = collection.get(where_document={"$contains": "great"})
-    assert len(items["metadatas"]) == 2
-
-    items = collection.get(where_document={"$contains": "bad"})
-    assert len(items["metadatas"]) == 0
-
-
 def test_query_where_document(client):
     client.reset()
     collection = client.create_collection("test_query_where_document")
@@ -964,101 +949,6 @@ logical_operator_records = {
 }
 
 
-def test_where_logical_operators(client):
-    client.reset()
-    collection = client.create_collection("test_logical_operators")
-    collection.add(**logical_operator_records)
-
-    items = collection.get(
-        where={
-            "$and": [
-                {"$or": [{"int_value": {"$gte": 3}}, {"float_value": {"$lt": 1.9}}]},
-                {"is": "doc"},
-            ]
-        }
-    )
-    assert len(items["metadatas"]) == 3
-
-    items = collection.get(
-        where={
-            "$or": [
-                {
-                    "$and": [
-                        {"int_value": {"$eq": 3}},
-                        {"string_value": {"$eq": "three"}},
-                    ]
-                },
-                {
-                    "$and": [
-                        {"int_value": {"$eq": 4}},
-                        {"string_value": {"$eq": "four"}},
-                    ]
-                },
-            ]
-        }
-    )
-    assert len(items["metadatas"]) == 2
-
-    items = collection.get(
-        where={
-            "$and": [
-                {
-                    "$or": [
-                        {"int_value": {"$eq": 1}},
-                        {"string_value": {"$eq": "two"}},
-                    ]
-                },
-                {
-                    "$or": [
-                        {"int_value": {"$eq": 2}},
-                        {"string_value": {"$eq": "one"}},
-                    ]
-                },
-            ]
-        }
-    )
-    assert len(items["metadatas"]) == 2
-
-
-def test_where_document_logical_operators(client):
-    client.reset()
-    collection = client.create_collection("test_document_logical_operators")
-    collection.add(**logical_operator_records)
-
-    items = collection.get(
-        where_document={
-            "$and": [
-                {"$contains": "first"},
-                {"$contains": "doc"},
-            ]
-        }
-    )
-    assert len(items["metadatas"]) == 1
-
-    items = collection.get(
-        where_document={
-            "$or": [
-                {"$contains": "first"},
-                {"$contains": "second"},
-            ]
-        }
-    )
-    assert len(items["metadatas"]) == 2
-
-    items = collection.get(
-        where_document={
-            "$or": [
-                {"$contains": "first"},
-                {"$contains": "second"},
-            ]
-        },
-        where={
-            "int_value": {"$ne": 2},
-        },
-    )
-    assert len(items["metadatas"]) == 1
-
-
 # endregion
 
 records = {
@@ -1111,40 +1001,6 @@ def test_query_include(client):
     assert items["ids"][0][1] == "id2"
 
 
-def test_get_include(client):
-    client.reset()
-    collection = client.create_collection("test_get_include")
-    collection.add(**records)
-
-    include = ["metadatas", "documents"]
-    items = collection.get(include=include, where={"int_value": 1})
-    assert items["embeddings"] is None
-    assert items["ids"][0] == "id1"
-    assert items["metadatas"][0]["int_value"] == 1
-    assert items["documents"][0] == "this document is first"
-    assert set(items["included"]) == set(include)
-
-    include = ["embeddings", "documents"]
-    items = collection.get(include=include)
-    assert items["metadatas"] is None
-    assert items["ids"][0] == "id1"
-    assert approx_equal(items["embeddings"][1][0], 1.2)
-    assert set(items["included"]) == set(include)
-
-    items = collection.get(include=[])
-    assert items["documents"] is None
-    assert items["metadatas"] is None
-    assert items["embeddings"] is None
-    assert items["ids"][0] == "id1"
-    assert items["included"] == []
-
-    with pytest.raises(ValueError, match="include"):
-        items = collection.get(include=["metadatas", "undefined"])
-
-    with pytest.raises(ValueError, match="include"):
-        items = collection.get(include=None)
-
-
 # make sure query results are returned in the right order
 
 
@@ -1163,20 +1019,13 @@ def test_query_order(client):
     assert items["documents"][0][1] == "this document is first"
 
 
-# test to make sure add, get, delete error on invalid id input
-
-
+# test to make sure delete error on invalid id input
 def test_invalid_id(client):
     client.reset()
     collection = client.create_collection("test_invalid_id")
     # Add with non-string id
     with pytest.raises(ValueError) as e:
         collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
-    assert "ID" in str(e.value)
-
-    # Get with non-list id
-    with pytest.raises(ValueError) as e:
-        collection.get(ids=1)
     assert "ID" in str(e.value)
 
     # Delete with malformed ids
