@@ -598,16 +598,6 @@ def test_collection_query_with_invalid_collection_throws(client):
         collection.query(query_texts=["test"])
 
 
-def test_collection_update_with_invalid_collection_throws(client):
-    client.reset()
-    collection = client.create_collection("test")
-    client.delete_collection("test")
-
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
-        collection.update(ids=["id1"], documents=["test"])
-
 
 # TEST METADATA AND METADATA FILTERING
 # region
@@ -681,21 +671,6 @@ def test_metadata_get_where_float(client):
     assert items["metadatas"][0]["float_value"] == 1.001
 
 
-def test_metadata_update_get_int_float(client):
-    client.reset()
-    collection = client.create_collection("test_int")
-    collection.add(**metadata_records)
-
-    collection.update(
-        ids=["id1"],
-        metadatas=[{"int_value": 2, "string_value": "two", "float_value": 2.002}],
-    )
-    items = collection.get(ids=["id1"])
-    assert items["metadatas"][0]["int_value"] == 2
-    assert items["metadatas"][0]["string_value"] == "two"
-    assert items["metadatas"][0]["float_value"] == 2.002
-
-
 bad_metadata_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
@@ -708,14 +683,6 @@ def test_metadata_validation_add(client):
     collection = client.create_collection("test_metadata_validation")
     with pytest.raises(ValueError, match="metadata"):
         collection.add(**bad_metadata_records)
-
-
-def test_metadata_validation_update(client):
-    client.reset()
-    collection = client.create_collection("test_metadata_validation")
-    collection.add(**metadata_records)
-    with pytest.raises(ValueError, match="metadata"):
-        collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
 
 
 def test_where_validation_get(client):
@@ -1372,36 +1339,6 @@ def test_multiple_collections(client):
     assert results1["ids"][0][0] == ids1[0]
     assert results2["ids"][0][0] == ids2[0]
 
-
-def test_update_query(client):
-    client.reset()
-    collection = client.create_collection("test_update_query")
-    collection.add(**records)
-
-    updated_records = {
-        "ids": [records["ids"][0]],
-        "embeddings": [[0.1, 0.2, 0.3]],
-        "documents": ["updated document"],
-        "metadatas": [{"foo": "bar"}],
-    }
-
-    collection.update(**updated_records)
-
-    # test query
-    results = collection.query(
-        query_embeddings=updated_records["embeddings"],
-        n_results=1,
-        include=["embeddings", "documents", "metadatas"],
-    )
-    assert len(results["ids"][0]) == 1
-    assert results["ids"][0][0] == updated_records["ids"][0]
-    assert results["documents"][0][0] == updated_records["documents"][0]
-    assert results["metadatas"][0][0]["foo"] == "bar"
-    assert vector_approx_equal(
-        results["embeddings"][0][0], updated_records["embeddings"][0]
-    )
-
-
 def test_get_nearest_neighbors_where_n_results_more_than_element(client):
     client.reset()
     collection = client.create_collection("testspace")
@@ -1479,66 +1416,7 @@ new_records = {
 }
 
 
-def test_upsert(client):
-    client.reset()
-    collection = client.create_collection("test")
-
-    collection.add(**initial_records)
-    assert collection.count() == 3
-
-    collection.upsert(**new_records)
-    assert collection.count() == 4
-
-    get_result = collection.get(
-        include=["embeddings", "metadatas", "documents"], ids=new_records["ids"][0]
-    )
-    assert vector_approx_equal(
-        get_result["embeddings"][0], new_records["embeddings"][0]
-    )
-    assert get_result["metadatas"][0] == new_records["metadatas"][0]
-    assert get_result["documents"][0] == new_records["documents"][0]
-
-    query_result = collection.query(
-        query_embeddings=get_result["embeddings"],
-        n_results=1,
-        include=["embeddings", "metadatas", "documents"],
-    )
-    assert vector_approx_equal(
-        query_result["embeddings"][0][0], new_records["embeddings"][0]
-    )
-    assert query_result["metadatas"][0][0] == new_records["metadatas"][0]
-    assert query_result["documents"][0][0] == new_records["documents"][0]
-
-    collection.delete(ids=initial_records["ids"][2])
-    collection.upsert(
-        ids=initial_records["ids"][2],
-        embeddings=[[1.1, 0.99, 2.21]],
-        metadatas=[{"string_value": "a new string value"}],
-    )
-    assert collection.count() == 4
-
-    get_result = collection.get(
-        include=["embeddings", "metadatas", "documents"], ids=["id3"]
-    )
-    assert vector_approx_equal(get_result["embeddings"][0], [1.1, 0.99, 2.21])
-    assert get_result["metadatas"][0] == {"string_value": "a new string value"}
-    assert get_result["documents"][0] is None
-
-
-def test_collection_upsert_with_invalid_collection_throws(client):
-    client.reset()
-    collection = client.create_collection("test")
-    client.delete_collection("test")
-
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
-        collection.upsert(**initial_records)
-
-
-# test to make sure add, query, update, upsert error on invalid embeddings input
-
-
+# test to make sure add, and query error on invalid embeddings input
 def test_invalid_embeddings(client):
     client.reset()
     collection = client.create_collection("test_invalid_embeddings")
@@ -1559,50 +1437,6 @@ def test_invalid_embeddings(client):
             n_results=1,
         )
     assert "embedding" in str(e.value)
-
-    # Update with invalid embeddings
-    invalid_records = {
-        "embeddings": [[[0], [0], [0]], [[1.2], [2.24], [3.2]]],
-        "ids": ["id1", "id2"],
-    }
-    with pytest.raises(ValueError) as e:
-        collection.update(**invalid_records)
-    assert "embedding" in str(e.value)
-
-    # Upsert with invalid embeddings
-    invalid_records = {
-        "embeddings": [[[1.1, 2.3, 3.2]], [[1.2, 2.24, 3.2]]],
-        "ids": ["id1", "id2"],
-    }
-    with pytest.raises(ValueError) as e:
-        collection.upsert(**invalid_records)
-    assert "embedding" in str(e.value)
-
-
-# test to make sure update shows exception for bad dimensionality
-
-
-def test_dimensionality_exception_update(client):
-    client.reset()
-    collection = client.create_collection("test_dimensionality_update_exception")
-    collection.add(**minimal_records)
-
-    with pytest.raises(Exception) as e:
-        collection.update(**bad_dimensionality_records)
-    assert "dimensionality" in str(e.value)
-
-
-# test to make sure upsert shows exception for bad dimensionality
-
-
-def test_dimensionality_exception_upsert(client):
-    client.reset()
-    collection = client.create_collection("test_dimensionality_upsert_exception")
-    collection.add(**minimal_records)
-
-    with pytest.raises(Exception) as e:
-        collection.upsert(**bad_dimensionality_records)
-    assert "dimensionality" in str(e.value)
 
 
 def test_ssl_self_signed(client_ssl):
