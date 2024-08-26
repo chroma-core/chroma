@@ -1,7 +1,7 @@
 import hashlib
 import hypothesis
 import hypothesis.strategies as st
-from typing import Any, Optional, List, Dict, Union, cast
+from typing import Any, Optional, List, Dict, Union, cast, Tuple
 from typing_extensions import TypedDict
 import uuid
 import numpy as np
@@ -195,7 +195,7 @@ def create_embeddings_ndarray(
     dim: int,
     count: int,
     dtype: npt.DTypeLike,
-) -> np.typing.NDArray[Any]:
+) -> npt.NDArray[Any]:
     return np.random.uniform(
         low=-1.0,
         high=1.0,
@@ -412,6 +412,8 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     # For cluster tests, we want to avoid generating documents of length < 3.
     # We also don't want them to contain certan special
     # characters like _ and % that implicitly involve searching for a regex in sqlite.
+
+    blacklist_categories: Tuple[str, ...] = ()
     if not NOT_CLUSTER_ONLY:
         # Blacklist certain unicode characters that affect sqlite processing.
         # For example, the null (/x00) character makes sqlite stop processing a string.
@@ -618,10 +620,10 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     else:
         op = draw(st.sampled_from(["$contains", "$not_contains"]))
 
-    if op == "$contains":
+    if op == "$contains":  # type: ignore[comparison-overlap]
         return {"$contains": word}
     else:
-        assert op == "$not_contains"
+        assert op == "$not_contains"  # type: ignore[comparison-overlap]
         return {"$not_contains": word}
 
 

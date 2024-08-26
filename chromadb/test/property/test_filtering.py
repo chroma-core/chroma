@@ -196,7 +196,7 @@ def test_filterable_metadata_get(
         embedding_function=collection.embedding_function,
     )
 
-    initial_version = coll.get_model()["version"]
+    initial_version = cast(int, coll.get_model()["version"])
 
     coll.add(**record_set)
 
@@ -309,7 +309,7 @@ def test_filterable_metadata_query(
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    initial_version = coll.get_model()["version"]
+    initial_version = cast(int, coll.get_model()["version"])
     normalized_record_set = invariants.wrap_all(record_set)
 
     coll.add(**record_set)  # type: ignore[arg-type]

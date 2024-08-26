@@ -364,7 +364,7 @@ def test_add_with_no_data(client: ClientAPI) -> None:
     ):
         coll.add(
             ids=["1"],
-            embeddings=[],  # type: ignore
-            metadatas=[{"a": 1}],  # type: ignore
-            documents=[],  # type: ignore
+            embeddings=[],
+            metadatas=[{"a": 1}],
+            documents=[],
         )
