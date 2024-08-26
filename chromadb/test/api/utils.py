@@ -103,3 +103,16 @@ records = {
     ],
     "documents": ["this document is first", "this document is second"],
 }
+
+bad_dimensionality_query = {
+    "query_embeddings": [[1.1, 2.3, 3.2, 4.5], [1.2, 2.24, 3.2, 4.5]],
+}
+
+operator_records = {
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "ids": ["id1", "id2"],
+    "metadatas": [
+        {"int_value": 1, "string_value": "one", "float_value": 1.001},
+        {"int_value": 2, "float_value": 2.002, "string_value": "two"},
+    ],
+}

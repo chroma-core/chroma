@@ -1,6 +1,6 @@
 import pytest
 from chromadb.errors import InvalidCollectionException
-from chromadb.test.api.utils import approx_equal, metadata_records, contains_records, logical_operator_records, records, batch_records
+from chromadb.test.api.utils import (approx_equal, metadata_records, contains_records, logical_operator_records, records, batch_records, operator_records)
 
 
 def test_get_from_db(client):
@@ -194,3 +194,35 @@ def test_invalid_id(client):
     with pytest.raises(ValueError) as e:
         collection.get(ids=1)
     assert "ID" in str(e.value)
+
+def test_get_document_valid_operators(client):
+    client.reset()
+    collection = client.create_collection("test_where_valid_operators")
+    collection.add(**operator_records)
+    with pytest.raises(ValueError, match="where document"):
+        collection.get(where_document={"$lt": {"$nested": 2}})
+
+    with pytest.raises(ValueError, match="where document"):
+        collection.get(where_document={"$contains": []})
+
+    # Test invalid $and, $or
+    with pytest.raises(ValueError):
+        collection.get(where_document={"$and": {"$unsupported": "doc"}})
+
+    with pytest.raises(ValueError):
+        collection.get(
+            where_document={"$or": [{"$unsupported": "doc"}, {"$unsupported": "doc"}]}
+        )
+
+    with pytest.raises(ValueError):
+        collection.get(where_document={"$or": [{"$contains": "doc"}]})
+
+    with pytest.raises(ValueError):
+        collection.get(where_document={"$or": []})
+
+    with pytest.raises(ValueError):
+        collection.get(
+            where_document={
+                "$or": [{"$and": [{"$contains": "doc"}]}, {"$contains": "doc"}]
+            }
+        )
