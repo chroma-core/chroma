@@ -258,6 +258,7 @@ minimal_records = {
     "ids": ["https://example.com/1", "https://example.com/2"],
 }
 
+<<<<<<< Updated upstream
 
 def test_add_minimal(client):
     client.reset()
@@ -295,6 +296,8 @@ def test_collection_get_with_invalid_collection_throws(client):
         collection.get()
 
 
+=======
+>>>>>>> Stashed changes
 def test_reset_db(client):
     client.reset()
 
@@ -1023,10 +1026,13 @@ def test_query_order(client):
 def test_invalid_id(client):
     client.reset()
     collection = client.create_collection("test_invalid_id")
+<<<<<<< Updated upstream
     # Add with non-string id
     with pytest.raises(ValueError) as e:
         collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
     assert "ID" in str(e.value)
+=======
+>>>>>>> Stashed changes
 
     # Delete with malformed ids
     with pytest.raises(ValueError) as e:
