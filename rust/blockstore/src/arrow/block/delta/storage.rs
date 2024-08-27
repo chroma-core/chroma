@@ -20,7 +20,7 @@ use std::{
 #[derive(Clone)]
 pub enum BlockStorage {
     String(SingleColumnStorage<String>),
-    Int32Array(SingleColumnStorage<Int32Array>),
+    Int32Array(SingleColumnStorage<Vec<i32>>),
     UInt32(SingleColumnStorage<u32>),
     RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
     DataRecord(DataRecordStorage),

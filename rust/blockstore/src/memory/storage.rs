@@ -195,7 +195,7 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
 }
 
 // TODO: remove this and make this all use a unified storage so we don't have two impls
-impl Writeable for Int32Array {
+impl Writeable for Vec<i32> {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
         storage
             .int32_array_storage
@@ -224,7 +224,7 @@ impl Writeable for Int32Array {
     }
 }
 
-impl<'referred_data> Readable<'referred_data> for Int32Array {
+impl<'referred_data> Readable<'referred_data> for Vec<i32> {
     fn read_from_storage(prefix: &str, key: KeyWrapper, storage: &Storage) -> Option<Self> {
         storage
             .int32_array_storage
@@ -1064,7 +1064,7 @@ pub struct StorageBuilder {
     // Roaring Bitmap Value
     roaring_bitmap_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, RoaringBitmap>>>>,
     // Int32 Array Value
-    int32_array_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Int32Array>>>>,
+    int32_array_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<i32>>>>>,
     // Data Record Fields
     data_record_id_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
     data_record_embedding_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<f32>>>>>,
@@ -1083,7 +1083,7 @@ pub struct Storage {
     // Roaring Bitmap Value
     roaring_bitmap_storage: Arc<BTreeMap<CompositeKey, RoaringBitmap>>,
     // Int32 Array Value
-    int32_array_storage: Arc<BTreeMap<CompositeKey, Int32Array>>,
+    int32_array_storage: Arc<BTreeMap<CompositeKey, Vec<i32>>>,
     // Data Record Fields
     data_record_id_storage: Arc<BTreeMap<CompositeKey, String>>,
     data_record_embedding_storage: Arc<BTreeMap<CompositeKey, Vec<f32>>>,

@@ -254,7 +254,7 @@ impl SingleColumnStorage<String> {
     }
 }
 
-impl SingleColumnStorage<Int32Array> {
+impl SingleColumnStorage<Vec<i32>> {
     pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
         let item_capacity = self.len();
         let inner = self.inner.read();
@@ -272,7 +272,7 @@ impl SingleColumnStorage<Int32Array> {
         }
 
         for (_, value) in storage.iter() {
-            value_builder.append_value(value);
+            value_builder.append_value(&Int32Array::from(value.clone()));
         }
 
         let value_field = Field::new(

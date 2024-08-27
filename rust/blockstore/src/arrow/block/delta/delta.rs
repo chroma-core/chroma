@@ -154,7 +154,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, Int32Array>();
+        let delta = block_manager.create::<&str, Vec<i32>>();
 
         let n = 2000;
         for i in 0..n {
@@ -165,25 +165,25 @@ mod test {
             for _ in 0..value_len {
                 new_vec.push(random::<i32>());
             }
-            delta.add::<&str, Int32Array>(prefix, &key, Int32Array::from(new_vec));
+            delta.add::<&str, Vec<i32>>(prefix, &key, new_vec.clone());
         }
 
-        let size = delta.get_size::<&str, Int32Array>();
+        let size = delta.get_size::<&str, Vec<i32>>();
         // TODO: should commit take ownership of delta?
         // Semantically, that makes sense, since a delta is unsuable after commit
 
-        let block = block_manager.commit::<&str, Int32Array>(&delta);
+        let block = block_manager.commit::<&str, Vec<i32>>(&delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, Int32Array>("prefix", &key).unwrap();
+            let read = block.get::<&str, Vec<i32>>("prefix", &key).unwrap();
             values_before_flush.push(read);
         }
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&block.clone().id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, Int32Array>("prefix", &key).unwrap();
+            let read = block.get::<&str, Vec<i32>>("prefix", &key).unwrap();
             assert_eq!(read, values_before_flush[i]);
         }
         test_save_load_size(path, &block);

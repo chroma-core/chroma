@@ -125,21 +125,21 @@ impl<'me> MetadataSegmentWriter<'me> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_writer =
-                        match blockfile_provider.fork::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(writer) => writer,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                        };
-                    let pls_reader =
-                        match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(reader) => reader,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                        };
+                    let pls_writer = match blockfile_provider.fork::<u32, Vec<i32>>(&pls_uuid).await
+                    {
+                        Ok(writer) => writer,
+                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                    };
+                    let pls_reader = match blockfile_provider.open::<u32, Vec<i32>>(&pls_uuid).await
+                    {
+                        Ok(reader) => reader,
+                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                    };
                     (pls_writer, Some(pls_reader))
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider.create::<u32, Int32Array>() {
+            None => match blockfile_provider.create::<u32, Vec<i32>>() {
                 Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
@@ -984,11 +984,11 @@ impl MetadataSegmentReader<'_> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_reader =
-                        match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(reader) => Some(reader),
-                            Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                        };
+                    let pls_reader = match blockfile_provider.open::<u32, Vec<i32>>(&pls_uuid).await
+                    {
+                        Ok(reader) => Some(reader),
+                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                    };
                     pls_reader
                 }
                 None => None,

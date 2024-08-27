@@ -87,6 +87,18 @@ impl Value for Int32Array {
     }
 }
 
+impl Value for Vec<i32> {
+    fn get_size(&self) -> usize {
+        self.get_size()
+    }
+}
+
+impl Value for &Vec<i32> {
+    fn get_size(&self) -> usize {
+        self.get_size()
+    }
+}
+
 impl Value for &Int32Array {
     fn get_size(&self) -> usize {
         self.get_buffer_memory_size()

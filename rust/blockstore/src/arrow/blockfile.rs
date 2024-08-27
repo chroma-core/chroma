@@ -605,24 +605,24 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<i32>>().unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
         let key1 = "zzzz";
-        let value1 = Int32Array::from(vec![1, 2, 3]);
+        let value1 = vec![1, 2, 3];
         writer.set(prefix_1, key1, value1.clone()).await.unwrap();
 
         let prefix_2 = "key";
         let key2 = "aaaa";
-        let value2 = Int32Array::from(vec![4, 5, 6]);
+        let value2 = vec![4, 5, 6];
         writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id)
+            .open::<&str, Vec<i32>>(&id)
             .await
             .unwrap();
 
@@ -819,32 +819,32 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<i32>>().unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
         let key1 = "zzzz";
-        let value1 = Int32Array::from(vec![1, 2, 3]);
+        let value1 = vec![1, 2, 3];
         writer.set(prefix_1, key1, value1).await.unwrap();
 
         let prefix_2 = "key";
         let key2 = "aaaa";
-        let value2 = Int32Array::from(vec![4, 5, 6]);
+        let value2 = vec![4, 5, 6];
         writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id)
+            .open::<&str, Vec<i32>>(&id)
             .await
             .unwrap();
 
         let value = reader.get(prefix_1, key1).await.unwrap();
-        assert_eq!(value.values(), &[1, 2, 3]);
+        assert_eq!(value, [1, 2, 3]);
 
         let value = reader.get(prefix_2, key2).await.unwrap();
-        assert_eq!(value.values(), &[4, 5, 6]);
+        assert_eq!(value, [4, 5, 6]);
     }
 
     #[tokio::test]
@@ -859,28 +859,28 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<i32>>().unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id_1)
+            .open::<&str, Vec<i32>>(&id_1)
             .await
             .unwrap();
 
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value.values(), &[i]);
+            assert_eq!(value, [i]);
         }
 
         // Sparse index should have 3 blocks
@@ -894,28 +894,28 @@ mod tests {
 
         // Add 5 new entries to the first block
         let writer = blockfile_provider
-            .fork::<&str, Int32Array>(&id_1)
+            .fork::<&str, Vec<i32>>(&id_1)
             .await
             .unwrap();
         let id_2 = writer.id();
         for i in 0..5 {
             let key = format!("{:05}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id_2)
+            .open::<&str, Vec<i32>>(&id_2)
             .await
             .unwrap();
         for i in 0..5 {
             let key = format!("{:05}", i);
             println!("Getting key: {}", key);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value.values(), &[i]);
+            assert_eq!(value, [i]);
         }
 
         // Sparse index should still have 3 blocks
@@ -929,26 +929,26 @@ mod tests {
 
         // Add 1200 more entries, causing splits
         let writer = blockfile_provider
-            .fork::<&str, Int32Array>(&id_2)
+            .fork::<&str, Vec<i32>>(&id_2)
             .await
             .unwrap();
         let id_3 = writer.id();
         for i in n..n * 2 {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id_3)
+            .open::<&str, Vec<i32>>(&id_3)
             .await
             .unwrap();
         for i in n..n * 2 {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value.values(), &[i]);
+            assert_eq!(value, [i]);
         }
 
         // Sparse index should have 6 blocks
@@ -973,33 +973,33 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<i32>>().unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
         let n = 1200;
         for i in n..n * 2 {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id_1)
+            .open::<&str, Vec<i32>>(&id_1)
             .await
             .unwrap();
 
         for i in 0..n * 2 {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value.values(), &[i]);
+            assert_eq!(value, &[i]);
         }
     }
 
@@ -1320,26 +1320,26 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<i32>>().unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id_1)
+            .open::<&str, Vec<i32>>(&id_1)
             .await
             .unwrap();
 
         for i in 0..n {
             let expected_key = format!("{:04}", i);
-            let expected_value = Int32Array::from(vec![i]);
+            let expected_value = vec![i];
             let res = reader.get_at_index(i as usize).await.unwrap();
             assert_eq!(res.0, "key");
             assert_eq!(res.1, expected_key);
@@ -1359,26 +1359,26 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Int32Array>().unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<i32>>().unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
         let n = 1200;
         for i in n..n * 2 {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
-            .fork::<&str, Int32Array>(&id_1)
+            .fork::<&str, Vec<i32>>(&id_1)
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Delete everything but the last 10 keys.
@@ -1386,16 +1386,16 @@ mod tests {
         for i in 0..delete_end {
             let key = format!("{:04}", i);
             writer
-                .delete::<&str, Int32Array>("key", key.as_str())
+                .delete::<&str, Vec<i32>>("key", key.as_str())
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
         let id_2 = flusher.id();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id_2)
+            .open::<&str, Vec<i32>>(&id_2)
             .await
             .unwrap();
 
@@ -1407,35 +1407,35 @@ mod tests {
         for i in delete_end..n * 2 {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value.values(), &[i]);
+            assert_eq!(value, [i]);
         }
 
         let writer = blockfile_provider
-            .fork::<&str, Int32Array>(&id_1)
+            .fork::<&str, Vec<i32>>(&id_1)
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Add everything back.
         for i in 0..delete_end {
             let key = format!("{:04}", i);
-            let value = Int32Array::from(vec![i]);
+            let value = vec![i];
             writer
-                .set::<&str, Int32Array>("key", key.as_str(), value)
+                .set::<&str, Vec<i32>>("key", key.as_str(), value)
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, Int32Array>().unwrap();
+        let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
         let id_3 = flusher.id();
-        flusher.flush::<&str, Int32Array>().await.unwrap();
+        flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Int32Array>(&id_3)
+            .open::<&str, Vec<i32>>(&id_3)
             .await
             .unwrap();
 
         for i in 0..n * 2 {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value.values(), &[i]);
+            assert_eq!(value, [i]);
         }
     }
 
