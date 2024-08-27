@@ -97,7 +97,7 @@ impl ArrowBlockfileWriter {
         self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut blocks = Vec::new();
-        for delta in self.block_deltas.lock().values() {
+        for (_, delta) in self.block_deltas.lock().drain() {
             let mut removed = false;
             // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
@@ -1435,7 +1435,7 @@ mod tests {
         for i in 0..n * 2 {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value, [i]);
+            assert_eq!(value, &[i]);
         }
     }
 

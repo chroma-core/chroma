@@ -91,7 +91,7 @@ impl BlockKeyArrowBuilder {
         }
     }
 
-    fn to_arrow(&mut self) -> (Field, ArrayRef, Field, ArrayRef) {
+    pub fn to_arrow(&mut self) -> (Field, ArrayRef, Field, ArrayRef) {
         match self {
             BlockKeyArrowBuilder::String((ref mut prefix_builder, ref mut key_builder)) => {
                 let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
@@ -222,42 +222,30 @@ impl BlockStorage {
         }
     }
 
-    pub fn to_record_batch<K: ArrowWriteableKey>(&self) -> RecordBatch {
-        let mut key_builder =
+    pub fn to_record_batch<K: ArrowWriteableKey>(self) -> RecordBatch {
+        let key_builder =
             K::get_arrow_builder(self.len(), self.get_prefix_size(), self.get_key_size());
         match self {
             BlockStorage::String(builder) => {
-                key_builder = builder.build_keys(key_builder);
+                // TODO: handle error
+                builder.to_arrow(key_builder).unwrap()
             }
             BlockStorage::UInt32(builder) => {
-                key_builder = builder.build_keys(key_builder);
+                // TODO: handle error
+                builder.to_arrow(key_builder).unwrap()
             }
             BlockStorage::DataRecord(builder) => {
-                key_builder = builder.build_keys(key_builder);
+                // TODO: handle error
+                builder.to_arrow(key_builder).unwrap()
             }
             BlockStorage::Int32Array(builder) => {
-                key_builder = builder.build_keys(key_builder);
+                // TODO: handle error
+                builder.to_arrow(key_builder).unwrap()
             }
             BlockStorage::RoaringBitmap(builder) => {
-                key_builder = builder.build_keys(key_builder);
+                // TODO: handle error
+                builder.to_arrow(key_builder).unwrap()
             }
         }
-
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
-        let (value_field, value_arr) = match self {
-            BlockStorage::String(builder) => builder.to_arrow(),
-            BlockStorage::UInt32(builder) => builder.to_arrow(),
-            BlockStorage::DataRecord(builder) => builder.to_arrow(),
-            BlockStorage::Int32Array(builder) => builder.to_arrow(),
-            BlockStorage::RoaringBitmap(builder) => builder.to_arrow(),
-        };
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        let record_batch = RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr]);
-        // TODO: handle error
-        record_batch.unwrap()
     }
 }
