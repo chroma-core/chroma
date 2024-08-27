@@ -8,11 +8,11 @@ npx typedoc --disableSources --hideBreadcrumbs true --hideInPageTOC true
 # move the generated docs to the correct location
 cd ./pages/reference/temp-js
 
-mv classes/ChromaClient.ChromaClient.md ../js-client.md 
-mv classes/Collection.Collection.md ../js-collection.md 
+mv classes/ChromaClient.ChromaClient.md ../js-client.md
+mv classes/Collection.Collection.md ../js-collection.md
 
 # go to reference folder
-cd .. 
+cd ..
 
 FILE="js-client.md"
 TEMP_FILE=$(mktemp)

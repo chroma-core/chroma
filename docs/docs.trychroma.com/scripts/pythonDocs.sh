@@ -63,7 +63,7 @@ sed -i.bak -e 's/#### /### /g' "$file_out"
 
 sed -i.bak -e 's/API Objects/Client Methods/g' "$file_out"
 
-# remove @override & @abstractmethod 
+# remove @override & @abstractmethod
 sed -i.bak -e '/@override/d' "$file_out"
 sed -i.bak -e '/@abstractmethod/d' "$file_out"
 
