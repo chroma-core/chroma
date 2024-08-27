@@ -163,7 +163,7 @@ IncludeMetadataDocumentsDistances = Field(
 
 
 class RecordSet(TypedDict):
-    ids: IDs
+    ids: Optional[IDs]
     embeddings: Optional[Embeddings]
     metadatas: Optional[Metadatas]
     documents: Optional[Documents]

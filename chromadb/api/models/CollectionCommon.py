@@ -157,6 +157,7 @@ class CollectionCommon(Generic[ClientT]):
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
@@ -354,7 +355,6 @@ class CollectionCommon(Generic[ClientT]):
 
     def _process_add_request(
         self,
-        ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -363,6 +363,7 @@ class CollectionCommon(Generic[ClientT]):
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
         documents: Optional[OneOrMany[Document]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:

@@ -335,9 +335,9 @@ class SegmentAPI(ServerAPI):
     @override
     def _add(
         self,
-        ids: IDs,
         collection_id: UUID,
         embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
@@ -348,9 +348,9 @@ class SegmentAPI(ServerAPI):
 
         ids = self.generate_ids_when_not_present(
             ids=ids,
-            n_documents=len(documents) if documents is not None else 0,
-            n_uris=len(uris) if uris is not None else 0,
-            n_embeddings=len(embeddings),
+            documents=documents,
+            uris=uris,
+            embeddings=embeddings,
         )
 
         self._validate_record_set(
@@ -887,12 +887,16 @@ class SegmentAPI(ServerAPI):
     @staticmethod
     def generate_ids_when_not_present(
         ids: Optional[IDs],
-        n_documents: int,
-        n_uris: int,
-        n_embeddings: int,
+        documents: Optional[Documents],
+        uris: Optional[URIs],
+        embeddings: Optional[Embeddings],
     ) -> IDs:
         if ids is not None and len(ids) != 0:
             return ids
+        
+        n_documents = len(documents) if documents is not None else 0
+        n_uris = len(uris) if uris is not None else 0
+        n_embeddings = len(embeddings) if embeddings is not None else 0
 
         n = 0
         if n_documents > 0:

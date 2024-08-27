@@ -209,9 +209,9 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def _add(
         self,
-        ids: IDs,
         collection_id: UUID,
         embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,

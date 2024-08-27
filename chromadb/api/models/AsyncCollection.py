@@ -69,7 +69,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         """
         record_set = self._process_add_request(
-            ids=ids if ids is not None else [],
+            ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
@@ -275,7 +275,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         await self._client._update(
             collection_id=self.id,
-            ids=record_set["ids"],
+            ids=cast(IDs, record_set["ids"]),
             embeddings=cast(Embeddings, record_set["embeddings"]),
             metadatas=record_set["metadatas"],
             documents=record_set["documents"],
@@ -318,7 +318,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         await self._client._upsert(
             collection_id=self.id,
-            ids=record_set["ids"],
+            ids=cast(IDs, record_set["ids"]),
             embeddings=cast(Embeddings, record_set["embeddings"]),
             metadatas=record_set["metadatas"],
             documents=record_set["documents"],

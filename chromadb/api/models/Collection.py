@@ -273,7 +273,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         self._client._update(
             collection_id=self.id,
-            ids=record_set["ids"],
+            ids=cast(IDs, record_set["ids"]),
             embeddings=cast(Embeddings, record_set["embeddings"]),
             metadatas=record_set["metadatas"],
             documents=record_set["documents"],
@@ -316,7 +316,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         self._client._upsert(
             collection_id=self.id,
-            ids=record_set["ids"],
+            ids=cast(IDs, record_set["ids"]),
             embeddings=cast(Embeddings, record_set["embeddings"]),
             metadatas=record_set["metadatas"],
             documents=record_set["documents"],
