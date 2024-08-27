@@ -443,15 +443,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @override
     async def _add(
         self,
-        ids: IDs,
         collection_id: UUID,
         embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> AddResult:
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         resp_json = await self._make_request(
             "post",

@@ -60,7 +60,7 @@ def maybe_cast_one_to_many_embedding(
     if target is None:
         return None
 
-    if isinstance(target, List) and len(target) != 0:
+    if isinstance(target, List):
         # One Embedding
         if isinstance(target[0], (int, float)):
             return cast(Embeddings, [target])
@@ -118,7 +118,7 @@ class IncludeEnum(str, Enum):
 
 # Record set
 class RecordSet(TypedDict):
-    ids: IDs
+    ids: Optional[IDs]
     embeddings: Optional[Embeddings]
     metadatas: Optional[Metadatas]
     documents: Optional[Documents]

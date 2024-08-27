@@ -146,7 +146,6 @@ class CollectionCommon(Generic[ClientT]):
 
     def _unpack_record_set(
         self,
-        ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -155,6 +154,7 @@ class CollectionCommon(Generic[ClientT]):
         ],
         metadatas: Optional[OneOrMany[Metadata]],
         documents: Optional[OneOrMany[Document]],
+        ids: Optional[OneOrMany[ID]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
@@ -164,8 +164,9 @@ class CollectionCommon(Generic[ClientT]):
         unpacked_documents = maybe_cast_one_to_many(documents)
         unpacked_images = maybe_cast_one_to_many(images)
         unpacked_uris = maybe_cast_one_to_many(uris)
+
         return {
-            "ids": cast(IDs, unpacked_ids),
+            "ids": unpacked_ids,
             "embeddings": unpacked_embeddings,
             "metadatas": unpacked_metadatas,
             "documents": unpacked_documents,
@@ -366,7 +367,6 @@ class CollectionCommon(Generic[ClientT]):
 
     def _process_add_request(
         self,
-        ids: OneOrMany[ID],
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
@@ -375,6 +375,7 @@ class CollectionCommon(Generic[ClientT]):
         ],
         metadatas: Optional[OneOrMany[Metadata]],
         documents: Optional[OneOrMany[Document]],
+        ids: Optional[OneOrMany[ID]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
