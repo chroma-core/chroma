@@ -113,11 +113,12 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             inner.size_tracker.subtract_key_size(key_len);
             inner.size_tracker.subtract_prefix_size(prefix.len());
         }
+        let value_size = value.get_size();
 
-        inner.storage.insert(composite_key, value.to_owned());
+        inner.storage.insert(composite_key, value);
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
-        inner.size_tracker.add_value_size(value.get_size());
+        inner.size_tracker.add_value_size(value_size);
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
