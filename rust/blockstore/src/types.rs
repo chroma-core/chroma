@@ -89,13 +89,13 @@ impl Value for Int32Array {
 
 impl Value for Vec<i32> {
     fn get_size(&self) -> usize {
-        self.get_size()
+        self.capacity() * 4
     }
 }
 
 impl Value for &Vec<i32> {
     fn get_size(&self) -> usize {
-        self.get_size()
+        self.capacity() * 4
     }
 }
 
