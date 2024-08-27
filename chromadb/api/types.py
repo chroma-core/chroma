@@ -482,7 +482,7 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
-def validate_embeddings(embeddings: Optional[Embeddings]) -> Embeddings:
+def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
     if not isinstance(embeddings, list):
         raise ValueError(

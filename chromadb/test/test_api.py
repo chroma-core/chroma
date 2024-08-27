@@ -1553,7 +1553,7 @@ def test_invalid_embeddings(client):
     assert "embedding" in str(e.value)
 
     # Query with invalid embeddings
-    with pytest.raises(InvalidInputException) as e:
+    with pytest.raises(ValueError) as e:
         collection.query(
             query_embeddings=[["1.1", "2.3", "3.2"]],
             n_results=1,

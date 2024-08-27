@@ -356,7 +356,7 @@ class SegmentAPI(ServerAPI):
             documents=documents,
             uris=uris,
             metadatas=metadatas,
-            require_embeddings_or_data=True,
+            require_embeddings=True,
         )
 
         records_to_submit = list(
@@ -404,7 +404,7 @@ class SegmentAPI(ServerAPI):
             documents=documents,
             uris=uris,
             metadatas=metadatas,
-            require_embeddings_or_data=False,
+            require_embeddings=False,
         )
 
         records_to_submit = list(
@@ -454,7 +454,7 @@ class SegmentAPI(ServerAPI):
             documents=documents,
             uris=uris,
             metadatas=metadatas,
-            require_embeddings_or_data=True,
+            require_embeddings=True,
         )
 
         records_to_submit = list(
@@ -633,7 +633,7 @@ class SegmentAPI(ServerAPI):
             return []
 
         self._validate_embedding_set(
-            collection=coll, ids=ids_to_delete, require_embeddings_or_data=False
+            collection=coll, ids=ids_to_delete, require_embeddings=False
         )
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
@@ -830,7 +830,7 @@ class SegmentAPI(ServerAPI):
         self,
         ids: IDs,
         collection: t.Collection,
-        require_embeddings_or_data: bool,
+        require_embeddings: bool,
         embeddings: Optional[Embeddings] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
@@ -844,11 +844,18 @@ class SegmentAPI(ServerAPI):
         )
 
         try:
-            if require_embeddings_or_data:
-                if embeddings is None and documents is None and uris is None:
-                    raise ValueError("You must provide embeddings, documents, or uris.")
+            if require_embeddings and embeddings is None:
+                raise ValueError("You must provide embeddings, documents, or uris.")
 
+            if embeddings is not None:
                 validate_embeddings(embeddings)
+
+                """Validate the dimension of an embedding record before submitting it to the system."""
+                for embedding in embeddings:
+                    if embedding:
+                        self._validate_dimension(
+                            collection, len(embedding), update=True
+                        )
 
             validate_ids(ids)
             validate_metadatas(metadatas) if metadatas is not None else None
@@ -875,14 +882,6 @@ class SegmentAPI(ServerAPI):
                     raise ValueError(
                         f"Number of {field} ({n}) does not match number of ids ({n_ids})"
                     )
-
-        if embeddings is None:
-            return
-
-        """Validate the dimension of an embedding record before submitting it to the system."""
-        for embedding in embeddings:
-            if embedding:
-                self._validate_dimension(collection, len(embedding), update=True)
 
     # This method is intentionally left untraced because otherwise it can emit thousands of spans for requests containing many embeddings.
     def _validate_dimension(
