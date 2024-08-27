@@ -17,7 +17,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Metadata,
-    IDs,
 )
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
@@ -464,17 +463,19 @@ def recordsets(
     num_unique_metadata: Optional[int] = None,
     min_metadata_size: int = 0,
     max_metadata_size: Optional[int] = None,
+    can_ids_be_empty: bool = False,
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
-    ids: IDs = list(
+    ids = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
+    if can_ids_be_empty and draw(st.booleans()):
+        ids = []
 
     n_records = len(ids)
-
-    if len(ids) == 0:
-        n_records += 1
+    if n_records == 0:
+        n_records = draw(st.integers(min_value=min_size, max_value=max_size))
 
     embeddings: Optional[Embeddings] = None
     if collection.has_embeddings:
@@ -506,7 +507,7 @@ def recordsets(
     # In this case, any field may be a list or a single value.
     if n_records == 1:
         single_id: Union[str, List[str]] = (
-            ids[0] if draw(st.booleans()) and len(ids) == 1 else ids
+            ids[0] if len(ids) == 1 and draw(st.booleans()) else ids
         )
         single_embedding = (
             embeddings[0]
@@ -569,7 +570,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     if not NOT_CLUSTER_ONLY:
         legal_ops = [None, "$eq"]
     else:
-        legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
+        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]  # type: ignore[no-redef]
 
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])

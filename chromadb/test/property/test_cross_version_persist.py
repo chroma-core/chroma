@@ -301,7 +301,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 
 @given(
     collection_strategy=collection_st,
-    embeddings_strategy=strategies.recordsets(collection_st, min_size=1),
+    embeddings_strategy=strategies.recordsets(collection_st),
 )
 @settings(deadline=None)
 def test_cycle_versions(

@@ -26,7 +26,9 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 # record sets so we explicitly create a large record set without using Hypothesis
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=0, max_size=500),
+    record_set=strategies.recordsets(
+        collection_st, max_size=500, can_ids_be_empty=True
+    ),
     should_compact=st.booleans(),
 )
 @settings(
@@ -119,7 +121,8 @@ def _test_add(
     # Only wait for compaction if the size of the collection is
     # some minimal size
 
-    normalized_record_set["ids"] = result["ids"]
+    if len(normalized_record_set["ids"]) == 0:
+        normalized_record_set["ids"] = result["ids"]
 
     if (
         not NOT_CLUSTER_ONLY
