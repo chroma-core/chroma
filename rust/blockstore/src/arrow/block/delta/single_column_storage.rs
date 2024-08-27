@@ -14,7 +14,10 @@ use arrow::{
 };
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct SingleColumnStorage<T: ArrowWriteableValue> {
@@ -23,6 +26,7 @@ pub struct SingleColumnStorage<T: ArrowWriteableValue> {
 
 struct Inner<T> {
     storage: BTreeMap<CompositeKey, T>,
+    // storage: HashMap<CompositeKey, T>,
     size_tracker: SingleColumnSizeTracker,
 }
 
@@ -114,10 +118,18 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             inner.size_tracker.subtract_prefix_size(prefix.len());
         }
 
-        inner.storage.insert(composite_key, value.to_owned());
+        let size = value.get_size();
+        inner.storage.insert(composite_key, value);
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
-        inner.size_tracker.add_value_size(value.get_size());
+        inner.size_tracker.add_value_size(size);
+
+        println!(
+            "prefix size: {}, key size: {}, value size: {}",
+            prefix.len(),
+            key_len,
+            size
+        );
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
@@ -209,12 +221,13 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         match split_key {
             None => panic!("A storage should have at least one element to be split."),
             Some(split_key) => {
-                let new_delta = inner.storage.split_off(&split_key);
+                // let new_delta = inner.storage.split_off(&split_key);
                 (
                     split_key,
                     SingleColumnStorage {
                         inner: Arc::new(RwLock::new(Inner {
-                            storage: new_delta,
+                            // storage: new_delta,
+                            storage: inner.storage.clone(),
                             size_tracker: SingleColumnSizeTracker::with_values(
                                 total_prefix_size - prefix_size,
                                 total_key_size - key_size,
@@ -230,6 +243,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 
 impl SingleColumnStorage<String> {
     pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
+        println!("btreesize: {}", self.len());
         let item_capacity = self.len();
         let mut value_builder;
         if item_capacity == 0 {

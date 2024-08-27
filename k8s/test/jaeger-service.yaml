@@ -8,6 +8,9 @@ spec:
     - name: http
       port: 16686
       targetPort: 16686
+    - name: grpc
+      port: 4317
+      targetPort: 4317
   selector:
     app: jaeger
   type: LoadBalancer

@@ -303,7 +303,9 @@ impl Handler<Memberlist> for CompactionManager {
     type Result = ();
 
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<CompactionManager>) {
-        self.scheduler.set_memberlist(message);
+        // self.scheduler.set_memberlist(message);
+        self.scheduler
+            .set_memberlist(vec!["compaction-service-0".to_string()])
     }
 }
 

@@ -140,7 +140,7 @@ k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_f
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
 
 # I have no idea why these need their own lines but the others don't.
-k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
+k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"], port_forwards='4317:4317')
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])

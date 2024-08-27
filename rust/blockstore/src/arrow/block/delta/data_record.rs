@@ -14,7 +14,10 @@ use arrow::{
 use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use parking_lot::RwLock;
 use prost::Message;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 // Convenience type for the storage entry
 // (id, embedding, metadata, document)
@@ -22,7 +25,7 @@ type DataRecordStorageEntry = (String, Vec<f32>, Option<Vec<u8>>, Option<String>
 
 #[derive(Debug)]
 struct Inner {
-    storage: BTreeMap<CompositeKey, DataRecordStorageEntry>,
+    storage: HashMap<CompositeKey, DataRecordStorageEntry>,
     prefix_size: usize,
     key_size: usize,
     id_size: usize,
@@ -50,7 +53,7 @@ impl DataRecordStorage {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(Inner {
-                storage: BTreeMap::new(),
+                storage: HashMap::new(), //BTreeMap::new(),
                 prefix_size: 0,
                 key_size: 0,
                 id_size: 0,
@@ -155,7 +158,7 @@ impl DataRecordStorage {
         };
         inner
             .storage
-            .insert(composite_key.clone(), (id, embedding, metadata, document));
+            .insert(composite_key, (id, embedding, metadata, document));
         inner.id_size += id_size;
         inner.embedding_size += embedding_size;
         inner.metadata_size += metadata_size;
@@ -312,7 +315,7 @@ impl DataRecordStorage {
     ) -> (CompositeKey, DataRecordStorage) {
         let split_info = self.split_internal::<K>(split_size);
         let mut inner = self.inner.write();
-        let split_storage = inner.storage.split_off(&split_info.split_key);
+        // let split_storage = inner.storage.split_off(&split_info.split_key);
         inner.prefix_size -= split_info.remaining_prefix_size;
         inner.key_size -= split_info.remaining_key_size;
         inner.id_size -= split_info.remaining_id_size;
@@ -322,7 +325,8 @@ impl DataRecordStorage {
 
         let drs = DataRecordStorage {
             inner: Arc::new(RwLock::new(Inner {
-                storage: split_storage,
+                // storage: split_storage,
+                storage: HashMap::new(),
                 prefix_size: split_info.remaining_prefix_size,
                 key_size: split_info.remaining_key_size,
                 id_size: split_info.remaining_id_size,
