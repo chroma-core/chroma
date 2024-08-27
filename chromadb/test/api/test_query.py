@@ -1,10 +1,9 @@
 import pytest
-import numpy as np
 
 from chromadb.test.api.utils import (
     batch_records, minimal_records, bad_dimensionality_query, operator_records, records, contains_records
     )
-
+from chromadb.errors import InvalidCollectionException
 def test_get_nearest_neighbors(client):
     client.reset()
     collection = client.create_collection("testspace")
@@ -203,3 +202,42 @@ def test_get_nearest_neighbors_where_n_results_more_than_element(client):
             assert set(results[key]) == set(includes)
         else:
             assert results[key] is None 
+            
+def test_increment_index_on(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+    includes = ["embeddings", "documents", "metadatas", "distances"]
+    # increment index
+    nn = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]],
+        n_results=1,
+        include=includes,
+    )
+    for key in nn.keys():
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
+        else:
+            assert nn[key] is None
+            
+
+def test_where_validation_query(client):
+    client.reset()
+    collection = client.create_collection("test_where_validation")
+    with pytest.raises(ValueError, match="where"):
+        collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
+        
+        
+def test_collection_query_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.query(query_texts=["test"])

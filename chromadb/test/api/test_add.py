@@ -1,7 +1,29 @@
 import pytest
 import numpy as np
 
-from chromadb.test.api.utils import minimal_records, bad_dimensionality_records
+from chromadb.test.api.utils import minimal_records, bad_dimensionality_records, batch_records, bad_metadata_records
+from chromadb.errors import InvalidCollectionException
+
+def test_add(client):
+    client.reset()
+
+    collection = client.create_collection("testspace")
+
+    collection.add(**batch_records)
+
+    assert collection.count() == 2
+    
+
+def test_collection_add_with_invalid_collection_throws(client):
+    client.reset()
+    collection = client.create_collection("test")
+    client.delete_collection("test")
+
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.add(**batch_records)
+
 
 def test_add_minimal(client):
     client.reset()
@@ -59,3 +81,9 @@ def test_add_invalid_embeddings(client):
     with pytest.raises(ValueError) as e:
         collection.add(**invalid_records)
     assert "embedding" in str(e.value)
+    
+def test_metadata_validation_add(client):
+    client.reset()
+    collection = client.create_collection("test_metadata_validation")
+    with pytest.raises(ValueError, match="metadata"):
+        collection.add(**bad_metadata_records)

@@ -1,5 +1,6 @@
 import pytest
 from chromadb.errors import InvalidCollectionException
+from chromadb.api.types import QueryResult
 from chromadb.test.api.utils import (approx_equal, metadata_records, contains_records, logical_operator_records, records, batch_records, operator_records)
 
 
@@ -26,19 +27,6 @@ def test_collection_get_with_invalid_collection_throws(client):
         InvalidCollectionException, match=r"Collection .* does not exist."
     ):
         collection.get()
-        
-        
-def test_metadata_add_get_int_float(client):
-    client.reset()
-    collection = client.create_collection("test_int")
-    collection.add(**metadata_records)
-
-    items = collection.get(ids=["id1", "id2"])
-    assert items["metadatas"][0]["int_value"] == 1
-    assert items["metadatas"][0]["float_value"] == 1.001
-    assert items["metadatas"][1]["int_value"] == 2
-    assert isinstance(items["metadatas"][0]["int_value"], int)
-    assert isinstance(items["metadatas"][0]["float_value"], float)
     
 
 def test_get_where_document(client):
@@ -55,7 +43,8 @@ def test_get_where_document(client):
     items = collection.get(where_document={"$contains": "bad"})
     assert len(items["metadatas"]) == 0
     
-
+# TEST METADATA AND METADATA FILTERING
+# region
 def test_where_logical_operators(client):
     client.reset()
     collection = client.create_collection("test_logical_operators")
@@ -226,3 +215,161 @@ def test_get_document_valid_operators(client):
                 "$or": [{"$and": [{"$contains": "doc"}]}, {"$contains": "doc"}]
             }
         )
+        
+def test_where_valid_operators(client):
+    client.reset()
+    collection = client.create_collection("test_where_valid_operators")
+    collection.add(**operator_records)
+    with pytest.raises(ValueError):
+        collection.get(where={"int_value": {"$invalid": 2}})
+
+    with pytest.raises(ValueError):
+        collection.get(where={"int_value": {"$lt": "2"}})
+
+    with pytest.raises(ValueError):
+        collection.get(where={"int_value": {"$lt": 2, "$gt": 1}})
+
+    # Test invalid $and, $or
+    with pytest.raises(ValueError):
+        collection.get(where={"$and": {"int_value": {"$lt": 2}}})
+
+    with pytest.raises(ValueError):
+        collection.get(
+            where={"int_value": {"$lt": 2}, "$or": {"int_value": {"$gt": 1}}}
+        )
+
+    with pytest.raises(ValueError):
+        collection.get(
+            where={"$gt": [{"int_value": {"$lt": 2}}, {"int_value": {"$gt": 1}}]}
+        )
+
+    with pytest.raises(ValueError):
+        collection.get(where={"$or": [{"int_value": {"$lt": 2}}]})
+
+    with pytest.raises(ValueError):
+        collection.get(where={"$or": []})
+
+    with pytest.raises(ValueError):
+        collection.get(where={"a": {"$contains": "test"}})
+
+    with pytest.raises(ValueError):
+        collection.get(
+            where={
+                "$or": [
+                    {"a": {"$contains": "first"}},  # invalid
+                    {"$contains": "second"},  # valid
+                ]
+            }
+        )
+        
+
+def test_where_lt(client):
+    client.reset()
+    collection = client.create_collection("test_where_lt")
+    collection.add(**operator_records)
+    items = collection.get(where={"int_value": {"$lt": 2}})
+    assert len(items["metadatas"]) == 1
+
+
+def test_where_lte(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"int_value": {"$lte": 2.0}})
+    assert len(items["metadatas"]) == 2
+
+
+def test_where_gt(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"float_value": {"$gt": -1.4}})
+    assert len(items["metadatas"]) == 2
+
+
+def test_where_gte(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"float_value": {"$gte": 2.002}})
+    assert len(items["metadatas"]) == 1
+
+
+def test_where_ne_string(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"string_value": {"$ne": "two"}})
+    assert len(items["metadatas"]) == 1
+
+
+def test_where_ne_eq_number(client):
+    client.reset()
+    collection = client.create_collection("test_where_lte")
+    collection.add(**operator_records)
+    items = collection.get(where={"int_value": {"$ne": 1}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"float_value": {"$eq": 2.002}})
+    assert len(items["metadatas"]) == 1
+
+def test_where_validation_get(client):
+    client.reset()
+    collection = client.create_collection("test_where_validation")
+    with pytest.raises(ValueError, match="where"):
+        collection.get(where={"value": {"nested": "5"}})
+
+def test_metadata_get_where_int(client):
+    client.reset()
+    collection = client.create_collection("test_int")
+    collection.add(**metadata_records)
+
+    items = collection.get(where={"int_value": 1})
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["string_value"] == "one"
+
+
+def test_metadata_get_where_float(client):
+    client.reset()
+    collection = client.create_collection("test_int")
+    collection.add(**metadata_records)
+
+    items = collection.get(where={"float_value": 1.001})
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["string_value"] == "one"
+    assert items["metadatas"][0]["float_value"] == 1.001
+
+def test_metadata_get_where_string(client):
+    client.reset()
+    collection = client.create_collection("test_int")
+    collection.add(**metadata_records)
+
+    items = collection.get(where={"string_value": "one"})
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["string_value"] == "one"
+
+def test_metadata_add_get_int_float(client):
+    client.reset()
+    collection = client.create_collection("test_int")
+    collection.add(**metadata_records)
+
+    items = collection.get(ids=["id1", "id2"])
+    assert items["metadatas"][0]["int_value"] == 1
+    assert items["metadatas"][0]["float_value"] == 1.001
+    assert items["metadatas"][1]["int_value"] == 2
+    assert isinstance(items["metadatas"][0]["int_value"], int)
+    assert isinstance(items["metadatas"][0]["float_value"], float)
+
+
+def test_metadata_add_query_int_float(client):
+    client.reset()
+    collection = client.create_collection("test_int")
+    collection.add(**metadata_records)
+
+    items: QueryResult = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]], n_results=1
+    )
+    assert items["metadatas"] is not None
+    assert items["metadatas"][0][0]["int_value"] == 1
+    assert items["metadatas"][0][0]["float_value"] == 1.001
+    assert isinstance(items["metadatas"][0][0]["int_value"], int)
+    assert isinstance(items["metadatas"][0][0]["float_value"], float)

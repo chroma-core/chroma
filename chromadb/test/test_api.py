@@ -21,27 +21,6 @@ from chromadb.utils.embedding_functions import (
 
 persist_dir = tempfile.mkdtemp()
 
-
-@pytest.fixture
-def local_persist_api():
-    client = chromadb.Client(
-        Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-            persist_directory=persist_dir,
-        ),
-    )
-    yield client
-    client.clear_system_cache()
-    if os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir, ignore_errors=True)
-
-
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
 def local_persist_api_cache_bust():
@@ -71,117 +50,6 @@ def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:
     if len(a) != len(b):
         return False
     return all([approx_equal(a, b, tolerance) for a, b in zip(a, b)])
-
-
-@pytest.mark.parametrize("api_fixture", [local_persist_api])
-def test_persist_index_loading(api_fixture, request):
-    client = request.getfixturevalue("local_persist_api")
-    client.reset()
-    collection = client.create_collection("test")
-    collection.add(ids="id1", documents="hello")
-
-    api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection("test")
-
-    includes = ["embeddings", "documents", "metadatas", "distances"]
-    nn = collection.query(
-        query_texts="hello",
-        n_results=1,
-        include=["embeddings", "documents", "metadatas", "distances"],
-    )
-    for key in nn.keys():
-        if (key in includes) or (key == "ids"):
-            assert len(nn[key]) == 1
-        elif key == "included":
-            assert set(nn[key]) == set(includes)
-        else:
-            assert nn[key] is None
-
-
-@pytest.mark.parametrize("api_fixture", [local_persist_api])
-def test_persist_index_loading_embedding_function(api_fixture, request):
-    class TestEF(EmbeddingFunction[Document]):
-        def __call__(self, input):
-            return [[1, 2, 3] for _ in range(len(input))]
-
-    client = request.getfixturevalue("local_persist_api")
-    client.reset()
-    collection = client.create_collection("test", embedding_function=TestEF())
-    collection.add(ids="id1", documents="hello")
-
-    client2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = client2.get_collection("test", embedding_function=TestEF())
-
-    includes = ["embeddings", "documents", "metadatas", "distances"]
-    nn = collection.query(
-        query_texts="hello",
-        n_results=1,
-        include=includes,
-    )
-    for key in nn.keys():
-        if (key in includes) or (key == "ids"):
-            assert len(nn[key]) == 1
-        elif key == "included":
-            assert set(nn[key]) == set(includes)
-        else:
-            assert nn[key] is None
-
-
-@pytest.mark.parametrize("api_fixture", [local_persist_api])
-def test_persist_index_get_or_create_embedding_function(api_fixture, request):
-    class TestEF(EmbeddingFunction[Document]):
-        def __call__(self, input):
-            return [[1, 2, 3] for _ in range(len(input))]
-
-    api = request.getfixturevalue("local_persist_api")
-    api.reset()
-    collection = api.get_or_create_collection("test", embedding_function=TestEF())
-    collection.add(ids="id1", documents="hello")
-
-    api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_or_create_collection("test", embedding_function=TestEF())
-
-    includes = ["embeddings", "documents", "metadatas", "distances"]
-    nn = collection.query(
-        query_texts="hello",
-        n_results=1,
-        include=includes,
-    )
-
-    for key in nn.keys():
-        if (key in includes) or (key == "ids"):
-            assert len(nn[key]) == 1
-        elif key == "included":
-            assert set(nn[key]) == set(includes)
-        else:
-            assert nn[key] is None
-
-    assert nn["ids"] == [["id1"]]
-    assert nn["embeddings"] == [[[1, 2, 3]]]
-    assert nn["documents"] == [["hello"]]
-    assert nn["distances"] == [[0]]
-
-
-@pytest.mark.parametrize("api_fixture", [local_persist_api])
-def test_persist(api_fixture, request):
-    client = request.getfixturevalue(api_fixture.__name__)
-
-    client.reset()
-
-    collection = client.create_collection("testspace")
-
-    collection.add(**batch_records)
-
-    assert collection.count() == 2
-
-    client = request.getfixturevalue(api_fixture.__name__)
-    collection = client.get_collection("testspace")
-    assert collection.count() == 2
-
-    client.delete_collection("testspace")
-
-    client = request.getfixturevalue(api_fixture.__name__)
-    assert client.list_collections() == []
 
 
 def test_heartbeat(client):
@@ -215,74 +83,10 @@ batch_records = {
 }
 
 
-def test_add(client):
-    client.reset()
-
-    collection = client.create_collection("testspace")
-
-    collection.add(**batch_records)
-
-    assert collection.count() == 2
-
-
-def test_collection_add_with_invalid_collection_throws(client):
-    client.reset()
-    collection = client.create_collection("test")
-    client.delete_collection("test")
-
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
-        collection.add(**batch_records)
-
-
-def test_get_or_create(client):
-    client.reset()
-
-    collection = client.create_collection("testspace")
-
-    collection.add(**batch_records)
-
-    assert collection.count() == 2
-
-    with pytest.raises(Exception):
-        collection = client.create_collection("testspace")
-
-    collection = client.get_or_create_collection("testspace")
-
-    assert collection.count() == 2
-
-
 minimal_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["https://example.com/1", "https://example.com/2"],
 }
-
-
-def test_get_from_db(client):
-    client.reset()
-    collection = client.create_collection("testspace")
-    collection.add(**batch_records)
-    includes = ["embeddings", "documents", "metadatas"]
-    records = collection.get(include=includes)
-    for key in records.keys():
-        if (key in includes) or (key == "ids"):
-            assert len(records[key]) == 2
-        elif key == "included":
-            assert set(records[key]) == set(includes)
-        else:
-            assert records[key] is None
-
-
-def test_collection_get_with_invalid_collection_throws(client):
-    client.reset()
-    collection = client.create_collection("test")
-    client.delete_collection("test")
-
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
-        collection.get()
 
 
 def test_reset_db(client):
@@ -323,15 +127,6 @@ def test_collection_delete_with_invalid_collection_throws(client):
         InvalidCollectionException, match=r"Collection .* does not exist."
     ):
         collection.delete(ids=["id1"])
-
-def test_dimensionality_validation_query(client):
-    client.reset()
-    collection = client.create_collection("test_dimensionality_validation_query")
-    collection.add(**minimal_records)
-
-    with pytest.raises(Exception) as e:
-        collection.query(**bad_dimensionality_query)
-    assert "dimensionality" in str(e.value)
 
 def test_count(client):
     client.reset()
@@ -440,28 +235,6 @@ def test_metadata_cru(client):
             assert collection.metadata is None
 
 
-def test_increment_index_on(client):
-    client.reset()
-    collection = client.create_collection("testspace")
-    collection.add(**batch_records)
-    assert collection.count() == 2
-
-    includes = ["embeddings", "documents", "metadatas", "distances"]
-    # increment index
-    nn = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2]],
-        n_results=1,
-        include=includes,
-    )
-    for key in nn.keys():
-        if (key in includes) or (key == "ids"):
-            assert len(nn[key]) == 1
-        elif key == "included":
-            assert set(nn[key]) == set(includes)
-        else:
-            assert nn[key] is None
-
-
 def test_add_a_collection(client):
     client.reset()
     client.create_collection("testspace")
@@ -524,33 +297,6 @@ def test_peek(client):
         else:
             assert peek[key] is None
 
-
-def test_collection_peek_with_invalid_collection_throws(client):
-    client.reset()
-    collection = client.create_collection("test")
-    client.delete_collection("test")
-
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
-        collection.peek()
-
-
-def test_collection_query_with_invalid_collection_throws(client):
-    client.reset()
-    collection = client.create_collection("test")
-    client.delete_collection("test")
-
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
-        collection.query(query_texts=["test"])
-
-
-
-# TEST METADATA AND METADATA FILTERING
-# region
-
 metadata_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
@@ -561,92 +307,11 @@ metadata_records = {
 }
 
 
-def test_metadata_add_get_int_float(client):
-    client.reset()
-    collection = client.create_collection("test_int")
-    collection.add(**metadata_records)
-
-    items = collection.get(ids=["id1", "id2"])
-    assert items["metadatas"][0]["int_value"] == 1
-    assert items["metadatas"][0]["float_value"] == 1.001
-    assert items["metadatas"][1]["int_value"] == 2
-    assert isinstance(items["metadatas"][0]["int_value"], int)
-    assert isinstance(items["metadatas"][0]["float_value"], float)
-
-
-def test_metadata_add_query_int_float(client):
-    client.reset()
-    collection = client.create_collection("test_int")
-    collection.add(**metadata_records)
-
-    items: QueryResult = collection.query(
-        query_embeddings=[[1.1, 2.3, 3.2]], n_results=1
-    )
-    assert items["metadatas"] is not None
-    assert items["metadatas"][0][0]["int_value"] == 1
-    assert items["metadatas"][0][0]["float_value"] == 1.001
-    assert isinstance(items["metadatas"][0][0]["int_value"], int)
-    assert isinstance(items["metadatas"][0][0]["float_value"], float)
-
-
-def test_metadata_get_where_string(client):
-    client.reset()
-    collection = client.create_collection("test_int")
-    collection.add(**metadata_records)
-
-    items = collection.get(where={"string_value": "one"})
-    assert items["metadatas"][0]["int_value"] == 1
-    assert items["metadatas"][0]["string_value"] == "one"
-
-
-def test_metadata_get_where_int(client):
-    client.reset()
-    collection = client.create_collection("test_int")
-    collection.add(**metadata_records)
-
-    items = collection.get(where={"int_value": 1})
-    assert items["metadatas"][0]["int_value"] == 1
-    assert items["metadatas"][0]["string_value"] == "one"
-
-
-def test_metadata_get_where_float(client):
-    client.reset()
-    collection = client.create_collection("test_int")
-    collection.add(**metadata_records)
-
-    items = collection.get(where={"float_value": 1.001})
-    assert items["metadatas"][0]["int_value"] == 1
-    assert items["metadatas"][0]["string_value"] == "one"
-    assert items["metadatas"][0]["float_value"] == 1.001
-
-
 bad_metadata_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
     "ids": ["id1", "id2"],
     "metadatas": [{"value": {"nested": "5"}}, {"value": [1, 2, 3]}],
 }
-
-
-def test_metadata_validation_add(client):
-    client.reset()
-    collection = client.create_collection("test_metadata_validation")
-    with pytest.raises(ValueError, match="metadata"):
-        collection.add(**bad_metadata_records)
-
-
-def test_where_validation_get(client):
-    client.reset()
-    collection = client.create_collection("test_where_validation")
-    with pytest.raises(ValueError, match="where"):
-        collection.get(where={"value": {"nested": "5"}})
-
-
-def test_where_validation_query(client):
-    client.reset()
-    collection = client.create_collection("test_where_validation")
-    with pytest.raises(ValueError, match="where"):
-        collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
-
 
 operator_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
@@ -656,104 +321,6 @@ operator_records = {
         {"int_value": 2, "float_value": 2.002, "string_value": "two"},
     ],
 }
-
-
-def test_where_lt(client):
-    client.reset()
-    collection = client.create_collection("test_where_lt")
-    collection.add(**operator_records)
-    items = collection.get(where={"int_value": {"$lt": 2}})
-    assert len(items["metadatas"]) == 1
-
-
-def test_where_lte(client):
-    client.reset()
-    collection = client.create_collection("test_where_lte")
-    collection.add(**operator_records)
-    items = collection.get(where={"int_value": {"$lte": 2.0}})
-    assert len(items["metadatas"]) == 2
-
-
-def test_where_gt(client):
-    client.reset()
-    collection = client.create_collection("test_where_lte")
-    collection.add(**operator_records)
-    items = collection.get(where={"float_value": {"$gt": -1.4}})
-    assert len(items["metadatas"]) == 2
-
-
-def test_where_gte(client):
-    client.reset()
-    collection = client.create_collection("test_where_lte")
-    collection.add(**operator_records)
-    items = collection.get(where={"float_value": {"$gte": 2.002}})
-    assert len(items["metadatas"]) == 1
-
-
-def test_where_ne_string(client):
-    client.reset()
-    collection = client.create_collection("test_where_lte")
-    collection.add(**operator_records)
-    items = collection.get(where={"string_value": {"$ne": "two"}})
-    assert len(items["metadatas"]) == 1
-
-
-def test_where_ne_eq_number(client):
-    client.reset()
-    collection = client.create_collection("test_where_lte")
-    collection.add(**operator_records)
-    items = collection.get(where={"int_value": {"$ne": 1}})
-    assert len(items["metadatas"]) == 1
-    items = collection.get(where={"float_value": {"$eq": 2.002}})
-    assert len(items["metadatas"]) == 1
-
-
-def test_where_valid_operators(client):
-    client.reset()
-    collection = client.create_collection("test_where_valid_operators")
-    collection.add(**operator_records)
-    with pytest.raises(ValueError):
-        collection.get(where={"int_value": {"$invalid": 2}})
-
-    with pytest.raises(ValueError):
-        collection.get(where={"int_value": {"$lt": "2"}})
-
-    with pytest.raises(ValueError):
-        collection.get(where={"int_value": {"$lt": 2, "$gt": 1}})
-
-    # Test invalid $and, $or
-    with pytest.raises(ValueError):
-        collection.get(where={"$and": {"int_value": {"$lt": 2}}})
-
-    with pytest.raises(ValueError):
-        collection.get(
-            where={"int_value": {"$lt": 2}, "$or": {"int_value": {"$gt": 1}}}
-        )
-
-    with pytest.raises(ValueError):
-        collection.get(
-            where={"$gt": [{"int_value": {"$lt": 2}}, {"int_value": {"$gt": 1}}]}
-        )
-
-    with pytest.raises(ValueError):
-        collection.get(where={"$or": [{"int_value": {"$lt": 2}}]})
-
-    with pytest.raises(ValueError):
-        collection.get(where={"$or": []})
-
-    with pytest.raises(ValueError):
-        collection.get(where={"a": {"$contains": "test"}})
-
-    with pytest.raises(ValueError):
-        collection.get(
-            where={
-                "$or": [
-                    {"a": {"$contains": "first"}},  # invalid
-                    {"$contains": "second"},  # valid
-                ]
-            }
-        )
-
 
 # TODO: Define the dimensionality of these embeddingds in terms of the default record
 bad_dimensionality_records = {
@@ -779,22 +346,6 @@ contains_records = {
         {"int_value": 2, "float_value": 2.002, "string_value": "two"},
     ],
 }
-
-
-def test_delete_where_document(client):
-    client.reset()
-    collection = client.create_collection("test_delete_where_document")
-    collection.add(**contains_records)
-
-    collection.delete(where_document={"$contains": "doc1"})
-    assert collection.count() == 1
-
-    collection.delete(where_document={"$contains": "bad"})
-    assert collection.count() == 1
-
-    collection.delete(where_document={"$contains": "great"})
-    assert collection.count() == 0
-
 
 logical_operator_records = {
     "embeddings": [
@@ -831,156 +382,6 @@ records = {
     "documents": ["this document is first", "this document is second"],
 }
 
-
-# test to make sure delete error on invalid id input
-def test_invalid_id(client):
-    client.reset()
-    collection = client.create_collection("test_invalid_id")
-
-    # Delete with malformed ids
-    with pytest.raises(ValueError) as e:
-        collection.delete(ids=["valid", 0])
-    assert "ID" in str(e.value)
-
-
-def test_index_params(client):
-    EPS = 1e-12
-    # first standard add
-    client.reset()
-    collection = client.create_collection(name="test_index_params")
-    collection.add(**records)
-    items = collection.query(
-        query_embeddings=[0.6, 1.12, 1.6],
-        n_results=1,
-    )
-    assert items["distances"][0][0] > 4
-
-    # cosine
-    client.reset()
-    collection = client.create_collection(
-        name="test_index_params",
-        metadata={"hnsw:space": "cosine", "hnsw:construction_ef": 20, "hnsw:M": 5},
-    )
-    collection.add(**records)
-    items = collection.query(
-        query_embeddings=[0.6, 1.12, 1.6],
-        n_results=1,
-    )
-    assert items["distances"][0][0] > 0 - EPS
-    assert items["distances"][0][0] < 1 + EPS
-
-    # ip
-    client.reset()
-    collection = client.create_collection(
-        name="test_index_params", metadata={"hnsw:space": "ip"}
-    )
-    collection.add(**records)
-    items = collection.query(
-        query_embeddings=[0.6, 1.12, 1.6],
-        n_results=1,
-    )
-    assert items["distances"][0][0] < -5
-
-
-def test_invalid_index_params(client):
-    client.reset()
-
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
-        )
-        collection.add(**records)
-
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:space": "foobar"}
-        )
-        collection.add(**records)
-
-
-def test_persist_index_loading_params(client, request):
-    client = request.getfixturevalue("local_persist_api")
-    client.reset()
-    collection = client.create_collection(
-        "test",
-        metadata={"hnsw:space": "ip"},
-    )
-    collection.add(ids="id1", documents="hello")
-
-    api2 = request.getfixturevalue("local_persist_api_cache_bust")
-    collection = api2.get_collection(
-        "test",
-    )
-
-    assert collection.metadata["hnsw:space"] == "ip"
-    includes = ["embeddings", "documents", "metadatas", "distances"]
-    nn = collection.query(
-        query_texts="hello",
-        n_results=1,
-        include=includes,
-    )
-    for key in nn.keys():
-        if (key in includes) or (key == "ids"):
-            assert len(nn[key]) == 1
-        elif key == "included":
-            assert set(nn[key]) == set(includes)
-        else:
-            assert nn[key] is None
-
-# test get_version
-def test_get_version(client):
-    client.reset()
-    version = client.get_version()
-
-    # assert version matches the pattern x.y.z
-    import re
-
-    assert re.match(r"\d+\.\d+\.\d+", version)
-
-
-# test delete_collection
-def test_delete_collection(client):
-    client.reset()
-    collection = client.create_collection("test_delete_collection")
-    collection.add(**records)
-
-    assert len(client.list_collections()) == 1
-    client.delete_collection("test_delete_collection")
-    assert len(client.list_collections()) == 0
-
-
-# test default embedding function
-def test_default_embedding():
-    embedding_function = DefaultEmbeddingFunction()
-    docs = ["this is a test" for _ in range(64)]
-    embeddings = embedding_function(docs)
-    assert len(embeddings) == 64
-
-
-def test_multiple_collections(client):
-    embeddings1 = np.random.rand(10, 512).astype(np.float32).tolist()
-    embeddings2 = np.random.rand(10, 512).astype(np.float32).tolist()
-    ids1 = [f"http://example.com/1/{i}" for i in range(len(embeddings1))]
-    ids2 = [f"http://example.com/2/{i}" for i in range(len(embeddings2))]
-
-    client.reset()
-    coll1 = client.create_collection("coll1")
-    coll1.add(embeddings=embeddings1, ids=ids1)
-
-    coll2 = client.create_collection("coll2")
-    coll2.add(embeddings=embeddings2, ids=ids2)
-
-    assert len(client.list_collections()) == 2
-    assert coll1.count() == len(embeddings1)
-    assert coll2.count() == len(embeddings2)
-
-    results1 = coll1.query(query_embeddings=embeddings1[0], n_results=1)
-    results2 = coll2.query(query_embeddings=embeddings2[0], n_results=1)
-
-    assert results1["ids"][0][0] == ids1[0]
-    assert results2["ids"][0][0] == ids2[0]
-
-
 initial_records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2], [2.2, 3.24, 4.2]],
     "ids": ["id1", "id2", "id3"],
@@ -1008,23 +409,3 @@ new_records = {
         "this document is new and fourth",
     ],
 }
-
-
-def test_ssl_self_signed(client_ssl):
-    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
-        pytest.skip("Skipping test for integration test")
-    client_ssl.heartbeat()
-
-
-def test_ssl_self_signed_without_ssl_verify(client_ssl):
-    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
-        pytest.skip("Skipping test for integration test")
-    client_ssl.heartbeat()
-    _port = client_ssl._server._settings.chroma_server_http_port
-    with pytest.raises(ValueError) as e:
-        chromadb.HttpClient(ssl=True, port=_port)
-    stack_trace = traceback.format_exception(
-        type(e.value), e.value, e.value.__traceback__
-    )
-    client_ssl.clear_system_cache()
-    assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
