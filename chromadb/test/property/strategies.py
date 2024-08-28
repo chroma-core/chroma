@@ -56,7 +56,7 @@ class RecordSet(TypedDict):
     represent what a user would pass to the API.
     """
 
-    ids: Union[types.ID, List[types.ID]]
+    ids: Optional[Union[types.ID, List[types.ID]]]
     embeddings: Optional[Union[types.Embeddings, types.Embedding]]
     metadatas: Optional[Union[List[Optional[types.Metadata]], types.Metadata]]
     documents: Optional[Union[List[types.Document], types.Document]]
@@ -67,7 +67,7 @@ class NormalizedRecordSet(TypedDict):
     A RecordSet, with all fields normalized to lists.
     """
 
-    ids: List[types.ID]
+    ids: Optional[List[types.ID]]
     embeddings: Optional[types.Embeddings]
     metadatas: Optional[List[Optional[types.Metadata]]]
     documents: Optional[List[types.Document]]
@@ -470,10 +470,11 @@ def recordsets(
     ids = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
-    if can_ids_be_empty and draw(st.booleans()):
-        ids = []
 
-    n_records = len(ids)
+    if can_ids_be_empty and draw(st.booleans()):
+        ids = None
+
+    n_records = len(ids) if ids is not None else 0
     if n_records == 0:
         n_records = draw(st.integers(min_value=min_size, max_value=max_size))
 
@@ -506,8 +507,8 @@ def recordsets(
     # the code that handles individual values rather than lists.
     # In this case, any field may be a list or a single value.
     if n_records == 1:
-        single_id: Union[str, List[str]] = (
-            ids[0] if len(ids) == 1 and draw(st.booleans()) else ids
+        single_id: Optional[Union[str, List[str]]] = (
+            ids[0] if ids is not None and len(ids) == 1 and draw(st.booleans()) else ids
         )
         single_embedding = (
             embeddings[0]
