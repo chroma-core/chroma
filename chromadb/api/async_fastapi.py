@@ -451,6 +451,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         uris: Optional[URIs] = None,
     ) -> AddResult:
         batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         resp_json = await self._make_request(
             "post",
