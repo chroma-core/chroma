@@ -76,7 +76,7 @@ impl ArrowWriteableValue for Vec<i32> {
     type ReadableValue<'referred_data> = Vec<i32>;
 
     fn offset_size(item_count: usize) -> usize {
-        0
+        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
     }
 
     fn validity_size(_item_count: usize) -> usize {
