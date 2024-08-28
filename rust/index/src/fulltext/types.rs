@@ -225,11 +225,10 @@ impl<'me> FullTextIndexWriter<'me> {
                         .deleted_token_doc_pairs
                         .insert((token.text.clone(), offset_id as i32));
                 }
-                None => {
-                    // Invariant violation -- we just populated this.
-                    tracing::error!("Error deleting doc ID from positional posting list");
-                    return Err(FullTextIndexError::InvariantViolation);
-                }
+                // This is fine since we delete all the positions of a token
+                // of a document at once so the next time we encounter this token
+                // (at a different position) the map could be empty.
+                None => {}
             }
         }
         Ok(())
