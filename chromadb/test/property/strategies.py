@@ -469,13 +469,11 @@ def recordsets(
     ids: Optional[List[types.ID]] = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
+    
+    n_records = len(ids)
 
     if can_ids_be_empty and draw(st.booleans()):
         ids = None
-
-    n_records = len(ids) if ids is not None else 0
-    if n_records == 0:
-        n_records = draw(st.integers(min_value=min_size, max_value=max_size))
 
     embeddings: Optional[Embeddings] = None
     if collection.has_embeddings:
