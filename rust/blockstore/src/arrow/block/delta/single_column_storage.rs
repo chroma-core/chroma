@@ -221,13 +221,12 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         match split_key {
             None => panic!("A storage should have at least one element to be split."),
             Some(split_key) => {
-                // let new_delta = inner.storage.split_off(&split_key);
+                let new_delta = inner.storage.split_off(&split_key);
                 (
                     split_key,
                     SingleColumnStorage {
                         inner: Arc::new(RwLock::new(Inner {
-                            // storage: new_delta,
-                            storage: inner.storage.clone(),
+                            storage: new_delta,
                             size_tracker: SingleColumnSizeTracker::with_values(
                                 total_prefix_size - prefix_size,
                                 total_key_size - key_size,

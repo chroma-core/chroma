@@ -114,7 +114,7 @@ compaction_service:
     blockfile_provider:
         Arrow:
             block_manager_config:
-                max_block_size_bytes: 16384
+                max_block_size_bytes: 8388608 #16384
                 block_cache_config:
                     lru:
                         capacity: 1000

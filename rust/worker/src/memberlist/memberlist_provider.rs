@@ -148,6 +148,17 @@ impl CustomResourceMemberlistProvider {
             .default_backoff()
             .applied_objects();
         let stream = stream.then(|event| async move {
+            let mut metadata = ObjectMeta::default();
+            metadata.name = Some("compaction-service-memberlist".to_string());
+            return Some(MemberListKubeResource {
+                metadata,
+                spec: MemberListCrd {
+                    members: vec![Member {
+                        member_id: "compaction-service-0".to_string(),
+                    }],
+                },
+            });
+
             match event {
                 Ok(event) => {
                     let event = event;
