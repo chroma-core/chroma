@@ -43,7 +43,7 @@ class Collection(CollectionCommon["ServerAPI"]):
     def add(
         self,
         ids: Optional[OneOrMany[ID]] = None,
-        embeddings: Optional[ # type: ignore[type-arg]
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[PyEmbedding],
