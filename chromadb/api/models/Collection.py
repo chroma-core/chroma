@@ -75,7 +75,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         """
         record_set = self._process_add_request(
-            ids=ids if ids is not None else [],
+            ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
