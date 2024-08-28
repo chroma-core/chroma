@@ -893,7 +893,7 @@ class SegmentAPI(ServerAPI):
     ) -> IDs:
         if ids is not None and len(ids) != 0:
             return ids
-        
+
         n_documents = len(documents) if documents is not None else 0
         n_uris = len(uris) if uris is not None else 0
         n_embeddings = len(embeddings) if embeddings is not None else 0
