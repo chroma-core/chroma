@@ -11,69 +11,8 @@ use arrow::{
 };
 use std::sync::Arc;
 
-// impl ArrowWriteableValue for Int32Array {
-//     type ReadableValue<'referred_data> = Int32Array;
-
-//     fn offset_size(item_count: usize) -> usize {
-//         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
-//     }
-
-//     fn validity_size(_item_count: usize) -> usize {
-//         0 // We don't support None values for Int32Array
-//     }
-
-//     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-//         match &delta.builder {
-//             BlockStorage::Int32Array(builder) => {
-//                 // We have to clone the value in this odd way here because when reading out of a block we get the entire array
-//                 let mut new_vec = Vec::with_capacity(value.len());
-//                 for i in 0..value.len() {
-//                     new_vec.push(value.value(i));
-//                 }
-//                 let new_arr = Int32Array::from(new_vec);
-//                 builder.add(prefix, key, new_arr);
-//             }
-//             _ => panic!("Invalid builder type"),
-//         }
-//     }
-
-//     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
-//         match &delta.builder {
-//             BlockStorage::Int32Array(builder) => {
-//                 builder.delete(prefix, key);
-//             }
-//             _ => panic!("Invalid builder type"),
-//         }
-//     }
-
-//     fn get_delta_builder() -> BlockStorage {
-//         BlockStorage::Int32Array(SingleColumnStorage::new())
-//     }
-// }
-
-// impl ArrowReadableValue<'_> for Int32Array {
-//     fn get(array: &Arc<dyn Array>, index: usize) -> Self {
-//         let arr = array
-//             .as_any()
-//             .downcast_ref::<ListArray>()
-//             .unwrap()
-//             .value(index);
-//         // Cloning an arrow array is cheap, since they are immutable and backed by Arc'ed data
-//         arr.as_any().downcast_ref::<Int32Array>().unwrap().clone()
-//     }
-
-//     fn add_to_delta<K: ArrowWriteableKey>(
-//         prefix: &str,
-//         key: K,
-//         value: Self,
-//         delta: &mut BlockDelta,
-//     ) {
-//         // delta.add(prefix, key, value.clone());
-//     }
-// }
-
 impl ArrowWriteableValue for Vec<i32> {
-    type ReadableValue<'referred_data> = Vec<i32>;
+    type ReadableValue<'referred_data> = &'referred_data [i32];
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
@@ -86,12 +25,6 @@ impl ArrowWriteableValue for Vec<i32> {
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
         match &delta.builder {
             BlockStorage::Int32Array(builder) => {
-                // We have to clone the value in this odd way here because when reading out of a block we get the entire array
-                // let mut new_vec = Vec::with_capacity(value.len());
-                // for i in 0..value.len() {
-                //     new_vec.push(value.value(i));
-                // }
-                // let new_arr = Int32Array::from(new_vec);
                 builder.add(prefix, key, value);
             }
             _ => panic!("Invalid builder type"),
@@ -134,5 +67,62 @@ impl ArrowReadableValue<'_> for Vec<i32> {
         delta: &mut BlockDelta,
     ) {
         delta.add(prefix, key, value.clone());
+    }
+}
+
+impl ArrowWriteableValue for &[i32] {
+    type ReadableValue<'referred_data> = &'referred_data [i32];
+
+    fn offset_size(item_count: usize) -> usize {
+        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
+    }
+
+    fn validity_size(_item_count: usize) -> usize {
+        0 // We don't support None values for Int32Array
+    }
+
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
+        match &delta.builder {
+            BlockStorage::Int32Array(builder) => {
+                builder.add(prefix, key, value.to_vec());
+            }
+            _ => panic!("Invalid builder type"),
+        }
+    }
+
+    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
+        match &delta.builder {
+            BlockStorage::Int32Array(builder) => {
+                builder.delete(prefix, key);
+            }
+            _ => panic!("Invalid builder type"),
+        }
+    }
+
+    fn get_delta_builder() -> BlockStorage {
+        BlockStorage::Int32Array(SingleColumnStorage::new())
+    }
+}
+
+impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [i32] {
+    fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self {
+        let list_array = array.as_any().downcast_ref::<ListArray>().unwrap();
+        let start = list_array.value_offsets()[index] as usize;
+        let end = list_array.value_offsets()[index + 1] as usize;
+        let i32array = list_array
+            .values()
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        &i32array.values()[start..end]
+    }
+
+    fn add_to_delta<K: ArrowWriteableKey>(
+        prefix: &str,
+        key: K,
+        value: Self,
+        delta: &mut BlockDelta,
+    ) {
+        delta.add(prefix, key, value);
     }
 }
