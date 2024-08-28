@@ -528,22 +528,27 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     return embeddings
 
 
-def validate_batch(
-    batch: Tuple[
-        Optional[IDs],
-        Optional[Embeddings],
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ],
+def validate_batch_size(
+    record_set: RecordSet,
     limits: Dict[str, Any],
 ) -> None:
-    batch_size = len(batch[0]) if batch[0] is not None else 0
+    (_, batch_size) = get_n_items_from_record_set(record_set)
 
     if batch_size > limits["max_batch_size"]:
         raise ValueError(
             f"Batch size {batch_size} exceeds maximum batch size {limits['max_batch_size']}"
         )
+
+
+def get_n_items_from_record_set(record_set: RecordSet) -> Tuple[str, int]:
+    """
+    Get the number of items in the record set.
+    """
+    for field, value in record_set.items():
+        if isinstance(value, list) and len(value) > 0:
+            return field, len(value)
+
+    return "", 0
 
 
 def validate_record_set(record_set: RecordSet) -> None:
@@ -555,23 +560,12 @@ def validate_record_set(record_set: RecordSet) -> None:
     validate_embeddings(embeddings) if embeddings is not None else None
     validate_metadatas(metadatas) if metadatas is not None else None
 
-    n_items_field = None
-    n_items = None
-
-    if ids is not None:
-        n_items_field = "ids"
-        n_items = len(ids)
+    n_items_field, n_items = get_n_items_from_record_set(record_set)
+    if n_items == 0:
+        return
 
     for field, value in record_set.items():
-        if field == "ids" or value is None:
-            continue
-
         if isinstance(value, list):
-            if n_items_field is None:
-                n_items_field = field
-                n_items = len(value)
-                continue
-
             n = len(value)
             if n != n_items:
                 raise ValueError(
