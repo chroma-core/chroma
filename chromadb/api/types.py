@@ -548,28 +548,28 @@ def validate_record_set(record_set: RecordSet) -> None:
     embeddings = record_set["embeddings"]
     ids = record_set["ids"]
     metadatas = record_set["metadatas"]
-    
+
     validate_ids(ids) if ids is not None else None
     validate_embeddings(embeddings) if embeddings is not None else None
     validate_metadatas(metadatas) if metadatas is not None else None
 
     n_items_field = None
     n_items = None
-    
+
     if ids is not None:
         n_items_field = "ids"
         n_items = len(ids)
-        
+
     for field, value in record_set.items():
         if field == "ids" or value is None:
             continue
-        
+
         if isinstance(value, list):
             if n_items_field is None:
                 n_items_field = field
                 n_items = len(value)
                 continue
-            
+
             n = len(value)
             if n != n_items:
                 raise ValueError(
