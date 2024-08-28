@@ -888,6 +888,9 @@ class SegmentAPI(ServerAPI):
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
 
         try:
+            if record_set["ids"] is None:
+                raise ValueError("Expected ids to be a non-empty list, got None")
+    
             validate_record_set(record_set)
             validate_batch(
                 (
