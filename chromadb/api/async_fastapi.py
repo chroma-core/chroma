@@ -451,7 +451,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         uris: Optional[URIs] = None,
     ) -> bool:
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
 
@@ -469,7 +469,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         uris: Optional[URIs] = None,
     ) -> bool:
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/update"
@@ -489,7 +489,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         uris: Optional[URIs] = None,
     ) -> bool:
         batch = (ids, embeddings, metadatas, documents, uris)
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
