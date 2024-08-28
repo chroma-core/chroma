@@ -45,6 +45,8 @@ pub(crate) struct CompactionManager {
     compaction_manager_queue_size: usize,
     compaction_interval: Duration,
     min_compaction_size: usize,
+    max_compaction_size: usize,
+    max_partition_size: usize,
 }
 
 #[derive(Error, Debug)]
@@ -72,6 +74,8 @@ impl CompactionManager {
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
         min_compaction_size: usize,
+        max_compaction_size: usize,
+        max_partition_size: usize,
     ) -> Self {
         CompactionManager {
             system: None,
@@ -85,6 +89,8 @@ impl CompactionManager {
             compaction_manager_queue_size,
             compaction_interval,
             min_compaction_size,
+            max_compaction_size,
+            max_partition_size,
         }
     }
 
@@ -115,6 +121,8 @@ impl CompactionManager {
                     None,
                     None,
                     Arc::new(AtomicU32::new(0)),
+                    self.max_compaction_size,
+                    self.max_partition_size,
                 );
 
                 match orchestrator.run().await {
@@ -206,6 +214,8 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
         let min_compaction_size = config.compactor.min_compaction_size;
+        let max_compaction_size = config.compactor.max_compaction_size;
+        let max_partition_size = config.compactor.max_partition_size;
 
         let assignment_policy_config = &config.assignment_policy;
         let assignment_policy = match crate::assignment::from_config(assignment_policy_config).await
@@ -245,6 +255,8 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
             min_compaction_size,
+            max_compaction_size,
+            max_partition_size,
         ))
     }
 }
@@ -485,6 +497,8 @@ mod tests {
         let max_concurrent_jobs = 10;
         let compaction_interval = Duration::from_secs(1);
         let min_compaction_size = 0;
+        let max_compaction_size = 1000;
+        let max_partition_size = 1000;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
@@ -524,6 +538,8 @@ mod tests {
             compaction_manager_queue_size,
             compaction_interval,
             min_compaction_size,
+            max_compaction_size,
+            max_partition_size,
         );
 
         let system = System::new();
