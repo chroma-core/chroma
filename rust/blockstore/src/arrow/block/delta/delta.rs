@@ -165,25 +165,23 @@ mod test {
             for _ in 0..value_len {
                 new_vec.push(random::<i32>());
             }
-            delta.add::<&str, Vec<i32>>(prefix, &key, new_vec.clone());
+            delta.add::<&str, Vec<i32>>(prefix, &key, new_vec);
         }
 
         let size = delta.get_size::<&str, Vec<i32>>();
-        // TODO: should commit take ownership of delta?
-        // Semantically, that makes sense, since a delta is unsuable after commit
 
         let block = block_manager.commit::<&str, Vec<i32>>(delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, Vec<i32>>("prefix", &key).unwrap();
-            values_before_flush.push(read);
+            let read = block.get::<&str, &[i32]>("prefix", &key).unwrap();
+            values_before_flush.push(read.to_vec());
         }
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&block.clone().id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, Vec<i32>>("prefix", &key).unwrap();
+            let read = block.get::<&str, &[i32]>("prefix", &key).unwrap();
             assert_eq!(read, values_before_flush[i]);
         }
         test_save_load_size(path, &block);

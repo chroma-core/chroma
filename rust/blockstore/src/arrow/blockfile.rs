@@ -621,10 +621,7 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
-        let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id)
-            .await
-            .unwrap();
+        let reader = blockfile_provider.open::<&str, &[i32]>(&id).await.unwrap();
 
         let count = reader.count().await;
         match count {
@@ -835,10 +832,7 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<i32>>().unwrap();
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
-        let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id)
-            .await
-            .unwrap();
+        let reader = blockfile_provider.open::<&str, &[i32]>(&id).await.unwrap();
 
         let value = reader.get(prefix_1, key1).await.unwrap();
         assert_eq!(value, [1, 2, 3]);
@@ -873,7 +867,7 @@ mod tests {
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id_1)
+            .open::<&str, &[i32]>(&id_1)
             .await
             .unwrap();
 
@@ -908,7 +902,7 @@ mod tests {
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id_2)
+            .open::<&str, &[i32]>(&id_2)
             .await
             .unwrap();
         for i in 0..5 {
@@ -942,7 +936,7 @@ mod tests {
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id_3)
+            .open::<&str, &[i32]>(&id_3)
             .await
             .unwrap();
         for i in n..n * 2 {
@@ -992,7 +986,7 @@ mod tests {
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id_1)
+            .open::<&str, &[i32]>(&id_1)
             .await
             .unwrap();
 
@@ -1333,7 +1327,7 @@ mod tests {
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id_1)
+            .open::<&str, &[i32]>(&id_1)
             .await
             .unwrap();
 
@@ -1395,7 +1389,7 @@ mod tests {
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id_2)
+            .open::<&str, &[i32]>(&id_2)
             .await
             .unwrap();
 
@@ -1428,7 +1422,7 @@ mod tests {
         flusher.flush::<&str, Vec<i32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .open::<&str, Vec<i32>>(&id_3)
+            .open::<&str, &[i32]>(&id_3)
             .await
             .unwrap();
 

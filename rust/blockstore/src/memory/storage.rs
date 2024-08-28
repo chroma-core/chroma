@@ -224,15 +224,19 @@ impl Writeable for Vec<i32> {
     }
 }
 
-impl<'referred_data> Readable<'referred_data> for Vec<i32> {
-    fn read_from_storage(prefix: &str, key: KeyWrapper, storage: &Storage) -> Option<Self> {
+impl<'referred_data> Readable<'referred_data> for &'referred_data [i32] {
+    fn read_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Option<Self> {
         storage
             .int32_array_storage
             .get(&CompositeKey {
                 prefix: prefix.to_string(),
                 key,
             })
-            .map(|a| a.clone())
+            .map(|a| a.as_slice())
     }
 
     fn get_by_prefix_from_storage(
@@ -243,7 +247,7 @@ impl<'referred_data> Readable<'referred_data> for Vec<i32> {
             .int32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -256,7 +260,7 @@ impl<'referred_data> Readable<'referred_data> for Vec<i32> {
             .int32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -269,7 +273,7 @@ impl<'referred_data> Readable<'referred_data> for Vec<i32> {
             .int32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -282,7 +286,7 @@ impl<'referred_data> Readable<'referred_data> for Vec<i32> {
             .int32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -295,7 +299,7 @@ impl<'referred_data> Readable<'referred_data> for Vec<i32> {
             .int32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -307,7 +311,7 @@ impl<'referred_data> Readable<'referred_data> for Vec<i32> {
             .int32_array_storage
             .iter()
             .nth(index)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {

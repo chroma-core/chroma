@@ -45,65 +45,6 @@ impl ArrowWriteableValue for Vec<i32> {
     }
 }
 
-impl ArrowReadableValue<'_> for Vec<i32> {
-    fn get(array: &Arc<dyn Array>, index: usize) -> Self {
-        let arr = array
-            .as_any()
-            .downcast_ref::<ListArray>()
-            .unwrap()
-            .value(index);
-        let arr_i32array = arr.as_any().downcast_ref::<Int32Array>().unwrap();
-        let mut value_arr: Vec<i32> = Vec::with_capacity(arr.len());
-        for i in 0..arr.len() {
-            value_arr.push(arr_i32array.value(i));
-        }
-        value_arr
-    }
-
-    fn add_to_delta<K: ArrowWriteableKey>(
-        prefix: &str,
-        key: K,
-        value: Self,
-        delta: &mut BlockDelta,
-    ) {
-        delta.add(prefix, key, value.clone());
-    }
-}
-
-impl ArrowWriteableValue for &[i32] {
-    type ReadableValue<'referred_data> = &'referred_data [i32];
-
-    fn offset_size(item_count: usize) -> usize {
-        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
-    }
-
-    fn validity_size(_item_count: usize) -> usize {
-        0 // We don't support None values for Int32Array
-    }
-
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        match &delta.builder {
-            BlockStorage::Int32Array(builder) => {
-                builder.add(prefix, key, value.to_vec());
-            }
-            _ => panic!("Invalid builder type"),
-        }
-    }
-
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
-        match &delta.builder {
-            BlockStorage::Int32Array(builder) => {
-                builder.delete(prefix, key);
-            }
-            _ => panic!("Invalid builder type"),
-        }
-    }
-
-    fn get_delta_builder() -> BlockStorage {
-        BlockStorage::Int32Array(SingleColumnStorage::new())
-    }
-}
-
 impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [i32] {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self {
         let list_array = array.as_any().downcast_ref::<ListArray>().unwrap();
@@ -123,6 +64,6 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [i32
         value: Self,
         delta: &mut BlockDelta,
     ) {
-        delta.add(prefix, key, value);
+        delta.add(prefix, key, value.to_vec());
     }
 }

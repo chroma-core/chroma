@@ -407,14 +407,14 @@ impl FullTextIndexFlusher {
 
 #[derive(Clone)]
 pub struct FullTextIndexReader<'me> {
-    posting_lists_blockfile_reader: BlockfileReader<'me, u32, Vec<i32>>,
+    posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [i32]>,
     frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
     tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
 }
 
 impl<'me> FullTextIndexReader<'me> {
     pub fn new(
-        posting_lists_blockfile_reader: BlockfileReader<'me, u32, Vec<i32>>,
+        posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [i32]>,
         frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
         tokenizer: Box<dyn ChromaTokenizer>,
     ) -> Self {
@@ -478,7 +478,7 @@ impl<'me> FullTextIndexReader<'me> {
             .unwrap();
         for (_, doc_id, positions) in first_token_positional_posting_list.iter() {
             // let positions_vec: Vec<i32> = positions.iter().map(|x| x.unwrap()).collect();
-            candidates.insert(*doc_id, positions.clone());
+            candidates.insert(*doc_id, positions.to_vec());
         }
 
         // Iterate through the rest of the tokens, intersecting the posting lists with the candidates.
@@ -561,7 +561,7 @@ impl<'me> FullTextIndexReader<'me> {
         let mut results = vec![];
         for (_, doc_id, positions) in positional_posting_list.iter() {
             // let positions_vec: Vec<i32> = positions.iter().map(|x| x.unwrap()).collect();
-            results.push((*doc_id, positions.clone()));
+            results.push((*doc_id, positions.to_vec()));
         }
         Ok(results)
     }
@@ -671,7 +671,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -700,7 +700,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -739,7 +739,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -773,7 +773,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -806,7 +806,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -839,7 +839,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -876,7 +876,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -914,7 +914,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -954,7 +954,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -1007,7 +1007,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -1054,7 +1054,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -1098,7 +1098,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -1141,7 +1141,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -1188,7 +1188,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
@@ -1230,7 +1230,7 @@ mod tests {
 
         let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, Vec<i32>>(&pl_blockfile_id)
+            .open::<u32, &[i32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(

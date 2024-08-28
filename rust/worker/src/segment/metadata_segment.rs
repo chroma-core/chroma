@@ -130,8 +130,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                         Ok(writer) => writer,
                         Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                     };
-                    let pls_reader = match blockfile_provider.open::<u32, Vec<i32>>(&pls_uuid).await
-                    {
+                    let pls_reader = match blockfile_provider.open::<u32, &[i32]>(&pls_uuid).await {
                         Ok(reader) => reader,
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     };
@@ -984,8 +983,7 @@ impl MetadataSegmentReader<'_> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_reader = match blockfile_provider.open::<u32, Vec<i32>>(&pls_uuid).await
-                    {
+                    let pls_reader = match blockfile_provider.open::<u32, &[i32]>(&pls_uuid).await {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     };
