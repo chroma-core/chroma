@@ -412,12 +412,11 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
     # We also don't want them to contain certan special
     # characters like _ and % that implicitly involve searching for a regex in sqlite.
 
-    blacklist_categories: Tuple[str, ...] = ()
     if not NOT_CLUSTER_ONLY:
         # Blacklist certain unicode characters that affect sqlite processing.
         # For example, the null (/x00) character makes sqlite stop processing a string.
         # Also, blacklist _ and % for cluster tests.
-        blacklist_categories = ("Cc", "Cs", "Pc", "Po")
+        blacklist_categories: Tuple[str, ...] = ("Cc", "Cs", "Pc", "Po")
         if collection.known_document_keywords:
             known_words_st = st.sampled_from(collection.known_document_keywords)
         else:
@@ -467,7 +466,7 @@ def recordsets(
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
-    ids = list(
+    ids: Optional[List[types.ID]] = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
 
@@ -700,7 +699,7 @@ def filters(
         ids = recordset["ids"]
 
     if not include_all_ids:
-        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
+        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids or []))))
         if ids is not None:
             # Remove duplicates since hypothesis samples with replacement
             ids = list(set(ids))
