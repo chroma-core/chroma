@@ -349,11 +349,14 @@ class SegmentAPI(ServerAPI):
 
         self._validate_embedding_set(
             collection=coll,
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            uris=uris,
-            metadatas=metadatas,
+            record_set={
+                "ids": ids,
+                "embeddings": embeddings,
+                "documents": documents,
+                "uris": uris,
+                "metadatas": metadatas,
+                "images": None,
+            },
             require_data=True,
         )
 
@@ -397,11 +400,14 @@ class SegmentAPI(ServerAPI):
 
         self._validate_embedding_set(
             collection=coll,
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            uris=uris,
-            metadatas=metadatas,
+            record_set={
+                "ids": ids,
+                "embeddings": embeddings,
+                "documents": documents,
+                "uris": uris,
+                "metadatas": metadatas,
+                "images": None,
+            },
             require_data=False,
         )
 
@@ -447,12 +453,15 @@ class SegmentAPI(ServerAPI):
 
         self._validate_embedding_set(
             collection=coll,
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            uris=uris,
-            metadatas=metadatas,
-            require_data=True,
+            record_set={
+                "ids": ids,
+                "embeddings": embeddings,
+                "documents": documents,
+                "uris": uris,
+                "metadatas": metadatas,
+                "images": None,
+            },
+            require_data=False,
         )
 
         records_to_submit = list(
@@ -629,10 +638,22 @@ class SegmentAPI(ServerAPI):
 
         if len(ids_to_delete) == 0:
             return []
-
+        
         self._validate_embedding_set(
-            collection=coll, ids=ids_to_delete, require_data=False
+            collection=coll,
+            record_set={
+                "ids": ids_to_delete,
+                "embeddings": None,
+                "documents": None,
+                "uris": None,
+                "metadatas": None,
+                "images": None,
+            },
+            require_data=False,
         )
+        
+        
+        
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
         )
@@ -826,38 +847,25 @@ class SegmentAPI(ServerAPI):
     @trace_method("SegmentAPI._validate_embedding_set", OpenTelemetryGranularity.ALL)
     def _validate_embedding_set(
         self,
-        ids: IDs,
         collection: t.Collection,
+        record_set: RecordSet,
         require_data: bool,
-        embeddings: Optional[Embeddings] = None,
-        documents: Optional[Documents] = None,
-        uris: Optional[URIs] = None,
-        metadatas: Optional[Metadatas] = None,
     ) -> None:
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
-
-        record_set: RecordSet = {
-            "ids": ids,
-            "embeddings": embeddings,
-            "metadatas": metadatas,
-            "documents": documents,
-            "uris": uris,
-            "images": None,
-        }
 
         try:
             validate_record_set(record_set)
             validate_batch(
-                (ids, embeddings, metadatas, documents, uris),
+                (record_set["ids"], record_set["embeddings"], record_set["metadatas"], record_set["documents"], record_set["uris"]),
                 {"max_batch_size": self.get_max_batch_size()},
             )
 
-            if require_data and embeddings is None:
+            if require_data and record_set["embeddings"] is None:
                 raise ValueError("You must provide embeddings")
 
-            if embeddings is not None:
+            if record_set["embeddings"] is not None:
                 """Validate the dimension of an embedding record before submitting it to the system."""
-                for embedding in embeddings:
+                for embedding in record_set["embeddings"]:
                     if embedding:
                         self._validate_dimension(
                             collection, len(embedding), update=True

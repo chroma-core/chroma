@@ -391,7 +391,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         Submits a batch of embeddings to the database
         """
-
         self._make_request(
             "post",
             url,
@@ -421,7 +420,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
-
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
 
@@ -442,7 +440,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         batch = (ids, embeddings, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
-
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/update")
         return True
 

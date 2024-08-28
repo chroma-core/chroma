@@ -1204,7 +1204,7 @@ def test_invalid_id(client):
     collection = client.create_collection("test_invalid_id")
     # Add with non-string id
     with pytest.raises(ValueError) as e:
-        collection.add(embeddings=[0, 0, 0], ids=1, metadatas=[{}])
+        collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
     assert "ID" in str(e.value)
 
     # Get with non-list id
