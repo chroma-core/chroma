@@ -461,7 +461,7 @@ class SegmentAPI(ServerAPI):
                 "metadatas": metadatas,
                 "images": None,
             },
-            require_data=False,
+            require_data=True,
         )
 
         records_to_submit = list(
