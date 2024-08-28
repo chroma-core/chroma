@@ -315,7 +315,6 @@ def test_add_with_no_ids(client: ClientAPI) -> None:
 
     # TODO: We need to clean up the api types to support this typing
     coll.add(
-        ids=[],
         embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
         metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
         documents=["a", "b", None],  # type: ignore
@@ -357,7 +356,7 @@ def test_add_with_no_data(client: ClientAPI) -> None:
     # TODO: We need to clean up the api types to support this typing
 
     with pytest.raises(
-        Exception, match="You must provide embeddings, documents, or uris."
+        Exception, match="You must provide embeddings, documents, images, or uris."
     ):
         coll.add(
             ids=["1"],
