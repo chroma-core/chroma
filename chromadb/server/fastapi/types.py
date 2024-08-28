@@ -16,7 +16,7 @@ class AddEmbedding(BaseModel):
     metadatas: Optional[List[Optional[Dict[Any, Any]]]] = None
     documents: Optional[List[Optional[str]]] = None
     uris: Optional[List[Optional[str]]] = None
-    ids: List[str]
+    ids: Optional[List[str]] = None
 
 
 class UpdateEmbedding(BaseModel):
