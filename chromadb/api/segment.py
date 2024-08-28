@@ -43,8 +43,9 @@ from chromadb.api.types import (
     validate_update_metadata,
     validate_where,
     validate_where_document,
-    validate_batch,
+    validate_batch_size,
     validate_record_set,
+    get_n_items_from_record_set,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -346,23 +347,20 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
-        ids = self.generate_ids_when_not_present(
-            ids=ids,
-            documents=documents,
-            uris=uris,
-            embeddings=embeddings,
-        )
+        record_set: RecordSet = {
+            "ids": ids,
+            "embeddings": embeddings,
+            "documents": documents,
+            "uris": uris,
+            "metadatas": metadatas,
+            "images": None,
+        }
+
+        ids = self.generate_ids_when_not_present(record_set)
 
         self._validate_record_set(
             collection=coll,
-            record_set={
-                "ids": ids,
-                "embeddings": embeddings,
-                "documents": documents,
-                "uris": uris,
-                "metadatas": metadatas,
-                "images": None,
-            },
+            record_set=record_set,
             require_data=True,
         )
 
@@ -886,25 +884,13 @@ class SegmentAPI(ServerAPI):
 
     @staticmethod
     def generate_ids_when_not_present(
-        ids: Optional[IDs],
-        documents: Optional[Documents],
-        uris: Optional[URIs],
-        embeddings: Optional[Embeddings],
+        record_set: RecordSet,
     ) -> IDs:
+        ids = record_set["ids"]
         if ids is not None and len(ids) != 0:
             return ids
 
-        n_documents = len(documents) if documents is not None else 0
-        n_uris = len(uris) if uris is not None else 0
-        n_embeddings = len(embeddings) if embeddings is not None else 0
-
-        n = 0
-        if n_documents > 0:
-            n = n_documents
-        elif n_uris > 0:
-            n = n_uris
-        elif n_embeddings > 0:
-            n = n_embeddings
+        (_, n) = get_n_items_from_record_set(record_set)
 
         generated_ids: List[str] = []
         for _ in range(n):
@@ -927,14 +913,8 @@ class SegmentAPI(ServerAPI):
 
         try:
             validate_record_set(record_set, require_data=require_data)
-            validate_batch(
-                (
-                    record_set["ids"],
-                    record_set["embeddings"],
-                    record_set["metadatas"],
-                    record_set["documents"],
-                    record_set["uris"],
-                ),
+            validate_batch_size(
+                record_set,
                 {"max_batch_size": self.get_max_batch_size()},
             )
 

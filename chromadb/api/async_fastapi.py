@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Optional, cast, Tuple, Sequence, Dict
+from typing import Any, Optional, cast, Sequence, Dict
 import logging
 import httpx
 from overrides import override
@@ -34,7 +34,8 @@ from chromadb.api.types import (
     AddResult,
     QueryResult,
     CollectionMetadata,
-    validate_batch,
+    validate_batch_size,
+    RecordSet,
     convert_np_embeddings_to_list,
 )
 
@@ -414,16 +415,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         return cast(IDs, resp_json)
 
-    @trace_method("AsyncFastAPI._submit_batch", OpenTelemetryGranularity.ALL)
-    async def _submit_batch(
+    @trace_method("AsyncFastAPI._submit_record_set", OpenTelemetryGranularity.ALL)
+    async def _submit_record_set(
         self,
-        batch: Tuple[
-            IDs,
-            Optional[PyEmbeddings],
-            Optional[Metadatas],
-            Optional[Documents],
-            Optional[URIs],
-        ],
+        record_set: RecordSet,
         url: str,
     ) -> Any:
         """
@@ -433,11 +428,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             "post",
             url,
             json={
-                "ids": batch[0],
-                "embeddings": batch[1],
-                "metadatas": batch[2],
-                "documents": batch[3],
-                "uris": batch[4],
+                "ids": record_set["ids"],
+                "embeddings": record_set["embeddings"],
+                "metadatas": record_set["metadatas"],
+                "documents": record_set["documents"],
+                "uris": record_set["uris"],
             },
         )
 
@@ -452,24 +447,30 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> AddResult:
-        batch = (
-            ids,
-            convert_np_embeddings_to_list(embeddings),
-            metadatas,
-            documents,
-            uris,
+        record_set: RecordSet = {
+            "ids": ids,
+            "embeddings": convert_np_embeddings_to_list(embeddings)
+            if embeddings is not None
+            else None,
+            "metadatas": metadatas,
+            "documents": documents,
+            "uris": uris,
+            "images": None,
+        }
+
+        validate_batch_size(
+            record_set, {"max_batch_size": await self.get_max_batch_size()}
         )
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         resp_json = await self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/add",
             json={
-                "ids": batch[0],
-                "embeddings": batch[1],
-                "metadatas": batch[2],
-                "documents": batch[3],
-                "uris": batch[4],
+                "ids": record_set["ids"],
+                "embeddings": record_set["embeddings"],
+                "metadatas": record_set["metadatas"],
+                "documents": record_set["documents"],
+                "uris": record_set["uris"],
             },
         )
 
@@ -488,19 +489,23 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (
-            ids,
-            convert_np_embeddings_to_list(embeddings)
+        record_set: RecordSet = {
+            "ids": ids,
+            "embeddings": convert_np_embeddings_to_list(embeddings)
             if embeddings is not None
             else None,
-            metadatas,
-            documents,
-            uris,
-        )
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
+            "metadatas": metadatas,
+            "documents": documents,
+            "uris": uris,
+            "images": None,
+        }
 
-        await self._submit_batch(
-            batch, "/collections/" + str(collection_id) + "/update"
+        validate_batch_size(
+            record_set, {"max_batch_size": await self.get_max_batch_size()}
+        )
+
+        await self._submit_record_set(
+            record_set, "/collections/" + str(collection_id) + "/update"
         )
 
         return True
@@ -516,17 +521,25 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (
-            ids,
-            convert_np_embeddings_to_list(embeddings),
-            metadatas,
-            documents,
-            uris,
+        record_set: RecordSet = {
+            "ids": ids,
+            "embeddings": convert_np_embeddings_to_list(embeddings)
+            if embeddings is not None
+            else None,
+            "metadatas": metadatas,
+            "documents": documents,
+            "uris": uris,
+            "images": None,
+        }
+
+        validate_batch_size(
+            record_set, {"max_batch_size": await self.get_max_batch_size()}
         )
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
-        await self._submit_batch(
-            batch, "/collections/" + str(collection_id) + "/upsert"
+
+        await self._submit_record_set(
+            record_set, "/collections/" + str(collection_id) + "/upsert"
         )
+
         return True
 
     @trace_method("AsyncFastAPI._query", OpenTelemetryGranularity.ALL)

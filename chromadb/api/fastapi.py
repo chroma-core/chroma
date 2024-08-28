@@ -1,6 +1,6 @@
 import orjson
 import logging
-from typing import Any, Dict, Optional, cast, Tuple
+from typing import Any, Dict, Optional, cast
 from typing import Sequence
 from uuid import UUID
 import httpx
@@ -19,6 +19,7 @@ from chromadb.api.types import (
     IDs,
     Include,
     Metadatas,
+    RecordSet,
     URIs,
     Where,
     WhereDocument,
@@ -27,7 +28,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     convert_np_embeddings_to_list,
-    validate_batch,
+    validate_batch_size,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -379,16 +380,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         return cast(IDs, resp_json)
 
-    @trace_method("FastAPI._submit_batch", OpenTelemetryGranularity.ALL)
-    def _submit_batch(
+    @trace_method("FastAPI._submit_record_set", OpenTelemetryGranularity.ALL)
+    def _submit_record_set(
         self,
-        batch: Tuple[
-            IDs,
-            Optional[PyEmbeddings],
-            Optional[Metadatas],
-            Optional[Documents],
-            Optional[URIs],
-        ],
+        record_set: RecordSet,
         url: str,
     ) -> None:
         """
@@ -398,11 +393,11 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             "post",
             url,
             json={
-                "ids": batch[0],
-                "embeddings": batch[1],
-                "metadatas": batch[2],
-                "documents": batch[3],
-                "uris": batch[4],
+                "ids": record_set["ids"],
+                "embeddings": record_set["embeddings"],
+                "metadatas": record_set["metadatas"],
+                "documents": record_set["documents"],
+                "uris": record_set["uris"],
             },
         )
 
@@ -421,24 +416,32 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        batch = (
+        record_set: RecordSet = {
+            "ids": 
             ids,
+            "embeddings":
             convert_np_embeddings_to_list(embeddings),
-            metadatas,
+           
+            "metadatas": metadatas,
+            "documents":
             documents,
+            "uris":
             uris,
-        )
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        ,
+            "images": None,
+        }
+
+        validate_batch_size(record_set, {"max_batch_size": self.get_max_batch_size()})
 
         resp_json = self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/add",
             json={
-                "ids": batch[0],
-                "embeddings": batch[1],
-                "metadatas": batch[2],
-                "documents": batch[3],
-                "uris": batch[4],
+                "ids": record_set["ids"],
+                "embeddings": record_set["embeddings"],
+                "metadatas": record_set["metadatas"],
+                "documents": record_set["documents"],
+                "uris": record_set["uris"],
             },
         )
 
@@ -461,17 +464,19 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (
-            ids,
-            convert_np_embeddings_to_list(embeddings)
-            if embeddings is not None
-            else None,
-            metadatas,
-            documents,
-            uris,
+        record_set: RecordSet = {
+            "ids": ids,
+            "embeddings": convert_np_embeddings_to_list(embeddings) if embeddings is not None else None,
+            "metadatas": metadatas,
+            "documents": documents,
+            "uris": uris,
+            "images": None,
+        }
+
+        validate_batch_size(record_set, {"max_batch_size": self.get_max_batch_size()})
+        self._submit_record_set(
+            record_set, "/collections/" + str(collection_id) + "/update"
         )
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
-        self._submit_batch(batch, "/collections/" + str(collection_id) + "/update")
         return True
 
     @trace_method("FastAPI._upsert", OpenTelemetryGranularity.ALL)
@@ -489,15 +494,20 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (
-            ids,
-            convert_np_embeddings_to_list(embeddings),
-            metadatas,
-            documents,
-            uris,
+        record_set: RecordSet = {
+            "ids": ids,
+            "embeddings": convert_np_embeddings_to_list(embeddings) if embeddings is not None else None,
+            "metadatas": metadatas,
+            "documents": documents,
+            "uris": uris,
+            "images": None,
+        }
+
+        validate_batch_size(record_set, {"max_batch_size": self.get_max_batch_size()})
+
+        self._submit_record_set(
+            record_set, "/collections/" + str(collection_id) + "/upsert"
         )
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
-        self._submit_batch(batch, "/collections/" + str(collection_id) + "/upsert")
         return True
 
     @trace_method("FastAPI._query", OpenTelemetryGranularity.ALL)

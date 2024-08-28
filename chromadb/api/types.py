@@ -609,17 +609,11 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     return embeddings
 
 
-def validate_batch(
-    batch: Tuple[
-        Optional[IDs],
-        Optional[Union[Embeddings, PyEmbeddings]],
-        Optional[Metadatas],
-        Optional[Documents],
-        Optional[URIs],
-    ],
+def validate_batch_size(
+    record_set: RecordSet,
     limits: Dict[str, Any],
 ) -> None:
-    batch_size = len(batch[0]) if batch[0] is not None else 0
+    (_, batch_size) = get_n_items_from_record_set(record_set)
 
     if batch_size > limits["max_batch_size"]:
         raise ValueError(
