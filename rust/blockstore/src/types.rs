@@ -8,7 +8,6 @@ use super::memory::reader_writer::{
     MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
 };
 use super::memory::storage::{Readable, Writeable};
-use super::positional_posting_list_value::PositionalPostingList;
 use arrow::array::{Array, Int32Array};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DataRecord;
@@ -144,12 +143,6 @@ impl Value for RoaringBitmap {
 impl Value for &RoaringBitmap {
     fn get_size(&self) -> usize {
         self.serialized_size()
-    }
-}
-
-impl Value for PositionalPostingList {
-    fn get_size(&self) -> usize {
-        return self.size_in_bytes();
     }
 }
 

@@ -593,7 +593,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
-                                    .add_document(document, segment_offset_id as i32)
+                                    .add_document(document, segment_offset_id)
                                     .await;
                             }
                             None => panic!(
@@ -711,7 +711,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     }
                                     // Previous version of record does not contain document string.
                                     None => match writer
-                                        .add_document(doc, segment_offset_id as i32)
+                                        .add_document(doc, segment_offset_id)
                                         .await
                                     {
                                         Ok(_) => {}
@@ -799,7 +799,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
-                                    .add_document(document, segment_offset_id as i32)
+                                    .add_document(document, segment_offset_id)
                                     .await;
                             }
                             None => panic!(
