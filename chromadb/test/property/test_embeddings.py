@@ -6,7 +6,7 @@ import logging
 import hypothesis
 import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
-from typing import Dict, Set, cast, Union, DefaultDict, Any, List, Optional
+from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import (
     ID,
@@ -144,9 +144,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             }
             self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
-            return multiple(
-                *filtered_record_set["ids"] or []
-            )
+            return multiple(*filtered_record_set["ids"] or [])
 
         else:
             result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
@@ -155,7 +153,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                 normalized_record_set["ids"] = result["ids"]
 
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
-            return multiple(*normalized_record_set["ids"])
+            return multiple(*normalized_record_set["ids"] or [])
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
     def delete_by_ids(self, ids: IDs) -> None:
@@ -187,11 +185,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(
-        lambda self: len(
-            self.record_set_state["ids"] or [])
-        >= 3
-    )
+    @precondition(lambda self: len(self.record_set_state["ids"] or []) >= 3)
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -469,9 +463,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         super().upsert_embeddings(record_set)
 
-        normalized_ids = invariants.wrap(record_set["ids"]) if record_set["ids"] is not None else []
+        normalized_ids = (
+            invariants.wrap(record_set["ids"]) if record_set["ids"] is not None else []
+        )
         n_ids = len(normalized_ids)
-        
 
         print(
             "[test_embeddings][upsert] ids ",
