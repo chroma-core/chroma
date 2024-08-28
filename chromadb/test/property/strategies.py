@@ -469,7 +469,7 @@ def recordsets(
     ids: Optional[List[types.ID]] = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
-    
+
     n_records = len(ids)
 
     if can_ids_be_empty and draw(st.booleans()):
