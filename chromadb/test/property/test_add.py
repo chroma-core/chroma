@@ -111,31 +111,27 @@ def _test_add(
     # Only wait for compaction if the size of the collection is
     # some minimal size
 
-    if len(normalized_record_set["ids"]) == 0:
+    n_ids = len(normalized_record_set["ids"] or [])
+    if n_ids == 0:
         normalized_record_set["ids"] = result["ids"]
+        n_ids = len(result["ids"])
 
-    if (
-        not NOT_CLUSTER_ONLY
-        and should_compact
-        and len(normalized_record_set["ids"]) > 10
-    ):
+    if not NOT_CLUSTER_ONLY and should_compact and n_ids > 10:
         # Wait for the model to be updated
         wait_for_version_increase(client, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
-    n_results = max(1, (len(normalized_record_set["ids"]) // 10))
+    n_results = max(1, (n_ids // 10))
 
     if batch_ann_accuracy:
         batch_size = 10
-        for i in range(0, len(normalized_record_set["ids"]), batch_size):
+        for i in range(0, n_ids, batch_size):
             invariants.ann_accuracy(
                 coll,
                 cast(strategies.RecordSet, normalized_record_set),
                 n_results=n_results,
                 embedding_function=collection.embedding_function,
-                query_indices=list(
-                    range(i, min(i + batch_size, len(normalized_record_set["ids"])))
-                ),
+                query_indices=list(range(i, min(i + batch_size, n_ids))),
             )
     else:
         invariants.ann_accuracy(
@@ -196,11 +192,9 @@ def test_add_large(
     ):
         coll.add(*batch)
 
-    if (
-        not NOT_CLUSTER_ONLY
-        and should_compact
-        and len(normalized_record_set["ids"]) > 10
-    ):
+    n_ids = len(normalized_record_set["ids"] or [])
+
+    if not NOT_CLUSTER_ONLY and should_compact and n_ids > 10:
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
             client, collection.name, initial_version, additional_time=240
