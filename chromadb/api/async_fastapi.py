@@ -32,6 +32,7 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
+    validate_batch,
 )
 
 
@@ -426,8 +427,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         Submits a batch of embeddings to the database
         """
 
-        print(type(batch[0]))
-
         return await self._make_request(
             "post",
             url,
@@ -452,6 +451,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         uris: Optional[URIs] = None,
     ) -> bool:
         batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
 
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
 
@@ -469,6 +469,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         uris: Optional[URIs] = None,
     ) -> bool:
         batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
 
         await self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/update"
@@ -488,6 +489,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         uris: Optional[URIs] = None,
     ) -> bool:
         batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
 
         await self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"

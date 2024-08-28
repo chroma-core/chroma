@@ -59,7 +59,7 @@ export const chromaFetch: FetchAPI = async (
       switch (resp.status) {
         case 400:
           throw new ChromaClientError(
-            `Bad request to ${input} with status: ${resp.statusText}`,
+            `Bad request to ${input} with message: ${respBody?.message}`,
           );
         case 401:
           throw new ChromaUnauthorizedError(`Unauthorized`);

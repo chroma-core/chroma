@@ -24,6 +24,7 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
+    validate_batch,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -419,6 +420,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
 
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
@@ -439,6 +441,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
 
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/update")
         return True
@@ -459,6 +462,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         - pass in column oriented data lists
         """
         batch = (ids, embeddings, metadatas, documents, uris)
+        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
 
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/upsert")
         return True
