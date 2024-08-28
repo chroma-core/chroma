@@ -3,12 +3,13 @@ import { ChromaConnectionError } from "./Errors";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import {
   AddRecordsParams,
-  BaseRecordOperationParams,
   BaseRecordOperationParamsWithIDsOptional,
   Collection,
   Metadata,
   MultiRecordOperationParams,
+  MultiRecordOperationParamsWithIDsOptional,
   UpdateRecordsParams,
+  UpsertRecordsParams,
 } from "./types";
 
 // a function to convert a non-Array object to an Array
@@ -84,9 +85,9 @@ export function isBrowser() {
 
 function arrayifyParams(
   params: BaseRecordOperationParamsWithIDsOptional,
-): MultiRecordOperationParams {
+): MultiRecordOperationParamsWithIDsOptional {
   return {
-    ids: params.ids !== undefined ? toArray(params.ids) : [],
+    ids: params.ids !== undefined ? toArray(params.ids) : undefined,
     embeddings: params.embeddings
       ? toArrayOfArrays(params.embeddings)
       : undefined,
@@ -98,11 +99,11 @@ function arrayifyParams(
 }
 
 export async function prepareRecordRequest(
-  reqParams: AddRecordsParams | UpdateRecordsParams,
+  reqParams: UpsertRecordsParams | UpdateRecordsParams,
   embeddingFunction: IEmbeddingFunction,
   update?: true,
 ): Promise<MultiRecordOperationParams> {
-  const { ids, embeddings, metadatas, documents } = arrayifyParams(reqParams);
+  const { ids = [], embeddings, metadatas, documents } = arrayifyParams(reqParams);
 
   if (!embeddings && !documents && !update) {
     throw new Error("embeddings and documents cannot both be undefined");
@@ -111,8 +112,8 @@ export async function prepareRecordRequest(
   const embeddingsArray = embeddings
     ? embeddings
     : documents
-    ? await embeddingFunction.generate(documents)
-    : undefined;
+      ? await embeddingFunction.generate(documents)
+      : undefined;
 
   if (!embeddingsArray && !update) {
     throw new Error("Failed to generate embeddings for your request.");
@@ -134,6 +135,54 @@ export async function prepareRecordRequest(
     throw new Error(
       `ID's must be unique, found duplicates for: ${duplicateIds}`,
     );
+  }
+
+  return {
+    ids,
+    metadatas,
+    documents,
+    embeddings: embeddingsArray,
+  };
+}
+
+export async function prepareRecordRequestWithIDsOptional(
+  reqParams: AddRecordsParams,
+  embeddingFunction: IEmbeddingFunction,
+): Promise<MultiRecordOperationParamsWithIDsOptional> {
+  const { ids, embeddings, metadatas, documents } = arrayifyParams(reqParams);
+
+  if (!embeddings && !documents) {
+    throw new Error("embeddings and documents cannot both be undefined");
+  }
+
+  const embeddingsArray = embeddings
+    ? embeddings
+    : documents
+      ? await embeddingFunction.generate(documents)
+      : undefined;
+
+  if (!embeddingsArray) {
+    throw new Error("Failed to generate embeddings for your request.");
+  }
+
+  if (ids) {
+    for (let i = 0; i < ids.length; i += 1) {
+      if (typeof ids[i] !== "string") {
+        throw new Error(
+          `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
+        );
+      }
+    }
+
+    const uniqueIds = new Set(ids);
+    if (uniqueIds.size !== ids.length) {
+      const duplicateIds = ids.filter(
+        (item, index) => ids.indexOf(item) !== index,
+      );
+      throw new Error(
+        `ID's must be unique, found duplicates for: ${duplicateIds}`,
+      );
+    }
   }
 
   return {

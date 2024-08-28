@@ -31,6 +31,7 @@ import type {
 } from "./types";
 import {
   prepareRecordRequest,
+  prepareRecordRequestWithIDsOptional,
   toArray,
   toArrayOfArrays,
   validateTenantDatabase,
@@ -420,7 +421,7 @@ export class ChromaClient {
     const resp = (await this.api.add(
       collection.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
-      (await prepareRecordRequest(
+      (await prepareRecordRequestWithIDsOptional(
         params,
         collection.embeddingFunction,
       )) as GeneratedApi.AddEmbedding,
