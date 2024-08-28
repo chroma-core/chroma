@@ -94,7 +94,7 @@ def test_persist(
 
     result = coll.add(**embeddings_strategy)  # type: ignore[arg-type]
 
-    if len(embeddings_strategy) == 0:
+    if embeddings_strategy["ids"] is None:
         embeddings_strategy["ids"] = result["ids"]
 
     invariants.count(coll, embeddings_strategy)
