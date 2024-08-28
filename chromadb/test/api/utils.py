@@ -1,15 +1,17 @@
 import pytest
-
+from typing import Generator
 import chromadb
 import os
 import shutil
 import tempfile
 from chromadb.config import Settings
+from chromadb.api import ClientAPI
 
 persist_dir = tempfile.mkdtemp()
 
+
 @pytest.fixture
-def local_persist_api():
+def local_persist_api() -> Generator[ClientAPI, None, None]:
     client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -27,13 +29,16 @@ def local_persist_api():
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
 
-def approx_equal(a, b, tolerance=1e-6) -> bool:
+
+def approx_equal(a: float, b: float, tolerance: float = 1e-6) -> bool:
     return abs(a - b) < tolerance
 
-def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:
+
+def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:  # type: ignore[no-untyped-def]
     if len(a) != len(b):
         return False
     return all([approx_equal(a, b, tolerance) for a, b in zip(a, b)])
+
 
 initial_records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2], [2.2, 3.24, 4.2]],
@@ -66,11 +71,12 @@ new_records = {
 
 minimal_records = {
     "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
-    "ids": ["id1", "id2"],
+    "ids": ["https://example.com/1", "https://example.com/2"],
 }
 
+# TODO: Define the dimensionality of these embeddingds in terms of the default record
 bad_dimensionality_records = {
-    "embeddings": [[1.1, 2.3], [1.2, 2.24]],  # Different dimensionality
+    "embeddings": [[1.1, 2.3, 3.2, 4.5], [1.2, 2.24, 3.2, 4.5]],
     "ids": ["id1", "id2"],
 }
 
@@ -95,10 +101,13 @@ bad_metadata_records = {
 }
 
 contains_records = {
-    "embeddings": [[1.1, 2.3, 3.2], [4.5, 6.7, 8.9]],
+    "embeddings": [[1.1, 2.3, 3.2], [1.2, 2.24, 3.2]],
+    "documents": ["this is doc1 and it's great!", "doc2 is also great!"],
     "ids": ["id1", "id2"],
-    "metadatas": [{"key": "value1"}, {"key": "value2"}],
-    "documents": ["this is doc1", "this is doc2 and it's great!"]
+    "metadatas": [
+        {"int_value": 1, "string_value": "one", "float_value": 1.001},
+        {"int_value": 2, "float_value": 2.002, "string_value": "two"},
+    ],
 }
 
 logical_operator_records = {
