@@ -103,6 +103,8 @@ pub struct CompactOrchestrator {
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
     // Current max offset id.
     curr_max_offset_id: Arc<AtomicU32>,
+    max_compaction_size: usize,
+    max_partition_size: usize,
 }
 
 #[derive(Error, Debug)]
@@ -170,6 +172,8 @@ impl CompactOrchestrator {
         >,
         record_segment: Option<Segment>,
         curr_max_offset_id: Arc<AtomicU32>,
+        max_compaction_size: usize,
+        max_partition_size: usize,
     ) -> Self {
         CompactOrchestrator {
             id: Uuid::new_v4(),
@@ -187,6 +191,8 @@ impl CompactOrchestrator {
             result_channel,
             record_segment,
             curr_max_offset_id,
+            max_compaction_size,
+            max_partition_size,
         }
     }
 
@@ -220,7 +226,7 @@ impl CompactOrchestrator {
             // offset is the one after the last compaction offset
             self.compaction_job.offset,
             100,
-            None,
+            Some(self.max_compaction_size as i32),
             Some(end_timestamp),
         );
         let task = wrap(operator, input, self_address);
@@ -242,11 +248,10 @@ impl CompactOrchestrator {
         self_address: Box<dyn ReceiverForMessage<TaskResult<PartitionOutput, PartitionError>>>,
     ) {
         self.state = ExecutionState::Partition;
-        // TODO: make this configurable
-        let max_partition_size = 10_000;
         let operator = PartitionOperator::new();
+        tracing::info!("Sending N Records: {:?}", records.len());
         println!("Sending N Records: {:?}", records.len());
-        let input = PartitionInput::new(records, max_partition_size);
+        let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
