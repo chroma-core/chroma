@@ -11,6 +11,7 @@ use chroma_types::{BooleanOperator, WhereDocument, WhereDocumentOperator};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tantivy::tokenizer::Token;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -92,60 +93,71 @@ impl<'me> FullTextIndexWriter<'me> {
 
     async fn populate_frequencies_and_posting_lists_from_previous_version(
         &self,
-        token: &str,
+        tokens: &Vec<Token>,
     ) -> Result<(), FullTextIndexError> {
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        match uncommitted_frequencies.get(token) {
-            Some(_) => return Ok(()),
-            None => {
-                let frequency = match &self.full_text_index_reader {
-                    // Readers are uninitialized until the first compaction finishes
-                    // so there is a case when this is none hence not an error.
-                    None => 0,
-                    Some(reader) => match reader.get_frequencies_for_token(token).await {
-                        Ok(frequency) => frequency,
-                        // New token so start with frequency of 0.
-                        Err(_) => 0,
-                    },
-                };
-                uncommitted_frequencies
-                    .insert(token.to_string(), (frequency as i32, frequency as i32));
+        for token in tokens {
+            match uncommitted_frequencies.get(&token.text) {
+                Some(_) => return Ok(()),
+                None => {
+                    let frequency = match &self.full_text_index_reader {
+                        // Readers are uninitialized until the first compaction finishes
+                        // so there is a case when this is none hence not an error.
+                        None => 0,
+                        Some(reader) => {
+                            match reader.get_frequencies_for_token(token.text.as_str()).await {
+                                Ok(frequency) => frequency,
+                                // New token so start with frequency of 0.
+                                Err(_) => 0,
+                            }
+                        }
+                    };
+                    uncommitted_frequencies
+                        .insert(token.text.clone(), (frequency as i32, frequency as i32));
+                }
             }
         }
+
+        drop(uncommitted_frequencies);
+
         let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-        match uncommitted_postings.positional_postings.get(token) {
-            Some(_) => {
-                // This should never happen -- if uncommitted has the token, then
-                // uncommitted_frequencies should have had it as well.
-                tracing::error!(
-                    "Error populating frequencies and posting lists from previous version"
-                );
-                return Err(FullTextIndexError::InvariantViolation);
-            }
-            None => {
-                let mut builder = PositionalPostingListBuilder::new();
-                let results = match &self.full_text_index_reader {
-                    // Readers are uninitialized until the first compaction finishes
-                    // so there is a case when this is none hence not an error.
-                    None => vec![],
-                    Some(reader) => match reader.get_all_results_for_token(token).await {
-                        Ok(results) => results,
-                        // New token so start with empty postings list.
-                        Err(_) => vec![],
-                    },
-                };
-                for (doc_id, positions) in results {
-                    let res = builder.add_doc_id_and_positions(doc_id as i32, positions);
-                    match res {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return Err(FullTextIndexError::PositionalPostingListError(e));
+        for token in tokens {
+            match uncommitted_postings.positional_postings.get(&token.text) {
+                Some(_) => {
+                    // This should never happen -- if uncommitted has the token, then
+                    // uncommitted_frequencies should have had it as well.
+                    tracing::error!(
+                        "Error populating frequencies and posting lists from previous version"
+                    );
+                    return Err(FullTextIndexError::InvariantViolation);
+                }
+                None => {
+                    let mut builder = PositionalPostingListBuilder::new();
+                    let results = match &self.full_text_index_reader {
+                        // Readers are uninitialized until the first compaction finishes
+                        // so there is a case when this is none hence not an error.
+                        None => vec![],
+                        Some(reader) => {
+                            match reader.get_all_results_for_token(token.text.as_str()).await {
+                                Ok(results) => results,
+                                // New token so start with empty postings list.
+                                Err(_) => vec![],
+                            }
+                        }
+                    };
+                    for (doc_id, positions) in results {
+                        let res = builder.add_doc_id_and_positions(doc_id as i32, positions);
+                        match res {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(FullTextIndexError::PositionalPostingListError(e));
+                            }
                         }
                     }
+                    uncommitted_postings
+                        .positional_postings
+                        .insert(token.text.clone(), builder);
                 }
-                uncommitted_postings
-                    .positional_postings
-                    .insert(token.to_string(), builder);
             }
         }
         Ok(())
@@ -163,21 +175,24 @@ impl<'me> FullTextIndexWriter<'me> {
         offset_id: i32,
     ) -> Result<(), FullTextIndexError> {
         let tokens = self.encode_tokens(document);
-        for token in tokens.get_tokens() {
-            self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
-                .await?;
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let tokens = tokens.get_tokens();
+        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
+            .await?;
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+
+        for token in tokens {
             // The entry should always exist because self.populate_frequencies_and_posting_lists_from_previous_version
             // will have created it if this token is new to the system.
             uncommitted_frequencies
-                .entry(token.text.to_string())
+                .entry(token.text.clone())
                 .and_modify(|e| (*e).0 += 1);
-            let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+
             // For a new token, the uncommitted list will not contain any entry so insert
             // an empty builder in that case.
             let builder = uncommitted_postings
                 .positional_postings
-                .entry(token.text.to_string())
+                .entry(token.text.clone())
                 .or_insert(PositionalPostingListBuilder::new());
 
             // Store starting positions of tokens. These are NOT affected by token filters.
@@ -194,7 +209,7 @@ impl<'me> FullTextIndexWriter<'me> {
                     }
                 }
             } else {
-                match builder.add_positions_for_doc_id(offset_id, vec![token.offset_from as i32]) {
+                match builder.add_position_for_doc_id(offset_id, token.offset_from as i32) {
                     Ok(_) => {}
                     Err(e) => {
                         return Err(FullTextIndexError::PositionalPostingListError(e));
@@ -211,10 +226,14 @@ impl<'me> FullTextIndexWriter<'me> {
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
         let tokens = self.encode_tokens(document);
-        for token in tokens.get_tokens() {
-            self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
-                .await?;
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let tokens = tokens.get_tokens();
+
+        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
+            .await?;
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+
+        for token in tokens {
             match uncommitted_frequencies.get_mut(token.text.as_str()) {
                 Some(frequency) => {
                     (*frequency).0 -= 1;
@@ -225,7 +244,6 @@ impl<'me> FullTextIndexWriter<'me> {
                     return Err(FullTextIndexError::InvariantViolation);
                 }
             }
-            let mut uncommitted_postings = self.uncommitted_postings.lock().await;
             match uncommitted_postings
                 .positional_postings
                 .get_mut(token.text.as_str())

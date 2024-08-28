@@ -96,10 +96,10 @@ impl PositionalPostingListBuilder {
         self.doc_ids.contains(&doc_id)
     }
 
-    pub fn add_positions_for_doc_id(
+    pub fn add_position_for_doc_id(
         &mut self,
         doc_id: i32,
-        positions: Vec<i32>,
+        position: i32,
     ) -> Result<(), PositionalPostingListBuilderError> {
         if !self.doc_ids.contains(&doc_id) {
             return Err(PositionalPostingListBuilderError::DocIdDoesNotExist);
@@ -107,7 +107,7 @@ impl PositionalPostingListBuilder {
 
         // Safe to unwrap here since this is called for >= 2nd time a token
         // exists in the document.
-        self.positions.get_mut(&doc_id).unwrap().extend(positions);
+        self.positions.get_mut(&doc_id).unwrap().push(position);
         Ok(())
     }
 
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn test_positional_posting_list_single_document() {
         let mut builder = PositionalPostingListBuilder::new();
-        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_position(1, vec![1, 2, 3]);
         let list = builder.build();
         assert_eq!(list.get_doc_ids().values()[0], 1);
         assert_eq!(
@@ -156,8 +156,8 @@ mod tests {
     #[test]
     fn test_positional_posting_list_multiple_documents() {
         let mut builder = PositionalPostingListBuilder::new();
-        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
-        let _res = builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
+        let _res = builder.add_doc_id_and_position(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_position(2, vec![4, 5, 6]);
         let list = builder.build();
         assert_eq!(list.get_doc_ids().values()[0], 1);
         assert_eq!(list.get_doc_ids().values()[1], 2);
@@ -174,8 +174,8 @@ mod tests {
     #[test]
     fn test_positional_posting_list_document_ids_sorted_after_build() {
         let mut builder = PositionalPostingListBuilder::new();
-        let _res = builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
-        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_position(2, vec![4, 5, 6]);
+        let _res = builder.add_doc_id_and_position(1, vec![1, 2, 3]);
         let list = builder.build();
         assert_eq!(list.get_doc_ids().values()[0], 1);
         assert_eq!(list.get_doc_ids().values()[1], 2);
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn test_positional_posting_list_all_positions_sorted_after_build() {
         let mut builder = PositionalPostingListBuilder::new();
-        let _res = builder.add_doc_id_and_positions(1, vec![3, 2, 1]);
+        let _res = builder.add_doc_id_and_position(1, vec![3, 2, 1]);
         let list = builder.build();
         assert_eq!(list.get_doc_ids().values()[0], 1);
         assert_eq!(
@@ -205,11 +205,11 @@ mod tests {
     fn test_positional_posting_list_incremental_build() {
         let mut builder = PositionalPostingListBuilder::new();
 
-        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_position(1, vec![1, 2, 3]);
         let _res = builder.add_positions_for_doc_id(1, [4].into());
         let _res = builder.add_positions_for_doc_id(1, [5].into());
         let _res = builder.add_positions_for_doc_id(1, [6].into());
-        let _res = builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
+        let _res = builder.add_doc_id_and_position(2, vec![4, 5, 6]);
         let _res = builder.add_positions_for_doc_id(2, [7].into());
 
         let list = builder.build();
@@ -225,8 +225,8 @@ mod tests {
     fn test_positional_posting_list_delete_doc_id() {
         let mut builder = PositionalPostingListBuilder::new();
 
-        let _res = builder.add_doc_id_and_positions(1, vec![1, 2, 3]);
-        let _res = builder.add_doc_id_and_positions(2, vec![4, 5, 6]);
+        let _res = builder.add_doc_id_and_position(1, vec![1, 2, 3]);
+        let _res = builder.add_doc_id_and_position(2, vec![4, 5, 6]);
         let _res = builder.delete_doc_id(1);
 
         let list = builder.build();
@@ -241,11 +241,11 @@ mod tests {
     fn test_all_positional_posting_list_behaviors_together() {
         let mut builder = PositionalPostingListBuilder::new();
 
-        let _res = builder.add_doc_id_and_positions(1, vec![3, 2, 1]);
+        let _res = builder.add_doc_id_and_position(1, vec![3, 2, 1]);
         let _res = builder.add_positions_for_doc_id(1, [4].into());
         let _res = builder.add_positions_for_doc_id(1, [6].into());
         let _res = builder.add_positions_for_doc_id(1, [5].into());
-        let _res = builder.add_doc_id_and_positions(2, vec![5, 4, 6]);
+        let _res = builder.add_doc_id_and_position(2, vec![5, 4, 6]);
         let _res = builder.add_positions_for_doc_id(2, [7].into());
 
         let list = builder.build();
