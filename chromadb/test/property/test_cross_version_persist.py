@@ -268,7 +268,9 @@ def persist_generated_data_with_old_version(
         # Check ids
         result = coll.get()
         actual_ids = result["ids"]
-        embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
+        embedding_id_to_index = {
+            id: i for i, id in enumerate(check_embeddings["ids"] or [])
+        }
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
 
