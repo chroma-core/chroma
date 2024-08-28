@@ -6,7 +6,7 @@ import logging
 import hypothesis
 import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
-from typing import Dict, Set, cast, Union, DefaultDict, Any, List
+from typing import Dict, Set, cast, Union, DefaultDict, Any, List, Optional
 from dataclasses import dataclass
 from chromadb.api.types import (
     ID,
@@ -120,18 +120,18 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             record_set
         )
 
-        if len(normalized_record_set["ids"]) > 0:
+        ids = normalized_record_set["ids"] or []
+        s_ids = self.record_set_state["ids"] or []
+        if len(ids) > 0:
             trace("add_more_embeddings")
 
-        intersection = set(normalized_record_set["ids"]).intersection(
-            self.record_set_state["ids"]
-        )
+        intersection = set(ids).intersection(s_ids)
         if len(intersection) > 0:
             # Partially apply the non-duplicative records to the state
-            new_ids = list(set(normalized_record_set["ids"]).difference(intersection))
-            indices = [normalized_record_set["ids"].index(id) for id in new_ids]
+            new_ids = list(set(ids).difference(intersection))
+            indices = [ids.index(id) for id in new_ids]
             filtered_record_set: strategies.NormalizedRecordSet = {
-                "ids": [normalized_record_set["ids"][i] for i in indices],
+                "ids": [ids[i] for i in indices],
                 "metadatas": [normalized_record_set["metadatas"][i] for i in indices]
                 if normalized_record_set["metadatas"]
                 else None,
@@ -144,12 +144,14 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             }
             self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
-            return multiple(*filtered_record_set["ids"])
+            return multiple(
+                *filtered_record_set["ids"] or []
+            )
 
         else:
             result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
 
-            if len(normalized_record_set["ids"]) == 0:
+            if normalized_record_set["ids"] is None:
                 normalized_record_set["ids"] = result["ids"]
 
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
@@ -159,7 +161,9 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
     def delete_by_ids(self, ids: IDs) -> None:
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
-        indices_to_remove = [self.record_set_state["ids"].index(id) for id in ids]
+
+        normalized_ids = self.record_set_state["ids"] or []
+        indices_to_remove = [normalized_ids.index(id) for id in ids]
 
         self.collection.delete(ids=ids)
         self._remove_embeddings(set(indices_to_remove))
@@ -183,7 +187,11 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
+    @precondition(
+        lambda self: len(
+            self.record_set_state["ids"] or [])
+        >= 3
+    )
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -239,9 +247,16 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
+
+        if normalized_record_set["ids"] is None:
+            return
+
         for idx, id in enumerate(normalized_record_set["ids"]):
             # Update path
-            if id in self.record_set_state["ids"]:
+            if (
+                self.record_set_state["ids"] is not None
+                and id in self.record_set_state["ids"]
+            ):
                 target_idx = self.record_set_state["ids"].index(id)
                 if normalized_record_set["embeddings"] is not None:
                     self.record_set_state["embeddings"][
@@ -383,14 +398,17 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
         )
+
+        ids = normalized_record_set["ids"] or []
+
         print(
             "[test_embeddings][add] Non Intersection ids ",
             normalized_record_set["ids"],
             " len ",
-            len(normalized_record_set["ids"]),
+            len(ids),
         )
-        self.log_operation_count += len(normalized_record_set["ids"])
-        for id in normalized_record_set["ids"]:
+        self.log_operation_count += len(ids)
+        for id in ids:
             if id not in self.unique_ids_in_log:
                 self.unique_ids_in_log.add(id)
         return res  # type: ignore[return-value]
@@ -417,16 +435,29 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     )
     def update_embeddings(self, record_set: strategies.RecordSet) -> None:
         super().update_embeddings(record_set)
+
+        n = (
+            len(invariants.wrap(record_set["ids"]))
+            if record_set["ids"] is not None
+            else 0
+        )
         print(
             "[test_embeddings][update] ids ",
             record_set["ids"],
             " len ",
-            len(invariants.wrap(record_set["ids"])),
+            n,
         )
-        self.log_operation_count += len(invariants.wrap(record_set["ids"]))
+        self.log_operation_count += n
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
+    @precondition(
+        lambda self: len(
+            self.record_set_state["ids"]
+            if self.record_set_state["ids"] is not None
+            else []
+        )
+        >= 3
+    )
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -437,14 +468,19 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     )
     def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         super().upsert_embeddings(record_set)
+
+        normalized_ids = invariants.wrap(record_set["ids"]) if record_set["ids"] is not None else []
+        n_ids = len(normalized_ids)
+        
+
         print(
             "[test_embeddings][upsert] ids ",
             record_set["ids"],
             " len ",
-            len(invariants.wrap(record_set["ids"])),
+            n_ids,
         )
-        self.log_operation_count += len(invariants.wrap(record_set["ids"]))
-        for id in invariants.wrap(record_set["ids"]):
+        self.log_operation_count += n_ids
+        for id in normalized_ids:
             if id not in self.unique_ids_in_log:
                 self.unique_ids_in_log.add(id)
 
