@@ -42,7 +42,6 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
-    validate_embeddings,
     validate_record_set,
 )
 from chromadb.telemetry.product.events import (

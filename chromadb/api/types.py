@@ -316,7 +316,7 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     return metadata
 
 
-def validate_metadatas(metadatas: Optional[Metadatas]) -> Metadatas:
+def validate_metadatas(metadatas: Metadatas) -> Metadatas:
     """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, floats or bools"""
     if not isinstance(metadatas, list):
         raise ValueError(f"Expected metadatas to be a list, got {metadatas}")
@@ -482,7 +482,7 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
-def validate_embeddings(embeddings: Optional[Embeddings]) -> Embeddings:
+def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
     if not isinstance(embeddings, list):
         raise ValueError(
