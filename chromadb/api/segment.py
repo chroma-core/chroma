@@ -638,7 +638,7 @@ class SegmentAPI(ServerAPI):
 
         if len(ids_to_delete) == 0:
             return []
-        
+
         self._validate_embedding_set(
             collection=coll,
             record_set={
@@ -651,9 +651,7 @@ class SegmentAPI(ServerAPI):
             },
             require_data=False,
         )
-        
-        
-        
+
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
         )
@@ -856,7 +854,13 @@ class SegmentAPI(ServerAPI):
         try:
             validate_record_set(record_set)
             validate_batch(
-                (record_set["ids"], record_set["embeddings"], record_set["metadatas"], record_set["documents"], record_set["uris"]),
+                (
+                    record_set["ids"],
+                    record_set["embeddings"],
+                    record_set["metadatas"],
+                    record_set["documents"],
+                    record_set["uris"],
+                ),
                 {"max_batch_size": self.get_max_batch_size()},
             )
 
