@@ -103,7 +103,12 @@ export async function prepareRecordRequest(
   embeddingFunction: IEmbeddingFunction,
   update?: true,
 ): Promise<MultiRecordOperationParams> {
-  const { ids = [], embeddings, metadatas, documents } = arrayifyParams(reqParams);
+  const {
+    ids = [],
+    embeddings,
+    metadatas,
+    documents,
+  } = arrayifyParams(reqParams);
 
   if (!embeddings && !documents && !update) {
     throw new Error("embeddings and documents cannot both be undefined");
@@ -112,8 +117,8 @@ export async function prepareRecordRequest(
   const embeddingsArray = embeddings
     ? embeddings
     : documents
-      ? await embeddingFunction.generate(documents)
-      : undefined;
+    ? await embeddingFunction.generate(documents)
+    : undefined;
 
   if (!embeddingsArray && !update) {
     throw new Error("Failed to generate embeddings for your request.");
@@ -158,8 +163,8 @@ export async function prepareRecordRequestWithIDsOptional(
   const embeddingsArray = embeddings
     ? embeddings
     : documents
-      ? await embeddingFunction.generate(documents)
-      : undefined;
+    ? await embeddingFunction.generate(documents)
+    : undefined;
 
   if (!embeddingsArray) {
     throw new Error("Failed to generate embeddings for your request.");
