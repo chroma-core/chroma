@@ -7,7 +7,7 @@ from chromadb.errors import ChromaError
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
-from chromadb.errors import InvalidCollectionException, InvalidInputException
+from chromadb.errors import InvalidCollectionException
 import chromadb.server.fastapi
 import pytest
 import tempfile
@@ -706,7 +706,7 @@ bad_metadata_records = {
 def test_metadata_validation_add(client):
     client.reset()
     collection = client.create_collection("test_metadata_validation")
-    with pytest.raises(InvalidInputException, match="metadata"):
+    with pytest.raises(ValueError, match="metadata"):
         collection.add(**bad_metadata_records)
 
 
@@ -714,7 +714,7 @@ def test_metadata_validation_update(client):
     client.reset()
     collection = client.create_collection("test_metadata_validation")
     collection.add(**metadata_records)
-    with pytest.raises(InvalidInputException, match="metadata"):
+    with pytest.raises(ValueError, match="metadata"):
         collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
 
 
@@ -1203,17 +1203,17 @@ def test_invalid_id(client):
     client.reset()
     collection = client.create_collection("test_invalid_id")
     # Add with non-string id
-    with pytest.raises(InvalidInputException) as e:
-        collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
+    with pytest.raises(ValueError) as e:
+        collection.add(embeddings=[0, 0, 0], ids=1, metadatas=[{}])
     assert "ID" in str(e.value)
 
     # Get with non-list id
-    with pytest.raises(InvalidInputException) as e:
+    with pytest.raises(ValueError) as e:
         collection.get(ids=1)
     assert "ID" in str(e.value)
 
     # Delete with malformed ids
-    with pytest.raises(InvalidInputException) as e:
+    with pytest.raises(ValueError) as e:
         collection.delete(ids=["valid", 0])
     assert "ID" in str(e.value)
 
@@ -1548,7 +1548,7 @@ def test_invalid_embeddings(client):
         "embeddings": [["0", "0", "0"], ["1.2", "2.24", "3.2"]],
         "ids": ["id1", "id2"],
     }
-    with pytest.raises(InvalidInputException) as e:
+    with pytest.raises(ValueError) as e:
         collection.add(**invalid_records)
     assert "embedding" in str(e.value)
 
@@ -1565,7 +1565,7 @@ def test_invalid_embeddings(client):
         "embeddings": [[[0], [0], [0]], [[1.2], [2.24], [3.2]]],
         "ids": ["id1", "id2"],
     }
-    with pytest.raises(InvalidInputException) as e:
+    with pytest.raises(ValueError) as e:
         collection.update(**invalid_records)
     assert "embedding" in str(e.value)
 
@@ -1574,7 +1574,7 @@ def test_invalid_embeddings(client):
         "embeddings": [[[1.1, 2.3, 3.2]], [[1.2, 2.24, 3.2]]],
         "ids": ["id1", "id2"],
     }
-    with pytest.raises(InvalidInputException) as e:
+    with pytest.raises(ValueError) as e:
         collection.upsert(**invalid_records)
     assert "embedding" in str(e.value)
 

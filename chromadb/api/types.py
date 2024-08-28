@@ -316,7 +316,7 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
     return metadata
 
 
-def validate_metadatas(metadatas: Metadatas) -> Metadatas:
+def validate_metadatas(metadatas: Optional[Metadatas]) -> Metadatas:
     """Validates metadatas to ensure it is a list of dictionaries of strings to strings, ints, floats or bools"""
     if not isinstance(metadatas, list):
         raise ValueError(f"Expected metadatas to be a list, got {metadatas}")
@@ -482,7 +482,7 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
-def validate_embeddings(embeddings: Embeddings) -> Embeddings:
+def validate_embeddings(embeddings: Optional[Embeddings]) -> Embeddings:
     """Validates embeddings to ensure it is a list of list of ints, or floats"""
     if not isinstance(embeddings, list):
         raise ValueError(
@@ -529,3 +529,25 @@ def validate_batch(
         raise ValueError(
             f"Batch size {len(batch[0])} exceeds maximum batch size {limits['max_batch_size']}"
         )
+
+
+def validate_record_set(record_set: RecordSet) -> None:
+    embeddings = record_set["embeddings"]
+    ids = record_set["ids"]
+    metadatas = record_set["metadatas"]
+
+    validate_ids(ids)
+    validate_embeddings(embeddings) if embeddings is not None else None
+    validate_metadatas(metadatas) if metadatas is not None else None
+
+    for field, value in record_set.items():
+        if field == "ids" or value is None:
+            continue
+
+        if isinstance(value, list):
+            n = len(value)
+            n_ids = len(record_set["ids"])
+            if n != n_ids:
+                raise ValueError(
+                    f"Number of {field} ({n}) does not match number of ids ({n_ids})"
+                )

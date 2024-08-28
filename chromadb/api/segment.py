@@ -42,9 +42,8 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
-    validate_ids,
     validate_embeddings,
-    validate_metadatas,
+    validate_record_set,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -356,7 +355,7 @@ class SegmentAPI(ServerAPI):
             documents=documents,
             uris=uris,
             metadatas=metadatas,
-            require_embeddings=True,
+            require_data=True,
         )
 
         records_to_submit = list(
@@ -404,7 +403,7 @@ class SegmentAPI(ServerAPI):
             documents=documents,
             uris=uris,
             metadatas=metadatas,
-            require_embeddings=False,
+            require_data=False,
         )
 
         records_to_submit = list(
@@ -454,7 +453,7 @@ class SegmentAPI(ServerAPI):
             documents=documents,
             uris=uris,
             metadatas=metadatas,
-            require_embeddings=True,
+            require_data=True,
         )
 
         records_to_submit = list(
@@ -633,7 +632,7 @@ class SegmentAPI(ServerAPI):
             return []
 
         self._validate_embedding_set(
-            collection=coll, ids=ids_to_delete, require_embeddings=False
+            collection=coll, ids=ids_to_delete, require_data=False
         )
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
@@ -830,7 +829,7 @@ class SegmentAPI(ServerAPI):
         self,
         ids: IDs,
         collection: t.Collection,
-        require_embeddings: bool,
+        require_data: bool,
         embeddings: Optional[Embeddings] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
@@ -838,18 +837,26 @@ class SegmentAPI(ServerAPI):
     ) -> None:
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
 
-        validate_batch(
-            (ids, embeddings, metadatas, documents, uris),
-            {"max_batch_size": self.get_max_batch_size()},
-        )
+        record_set: RecordSet = {
+            "ids": ids,
+            "embeddings": embeddings,
+            "metadatas": metadatas,
+            "documents": documents,
+            "uris": uris,
+            "images": None,
+        }
 
         try:
-            if require_embeddings and embeddings is None:
-                raise ValueError("You must provide embeddings, documents, or uris.")
+            validate_record_set(record_set)
+            validate_batch(
+                (ids, embeddings, metadatas, documents, uris),
+                {"max_batch_size": self.get_max_batch_size()},
+            )
+
+            if require_data and embeddings is None:
+                raise ValueError("You must provide embeddings")
 
             if embeddings is not None:
-                validate_embeddings(embeddings)
-
                 """Validate the dimension of an embedding record before submitting it to the system."""
                 for embedding in embeddings:
                     if embedding:
@@ -857,31 +864,8 @@ class SegmentAPI(ServerAPI):
                             collection, len(embedding), update=True
                         )
 
-            validate_ids(ids)
-            validate_metadatas(metadatas) if metadatas is not None else None
         except ValueError as e:
             raise InvalidInputException(f"{e}")
-
-        record_set: RecordSet = {
-            "ids": ids,
-            "embeddings": embeddings,
-            "metadatas": metadatas,
-            "documents": documents,
-            "uris": uris,
-            "images": None,  # Adding this field as it's part of RecordSet
-        }
-
-        for field, value in record_set.items():
-            if field == "ids" or value is None:
-                continue
-
-            if isinstance(value, list):
-                n = len(value)
-                n_ids = len(record_set["ids"])
-                if n != n_ids:
-                    raise ValueError(
-                        f"Number of {field} ({n}) does not match number of ids ({n_ids})"
-                    )
 
     # This method is intentionally left untraced because otherwise it can emit thousands of spans for requests containing many embeddings.
     def _validate_dimension(
