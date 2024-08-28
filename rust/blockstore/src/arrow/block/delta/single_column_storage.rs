@@ -86,16 +86,6 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             + value_validity_bytes
     }
 
-    pub(super) fn build_keys(self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
-        let inner = self.inner.read();
-        let storage = &inner.storage;
-        let mut builder = builder;
-        for (key, _) in storage.iter() {
-            builder.add_key(key.clone());
-        }
-        builder
-    }
-
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: T) {
         let mut inner = self.inner.write();
         let key_len = key.get_size();

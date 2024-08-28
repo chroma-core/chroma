@@ -340,15 +340,6 @@ impl DataRecordStorage {
         inner.storage.len()
     }
 
-    pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
-        let inner = self.inner.read();
-        let mut builder = builder;
-        for (key, _) in inner.storage.iter() {
-            builder.add_key(key.clone());
-        }
-        builder
-    }
-
     pub(super) fn to_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
