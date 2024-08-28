@@ -185,12 +185,12 @@ class CollectionCommon(Generic[ClientT]):
 
         if (
             require_data
-            and record_set["embeddings"] is None
-            and record_set["documents"] is None
-            and record_set["images"] is None
-            and record_set["uris"] is None
+            and (record_set["embeddings"] is None or len(record_set["embeddings"]) == 0)
+            and (record_set["documents"] is None or len(record_set["documents"]) == 0)
+            and (record_set["images"] is None or len(record_set["images"]) == 0)
+            and (record_set["uris"] is None or len(record_set["uris"]) == 0)
         ):
-            raise ValueError("You must provide embeddings, documents, images, or URIs.")
+            raise ValueError("You must provide embeddings, documents, images, or uris.")
 
         validate_record_set(record_set)
 

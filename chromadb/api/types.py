@@ -62,7 +62,7 @@ def maybe_cast_one_to_many_embedding(
 
     if isinstance(target, List):
         # One Embedding
-        if isinstance(target[0], (int, float)):
+        if len(target) > 0 and isinstance(target[0], (int, float)):
             return cast(Embeddings, [target])
     # Already a sequence
 
