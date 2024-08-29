@@ -13,6 +13,7 @@ from chromadb.config import Settings
 
 persist_dir = tempfile.mkdtemp()
 
+
 def test_ssl_self_signed(client_ssl: ClientAPI) -> None:
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
         pytest.skip("Skipping test for integration test")
