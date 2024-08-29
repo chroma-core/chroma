@@ -89,29 +89,30 @@ impl<'me> FullTextIndexWriter<'me> {
         &self,
         tokens: &Vec<Token>,
     ) -> Result<(), FullTextIndexError> {
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        for token in tokens {
-            if uncommitted_frequencies.contains_key(&token.text) {
-                continue;
-            }
-
-            let frequency = match &self.full_text_index_reader {
-                // Readers are uninitialized until the first compaction finishes
-                // so there is a case when this is none hence not an error.
-                None => 0,
-                Some(reader) => {
-                    match reader.get_frequencies_for_token(token.text.as_str()).await {
-                        Ok(frequency) => frequency,
-                        // New token so start with frequency of 0.
-                        Err(_) => 0,
-                    }
+        // (Scoped to limit the lifetime of the lock)
+        {
+            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+            for token in tokens {
+                if uncommitted_frequencies.contains_key(&token.text) {
+                    continue;
                 }
-            };
-            uncommitted_frequencies
-                .insert(token.text.clone(), (frequency as i32, frequency as i32));
-        }
 
-        drop(uncommitted_frequencies);
+                let frequency = match &self.full_text_index_reader {
+                    // Readers are uninitialized until the first compaction finishes
+                    // so there is a case when this is none hence not an error.
+                    None => 0,
+                    Some(reader) => {
+                        match reader.get_frequencies_for_token(token.text.as_str()).await {
+                            Ok(frequency) => frequency,
+                            // New token so start with frequency of 0.
+                            Err(_) => 0,
+                        }
+                    }
+                };
+                uncommitted_frequencies
+                    .insert(token.text.clone(), (frequency as i32, frequency as i32));
+            }
+        }
 
         let mut uncommitted_postings = self.uncommitted_postings.lock().await;
         for token in tokens {
