@@ -2,10 +2,53 @@ import pytest
 import numpy as np
 
 from chromadb.api import ClientAPI
-from chromadb.test.api.utils import local_persist_api, batch_records, records
+from chromadb.api.types import EmbeddingFunction, Documents
+from chromadb.test.api.utils import batch_records, records
 from chromadb.errors import InvalidCollectionException, ChromaError
+from chromadb.test.api.utils import (
+    local_persist_api,
+    local_persist_api_cache_bust,
+)
 
-@pytest.mark.parametrize("api_fixture", [local_persist_api])  # type: ignore[no-untyped-def]
+
+@pytest.mark.parametrize(
+    "api_fixture", [local_persist_api, local_persist_api_cache_bust]
+)
+def test_persist_index_get_or_create_embedding_function(api_fixture, request):  # type: ignore[no-untyped-def]
+    class TestEF(EmbeddingFunction[Documents]):
+        def __call__(self, input):  # type: ignore[no-untyped-def]
+            return [[1, 2, 3] for _ in range(len(input))]
+
+    api = request.getfixturevalue("local_persist_api")
+    api.reset()
+    collection = api.get_or_create_collection("test", embedding_function=TestEF())
+    collection.add(ids="id1", documents="hello")
+
+    api2 = request.getfixturevalue("local_persist_api_cache_bust")
+    collection = api2.get_or_create_collection("test", embedding_function=TestEF())
+
+    includes = ["embeddings", "documents", "metadatas", "distances"]
+    nn = collection.query(
+        query_texts="hello",
+        n_results=1,
+        include=includes,
+    )
+
+    for key in nn.keys():
+        if (key in includes) or (key == "ids"):
+            assert len(nn[key]) == 1
+        elif key == "included":
+            assert set(nn[key]) == set(includes)
+        else:
+            assert nn[key] is None
+
+    assert nn["ids"] == [["id1"]]
+    assert nn["embeddings"] == [[[1, 2, 3]]]
+    assert nn["documents"] == [["hello"]]
+    assert nn["distances"] == [[0]]
+
+
+@pytest.mark.parametrize("api_fixture", [local_persist_api, local_persist_api_cache_bust])  # type: ignore[no-untyped-def]
 def test_persist(api_fixture, request) -> None:
     client = request.getfixturevalue(api_fixture.__name__)
 
