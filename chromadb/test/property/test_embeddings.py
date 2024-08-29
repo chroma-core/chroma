@@ -261,10 +261,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
         for idx, id in enumerate(normalized_record_set["ids"]):
             # Update path
-            if (
-                self.record_set_state["ids"] is not None
-                and id in self.record_set_state["ids"]
-            ):
+            if id in self.record_set_state["ids"]:
                 target_idx = self.record_set_state["ids"].index(id)
                 if normalized_record_set["embeddings"] is not None:
                     self.record_set_state["embeddings"][
@@ -408,11 +405,11 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         )
 
         ids = normalized_record_set["ids"]
-        n_ids = len(ids) if ids is not None else 0
+        n_ids = len(invariants.wrap(res))
 
         print(
             "[test_embeddings][add] Non Intersection ids ",
-            normalized_record_set["ids"],
+            ids,
             " len ",
             n_ids,
         )
