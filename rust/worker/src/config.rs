@@ -248,6 +248,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -390,6 +392,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -550,6 +554,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -698,6 +704,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
