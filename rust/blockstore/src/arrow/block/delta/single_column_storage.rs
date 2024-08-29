@@ -6,8 +6,7 @@ use crate::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BinaryBuilder, Int32Array, Int32Builder, ListBuilder, RecordBatch,
-        StringBuilder, UInt32Builder,
+        Array, BinaryBuilder, ListBuilder, RecordBatch, StringBuilder, UInt32Array, UInt32Builder,
     },
     datatypes::Field,
     util::bit_util,
@@ -260,7 +259,7 @@ impl SingleColumnStorage<String> {
     }
 }
 
-impl SingleColumnStorage<Vec<i32>> {
+impl SingleColumnStorage<Vec<u32>> {
     pub(super) fn to_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
@@ -274,16 +273,16 @@ impl SingleColumnStorage<Vec<i32>> {
                 let storage = inner.into_inner().storage;
                 let total_value_count = storage.iter().fold(0, |acc, (_, value)| acc + value.len());
                 if item_capacity == 0 {
-                    value_builder = ListBuilder::new(Int32Builder::new());
+                    value_builder = ListBuilder::new(UInt32Builder::new());
                 } else {
                     value_builder = ListBuilder::with_capacity(
-                        Int32Builder::with_capacity(total_value_count),
+                        UInt32Builder::with_capacity(total_value_count),
                         item_capacity,
                     );
                 }
                 for (key, value) in storage.into_iter() {
                     key_builder.add_key(key);
-                    value_builder.append_value(&Int32Array::from(value));
+                    value_builder.append_value(&UInt32Array::from(value));
                 }
             }
             Err(_) => {

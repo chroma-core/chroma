@@ -5,8 +5,7 @@ use crate::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BooleanBuilder, Float32Builder, Int32Array, RecordBatch, StringBuilder,
-        UInt32Builder,
+        Array, ArrayRef, BooleanBuilder, Float32Builder, RecordBatch, StringBuilder, UInt32Builder,
     },
     datatypes::Field,
 };
@@ -14,13 +13,12 @@ use roaring::RoaringBitmap;
 use std::{
     fmt,
     fmt::{Debug, Formatter},
-    sync::Arc,
 };
 
 #[derive(Clone)]
 pub enum BlockStorage {
     String(SingleColumnStorage<String>),
-    Int32Array(SingleColumnStorage<Vec<i32>>),
+    VecUInt32(SingleColumnStorage<Vec<u32>>),
     UInt32(SingleColumnStorage<u32>),
     RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
     DataRecord(DataRecordStorage),
@@ -30,7 +28,7 @@ impl Debug for BlockStorage {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             BlockStorage::String(_) => write!(f, "String"),
-            BlockStorage::Int32Array(_) => write!(f, "Int32Array"),
+            BlockStorage::VecUInt32(_) => write!(f, "VecUInt32"),
             BlockStorage::UInt32(_) => write!(f, "UInt32"),
             BlockStorage::RoaringBitmap(_) => write!(f, "RoaringBitmap"),
             BlockStorage::DataRecord(_) => write!(f, "DataRecord"),
@@ -151,7 +149,7 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_prefix_size(),
             BlockStorage::UInt32(builder) => builder.get_prefix_size(),
             BlockStorage::DataRecord(builder) => builder.get_prefix_size(),
-            BlockStorage::Int32Array(builder) => builder.get_prefix_size(),
+            BlockStorage::VecUInt32(builder) => builder.get_prefix_size(),
             BlockStorage::RoaringBitmap(builder) => builder.get_prefix_size(),
         }
     }
@@ -161,7 +159,7 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_key_size(),
             BlockStorage::UInt32(builder) => builder.get_key_size(),
             BlockStorage::DataRecord(builder) => builder.get_key_size(),
-            BlockStorage::Int32Array(builder) => builder.get_key_size(),
+            BlockStorage::VecUInt32(builder) => builder.get_key_size(),
             BlockStorage::RoaringBitmap(builder) => builder.get_key_size(),
         }
     }
@@ -171,7 +169,7 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_min_key(),
             BlockStorage::UInt32(builder) => builder.get_min_key(),
             BlockStorage::DataRecord(builder) => builder.get_min_key(),
-            BlockStorage::Int32Array(builder) => builder.get_min_key(),
+            BlockStorage::VecUInt32(builder) => builder.get_min_key(),
             BlockStorage::RoaringBitmap(builder) => builder.get_min_key(),
         }
     }
@@ -182,7 +180,7 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_size::<K>(),
             BlockStorage::UInt32(builder) => builder.get_size::<K>(),
             BlockStorage::DataRecord(builder) => builder.get_size::<K>(),
-            BlockStorage::Int32Array(builder) => builder.get_size::<K>(),
+            BlockStorage::VecUInt32(builder) => builder.get_size::<K>(),
             BlockStorage::RoaringBitmap(builder) => builder.get_size::<K>(),
         }
     }
@@ -201,9 +199,9 @@ impl BlockStorage {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::DataRecord(storage))
             }
-            BlockStorage::Int32Array(builder) => {
+            BlockStorage::VecUInt32(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
-                (split_key, BlockStorage::Int32Array(storage))
+                (split_key, BlockStorage::VecUInt32(storage))
             }
             BlockStorage::RoaringBitmap(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
@@ -217,7 +215,7 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.len(),
             BlockStorage::UInt32(builder) => builder.len(),
             BlockStorage::DataRecord(builder) => builder.len(),
-            BlockStorage::Int32Array(builder) => builder.len(),
+            BlockStorage::VecUInt32(builder) => builder.len(),
             BlockStorage::RoaringBitmap(builder) => builder.len(),
         }
     }
@@ -238,7 +236,7 @@ impl BlockStorage {
                 // TODO: handle error
                 builder.to_arrow(key_builder).unwrap()
             }
-            BlockStorage::Int32Array(builder) => {
+            BlockStorage::VecUInt32(builder) => {
                 // TODO: handle error
                 builder.to_arrow(key_builder).unwrap()
             }

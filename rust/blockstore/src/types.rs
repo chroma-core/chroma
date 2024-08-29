@@ -8,11 +8,11 @@ use super::memory::reader_writer::{
     MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
 };
 use super::memory::storage::{Readable, Writeable};
-use arrow::array::{Array, Int32Array};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DataRecord;
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
+use std::mem::size_of;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -78,41 +78,15 @@ pub trait Value: Clone {
     fn get_size(&self) -> usize;
 }
 
-// TODO: Maybe make writeable and readable traits'
-// TODO: we don't need this get size
-impl Value for Int32Array {
+impl Value for Vec<u32> {
     fn get_size(&self) -> usize {
-        self.get_buffer_memory_size()
+        self.len() * size_of::<u32>()
     }
 }
 
-impl Value for Vec<i32> {
+impl Value for &[u32] {
     fn get_size(&self) -> usize {
-        self.len() * 4
-    }
-}
-
-impl Value for &Vec<i32> {
-    fn get_size(&self) -> usize {
-        self.len() * 4
-    }
-}
-
-impl Value for &[i32] {
-    fn get_size(&self) -> usize {
-        self.len() * 4
-    }
-}
-
-impl Value for &&[i32] {
-    fn get_size(&self) -> usize {
-        self.len() * 4
-    }
-}
-
-impl Value for &Int32Array {
-    fn get_size(&self) -> usize {
-        self.get_buffer_memory_size()
+        self.len() * size_of::<u32>()
     }
 }
 

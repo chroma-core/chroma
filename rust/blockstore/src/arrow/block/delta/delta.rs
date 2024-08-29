@@ -121,7 +121,6 @@ impl BlockDelta {
 #[cfg(test)]
 mod test {
     use crate::arrow::{block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager};
-    use arrow::array::Int32Array;
     use chroma_cache::{
         cache::Cache,
         config::{CacheConfig, UnboundedCacheConfig},
@@ -154,7 +153,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, Vec<i32>>();
+        let delta = block_manager.create::<&str, Vec<u32>>();
 
         let n = 2000;
         for i in 0..n {
@@ -163,25 +162,25 @@ mod test {
             let value_len: usize = rand::thread_rng().gen_range(1..100);
             let mut new_vec = Vec::with_capacity(value_len);
             for _ in 0..value_len {
-                new_vec.push(random::<i32>());
+                new_vec.push(random::<u32>());
             }
-            delta.add::<&str, Vec<i32>>(prefix, &key, new_vec);
+            delta.add::<&str, Vec<u32>>(prefix, &key, new_vec);
         }
 
-        let size = delta.get_size::<&str, Vec<i32>>();
+        let size = delta.get_size::<&str, Vec<u32>>();
 
-        let block = block_manager.commit::<&str, Vec<i32>>(delta);
+        let block = block_manager.commit::<&str, Vec<u32>>(delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, &[i32]>("prefix", &key).unwrap();
+            let read = block.get::<&str, &[u32]>("prefix", &key).unwrap();
             values_before_flush.push(read.to_vec());
         }
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&block.clone().id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, &[i32]>("prefix", &key).unwrap();
+            let read = block.get::<&str, &[u32]>("prefix", &key).unwrap();
             assert_eq!(read, values_before_flush[i]);
         }
         test_save_load_size(path, &block);
