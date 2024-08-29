@@ -7,6 +7,7 @@ use chroma_types::{BooleanOperator, WhereDocument, WhereDocumentOperator};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tantivy::tokenizer::Token;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -50,7 +51,7 @@ pub struct FullTextIndexWriter<'me> {
     full_text_index_reader: Option<FullTextIndexReader<'me>>,
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
-    tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
+    tokenizer: Arc<Box<dyn ChromaTokenizer>>,
 
     // TODO(Sanket): Move off this tokio::sync::mutex and use
     // a lightweight lock instead. This is needed currently to
@@ -78,7 +79,7 @@ impl<'me> FullTextIndexWriter<'me> {
             full_text_index_reader,
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
-            tokenizer: Arc::new(Mutex::new(tokenizer)),
+            tokenizer: Arc::new(tokenizer),
             uncommitted_postings: Arc::new(tokio::sync::Mutex::new(UncommittedPostings::new())),
             uncommitted_frequencies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
@@ -86,63 +87,65 @@ impl<'me> FullTextIndexWriter<'me> {
 
     async fn populate_frequencies_and_posting_lists_from_previous_version(
         &self,
-        token: &str,
+        tokens: &[Token],
     ) -> Result<(), FullTextIndexError> {
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        match uncommitted_frequencies.get(token) {
-            Some(_) => return Ok(()),
-            None => {
+        // (Scoped to limit the lifetime of the lock)
+        {
+            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+            for token in tokens {
+                if uncommitted_frequencies.contains_key(&token.text) {
+                    continue;
+                }
+
                 let frequency = match &self.full_text_index_reader {
                     // Readers are uninitialized until the first compaction finishes
                     // so there is a case when this is none hence not an error.
                     None => 0,
-                    Some(reader) => match reader.get_frequencies_for_token(token).await {
-                        Ok(frequency) => frequency,
-                        // New token so start with frequency of 0.
-                        Err(_) => 0,
-                    },
+                    Some(reader) => {
+                        match reader.get_frequencies_for_token(token.text.as_str()).await {
+                            Ok(frequency) => frequency,
+                            // New token so start with frequency of 0.
+                            Err(_) => 0,
+                        }
+                    }
                 };
                 uncommitted_frequencies
-                    .insert(token.to_string(), (frequency as i32, frequency as i32));
+                    .insert(token.text.clone(), (frequency as i32, frequency as i32));
             }
         }
+
         let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-        match uncommitted_postings.positional_postings.get(token) {
-            Some(_) => {
-                // This should never happen -- if uncommitted has the token, then
-                // uncommitted_frequencies should have had it as well.
-                tracing::error!(
-                    "Error populating frequencies and posting lists from previous version"
-                );
-                return Err(FullTextIndexError::InvariantViolation);
+        for token in tokens {
+            if uncommitted_postings
+                .positional_postings
+                .contains_key(&token.text)
+            {
+                continue;
             }
-            None => {
-                let results = match &self.full_text_index_reader {
-                    // Readers are uninitialized until the first compaction finishes
-                    // so there is a case when this is none hence not an error.
-                    None => vec![],
-                    Some(reader) => match reader.get_all_results_for_token(token).await {
-                        Ok(results) => results,
-                        // New token so start with empty postings list.
-                        Err(_) => vec![],
-                    },
-                };
-                let mut doc_and_positions = HashMap::new();
-                for result in results {
-                    doc_and_positions.insert(result.0, result.1);
-                }
-                uncommitted_postings
-                    .positional_postings
-                    .insert(token.to_string(), doc_and_positions);
+
+            let results = match &self.full_text_index_reader {
+                // Readers are uninitialized until the first compaction finishes
+                // so there is a case when this is none hence not an error.
+                None => vec![],
+                Some(reader) => match reader.get_all_results_for_token(&token.text).await {
+                    Ok(results) => results,
+                    // New token so start with empty postings list.
+                    Err(_) => vec![],
+                },
+            };
+            let mut doc_and_positions = HashMap::new();
+            for result in results {
+                doc_and_positions.insert(result.0, result.1);
             }
+            uncommitted_postings
+                .positional_postings
+                .insert(token.text.clone(), doc_and_positions);
         }
         Ok(())
     }
 
     pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
-        let tokenizer = self.tokenizer.lock();
-        let tokens = tokenizer.encode(document);
-        tokens
+        self.tokenizer.encode(document)
     }
 
     pub async fn add_document(
@@ -151,16 +154,19 @@ impl<'me> FullTextIndexWriter<'me> {
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
         let tokens = self.encode_tokens(document);
-        for token in tokens.get_tokens() {
-            self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
-                .await?;
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let tokens = tokens.get_tokens();
+        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
+            .await?;
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+
+        for token in tokens {
             // The entry should always exist because self.populate_frequencies_and_posting_lists_from_previous_version
             // will have created it if this token is new to the system.
             uncommitted_frequencies
-                .entry(token.text.to_string())
+                .entry(token.text.clone())
                 .and_modify(|e| (*e).0 += 1);
-            let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+
             // For a new token, the uncommitted list will not contain any entry so insert
             // an empty builder in that case.
             let builder = uncommitted_postings
@@ -193,10 +199,14 @@ impl<'me> FullTextIndexWriter<'me> {
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
         let tokens = self.encode_tokens(document);
-        for token in tokens.get_tokens() {
-            self.populate_frequencies_and_posting_lists_from_previous_version(token.text.as_str())
-                .await?;
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let tokens = tokens.get_tokens();
+
+        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
+            .await?;
+        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+
+        for token in tokens {
             match uncommitted_frequencies.get_mut(token.text.as_str()) {
                 Some(frequency) => {
                     (*frequency).0 -= 1;
@@ -207,7 +217,6 @@ impl<'me> FullTextIndexWriter<'me> {
                     return Err(FullTextIndexError::InvariantViolation);
                 }
             }
-            let mut uncommitted_postings = self.uncommitted_postings.lock().await;
             match uncommitted_postings
                 .positional_postings
                 .get_mut(token.text.as_str())
@@ -374,7 +383,7 @@ impl FullTextIndexFlusher {
 pub struct FullTextIndexReader<'me> {
     posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [u32]>,
     frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
-    tokenizer: Arc<Mutex<Box<dyn ChromaTokenizer>>>,
+    tokenizer: Arc<Box<dyn ChromaTokenizer>>,
 }
 
 impl<'me> FullTextIndexReader<'me> {
@@ -386,14 +395,12 @@ impl<'me> FullTextIndexReader<'me> {
         FullTextIndexReader {
             posting_lists_blockfile_reader,
             frequencies_blockfile_reader,
-            tokenizer: Arc::new(Mutex::new(tokenizer)),
+            tokenizer: Arc::new(tokenizer),
         }
     }
 
     pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
-        let tokenizer = self.tokenizer.lock();
-        let tokens = tokenizer.encode(document);
-        tokens
+        self.tokenizer.encode(document)
     }
 
     pub async fn search(&self, query: &str) -> Result<Vec<i32>, FullTextIndexError> {
@@ -594,9 +601,9 @@ mod tests {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().unwrap();
         let freq_blockfile_writer = provider.create::<u32, String>().unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let _index =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
     }
@@ -609,9 +616,9 @@ mod tests {
         let freq_blockfile_id = freq_blockfile_writer.id();
         let pl_blockfile_id = pl_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
@@ -623,9 +630,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let _ = FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
     }
 
@@ -637,9 +644,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).await.unwrap();
@@ -652,9 +659,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -676,9 +683,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("helo", 1).await.unwrap();
@@ -691,9 +698,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -709,9 +716,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("aaa", 1).await.unwrap();
@@ -725,9 +732,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -743,9 +750,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello", 1).await.unwrap();
@@ -758,9 +765,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -776,9 +783,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).await.unwrap();
@@ -791,9 +798,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -809,9 +816,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer
@@ -828,9 +835,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -850,9 +857,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).await.unwrap();
@@ -866,9 +873,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -888,9 +895,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("hello world", 1).await.unwrap();
@@ -906,9 +913,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -937,9 +944,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("aaa", 1).await.unwrap();
@@ -959,9 +966,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -986,9 +993,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer.add_document("!!!!!", 1).await.unwrap();
@@ -1006,9 +1013,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -1031,9 +1038,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
@@ -1050,9 +1057,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -1074,9 +1081,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
@@ -1093,9 +1100,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -1117,9 +1124,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
@@ -1140,9 +1147,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
@@ -1162,9 +1169,9 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
@@ -1182,9 +1189,9 @@ mod tests {
             .open::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
-        )));
+        ));
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 

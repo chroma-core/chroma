@@ -175,9 +175,9 @@ impl<'me> MetadataSegmentWriter<'me> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(
                     NgramTokenizer::new(3, 3, false).unwrap(),
-                )));
+                ));
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,
@@ -188,9 +188,9 @@ impl<'me> MetadataSegmentWriter<'me> {
             _ => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
 
-        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(3, 3, false).unwrap(),
-        )));
+        ));
         let full_text_index_writer = FullTextIndexWriter::new(
             full_text_index_reader,
             pls_writer,
@@ -1017,9 +1017,9 @@ impl MetadataSegmentReader<'_> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(
                     NgramTokenizer::new(3, 3, false).unwrap(),
-                )));
+                ));
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,
