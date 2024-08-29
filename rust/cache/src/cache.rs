@@ -72,6 +72,19 @@ impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'sta
             }
         }
     }
+
+    pub fn clear(&self) {
+        match self {
+            Cache::Unbounded(cache) => {
+                let mut write_guard = cache.cache.write();
+                write_guard.clear();
+                write_guard.shrink_to_fit();
+            }
+            Cache::Foyer(cache) => {
+                cache.clear();
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -174,6 +187,10 @@ where
             }
             None => None,
         }
+    }
+
+    pub fn clear(&self) {
+        self.cache.clear();
     }
 }
 
