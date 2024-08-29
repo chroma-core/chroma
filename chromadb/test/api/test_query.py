@@ -91,12 +91,12 @@ def test_query_where_document(client: ClientAPI) -> None:
     items = collection.query(
         query_embeddings=[1, 0, 0], where_document={"$contains": "doc1"}, n_results=1
     )
-    assert len((items["metadatas"] or [])[0]) == 1
+    assert len((items["metadatas"])[0]) == 1  # type: ignore[index]
 
     items = collection.query(
         query_embeddings=[0, 0, 0], where_document={"$contains": "great"}, n_results=2
     )
-    assert len((items["metadatas"] or [])[0]) == 2
+    assert len((items["metadatas"])[0]) == 2  # type: ignore[index]
 
     with pytest.raises(Exception) as e:
         items = collection.query(
@@ -118,7 +118,7 @@ def test_query_include(client: ClientAPI) -> None:
     )
     assert items["embeddings"] is None
     assert items["ids"][0][0] == "id1"
-    assert (items["metadatas"] or [])[0][0]["int_value"] == 1
+    assert (items["metadatas"])[0][0]["int_value"] == 1  # type: ignore[index]
     assert set(items["included"]) == set(include)
 
     include = cast(List[IncludeEnum], ["embeddings", "documents", "distances"])
@@ -156,8 +156,8 @@ def test_query_order(client: ClientAPI) -> None:
         n_results=2,
     )
 
-    assert (items["documents"] or [])[0][0] == "this document is second"
-    assert (items["documents"] or [])[0][1] == "this document is first"
+    assert (items["documents"])[0][0] == "this document is second"  # type: ignore[index]
+    assert (items["documents"])[0][1] == "this document is first"  # type: ignore[index]
 
 
 def test_invalid_n_results_param(client: ClientAPI) -> None:

@@ -23,9 +23,9 @@ def test_metadata_update_get_int_float(client: ClientAPI) -> None:
         metadatas=[{"int_value": 2, "string_value": "two", "float_value": 2.002}],
     )
     items = collection.get(ids=["id1"])
-    assert (items["metadatas"] or [])[0]["int_value"] == 2
-    assert (items["metadatas"] or [])[0]["string_value"] == "two"
-    assert (items["metadatas"] or [])[0]["float_value"] == 2.002
+    assert (items["metadatas"])[0]["int_value"] == 2  # type: ignore[index]
+    assert (items["metadatas"])[0]["string_value"] == "two"  # type: ignore[index]
+    assert (items["metadatas"])[0]["float_value"] == 2.002  # type: ignore[index]
 
 
 def test_metadata_validation_update(client: ClientAPI) -> None:
@@ -58,10 +58,10 @@ def test_update_query(client: ClientAPI) -> None:
     )
     assert len(results["ids"][0]) == 1
     assert results["ids"][0][0] == updated_records["ids"][0]
-    assert (results["documents"] or [])[0][0] == updated_records["documents"][0]
-    assert (results["metadatas"] or [])[0][0]["foo"] == "bar"
+    assert (results["documents"])[0][0] == updated_records["documents"][0]  # type: ignore[index]
+    assert (results["metadatas"])[0][0]["foo"] == "bar"  # type: ignore[index]
     assert vector_approx_equal(
-        (results["embeddings"] or [[]])[0][0], updated_records["embeddings"][0]
+        (results["embeddings"])[0][0], updated_records["embeddings"][0]  # type: ignore[index]
     )
 
 

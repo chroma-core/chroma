@@ -13,8 +13,9 @@ import shutil
 
 persist_dir = tempfile.mkdtemp()
 
+
 @pytest.fixture
-def local_persist_api():
+def local_persist_api() -> Generator[ClientAPI, None, None]:
     client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -53,6 +54,7 @@ def local_persist_api_cache_bust() -> Generator[ClientAPI, None, None]:
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
 
+
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
 def test_persist_index_get_or_create_embedding_function(api_fixture, request):  # type: ignore[no-untyped-def]
     class TestEF(EmbeddingFunction[Documents]):
@@ -86,6 +88,7 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):  
     assert nn["embeddings"] == [[[1, 2, 3]]]
     assert nn["documents"] == [["hello"]]
     assert nn["distances"] == [[0]]
+
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])  # type: ignore[no-untyped-def]
 def test_persist_index_loading(api_fixture, request):
@@ -157,7 +160,7 @@ def test_index_params(client: ClientAPI) -> None:
         query_embeddings=[0.6, 1.12, 1.6],
         n_results=1,
     )
-    assert (items["distances"] or [])[0][0] > 4
+    assert (items["distances"])[0][0] > 4  # type: ignore[index]
 
     # cosine
     client.reset()
@@ -170,8 +173,8 @@ def test_index_params(client: ClientAPI) -> None:
         query_embeddings=[0.6, 1.12, 1.6],
         n_results=1,
     )
-    assert (items["distances"] or [])[0][0] > 0 - EPS
-    assert (items["distances"] or [])[0][0] < 1 + EPS
+    assert (items["distances"])[0][0] > 0 - EPS  # type: ignore[index]
+    assert (items["distances"])[0][0] < 1 + EPS  # type: ignore[index]
 
     # ip
     client.reset()
@@ -183,7 +186,7 @@ def test_index_params(client: ClientAPI) -> None:
         query_embeddings=[0.6, 1.12, 1.6],
         n_results=1,
     )
-    assert (items["distances"] or [])[0][0] < -5
+    assert (items["distances"])[0][0] < -5  # type: ignore[index]
 
 
 def test_invalid_index_params(client: ClientAPI) -> None:

@@ -48,13 +48,12 @@ def test_get_where_document(client: ClientAPI) -> None:
     collection.add(**contains_records)  # type: ignore[arg-type]
 
     items = collection.get(where_document={"$contains": "doc1"})
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
 
     items = collection.get(where_document={"$contains": "great"})
-    assert len(items["metadatas"] or []) == 2
-
+    assert len(items["metadatas"]) == 2  # type: ignore[arg-type]
     items = collection.get(where_document={"$contains": "bad"})
-    assert len(items["metadatas"] or []) == 0
+    assert len(items["metadatas"]) == 0  # type: ignore[arg-type]
 
 
 # TEST METADATA AND METADATA FILTERING
@@ -72,8 +71,7 @@ def test_where_logical_operators(client: ClientAPI) -> None:
             ]
         }
     )
-    assert len(items["metadatas"] or []) == 3
-
+    assert len(items["metadatas"]) == 3  # type: ignore[arg-type]
     items = collection.get(
         where={
             "$or": [
@@ -92,7 +90,7 @@ def test_where_logical_operators(client: ClientAPI) -> None:
             ]
         }
     )
-    assert len(items["metadatas"] or []) == 2
+    assert len(items["metadatas"]) == 2  # type: ignore[arg-type]
 
     items = collection.get(
         where={
@@ -112,7 +110,7 @@ def test_where_logical_operators(client: ClientAPI) -> None:
             ]
         }
     )
-    assert len(items["metadatas"] or []) == 2
+    assert len(items["metadatas"]) == 2  # type: ignore[arg-type]
 
 
 def test_where_document_logical_operators(client: ClientAPI) -> None:
@@ -128,7 +126,7 @@ def test_where_document_logical_operators(client: ClientAPI) -> None:
             ]
         }
     )
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
 
     items = collection.get(
         where_document={
@@ -138,7 +136,7 @@ def test_where_document_logical_operators(client: ClientAPI) -> None:
             ]
         }
     )
-    assert len(items["metadatas"] or []) == 2
+    assert len(items["metadatas"]) == 2  # type: ignore[arg-type]
 
     items = collection.get(
         where_document={
@@ -151,7 +149,7 @@ def test_where_document_logical_operators(client: ClientAPI) -> None:
             "int_value": {"$ne": 2},  # type: ignore[dict-item]
         },
     )
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
 
 
 def test_get_include(client: ClientAPI) -> None:
@@ -163,15 +161,15 @@ def test_get_include(client: ClientAPI) -> None:
     items = collection.get(include=include, where={"int_value": 1})
     assert items["embeddings"] is None
     assert items["ids"][0] == "id1"
-    assert (items["metadatas"] or [])[0]["int_value"] == 1
-    assert (items["documents"] or [])[0] == "this document is first"
+    assert (items["metadatas"])[0]["int_value"] == 1  # type: ignore[index]
+    assert (items["documents"])[0] == "this document is first"  # type: ignore[index]
     assert set(items["included"]) == set(include)
 
     include = cast(List[IncludeEnum], ["embeddings", "documents"])
     items = collection.get(include=include)
     assert items["metadatas"] is None
     assert items["ids"][0] == "id1"
-    assert approx_equal((items["embeddings"] or [])[1][0], 1.2)
+    assert approx_equal((items["embeddings"])[1][0], 1.2)  # type: ignore[index]
     assert set(items["included"]) == set(include)
 
     items = collection.get(include=[])
@@ -286,7 +284,7 @@ def test_where_lt(client: ClientAPI) -> None:
     collection = client.create_collection("test_where_lt")
     collection.add(**operator_records)  # type: ignore[arg-type]
     items = collection.get(where={"int_value": {"$lt": 2}})  # type: ignore[dict-item]
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
 
 
 def test_where_lte(client: ClientAPI) -> None:
@@ -294,7 +292,7 @@ def test_where_lte(client: ClientAPI) -> None:
     collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)  # type: ignore[arg-type]
     items = collection.get(where={"int_value": {"$lte": 2.0}})  # type: ignore[dict-item]
-    assert len(items["metadatas"] or []) == 2
+    assert len(items["metadatas"]) == 2  # type: ignore[arg-type]
 
 
 def test_where_gt(client: ClientAPI) -> None:
@@ -302,7 +300,7 @@ def test_where_gt(client: ClientAPI) -> None:
     collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)  # type: ignore[arg-type]
     items = collection.get(where={"float_value": {"$gt": -1.4}})  # type: ignore[dict-item]
-    assert len(items["metadatas"] or []) == 2
+    assert len(items["metadatas"]) == 2  # type: ignore[arg-type]
 
 
 def test_where_gte(client: ClientAPI) -> None:
@@ -310,7 +308,7 @@ def test_where_gte(client: ClientAPI) -> None:
     collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)  # type: ignore[arg-type]
     items = collection.get(where={"float_value": {"$gte": 2.002}})  # type: ignore[dict-item]
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
 
 
 def test_where_ne_string(client: ClientAPI) -> None:
@@ -318,7 +316,7 @@ def test_where_ne_string(client: ClientAPI) -> None:
     collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)  # type: ignore[arg-type]
     items = collection.get(where={"string_value": {"$ne": "two"}})  # type: ignore[dict-item]
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
 
 
 def test_where_ne_eq_number(client: ClientAPI) -> None:
@@ -326,9 +324,9 @@ def test_where_ne_eq_number(client: ClientAPI) -> None:
     collection = client.create_collection("test_where_lte")
     collection.add(**operator_records)  # type: ignore[arg-type]
     items = collection.get(where={"int_value": {"$ne": 1}})  # type: ignore[dict-item]
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
     items = collection.get(where={"float_value": {"$eq": 2.002}})  # type: ignore[dict-item]
-    assert len(items["metadatas"] or []) == 1
+    assert len(items["metadatas"]) == 1  # type: ignore[arg-type]
 
 
 def test_where_validation_get(client: ClientAPI) -> None:
@@ -344,8 +342,8 @@ def test_metadata_get_where_int(client: ClientAPI) -> None:
     collection.add(**metadata_records)  # type: ignore[arg-type]
 
     items = collection.get(where={"int_value": 1})
-    assert (items["metadatas"] or [])[0]["int_value"] == 1
-    assert (items["metadatas"] or [])[0]["string_value"] == "one"
+    assert (items["metadatas"])[0]["int_value"] == 1  # type: ignore[index]
+    assert (items["metadatas"])[0]["string_value"] == "one"  # type: ignore[index]
 
 
 def test_metadata_get_where_float(client: ClientAPI) -> None:
@@ -354,9 +352,9 @@ def test_metadata_get_where_float(client: ClientAPI) -> None:
     collection.add(**metadata_records)  # type: ignore[arg-type]
 
     items = collection.get(where={"float_value": 1.001})
-    assert (items["metadatas"] or [])[0]["int_value"] == 1
-    assert (items["metadatas"] or [])[0]["string_value"] == "one"
-    assert (items["metadatas"] or [])[0]["float_value"] == 1.001
+    assert (items["metadatas"])[0]["int_value"] == 1  # type: ignore[index]
+    assert (items["metadatas"])[0]["string_value"] == "one"  # type: ignore[index]
+    assert (items["metadatas"])[0]["float_value"] == 1.001  # type: ignore[index]
 
 
 def test_metadata_get_where_string(client: ClientAPI) -> None:
@@ -365,8 +363,8 @@ def test_metadata_get_where_string(client: ClientAPI) -> None:
     collection.add(**metadata_records)  # type: ignore[arg-type]
 
     items = collection.get(where={"string_value": "one"})
-    assert (items["metadatas"] or [])[0]["int_value"] == 1
-    assert (items["metadatas"] or [])[0]["string_value"] == "one"
+    assert (items["metadatas"])[0]["int_value"] == 1  # type: ignore[index]
+    assert (items["metadatas"])[0]["string_value"] == "one"  # type: ignore[index]
 
 
 def test_metadata_add_get_int_float(client: ClientAPI) -> None:
@@ -375,11 +373,11 @@ def test_metadata_add_get_int_float(client: ClientAPI) -> None:
     collection.add(**metadata_records)  # type: ignore[arg-type]
 
     items = collection.get(ids=["id1", "id2"])
-    assert (items["metadatas"] or [])[0]["int_value"] == 1
-    assert (items["metadatas"] or [])[0]["float_value"] == 1.001
-    assert (items["metadatas"] or [])[1]["int_value"] == 2
-    assert isinstance((items["metadatas"] or [])[0]["int_value"], int)
-    assert isinstance((items["metadatas"] or [])[0]["float_value"], float)
+    assert (items["metadatas"])[0]["int_value"] == 1  # type: ignore[index]
+    assert (items["metadatas"])[0]["float_value"] == 1.001  # type: ignore[index]
+    assert (items["metadatas"])[1]["int_value"] == 2  # type: ignore[index]
+    assert isinstance((items["metadatas"])[0]["int_value"], int)  # type: ignore[index]
+    assert isinstance((items["metadatas"])[0]["float_value"], float)  # type: ignore[index]
 
 
 def test_metadata_add_query_int_float(client: ClientAPI) -> None:

@@ -27,10 +27,10 @@ def test_upsert(client: ClientAPI) -> None:
         ids=new_records["ids"][0],  # type: ignore[index]
     )
     assert vector_approx_equal(
-        (get_result["embeddings"] or [[]])[0], new_records["embeddings"][0]  # type: ignore[index]
+        (get_result["embeddings"])[0], new_records["embeddings"][0]  # type: ignore[index]
     )
-    assert (get_result["metadatas"] or [{}])[0] == new_records["metadatas"][0]  # type: ignore[index]
-    assert (get_result["documents"] or [])[0] == new_records["documents"][0]  # type: ignore[index]
+    assert (get_result["metadatas"])[0] == new_records["metadatas"][0]  # type: ignore[index]
+    assert (get_result["documents"])[0] == new_records["documents"][0]  # type: ignore[index]
 
     query_result = collection.query(
         query_embeddings=get_result["embeddings"],
@@ -38,10 +38,10 @@ def test_upsert(client: ClientAPI) -> None:
         include=cast(List[IncludeEnum], ["embeddings", "metadatas", "documents"]),
     )
     assert vector_approx_equal(
-        (query_result["embeddings"] or [[]])[0][0], new_records["embeddings"][0]  # type: ignore[index]
+        (query_result["embeddings"])[0][0], new_records["embeddings"][0]  # type: ignore[index]
     )
-    assert (query_result["metadatas"] or [{}])[0][0] == new_records["metadatas"][0]  # type: ignore
-    assert (query_result["documents"] or [])[0][0] == new_records["documents"][0]  # type: ignore[index]
+    assert (query_result["metadatas"])[0][0] == new_records["metadatas"][0]  # type: ignore
+    assert (query_result["documents"])[0][0] == new_records["documents"][0]  # type: ignore[index]
 
     collection.delete(ids=initial_records["ids"][2])  # type: ignore[index]
     collection.upsert(
@@ -55,11 +55,11 @@ def test_upsert(client: ClientAPI) -> None:
         include=cast(List[IncludeEnum], ["embeddings", "metadatas", "documents"]),
         ids=["id3"],
     )
-    assert vector_approx_equal((get_result["embeddings"] or [[]])[0], [1.1, 0.99, 2.21])
-    assert (get_result["metadatas"] or [{}])[0] == {
+    assert vector_approx_equal((get_result["embeddings"])[0], [1.1, 0.99, 2.21])  # type: ignore[index]
+    assert (get_result["metadatas"])[0] == {  # type: ignore[index]
         "string_value": "a new string value"
     }
-    assert (get_result["documents"] or [])[0] is None
+    assert (get_result["documents"])[0]  # type: ignore[index]
 
 
 def test_collection_upsert_with_invalid_collection_throws(client: ClientAPI) -> None:
