@@ -296,7 +296,7 @@ impl SingleColumnStorage<Vec<u32>> {
             "value",
             arrow::datatypes::DataType::List(Arc::new(Field::new(
                 "item",
-                arrow::datatypes::DataType::Int32,
+                arrow::datatypes::DataType::UInt32,
                 true,
             ))),
             true,
