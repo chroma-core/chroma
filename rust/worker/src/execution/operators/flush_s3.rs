@@ -63,8 +63,10 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
         // to make this call a part of commit itself. It's not obvious directly
         // how to do that since commit is per partition but write_to_blockfiles
         // only need to be called once across all partitions combined.
-        let mut writer = input.metadata_segment_writer.clone();
-        match writer
+        // Eventually, we want the blockfile itself to support read then write semantics
+        // so we will get rid of this write_to_blockfile() extravaganza.
+        let mut metadata_segment_writer = input.metadata_segment_writer.clone();
+        match metadata_segment_writer
             .write_to_blockfiles()
             .instrument(tracing::info_span!("Writing to blockfiles"))
             .await
@@ -131,7 +133,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
             }
         };
 
-        let metadata_segment_flusher = input.metadata_segment_writer.clone().commit();
+        let metadata_segment_flusher = metadata_segment_writer.commit();
         let metadata_segment_flush_info = match metadata_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.metadata_segment_writer.id;
