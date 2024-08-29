@@ -65,6 +65,10 @@ def maybe_cast_one_to_many_embedding(
         if isinstance(target[0], (int, float)):
             return cast(Embeddings, [target])
     # Already a sequence
+
+    if isinstance(target, np.ndarray):
+        return cast(Embeddings, target.tolist())
+
     return cast(Embeddings, target)
 
 

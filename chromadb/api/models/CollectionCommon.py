@@ -294,9 +294,7 @@ class CollectionCommon(Generic[ClientT]):
         )
         valid_query_embeddings = (
             validate_embeddings(
-                self._normalize_embeddings(
-                    cast(Embeddings, maybe_cast_one_to_many_embedding(query_embeddings))
-                )
+                cast(Embeddings, maybe_cast_one_to_many_embedding(query_embeddings))
             )
             if query_embeddings is not None
             else None
@@ -389,14 +387,6 @@ class CollectionCommon(Generic[ClientT]):
             uris=uris,
         )
 
-        normalized_embeddings = (
-            self._normalize_embeddings(unpacked_record_set["embeddings"])
-            if unpacked_record_set["embeddings"] is not None
-            else None
-        )
-
-        unpacked_record_set["embeddings"] = normalized_embeddings
-
         self._validate_record_set(
             record_set=unpacked_record_set,
             require_data=True,
@@ -408,8 +398,8 @@ class CollectionCommon(Generic[ClientT]):
                 images=unpacked_record_set["images"],
                 uris=unpacked_record_set["uris"],
             )
-            if normalized_embeddings is None
-            else normalized_embeddings
+            if unpacked_record_set["embeddings"] is None
+            else unpacked_record_set["embeddings"]
         )
 
         unpacked_record_set["embeddings"] = prepared_embeddings
@@ -440,20 +430,12 @@ class CollectionCommon(Generic[ClientT]):
             uris=uris,
         )
 
-        normalized_embeddings = (
-            self._normalize_embeddings(unpacked_record_set["embeddings"])
-            if unpacked_record_set["embeddings"] is not None
-            else None
-        )
-
-        unpacked_record_set["embeddings"] = normalized_embeddings
-
         self._validate_record_set(
             record_set=unpacked_record_set,
             require_data=require_data,
         )
 
-        prepared_embeddings = normalized_embeddings
+        prepared_embeddings = unpacked_record_set["embeddings"]
         try:
             prepared_embeddings = (
                 self._compute_embeddings(
