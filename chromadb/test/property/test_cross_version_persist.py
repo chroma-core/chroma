@@ -262,14 +262,18 @@ def persist_generated_data_with_old_version(
         # version
 
         check_embeddings = invariants.wrap_all(embeddings_strategy)
-        # Check count
-        assert coll.count() == len(check_embeddings["embeddings"] or [])
+
+        if check_embeddings["ids"] is None:
+            check_embeddings["ids"] = result["ids"]
+
+        if check_embeddings["embeddings"] is not None:
+            # Check count
+            assert coll.count() == len(check_embeddings["embeddings"])
+
         # Check ids
         result = coll.get()
         actual_ids = result["ids"]
-        embedding_id_to_index = {
-            id: i for i, id in enumerate(check_embeddings["ids"] or [])
-        }
+        embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}  # type: ignore[arg-type]
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
         # Shutdown system

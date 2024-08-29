@@ -359,6 +359,7 @@ class SegmentAPI(ServerAPI):
         }
 
         ids = self.generate_ids_when_not_present(record_set)
+        record_set["ids"] = ids
 
         self._validate_recrod_set(
             collection=coll,
@@ -851,7 +852,7 @@ class SegmentAPI(ServerAPI):
         ids = record_set["ids"]
         if ids is not None and len(ids) != 0:
             return ids
-
+        
         (_, n) = get_n_items_from_record_set(record_set)
 
         generated_ids: List[str] = []

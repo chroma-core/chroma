@@ -67,13 +67,29 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
     }
 
 
+def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> int:
+    """Get the number of items from a record set"""
+    (_, n) = types.get_n_items_from_record_set(
+        {
+            "ids": normalized_record_set["ids"],
+            "embeddings": normalized_record_set["embeddings"],
+            "metadatas": cast(types.Metadatas, normalized_record_set["metadatas"]),
+            "documents": normalized_record_set["documents"],
+            "uris": None,
+            "images": None,
+        }
+    )
+
+    return n
+
+
 def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
     normalized_record_set = wrap_all(record_set)
+    n = get_n_items_from_record_set(normalized_record_set)
 
-    n_ids = len(normalized_record_set["ids"] or [])
-    assert count == n_ids
+    assert count == n
 
 
 def _field_matches(
@@ -87,15 +103,20 @@ def _field_matches(
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
+    # If there are no ids, then there are no data to test
+    if normalized_record_set["ids"] is None:
+        return
+
     result = collection.get(ids=normalized_record_set["ids"], include=[field_name])  # type: ignore[list-item]
+
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
-    embedding_id_to_index = {
-        id: i for i, id in enumerate(normalized_record_set["ids"] or [])
-    }
+    embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
 
-    if len(normalized_record_set["ids"] or []) == 0:
+    n = get_n_items_from_record_set(normalized_record_set)
+
+    if n == 0:
         assert actual_field == []
         return
 
@@ -127,10 +148,13 @@ def ids_match(collection: Collection, record_set: RecordSet) -> None:
     actual_ids = collection.get(ids=normalized_record_set["ids"], include=[])["ids"]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
-    embedding_id_to_index = {
-        id: i for i, id in enumerate(normalized_record_set["ids"] or [])
-    }
-    actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
+
+    if normalized_record_set["ids"] is not None:
+        embedding_id_to_index = {
+            id: i for i, id in enumerate(normalized_record_set["ids"])
+        }
+        actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
+
     assert actual_ids == normalized_record_set["ids"]
 
 
@@ -213,7 +237,8 @@ def ann_accuracy(
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
 
-    if len(normalized_record_set["ids"] or []) == 0:
+    n = get_n_items_from_record_set(normalized_record_set)
+    if n == 0:
         return  # nothing to test here
 
     embeddings: Optional[types.Embeddings] = normalized_record_set["embeddings"]
@@ -272,8 +297,10 @@ def ann_accuracy(
     assert query_results["metadatas"] is not None
     assert query_results["embeddings"] is not None
 
+    if normalized_record_set["ids"] is None:
+        return
     # Dict of ids to indices
-    id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"] or [])}
+    id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     missing = 0
     for i, (indices_i, distances_i) in enumerate(zip(indices, distances)):
         expected_ids = np.array(normalized_record_set["ids"])[indices_i[:n_results]]
@@ -313,7 +340,7 @@ def ann_accuracy(
                     == query_results["metadatas"][i][j]
                 )
 
-    size = len(normalized_record_set["ids"] or [])
+    size = len(normalized_record_set["ids"])
     recall = (size - missing) / size
 
     try:

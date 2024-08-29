@@ -108,14 +108,18 @@ def _test_add(
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
     result = coll.add(**record_set)  # type: ignore
-    # Only wait for compaction if the size of the collection is
-    # some minimal size
 
-    n_ids = len(normalized_record_set["ids"] or [])
+    n_ids = (
+        len(normalized_record_set["ids"])
+        if normalized_record_set["ids"] is not None
+        else 0
+    )
     if n_ids == 0:
         normalized_record_set["ids"] = result["ids"]
         n_ids = len(result["ids"])
 
+    # Only wait for compaction if the size of the collection is
+    # some minimal size
     if not NOT_CLUSTER_ONLY and should_compact and n_ids > 10:
         # Wait for the model to be updated
         wait_for_version_increase(client, collection.name, initial_version)
@@ -183,6 +187,7 @@ def test_add_large(
     normalized_record_set = invariants.wrap_all(record_set)
     initial_version = cast(int, coll.get_model()["version"])
 
+    ids = []
     for batch in create_batches(
         api=client,
         ids=cast(List[str], record_set["ids"]),
@@ -190,9 +195,17 @@ def test_add_large(
         metadatas=cast(Metadatas, record_set["metadatas"]),
         documents=cast(List[str], record_set["documents"]),
     ):
-        coll.add(*batch)
+        result = coll.add(*batch)
+        if result["ids"] is not None:
+            ids.extend(result["ids"])
 
-    n_ids = len(normalized_record_set["ids"] or [])
+    n_ids = (
+        len(normalized_record_set["ids"])
+        if normalized_record_set["ids"] is not None
+        else 0
+    )
+    if n_ids == 0:
+        normalized_record_set["ids"] = ids
 
     if not NOT_CLUSTER_ONLY and should_compact and n_ids > 10:
         # Wait for the model to be updated, since the record set is larger, add some additional time
