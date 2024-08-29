@@ -85,10 +85,10 @@ impl BlockfileProvider {
         }
     }
 
-    pub fn purge_all_entries(&self) {
+    pub fn clear(&self) {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.purge_all_entries(),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.purge_all_entries(),
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.clear(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.clear(),
         }
     }
 

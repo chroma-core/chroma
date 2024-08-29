@@ -79,20 +79,9 @@ impl ArrowBlockfileProvider {
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 
-    pub fn purge_all_entries(&self) {
-        loop {
-            match self.block_manager.block_cache.pop() {
-                Some(_) => {}
-                None => break,
-            }
-        }
-
-        loop {
-            match self.sparse_index_manager.cache.pop() {
-                Some(_) => {}
-                None => break,
-            }
-        }
+    pub fn clear(&self) {
+        self.block_manager.block_cache.clear();
+        self.sparse_index_manager.cache.clear();
     }
 
     pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
