@@ -79,6 +79,16 @@ impl ArrowBlockfileProvider {
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 
+    pub fn purge_all_entries(&self) {
+        while let Some((key, _)) = self.block_manager.block_cache.pop() {
+            self.block_manager.block_cache.remove(&key);
+        }
+
+        while let Some((key, _)) = self.sparse_index_manager.cache.pop() {
+            self.sparse_index_manager.cache.remove(&key);
+        }
+    }
+
     pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         id: &uuid::Uuid,

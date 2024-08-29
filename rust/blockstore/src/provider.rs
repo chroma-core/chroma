@@ -85,6 +85,13 @@ impl BlockfileProvider {
         }
     }
 
+    pub fn purge_all_entries(&self) {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.purge_all_entries(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.purge_all_entries(),
+        }
+    }
+
     pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         id: &uuid::Uuid,

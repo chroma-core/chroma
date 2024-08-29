@@ -1165,4 +1165,13 @@ impl StorageManager {
         read_cache_guard.insert(id, storage.clone());
         storage
     }
+
+    pub(super) fn purge_all_entries(&self) {
+        let mut write_cache_guard = self.write_cache.write();
+        write_cache_guard.clear();
+        write_cache_guard.shrink_to_fit();
+        let mut read_cache_guard = self.read_cache.write();
+        read_cache_guard.clear();
+        read_cache_guard.shrink_to_fit();
+    }
 }

@@ -49,6 +49,10 @@ impl MemoryBlockfileProvider {
         Ok(BlockfileWriter::MemoryBlockfileWriter(writer))
     }
 
+    pub(crate) fn purge_all_entries(&self) {
+        self.storage_manager.purge_all_entries();
+    }
+
     pub(crate) fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         _id: &uuid::Uuid,
