@@ -57,6 +57,26 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
     }
 
     async fn run(&self, input: &FlushS3Input) -> Result<FlushS3Output, Self::Error> {
+        // TODO: Ideally we shouldn't even have to make an explicit call to
+        // write_to_blockfiles since it is not the workflow for other segments
+        // and is exclusive to metadata segment. We should figure out a way
+        // to make this call a part of commit itself. It's not obvious directly
+        // how to do that since commit is per partition but write_to_blockfiles
+        // only need to be called once across all partitions combined.
+        // Eventually, we want the blockfile itself to support read then write semantics
+        // so we will get rid of this write_to_blockfile() extravaganza.
+        let mut metadata_segment_writer = input.metadata_segment_writer.clone();
+        match metadata_segment_writer
+            .write_to_blockfiles()
+            .instrument(tracing::info_span!("Writing to blockfiles"))
+            .await
+        {
+            Ok(()) => (),
+            Err(e) => {
+                tracing::error!("Error writing metadata segment out to blockfiles: {:?}", e);
+                return Err(Box::new(e));
+            }
+        }
         let record_segment_flusher = input.record_segment_writer.clone().commit();
         let record_segment_flush_info = match record_segment_flusher {
             Ok(flusher) => {
@@ -113,7 +133,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
             }
         };
 
-        let metadata_segment_flusher = input.metadata_segment_writer.clone().commit();
+        let metadata_segment_flusher = metadata_segment_writer.commit();
         let metadata_segment_flush_info = match metadata_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.metadata_segment_writer.id;
