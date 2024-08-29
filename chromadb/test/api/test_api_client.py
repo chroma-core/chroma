@@ -4,12 +4,9 @@ import chromadb
 import traceback
 import tempfile
 import httpx
-import shutil
 from datetime import datetime, timedelta
 from chromadb.api.fastapi import FastAPI
 from chromadb.api import ClientAPI
-from typing import Generator
-from chromadb.config import Settings
 
 persist_dir = tempfile.mkdtemp()
 

@@ -23,6 +23,8 @@ chroma_test_data/
 server.htpasswd
 server.authz
 server.authn
+servercert.pem
+serverkey.pem
 
 .venv
 venv

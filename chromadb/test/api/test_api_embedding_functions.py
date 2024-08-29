@@ -1,4 +1,3 @@
-import pytest
 from typing import cast
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,

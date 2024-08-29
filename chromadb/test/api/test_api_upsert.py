@@ -59,7 +59,8 @@ def test_upsert(client: ClientAPI) -> None:
     assert (get_result["metadatas"])[0] == {  # type: ignore[index]
         "string_value": "a new string value"
     }
-    assert (get_result["documents"])[0]  # type: ignore[index]
+
+    assert (get_result["documents"])[0] is None  # type: ignore[index]
 
 
 def test_collection_upsert_with_invalid_collection_throws(client: ClientAPI) -> None:
