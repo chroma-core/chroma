@@ -87,7 +87,7 @@ impl<'me> FullTextIndexWriter<'me> {
 
     async fn populate_frequencies_and_posting_lists_from_previous_version(
         &self,
-        tokens: &Vec<Token>,
+        tokens: &[Token],
     ) -> Result<(), FullTextIndexError> {
         // (Scoped to limit the lifetime of the lock)
         {
