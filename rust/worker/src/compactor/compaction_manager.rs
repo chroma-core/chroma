@@ -301,6 +301,7 @@ impl Handler<ScheduleMessage> for CompactionManager {
         self.compact_batch().await;
 
         self.hnsw_index_provider.purge_all_entries().await;
+        self.blockfile_provider.clear();
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler
