@@ -347,7 +347,7 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
-        self._validate_embedding_set(
+        self._validate_recrod_set(
             collection=coll,
             record_set={
                 "ids": ids,
@@ -398,7 +398,7 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
 
-        self._validate_embedding_set(
+        self._validate_recrod_set(
             collection=coll,
             record_set={
                 "ids": ids,
@@ -451,7 +451,7 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
 
-        self._validate_embedding_set(
+        self._validate_recrod_set(
             collection=coll,
             record_set={
                 "ids": ids,
@@ -639,7 +639,7 @@ class SegmentAPI(ServerAPI):
         if len(ids_to_delete) == 0:
             return []
 
-        self._validate_embedding_set(
+        self._validate_recrod_set(
             collection=coll,
             record_set={
                 "ids": ids_to_delete,
@@ -842,8 +842,8 @@ class SegmentAPI(ServerAPI):
     # system, since the cache is only local.
     # TODO: promote collection -> topic to a base class method so that it can be
     # used for channel assignment in the distributed version of the system.
-    @trace_method("SegmentAPI._validate_embedding_set", OpenTelemetryGranularity.ALL)
-    def _validate_embedding_set(
+    @trace_method("SegmentAPI._validate_recrod_set", OpenTelemetryGranularity.ALL)
+    def _validate_recrod_set(
         self,
         collection: t.Collection,
         record_set: RecordSet,
