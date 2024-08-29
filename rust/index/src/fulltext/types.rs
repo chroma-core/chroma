@@ -91,60 +91,54 @@ impl<'me> FullTextIndexWriter<'me> {
     ) -> Result<(), FullTextIndexError> {
         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
         for token in tokens {
-            match uncommitted_frequencies.get(&token.text) {
-                Some(_) => return Ok(()),
-                None => {
-                    let frequency = match &self.full_text_index_reader {
-                        // Readers are uninitialized until the first compaction finishes
-                        // so there is a case when this is none hence not an error.
-                        None => 0,
-                        Some(reader) => {
-                            match reader.get_frequencies_for_token(token.text.as_str()).await {
-                                Ok(frequency) => frequency,
-                                // New token so start with frequency of 0.
-                                Err(_) => 0,
-                            }
-                        }
-                    };
-                    uncommitted_frequencies
-                        .insert(token.text.clone(), (frequency as i32, frequency as i32));
-                }
+            if uncommitted_frequencies.contains_key(&token.text) {
+                continue;
             }
+
+            let frequency = match &self.full_text_index_reader {
+                // Readers are uninitialized until the first compaction finishes
+                // so there is a case when this is none hence not an error.
+                None => 0,
+                Some(reader) => {
+                    match reader.get_frequencies_for_token(token.text.as_str()).await {
+                        Ok(frequency) => frequency,
+                        // New token so start with frequency of 0.
+                        Err(_) => 0,
+                    }
+                }
+            };
+            uncommitted_frequencies
+                .insert(token.text.clone(), (frequency as i32, frequency as i32));
         }
 
         drop(uncommitted_frequencies);
 
         let mut uncommitted_postings = self.uncommitted_postings.lock().await;
         for token in tokens {
-            match uncommitted_postings.positional_postings.get(&token.text) {
-                Some(_) => {
-                    // This should never happen -- if uncommitted has the token, then
-                    // uncommitted_frequencies should have had it as well.
-                    tracing::error!(
-                        "Error populating frequencies and posting lists from previous version"
-                    );
-                    return Err(FullTextIndexError::InvariantViolation);
-                }
-                None => {
-                    let results = match &self.full_text_index_reader {
-                        // Readers are uninitialized until the first compaction finishes
-                        // so there is a case when this is none hence not an error.
-                        None => vec![],
-                        Some(reader) => match reader.get_all_results_for_token(&token.text).await {
-                            Ok(results) => results,
-                            // New token so start with empty postings list.
-                            Err(_) => vec![],
-                        },
-                    };
-                    let mut doc_and_positions = HashMap::new();
-                    for result in results {
-                        doc_and_positions.insert(result.0, result.1);
-                    }
-                    uncommitted_postings
-                        .positional_postings
-                        .insert(token.text.clone(), doc_and_positions);
-                }
+            if uncommitted_postings
+                .positional_postings
+                .contains_key(&token.text)
+            {
+                continue;
             }
+
+            let results = match &self.full_text_index_reader {
+                // Readers are uninitialized until the first compaction finishes
+                // so there is a case when this is none hence not an error.
+                None => vec![],
+                Some(reader) => match reader.get_all_results_for_token(&token.text).await {
+                    Ok(results) => results,
+                    // New token so start with empty postings list.
+                    Err(_) => vec![],
+                },
+            };
+            let mut doc_and_positions = HashMap::new();
+            for result in results {
+                doc_and_positions.insert(result.0, result.1);
+            }
+            uncommitted_postings
+                .positional_postings
+                .insert(token.text.clone(), doc_and_positions);
         }
         Ok(())
     }
