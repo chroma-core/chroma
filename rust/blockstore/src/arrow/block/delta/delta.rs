@@ -60,7 +60,7 @@ impl BlockDelta {
         self.builder.get_size::<K>()
     }
 
-    pub fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> RecordBatch {
+    pub fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(self) -> RecordBatch {
         self.builder.to_record_batch::<K>()
     }
 
@@ -121,7 +121,6 @@ impl BlockDelta {
 #[cfg(test)]
 mod test {
     use crate::arrow::{block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager};
-    use arrow::array::Int32Array;
     use chroma_cache::{
         cache::Cache,
         config::{CacheConfig, UnboundedCacheConfig},
@@ -154,7 +153,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, Int32Array>();
+        let delta = block_manager.create::<&str, Vec<u32>>();
 
         let n = 2000;
         for i in 0..n {
@@ -163,27 +162,25 @@ mod test {
             let value_len: usize = rand::thread_rng().gen_range(1..100);
             let mut new_vec = Vec::with_capacity(value_len);
             for _ in 0..value_len {
-                new_vec.push(random::<i32>());
+                new_vec.push(random::<u32>());
             }
-            delta.add::<&str, Int32Array>(prefix, &key, Int32Array::from(new_vec));
+            delta.add::<&str, Vec<u32>>(prefix, &key, new_vec);
         }
 
-        let size = delta.get_size::<&str, Int32Array>();
-        // TODO: should commit take ownership of delta?
-        // Semantically, that makes sense, since a delta is unsuable after commit
+        let size = delta.get_size::<&str, Vec<u32>>();
 
-        let block = block_manager.commit::<&str, Int32Array>(&delta);
+        let block = block_manager.commit::<&str, Vec<u32>>(delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, Int32Array>("prefix", &key).unwrap();
-            values_before_flush.push(read);
+            let read = block.get::<&str, &[u32]>("prefix", &key).unwrap();
+            values_before_flush.push(read.to_vec());
         }
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&block.clone().id).await.unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
-            let read = block.get::<&str, Int32Array>("prefix", &key).unwrap();
+            let read = block.get::<&str, &[u32]>("prefix", &key).unwrap();
             assert_eq!(read, values_before_flush[i]);
         }
         test_save_load_size(path, &block);
@@ -208,7 +205,7 @@ mod test {
             delta.add(prefix, key.as_str(), value.to_owned());
         }
         let size = delta.get_size::<&str, String>();
-        let block = block_manager.commit::<&str, String>(&delta);
+        let block = block_manager.commit::<&str, String>(delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
@@ -237,7 +234,7 @@ mod test {
         // test fork
         let forked_block = block_manager.fork::<&str, String>(&delta_id).await;
         let new_id = forked_block.id.clone();
-        let block = block_manager.commit::<&str, String>(&forked_block);
+        let block = block_manager.commit::<&str, String>(forked_block);
         block_manager.flush(&block).await.unwrap();
         let forked_block = block_manager.get(&new_id).await.unwrap();
         for i in 0..n {
@@ -265,7 +262,8 @@ mod test {
         }
 
         let size = delta.get_size::<f32, String>();
-        let block = block_manager.commit::<f32, String>(&delta);
+        let delta_id = delta.id.clone();
+        let block = block_manager.commit::<f32, String>(delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = i as f32;
@@ -273,7 +271,7 @@ mod test {
             values_before_flush.push(read);
         }
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta.id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap();
         assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = i as f32;
@@ -302,9 +300,10 @@ mod test {
         }
 
         let size = delta.get_size::<&str, RoaringBitmap>();
-        let block = block_manager.commit::<&str, RoaringBitmap>(&delta);
+        let delta_id = delta.id.clone();
+        let block = block_manager.commit::<&str, RoaringBitmap>(delta);
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta.id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap();
 
         assert_eq!(size, block.get_size());
 
@@ -366,9 +365,10 @@ mod test {
         }
 
         let size = delta.get_size::<&str, &DataRecord>();
-        let block = block_manager.commit::<&str, &DataRecord>(&delta);
+        let delta_id = delta.id.clone();
+        let block = block_manager.commit::<&str, &DataRecord>(delta);
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta.id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap();
         for i in 0..3 {
             let read = block.get::<&str, DataRecord>("", ids[i]).unwrap();
             assert_eq!(read.id, ids[i]);
@@ -400,9 +400,10 @@ mod test {
         }
 
         let size = delta.get_size::<u32, String>();
-        let block = block_manager.commit::<u32, String>(&delta);
+        let delta_id = delta.id.clone();
+        let block = block_manager.commit::<u32, String>(delta);
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta.id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap();
         assert_eq!(size, block.get_size());
 
         // test save/load
@@ -427,7 +428,7 @@ mod test {
             delta.add(prefix, key, value);
         }
         let size = delta.get_size::<u32, u32>();
-        let block = block_manager.commit::<u32, u32>(&delta);
+        let block = block_manager.commit::<u32, u32>(delta);
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = i as u32;
@@ -456,7 +457,7 @@ mod test {
         // test fork
         let forked_block = block_manager.fork::<u32, u32>(&delta_id).await;
         let new_id = forked_block.id.clone();
-        let block = block_manager.commit::<u32, u32>(&forked_block);
+        let block = block_manager.commit::<u32, u32>(forked_block);
         block_manager.flush(&block).await.unwrap();
         let forked_block = block_manager.get(&new_id).await.unwrap();
         for i in 0..n {

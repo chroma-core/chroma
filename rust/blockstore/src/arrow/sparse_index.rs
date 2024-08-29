@@ -503,8 +503,9 @@ impl SparseIndex {
             }
         }
 
+        let delta_id = delta.id;
         let record_batch = delta.finish::<K, String>();
-        Ok(Block::from_record_batch(delta.id, record_batch))
+        Ok(Block::from_record_batch(delta_id, record_batch))
     }
 
     pub(super) fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
