@@ -5,8 +5,8 @@ use crate::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BinaryBuilder, FixedSizeListBuilder, Float32Builder, StringBuilder,
-        StructArray,
+        Array, ArrayRef, BinaryBuilder, FixedSizeListBuilder, Float32Builder, RecordBatch,
+        StringBuilder, StructArray,
     },
     datatypes::{Field, Fields},
     util::bit_util,
@@ -343,57 +343,63 @@ impl DataRecordStorage {
         inner.storage.len()
     }
 
-    pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
-        let inner = self.inner.read();
-        let mut builder = builder;
-        for (key, _) in inner.storage.iter() {
-            builder.add_key(key.clone());
-        }
-        builder
-    }
-
-    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
-        let inner = self.inner.read();
-
-        let item_capacity = inner.storage.len();
+    pub(super) fn to_arrow(
+        self,
+        key_builder: BlockKeyArrowBuilder,
+    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        // build arrow key.
+        let mut key_builder = key_builder;
         let mut embedding_builder;
         let mut id_builder;
         let mut metadata_builder;
         let mut document_builder;
         let embedding_dim;
-        if item_capacity == 0 {
-            // ok to initialize fixed size float list with fixed size as 0.
-            embedding_dim = 0;
-            embedding_builder = FixedSizeListBuilder::new(Float32Builder::new(), 0);
-            id_builder = StringBuilder::new();
-            metadata_builder = BinaryBuilder::new();
-            document_builder = StringBuilder::new();
-        } else {
-            embedding_dim = inner.storage.iter().next().unwrap().1 .1.len();
-            // Assumes all embeddings are of the same length, which is guaranteed by calling code
-            // TODO: validate this assumption by throwing an error if it's not true
-            let total_embedding_count = embedding_dim * item_capacity;
-            id_builder = StringBuilder::with_capacity(item_capacity, inner.id_size);
-            embedding_builder = FixedSizeListBuilder::with_capacity(
-                Float32Builder::with_capacity(total_embedding_count),
-                embedding_dim as i32,
-                item_capacity,
-            );
-            metadata_builder = BinaryBuilder::with_capacity(item_capacity, inner.metadata_size);
-            document_builder = StringBuilder::with_capacity(item_capacity, inner.document_size);
-        }
-
-        let iter = inner.storage.iter();
-        for (_key, (id, embedding, metadata, document)) in iter {
-            id_builder.append_value(id);
-            let embedding_arr = embedding_builder.values();
-            for entry in embedding.iter() {
-                embedding_arr.append_value(*entry);
+        match Arc::try_unwrap(self.inner) {
+            Ok(inner) => {
+                let inner = inner.into_inner();
+                let storage = inner.storage;
+                let item_capacity = storage.len();
+                if item_capacity == 0 {
+                    // ok to initialize fixed size float list with fixed size as 0.
+                    embedding_dim = 0;
+                    embedding_builder = FixedSizeListBuilder::new(Float32Builder::new(), 0);
+                    id_builder = StringBuilder::new();
+                    metadata_builder = BinaryBuilder::new();
+                    document_builder = StringBuilder::new();
+                } else {
+                    embedding_dim = storage.iter().next().unwrap().1 .1.len();
+                    // Assumes all embeddings are of the same length, which is guaranteed by calling code
+                    // TODO: validate this assumption by throwing an error if it's not true
+                    let total_embedding_count = embedding_dim * item_capacity;
+                    id_builder = StringBuilder::with_capacity(item_capacity, inner.id_size);
+                    embedding_builder = FixedSizeListBuilder::with_capacity(
+                        Float32Builder::with_capacity(total_embedding_count),
+                        embedding_dim as i32,
+                        item_capacity,
+                    );
+                    metadata_builder =
+                        BinaryBuilder::with_capacity(item_capacity, inner.metadata_size);
+                    document_builder =
+                        StringBuilder::with_capacity(item_capacity, inner.document_size);
+                }
+                for (key, (id, embedding, metadata, document)) in storage.into_iter() {
+                    key_builder.add_key(key);
+                    id_builder.append_value(id);
+                    let embedding_arr = embedding_builder.values();
+                    for entry in embedding {
+                        embedding_arr.append_value(entry);
+                    }
+                    embedding_builder.append(true);
+                    metadata_builder.append_option(metadata.as_deref());
+                    document_builder.append_option(document.as_deref());
+                }
             }
-            embedding_builder.append(true);
-            metadata_builder.append_option(metadata.as_deref());
-            document_builder.append_option(document.as_deref());
+            Err(_) => {
+                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
+            }
         }
+        // Build arrow key with fields.
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
 
         let id_field = Field::new("id", arrow::datatypes::DataType::Utf8, true);
         let embedding_field = Field::new(
@@ -442,9 +448,12 @@ impl DataRecordStorage {
             arrow::datatypes::DataType::Struct(struct_fields),
             true,
         );
-        (
+        let value_arr = (&struct_arr as &dyn Array).slice(0, struct_arr.len());
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            prefix_field,
+            key_field,
             struct_field,
-            (&struct_arr as &dyn Array).slice(0, struct_arr.len()),
-        )
+        ]));
+        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
     }
 }

@@ -195,10 +195,10 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
 }
 
 // TODO: remove this and make this all use a unified storage so we don't have two impls
-impl Writeable for Int32Array {
+impl Writeable for Vec<u32> {
     fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .write()
             .as_mut()
             .unwrap()
@@ -213,7 +213,7 @@ impl Writeable for Int32Array {
 
     fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .write()
             .as_mut()
             .unwrap()
@@ -224,15 +224,19 @@ impl Writeable for Int32Array {
     }
 }
 
-impl<'referred_data> Readable<'referred_data> for Int32Array {
-    fn read_from_storage(prefix: &str, key: KeyWrapper, storage: &Storage) -> Option<Self> {
+impl<'referred_data> Readable<'referred_data> for &'referred_data [u32] {
+    fn read_from_storage(
+        prefix: &str,
+        key: KeyWrapper,
+        storage: &'referred_data Storage,
+    ) -> Option<Self> {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .get(&CompositeKey {
                 prefix: prefix.to_string(),
                 key,
             })
-            .map(|a| a.clone())
+            .map(|a| a.as_slice())
     }
 
     fn get_by_prefix_from_storage(
@@ -240,10 +244,10 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)> {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -253,10 +257,10 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)> {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -266,10 +270,10 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)> {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -279,10 +283,10 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)> {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -292,10 +296,10 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
         storage: &'referred_data Storage,
     ) -> Vec<(&'referred_data CompositeKey, Self)> {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
 
@@ -304,19 +308,19 @@ impl<'referred_data> Readable<'referred_data> for Int32Array {
         index: usize,
     ) -> Option<(&'referred_data CompositeKey, Self)> {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .iter()
             .nth(index)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, v.as_slice()))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
-        Ok(storage.int32_array_storage.iter().len())
+        Ok(storage.uint32_array_storage.iter().len())
     }
 
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool {
         storage
-            .int32_array_storage
+            .uint32_array_storage
             .get(&CompositeKey {
                 prefix: prefix.to_string(),
                 key,
@@ -1063,8 +1067,8 @@ pub struct StorageBuilder {
     f32_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, f32>>>>,
     // Roaring Bitmap Value
     roaring_bitmap_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, RoaringBitmap>>>>,
-    // Int32 Array Value
-    int32_array_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Int32Array>>>>,
+    // UInt32 Array Value
+    uint32_array_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<u32>>>>>,
     // Data Record Fields
     data_record_id_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
     data_record_embedding_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<f32>>>>>,
@@ -1082,8 +1086,8 @@ pub struct Storage {
     f32_storage: Arc<BTreeMap<CompositeKey, f32>>,
     // Roaring Bitmap Value
     roaring_bitmap_storage: Arc<BTreeMap<CompositeKey, RoaringBitmap>>,
-    // Int32 Array Value
-    int32_array_storage: Arc<BTreeMap<CompositeKey, Int32Array>>,
+    // UInt32 Array Value
+    uint32_array_storage: Arc<BTreeMap<CompositeKey, Vec<u32>>>,
     // Data Record Fields
     data_record_id_storage: Arc<BTreeMap<CompositeKey, String>>,
     data_record_embedding_storage: Arc<BTreeMap<CompositeKey, Vec<f32>>>,
@@ -1118,7 +1122,7 @@ impl StorageManager {
             u32_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
             f32_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
             roaring_bitmap_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
-            int32_array_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
+            uint32_array_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
             data_record_id_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
             data_record_embedding_storage: Arc::new(RwLock::new(Some(BTreeMap::new()))),
             id,
@@ -1134,7 +1138,7 @@ impl StorageManager {
         let storage = Storage {
             bool_storage: builder.bool_storage.write().take().unwrap().into(),
             string_value_storage: builder.string_value_storage.write().take().unwrap().into(),
-            int32_array_storage: builder.int32_array_storage.write().take().unwrap().into(),
+            uint32_array_storage: builder.uint32_array_storage.write().take().unwrap().into(),
             roaring_bitmap_storage: builder
                 .roaring_bitmap_storage
                 .write()

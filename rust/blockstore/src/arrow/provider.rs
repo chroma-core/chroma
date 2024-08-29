@@ -197,10 +197,11 @@ impl BlockManager {
 
     pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
-        delta: &BlockDelta,
+        delta: BlockDelta,
     ) -> Block {
+        let delta_id = delta.id;
         let record_batch = delta.finish::<K, V>();
-        let block = Block::from_record_batch(delta.id, record_batch);
+        let block = Block::from_record_batch(delta_id, record_batch);
         block
     }
 

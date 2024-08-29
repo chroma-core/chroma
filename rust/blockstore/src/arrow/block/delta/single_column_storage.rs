@@ -6,8 +6,7 @@ use crate::{
 };
 use arrow::{
     array::{
-        Array, ArrayRef, BinaryBuilder, Int32Array, Int32Builder, ListBuilder, StringBuilder,
-        UInt32Builder,
+        Array, BinaryBuilder, ListBuilder, RecordBatch, StringBuilder, UInt32Array, UInt32Builder,
     },
     datatypes::Field,
     util::bit_util,
@@ -88,16 +87,6 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             + key_offset_bytes
             + value_offset_bytes
             + value_validity_bytes
-    }
-
-    pub(super) fn build_keys(&self, builder: BlockKeyArrowBuilder) -> BlockKeyArrowBuilder {
-        let inner = self.inner.read();
-        let storage = &inner.storage;
-        let mut builder = builder;
-        for (key, _) in storage.iter() {
-            builder.add_key(key.clone());
-        }
-        builder
     }
 
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: T) {
@@ -234,8 +223,12 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 }
 
 impl SingleColumnStorage<String> {
-    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
-        println!("btreesize: {}", self.len());
+    pub(super) fn to_arrow(
+        self,
+        key_builder: BlockKeyArrowBuilder,
+    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        // Build key and value.
+        let mut key_builder = key_builder;
         let item_capacity = self.len();
         let mut value_builder;
         if item_capacity == 0 {
@@ -243,115 +236,173 @@ impl SingleColumnStorage<String> {
         } else {
             value_builder = StringBuilder::with_capacity(item_capacity, self.get_value_size());
         }
-
-        let inner = self.inner.read();
-        let storage = &inner.storage;
-
-        for (_, value) in storage.iter() {
-            value_builder.append_value(value);
+        match Arc::try_unwrap(self.inner) {
+            Ok(inner) => {
+                let storage = inner.into_inner().storage;
+                for (key, value) in storage.into_iter() {
+                    key_builder.add_key(key);
+                    value_builder.append_value(value);
+                }
+            }
+            Err(_) => {
+                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
+            }
         }
-
+        // Build arrow key with fields.
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
+        // Build arrow value with fields.
         let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
         let value_arr = value_builder.finish();
-        (
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            prefix_field,
+            key_field,
             value_field,
-            (&value_arr as &dyn Array).slice(0, value_arr.len()),
-        )
+        ]));
+        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
     }
 }
 
-impl SingleColumnStorage<Int32Array> {
-    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
+impl SingleColumnStorage<Vec<u32>> {
+    pub(super) fn to_arrow(
+        self,
+        key_builder: BlockKeyArrowBuilder,
+    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        // Build key and value.
+        let mut key_builder = key_builder;
         let item_capacity = self.len();
-        let inner = self.inner.read();
-        let storage = &inner.storage;
-        let total_value_count = storage.iter().fold(0, |acc, (_, value)| acc + value.len());
-
         let mut value_builder;
-        if item_capacity == 0 {
-            value_builder = ListBuilder::new(Int32Builder::new());
-        } else {
-            value_builder = ListBuilder::with_capacity(
-                Int32Builder::with_capacity(total_value_count),
-                item_capacity,
-            );
+        match Arc::try_unwrap(self.inner) {
+            Ok(inner) => {
+                let storage = inner.into_inner().storage;
+                let total_value_count = storage.iter().fold(0, |acc, (_, value)| acc + value.len());
+                if item_capacity == 0 {
+                    value_builder = ListBuilder::new(UInt32Builder::new());
+                } else {
+                    value_builder = ListBuilder::with_capacity(
+                        UInt32Builder::with_capacity(total_value_count),
+                        item_capacity,
+                    );
+                }
+                for (key, value) in storage.into_iter() {
+                    key_builder.add_key(key);
+                    value_builder.append_value(&UInt32Array::from(value));
+                }
+            }
+            Err(_) => {
+                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
+            }
         }
-
-        for (_, value) in storage.iter() {
-            value_builder.append_value(value);
-        }
+        // Build arrow key and value with fields.
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
 
         let value_field = Field::new(
             "value",
             arrow::datatypes::DataType::List(Arc::new(Field::new(
                 "item",
-                arrow::datatypes::DataType::Int32,
+                arrow::datatypes::DataType::UInt32,
                 true,
             ))),
             true,
         );
         let value_arr = value_builder.finish();
-        (
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            prefix_field,
+            key_field,
             value_field,
-            (&value_arr as &dyn Array).slice(0, value_arr.len()),
-        )
+        ]));
+        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
     }
 }
 
 impl SingleColumnStorage<u32> {
-    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
-        let inner = self.inner.read();
-        let storage = &inner.storage;
-        let item_capacity = storage.len();
+    pub(super) fn to_arrow(
+        self,
+        key_builder: BlockKeyArrowBuilder,
+    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        // Build key and value.
+        let mut key_builder = key_builder;
         let mut value_builder;
-        if item_capacity == 0 {
-            value_builder = UInt32Builder::new();
-        } else {
-            value_builder = UInt32Builder::with_capacity(item_capacity);
+        match Arc::try_unwrap(self.inner) {
+            Ok(inner) => {
+                let storage = inner.into_inner().storage;
+                let item_capacity = storage.len();
+                if item_capacity == 0 {
+                    value_builder = UInt32Builder::new();
+                } else {
+                    value_builder = UInt32Builder::with_capacity(item_capacity);
+                }
+                for (key, value) in storage.into_iter() {
+                    key_builder.add_key(key);
+                    value_builder.append_value(value);
+                }
+            }
+            Err(_) => {
+                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
+            }
         }
-        for (_, value) in storage.iter() {
-            value_builder.append_value(*value);
-        }
+        // Build arrow key with fields.
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
         let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
         let value_arr = value_builder.finish();
-        (
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            prefix_field,
+            key_field,
             value_field,
-            (&value_arr as &dyn Array).slice(0, value_arr.len()),
-        )
+        ]));
+        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
     }
 }
 
 impl SingleColumnStorage<RoaringBitmap> {
-    pub(super) fn to_arrow(&self) -> (Field, ArrayRef) {
-        let inner = self.inner.read();
-        let storage = &inner.storage;
+    pub(super) fn to_arrow(
+        self,
+        key_builder: BlockKeyArrowBuilder,
+    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        // Build key.
+        let mut key_builder = key_builder;
         let item_capacity = self.len();
-        let total_value_count = storage
-            .iter()
-            .fold(0, |acc, (_, value)| acc + value.get_size());
         let mut value_builder;
-        if item_capacity == 0 {
-            value_builder = BinaryBuilder::new();
-        } else {
-            value_builder = BinaryBuilder::with_capacity(item_capacity, total_value_count);
+        match Arc::try_unwrap(self.inner) {
+            Ok(inner) => {
+                let storage = inner.into_inner().storage;
+                let total_value_count = storage
+                    .iter()
+                    .fold(0, |acc, (_, value)| acc + value.get_size());
+                if item_capacity == 0 {
+                    value_builder = BinaryBuilder::new();
+                } else {
+                    value_builder = BinaryBuilder::with_capacity(item_capacity, total_value_count);
+                }
+                for (key, value) in storage.into_iter() {
+                    key_builder.add_key(key);
+                    let mut serialized = Vec::with_capacity(value.serialized_size());
+                    let res = value.serialize_into(&mut serialized);
+                    // TODO: proper error handling
+                    let serialized = match res {
+                        Ok(_) => serialized,
+                        Err(e) => panic!("Failed to serialize RoaringBitmap: {}", e),
+                    };
+                    value_builder.append_value(serialized);
+                }
+            }
+            Err(_) => {
+                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
+            }
         }
-
-        for (_, value) in storage.iter() {
-            let mut serialized = Vec::with_capacity(value.serialized_size());
-            let res = value.serialize_into(&mut serialized);
-            // TODO: proper error handling
-            let serialized = match res {
-                Ok(_) => serialized,
-                Err(e) => panic!("Failed to serialize RoaringBitmap: {}", e),
-            };
-            value_builder.append_value(serialized);
-        }
+        // Build arrow key with fields.
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
 
         let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = value_builder.finish();
-        (
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            prefix_field,
+            key_field,
             value_field,
-            (&value_arr as &dyn Array).slice(0, value_arr.len()),
-        )
+        ]));
+        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
     }
 }
