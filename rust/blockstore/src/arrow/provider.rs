@@ -80,12 +80,18 @@ impl ArrowBlockfileProvider {
     }
 
     pub fn purge_all_entries(&self) {
-        while let Some((key, _)) = self.block_manager.block_cache.pop() {
-            self.block_manager.block_cache.remove(&key);
+        loop {
+            match self.block_manager.block_cache.pop() {
+                Some(_) => {}
+                None => break,
+            }
         }
 
-        while let Some((key, _)) = self.sparse_index_manager.cache.pop() {
-            self.sparse_index_manager.cache.remove(&key);
+        loop {
+            match self.sparse_index_manager.cache.pop() {
+                Some(_) => {}
+                None => break,
+            }
         }
     }
 
