@@ -109,7 +109,7 @@ compaction_service:
     max_concurrent_jobs: 100
     compaction_interval_sec: 10
     min_compaction_size: 10
-    max_compaction_size: 20000
+    max_compaction_size: 200000
     max_partition_size: 10000
   blockfile_provider:
     Arrow:

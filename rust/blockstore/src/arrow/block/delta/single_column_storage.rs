@@ -123,13 +123,6 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(size);
-
-        println!(
-            "prefix size: {}, key size: {}, value size: {}",
-            prefix.len(),
-            key_len,
-            size
-        );
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {

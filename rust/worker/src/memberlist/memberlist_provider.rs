@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
+use kube::api::ObjectMeta;
 use kube::runtime::watcher::Config;
 use kube::{
     api::Api,
