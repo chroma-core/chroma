@@ -470,7 +470,7 @@ def recordsets(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
 
-    n_records = len(ids)
+    n_records = len(ids)  # type: ignore[arg-type]
 
     if can_ids_be_empty and draw(st.booleans()):
         ids = None
@@ -696,8 +696,8 @@ def filters(
     else:
         ids = recordset["ids"]
 
-    if not include_all_ids:
-        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids or []))))
+    if not include_all_ids and ids is not None:
+        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
         if ids is not None:
             # Remove duplicates since hypothesis samples with replacement
             ids = list(set(ids))

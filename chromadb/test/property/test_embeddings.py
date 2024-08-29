@@ -121,13 +121,17 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             record_set
         )
 
-        ids = normalized_record_set["ids"] or []
-        s_ids = self.record_set_state["ids"] or []
-        if len(ids) > 0:
-            trace("add_more_embeddings")
+        ids = normalized_record_set["ids"]
+        s_ids = self.record_set_state["ids"]
 
-        intersection = set(ids).intersection(s_ids)
-        if len(intersection) > 0:
+        intersection = set()
+        # only find possible intersection when
+        # record_set ids is not None and record_set_state ids is not None
+        if ids is not None and s_ids is not None:
+            intersection = set(ids).intersection(s_ids)
+
+        # if there is an intersection, we need to apply the non-duplicative records to the state
+        if ids is not None and s_ids is not None and len(intersection) > 0:
             # Partially apply the non-duplicative records to the state
             new_ids = list(set(ids).difference(intersection))
             indices = [ids.index(id) for id in new_ids]
@@ -143,10 +147,12 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                 if normalized_record_set["embeddings"]
                 else None,
             }
-            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
-            self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
-            return multiple(*filtered_record_set["ids"] or [])
+            result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
 
+            self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
+            return multiple(*filtered_record_set["ids"])  # type: ignore
+
+        # if there is no intersection, we can apply the entire record set to the state
         else:
             result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
 
@@ -154,14 +160,17 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                 normalized_record_set["ids"] = result["ids"]
 
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
-            return multiple(*normalized_record_set["ids"] or [])
+            return multiple(*normalized_record_set["ids"])  # type: ignore
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
     def delete_by_ids(self, ids: IDs) -> None:
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
 
-        normalized_ids = self.record_set_state["ids"] or []
+        normalized_ids = self.record_set_state["ids"]
+        if normalized_ids is None:
+            return
+
         indices_to_remove = [normalized_ids.index(id) for id in ids]
 
         self.collection.delete(ids=ids)
@@ -186,7 +195,11 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(lambda self: len(self.record_set_state["ids"] or []) >= 3)
+    @precondition(
+        lambda self: len(self.record_set_state["ids"]) >= 3
+        if self.record_set_state["ids"] is not None
+        else False
+    )
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -394,15 +407,20 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             record_set
         )
 
-        ids = normalized_record_set["ids"] or []
+        ids = normalized_record_set["ids"]
+        n_ids = len(ids) if ids is not None else 0
 
         print(
             "[test_embeddings][add] Non Intersection ids ",
             normalized_record_set["ids"],
             " len ",
-            len(ids),
+            n_ids,
         )
-        self.log_operation_count += len(ids)
+        self.log_operation_count += n_ids
+
+        if ids is None:
+            return res  # type: ignore[return-value]
+
         for id in ids:
             if id not in self.unique_ids_in_log:
                 self.unique_ids_in_log.add(id)
