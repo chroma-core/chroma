@@ -3,6 +3,7 @@ from typing import cast
 import chromadb.errors as errors
 from chromadb.api.types import validate_embeddings, Embeddings, IDs, validate_ids
 
+
 def test_embeddings_validation() -> None:
     invalid_embeddings = [[0, 0, True], [1.2, 2.24, 3.2]]
 
