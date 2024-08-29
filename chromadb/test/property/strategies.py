@@ -466,6 +466,7 @@ def recordsets(
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
+    # we could have generated n_records first but that would double the amount of entropies
     ids: Optional[List[types.ID]] = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
