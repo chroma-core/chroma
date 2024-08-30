@@ -26,6 +26,7 @@ query_service:
         AdmissionControlledS3:
             s3_config:
                 bucket: "chroma-storage"
+                endpoint: "http://minio.chroma:9000"
                 credentials: "Minio"
                 connect_timeout_ms: 5000
                 request_timeout_ms: 30000 # 1 minute
@@ -84,6 +85,7 @@ compaction_service:
         AdmissionControlledS3:
             s3_config:
                 bucket: "chroma-storage"
+                endpoint: "http://minio.chroma:9000"
                 credentials: "Minio"
                 connect_timeout_ms: 5000
                 request_timeout_ms: 60000 # 1 minute
