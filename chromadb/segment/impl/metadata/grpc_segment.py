@@ -95,6 +95,7 @@ class GrpcMetadataSegment(MetadataReader):
             ids=ids,
             limit=limit,
             offset=offset,
+            include_metadata=include_metadata,
         )
         limit = limit or 2**63 - 1
         offset = offset or 0

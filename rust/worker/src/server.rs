@@ -388,8 +388,6 @@ impl WorkerServer {
             None => None,
         };
 
-        // TODO: propagate the include_metadata flag into the query so we don't wastefully
-        // retrieve metadata if it's not needed
         let orchestrator = MetadataQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
@@ -401,6 +399,7 @@ impl WorkerServer {
             self.blockfile_provider.clone(),
             where_clause,
             where_document_clause,
+            request.include_metadata,
         );
 
         let result = orchestrator.run().await;
@@ -417,25 +416,33 @@ impl WorkerServer {
 
         let mut output = Vec::new();
         let (ids, metadatas, documents) = result;
-        for ((id, metadata), document) in ids
-            .into_iter()
-            .zip(metadatas.into_iter())
-            .zip(documents.into_iter())
-        {
-            // The transport layer assumes the document exists in the metadata
-            // with the special key "chroma:document"
-            if request.include_metadata && metadata.is_some() {
-                let mut output_metadata = metadata.unwrap();
-                if let Some(document) = document {
-                    output_metadata
-                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
-                };
-                let record = chroma_proto::MetadataEmbeddingRecord {
-                    id,
-                    metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-                };
-                output.push(record);
-            } else {
+        if request.include_metadata {
+            for ((id, metadata), document) in ids
+                .into_iter()
+                .zip(metadatas.into_iter())
+                .zip(documents.into_iter())
+            {
+                // The transport layer assumes the document exists in the metadata
+                // with the special key "chroma:document"
+                if metadata.is_some() {
+                    // safe to wrap as we just checked if metadata is some.
+                    let mut output_metadata = metadata.unwrap();
+                    if let Some(document) = document {
+                        output_metadata
+                            .insert("chroma:document".to_string(), MetadataValue::Str(document));
+                    };
+                    let record = chroma_proto::MetadataEmbeddingRecord {
+                        id,
+                        metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
+                    };
+                    output.push(record);
+                } else {
+                    let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
+                    output.push(record);
+                }
+            }
+        } else {
+            for id in ids {
                 let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
                 output.push(record);
             }
