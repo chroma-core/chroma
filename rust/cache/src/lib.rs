@@ -3,9 +3,9 @@ pub mod config;
 
 use crate::cache::Cache;
 use crate::config::CacheConfig;
+use cache::Cacheable;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_types::Cacheable;
 use std::hash::Hash;
 
 pub async fn from_config<K, V>(config: &CacheConfig) -> Result<Cache<K, V>, Box<dyn ChromaError>>

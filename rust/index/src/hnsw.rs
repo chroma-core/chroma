@@ -125,7 +125,7 @@ impl HnswIndexConfig {
 /// synchronize access to the index between reads and writes.
 pub struct HnswIndex {
     ffi_ptr: *const IndexPtrFFI,
-    pub dimensionality: i32,
+    dimensionality: i32,
     pub id: Uuid,
 }
 
@@ -328,6 +328,10 @@ impl HnswIndex {
     pub fn len(&self) -> usize {
         unsafe { len(self.ffi_ptr) as usize }
         // Does not return an error
+    }
+
+    pub fn dimensionality(&self) -> i32 {
+        self.dimensionality
     }
 
     pub fn capacity(&self) -> usize {

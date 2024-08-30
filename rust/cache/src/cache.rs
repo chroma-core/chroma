@@ -2,7 +2,6 @@ use crate::config::CacheConfig;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Cacheable;
 use core::hash::Hash;
 use foyer::{Cache as FoyerCache, CacheBuilder, LfuConfig, LruConfig};
 use parking_lot::RwLock;
@@ -182,7 +181,7 @@ where
             CacheConfig::WeightedLru(weighted_lru) => {
                 // TODO: add more eviction config
                 let eviction_config = LruConfig::default();
-                let cache_builder = CacheBuilder::new(weighted_lru.capacity_bytes)
+                let cache_builder = CacheBuilder::new(weighted_lru.capacity)
                     .with_eviction_config(eviction_config)
                     .with_weighter(|_key: &_, value: &V| value.weight());
                 FoyerCacheWrapper {
@@ -256,5 +255,12 @@ impl ChromaError for CacheConfigError {
         match self {
             CacheConfigError::InvalidCacheConfig => ErrorCodes::InvalidArgument,
         }
+    }
+}
+
+pub trait Cacheable {
+    // By default the weight of a type that is cacheable is 1.
+    fn weight(&self) -> usize {
+        return 1;
     }
 }

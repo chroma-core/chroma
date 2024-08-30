@@ -9,8 +9,8 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
+use chroma_cache::cache::Cacheable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Cacheable;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::io::SeekFrom;
 use thiserror::Error;

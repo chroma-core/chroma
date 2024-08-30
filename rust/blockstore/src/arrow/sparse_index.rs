@@ -1,6 +1,6 @@
 use crate::key::{CompositeKey, KeyWrapper};
+use chroma_cache::cache::Cacheable;
 use chroma_error::ChromaError;
-use chroma_types::Cacheable;
 use core::panic;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};

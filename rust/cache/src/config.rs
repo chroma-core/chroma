@@ -28,5 +28,5 @@ pub struct LfuConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct WeightedLruConfig {
-    pub capacity_bytes: usize,
+    pub capacity: usize,
 }

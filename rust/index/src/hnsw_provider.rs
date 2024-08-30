@@ -7,12 +7,12 @@ use super::{
 };
 
 use async_trait::async_trait;
-use chroma_cache::cache::Cache;
+use chroma_cache::cache::{Cache, Cacheable};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
-use chroma_types::{Cacheable, Segment};
+use chroma_types::Segment;
 use parking_lot::RwLock;
 use rand::seq::index;
 use std::fmt::Debug;
@@ -62,7 +62,7 @@ pub struct HnswIndexRef {
 impl Cacheable for HnswIndexRef {
     fn weight(&self) -> usize {
         let index = self.inner.read();
-        index.len() * std::mem::size_of::<f32>() * index.dimensionality as usize
+        index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize
     }
 }
 
