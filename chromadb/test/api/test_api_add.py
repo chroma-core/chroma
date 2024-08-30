@@ -33,7 +33,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
     coll = client.create_collection("test")
 
     # Test case 1: Inconsistent number of ids
-    with pytest.raises(ValueError, match="Inconsistent number of items"):
+    with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2"],
             embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
@@ -42,7 +42,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
         )
 
     # Test case 2: Inconsistent number of embeddings
-    with pytest.raises(ValueError, match="Inconsistent number of items"):
+    with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2", "3"],
             embeddings=[[1, 2, 3], [1, 2, 3]],  # type: ignore
@@ -51,7 +51,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
         )
 
     # Test case 3: Inconsistent number of metadatas
-    with pytest.raises(ValueError, match="Inconsistent number of items"):
+    with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2", "3"],
             embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
@@ -60,7 +60,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
         )
 
     # Test case 4: Inconsistent number of documents
-    with pytest.raises(ValueError, match="Inconsistent number of items"):
+    with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2", "3"],
             embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
