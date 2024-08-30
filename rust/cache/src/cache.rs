@@ -28,7 +28,9 @@ impl<
     pub fn new(config: &CacheConfig) -> Self {
         match config {
             CacheConfig::Unbounded(_) => Cache::Unbounded(UnboundedCache::new(config)),
-            _ => Cache::Foyer(FoyerCacheWrapper::new(config)),
+            CacheConfig::Lru(_) => Cache::Foyer(FoyerCacheWrapper::new(config)),
+            CacheConfig::Lfu(_) => Cache::Foyer(FoyerCacheWrapper::new(config)),
+            CacheConfig::WeightedLru(_) => Cache::Foyer(FoyerCacheWrapper::new(config)),
         }
     }
 
@@ -111,7 +113,9 @@ where
             CacheConfig::Unbounded(_) => UnboundedCache {
                 cache: Arc::new(RwLock::new(HashMap::new())),
             },
-            _ => panic!("Invalid cache configuration"),
+            CacheConfig::Lru(_) => panic!("Invalid cache configuration"),
+            CacheConfig::Lfu(_) => panic!("Invalid cache configuration"),
+            CacheConfig::WeightedLru(_) => panic!("Invalid cache configuration"),
         }
     }
 
