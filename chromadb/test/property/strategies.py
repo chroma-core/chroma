@@ -195,7 +195,7 @@ def create_embeddings_ndarray(
     dim: int,
     count: int,
     dtype: npt.DTypeLike,
-) -> np.ndarray[Any, Any]:
+) -> np.ndarray:  # type: ignore
     return np.random.uniform(
         low=-1.0,
         high=1.0,
