@@ -32,8 +32,9 @@ impl ChromaError for ConversionError {
     }
 }
 
-pub trait Value: Send + Sync + Clone + 'static {
-    fn size(&self) -> usize {
+pub trait Cacheable {
+    // By default the weight of a type that is cacheable is 1.
+    fn weight(&self) -> usize {
         return 1;
     }
 }

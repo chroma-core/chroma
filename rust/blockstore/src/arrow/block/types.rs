@@ -10,7 +10,7 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Value;
+use chroma_types::Cacheable;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::io::SeekFrom;
 use thiserror::Error;
@@ -37,8 +37,8 @@ pub struct Block {
     pub id: Uuid,
 }
 
-impl Value for Block {
-    fn size(&self) -> usize {
+impl Cacheable for Block {
+    fn weight(&self) -> usize {
         self.get_size()
     }
 }

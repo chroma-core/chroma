@@ -58,8 +58,8 @@ query_service:
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
-            lru:
-                capacity: 1000
+            weighted_lru:
+                capacity_bytes: 8 * 1024 * 1024 * 1024 # 8GB
 
 compaction_service:
     service_name: "compaction-service"
@@ -123,5 +123,5 @@ compaction_service:
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
-            lru:
-                capacity: 1000
+            weighted_lru:
+                capacity_bytes: 8 * 1024 * 1024 * 1024 # 8GB

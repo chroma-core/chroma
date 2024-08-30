@@ -1,6 +1,6 @@
 use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
-use chroma_types::Value;
+use chroma_types::Cacheable;
 use core::panic;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
@@ -81,8 +81,8 @@ pub struct SparseIndex {
     pub(super) id: Uuid,
 }
 
-impl Value for SparseIndex {
-    fn size(&self) -> usize {
+impl Cacheable for SparseIndex {
+    fn weight(&self) -> usize {
         self.forward.lock().len()
     }
 }
