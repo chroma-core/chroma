@@ -167,6 +167,7 @@ mod tests {
                         AdmissionControlledS3:
                             s3_config:
                                 bucket: "chroma"
+                                endpoint: "http://minio.chroma:9000"
                                 credentials: Minio
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
@@ -225,6 +226,7 @@ mod tests {
                         AdmissionControlledS3:
                             s3_config:
                                 bucket: "chroma"
+                                endpoint: "http://minio.chroma:9000"
                                 credentials: Minio
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
@@ -311,6 +313,7 @@ mod tests {
                         AdmissionControlledS3:
                             s3_config:
                                 bucket: "chroma"
+                                endpoint: "http://minio.chroma:9000"
                                 credentials: Minio
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
@@ -369,6 +372,7 @@ mod tests {
                         AdmissionControlledS3:
                             s3_config:
                                 bucket: "chroma"
+                                endpoint: "http://minio.chroma:9000"
                                 credentials: Minio
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
@@ -473,6 +477,7 @@ mod tests {
                         AdmissionControlledS3:
                             s3_config:
                                 bucket: "chroma"
+                                endpoint: "http://minio.chroma:9000"
                                 credentials: Minio
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
@@ -531,6 +536,7 @@ mod tests {
                         AdmissionControlledS3:
                             s3_config:
                                 bucket: "chroma"
+                                endpoint: "http://minio.chroma:9000"
                                 credentials: Minio
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
@@ -596,6 +602,10 @@ mod tests {
             );
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
+            let _ = jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__ENDPOINT",
+                "http://minio.chroma:9000",
+            );
             let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
             let _ = jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__upload_part_size_bytes",
@@ -637,6 +647,7 @@ mod tests {
                         AdmissionControlledS3:
                             s3_config:
                                 bucket: "chroma"
+                                endpoint: "http://minio.chroma:9000"
                                 credentials: Minio
                                 connect_timeout_ms: 5000
                                 request_timeout_ms: 1000
