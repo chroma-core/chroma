@@ -424,22 +424,22 @@ impl WorkerServer {
             {
                 // The transport layer assumes the document exists in the metadata
                 // with the special key "chroma:document"
-                if metadata.is_some() {
-                    // safe to wrap as we just checked if metadata is some.
-                    let mut output_metadata = metadata.unwrap();
-                    if let Some(document) = document {
+                let mut output_metadata = match metadata {
+                    Some(metadata) => metadata,
+                    None => HashMap::new(),
+                };
+                match document {
+                    Some(document) => {
                         output_metadata
                             .insert("chroma:document".to_string(), MetadataValue::Str(document));
-                    };
-                    let record = chroma_proto::MetadataEmbeddingRecord {
-                        id,
-                        metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-                    };
-                    output.push(record);
-                } else {
-                    let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
-                    output.push(record);
+                    }
+                    None => {}
                 }
+                let record = chroma_proto::MetadataEmbeddingRecord {
+                    id,
+                    metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
+                };
+                output.push(record);
             }
         } else {
             for id in ids {
