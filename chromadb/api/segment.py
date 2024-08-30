@@ -892,10 +892,7 @@ class SegmentAPI(ServerAPI):
             return ids
 
         (_, n) = get_n_items_from_record_set(record_set)
-
-        generated_ids: List[str] = []
-        for _ in range(n):
-            generated_ids.append(str(uuid4()))
+        generated_ids: List[str] = [str(uuid4()) for _ in range(n)]
 
         return generated_ids
 

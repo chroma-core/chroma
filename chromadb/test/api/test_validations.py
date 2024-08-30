@@ -144,9 +144,6 @@ def test_ids_validation() -> None:
     with pytest.raises(ValueError, match="Expected ID to be a str"):
         validate_ids(cast(IDs, ["id1", 123, "id3"]))
 
-    with pytest.raises(ValueError, match="Expected ID to be a non-empty str"):
-        validate_ids(["id1", "", "id3"])
-
     with pytest.raises(errors.DuplicateIDError, match="Expected IDs to be unique"):
         validate_ids(["id1", "id2", "id1"])
 

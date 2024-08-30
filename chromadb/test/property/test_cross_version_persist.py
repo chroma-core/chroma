@@ -259,14 +259,13 @@ def persist_generated_data_with_old_version(
         )
         result = coll.add(**embeddings_strategy)
 
+        if result is not None and "ids" in result:
+            embeddings_strategy["ids"] = result["ids"]
+
         # Just use some basic checks for sanity and manual testing where you break the new
         # version
 
         check_embeddings = invariants.wrap_all(embeddings_strategy)
-
-        if check_embeddings["ids"] is None:
-            check_embeddings["ids"] = result["ids"]
-
         if check_embeddings["embeddings"] is not None:
             # Check count
             assert coll.count() == len(check_embeddings["embeddings"])
@@ -307,18 +306,27 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 
 @given(
     collection_strategy=collection_st,
-    embeddings_strategy=strategies.recordsets(collection_st),
+    embeddings_strategy=strategies.recordsets(collection_strategy=collection_st),
+    should_stomp_ids=st.booleans(),
 )
 @settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
+    should_stomp_ids: bool,
 ) -> None:
     # Test backwards compatibility
     # For the current version, ensure that we can load a collection from
     # the previous versions
     version, settings = version_settings
+
+    if (
+        packaging_version.Version(version) > packaging_version.Version("0.5.5")
+        and should_stomp_ids
+    ):
+        embeddings_strategy["ids"] = []
+
     # The strategies can generate metadatas of malformed inputs. Other tests
     # will error check and cover these cases to make sure they error. Here we
     # just convert them to valid values since the error cases are already tested

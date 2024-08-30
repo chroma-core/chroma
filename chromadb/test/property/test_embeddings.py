@@ -167,11 +167,11 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         trace("remove embeddings")
         self.on_state_change(EmbeddingStateMachineStates.delete_by_ids)
 
-        normalized_ids = self.record_set_state["ids"]
-        if normalized_ids is None:
-            return
+        state_ids = self.record_set_state["ids"]
+        if state_ids is None:
+            raise ValueError("IDs within the record set state should not be None")
 
-        indices_to_remove = [normalized_ids.index(id) for id in ids]
+        indices_to_remove = [state_ids.index(id) for id in ids]
 
         self.collection.delete(ids=ids)
         self._remove_embeddings(set(indices_to_remove))
@@ -257,7 +257,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         )
 
         if normalized_record_set["ids"] is None:
-            return
+            raise ValueError("IDs should not be empty")
 
         for idx, id in enumerate(normalized_record_set["ids"]):
             # Update path
@@ -404,23 +404,22 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             record_set
         )
 
-        ids = normalized_record_set["ids"]
-        n_ids = len(invariants.wrap(res))
+        n_records = invariants.get_n_items_from_record_set(normalized_record_set)
+        ids = [id for id in res]
 
         print(
             "[test_embeddings][add] Non Intersection ids ",
             ids,
             " len ",
-            n_ids,
+            len(ids),
         )
-        self.log_operation_count += n_ids
 
-        if ids is None:
-            return res  # type: ignore[return-value]
+        self.log_operation_count += n_records
 
-        for id in ids:
+        for id in res:
             if id not in self.unique_ids_in_log:
                 self.unique_ids_in_log.add(id)
+
         return res  # type: ignore[return-value]
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
@@ -446,11 +445,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     def update_embeddings(self, record_set: strategies.RecordSet) -> None:
         super().update_embeddings(record_set)
 
-        n = (
-            len(invariants.wrap(record_set["ids"]))
-            if record_set["ids"] is not None
-            else 0
-        )
+        if record_set["ids"] is None:
+            raise ValueError("IDs should not be empty")
+        n = len(invariants.wrap(record_set["ids"]))
+
         print(
             "[test_embeddings][update] ids ",
             record_set["ids"],
@@ -479,10 +477,11 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     def upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         super().upsert_embeddings(record_set)
 
-        normalized_ids = (
-            invariants.wrap(record_set["ids"]) if record_set["ids"] is not None else []
-        )
-        n_ids = len(normalized_ids)
+        if record_set["ids"] is None:
+            raise ValueError("IDs should not be empty")
+
+        normalized_ids = invariants.wrap(record_set["ids"])
+        n_ids = len(invariants.wrap(record_set["ids"]))
 
         print(
             "[test_embeddings][upsert] ids ",
