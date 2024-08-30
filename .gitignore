@@ -44,3 +44,9 @@ target/
 
 # Rapid test data
 testdata
+
+# Build files
+build/
+
+# Built libraries
+chromadb/lib/

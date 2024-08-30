@@ -70,7 +70,7 @@ chroma = "chromadb.cli.cli:app"
 "Bug Tracker" = "https://github.com/chroma-core/chroma/issues"
 
 [build-system]
-requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2", "cmake"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
@@ -80,4 +80,4 @@ local_scheme = "no-local-version"
 packages = ["chromadb"]
 
 [tool.setuptools.package-data]
-chromadb = ["*.yml"]
+"chromadb" = ["*.yml","**/*.so","**/*.dylib","**/*.dll","**/*.pyd"]
