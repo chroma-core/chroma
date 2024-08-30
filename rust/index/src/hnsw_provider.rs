@@ -56,7 +56,7 @@ pub struct HnswIndexProvider {
 
 #[derive(Clone)]
 pub struct HnswIndexRef {
-    inner: Arc<RwLock<HnswIndex>>,
+    pub inner: Arc<RwLock<HnswIndex>>,
 }
 
 impl Cacheable for HnswIndexRef {
@@ -102,13 +102,13 @@ impl HnswIndexProvider {
         }
     }
 
-    pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
+    pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<HnswIndexRef> {
         match self.cache.get(collection_id) {
             Some(index) => {
                 let index_with_lock = index.inner.read();
                 if index_with_lock.id == *index_id {
                     // Clone is cheap because we are just cloning the Arc.
-                    return Some(index.inner.clone());
+                    return Some(index.clone());
                 }
                 return None;
             }
@@ -125,7 +125,7 @@ impl HnswIndexProvider {
         source_id: &Uuid,
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderForkError>> {
+    ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
         let new_id = Uuid::new_v4();
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
         // This is ok to be called from multiple threads concurrently. See
@@ -181,13 +181,10 @@ impl HnswIndexProvider {
                         return Ok(index.clone());
                     }
                     None => {
-                        let index = Arc::new(RwLock::new(index));
-                        self.cache.insert(
-                            segment.collection,
-                            HnswIndexRef {
-                                inner: index.clone(),
-                            },
-                        );
+                        let index = HnswIndexRef {
+                            inner: Arc::new(RwLock::new(index)),
+                        };
+                        self.cache.insert(segment.collection, index.clone());
                         Ok(index)
                     }
                 }
@@ -268,7 +265,7 @@ impl HnswIndexProvider {
         id: &Uuid,
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderOpenError>> {
+    ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
         // Create directories should be thread safe.
@@ -316,13 +313,10 @@ impl HnswIndexProvider {
                         return Ok(index.clone());
                     }
                     None => {
-                        let index = Arc::new(RwLock::new(index));
-                        self.cache.insert(
-                            segment.collection,
-                            HnswIndexRef {
-                                inner: index.clone(),
-                            },
-                        );
+                        let index = HnswIndexRef {
+                            inner: Arc::new(RwLock::new(index)),
+                        };
+                        self.cache.insert(segment.collection, index.clone());
                         Ok(index)
                     }
                 }
@@ -346,7 +340,7 @@ impl HnswIndexProvider {
         // TODO: This should not take Segment. The index layer should not know about the segment concept
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderCreateError>> {
+    ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
         let id = Uuid::new_v4();
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
@@ -384,20 +378,17 @@ impl HnswIndexProvider {
                 return Ok(index.clone());
             }
             None => {
-                let index = Arc::new(RwLock::new(index));
-                self.cache.insert(
-                    segment.collection,
-                    HnswIndexRef {
-                        inner: index.clone(),
-                    },
-                );
+                let index = HnswIndexRef {
+                    inner: Arc::new(RwLock::new(index)),
+                };
+                self.cache.insert(segment.collection, index.clone());
                 Ok(index)
             }
         }
     }
 
-    pub fn commit(&self, index: Arc<RwLock<HnswIndex>>) -> Result<(), Box<dyn ChromaError>> {
-        match index.write().save() {
+    pub fn commit(&self, index: HnswIndexRef) -> Result<(), Box<dyn ChromaError>> {
+        match index.inner.write().save() {
             Ok(_) => {}
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderCommitError::HnswSaveError(e)));
@@ -603,13 +594,13 @@ mod tests {
 
         let dimensionality = 128;
         let created_index = provider.create(&segment, dimensionality).await.unwrap();
-        let created_index_id = created_index.read().id;
+        let created_index_id = created_index.inner.read().id;
 
         let forked_index = provider
             .fork(&created_index_id, &segment, dimensionality)
             .await
             .unwrap();
-        let forked_index_id = forked_index.read().id;
+        let forked_index_id = forked_index.inner.read().id;
 
         assert_ne!(created_index_id, forked_index_id);
     }
