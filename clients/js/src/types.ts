@@ -196,6 +196,10 @@ type SingleContentRecordOperationParams = SingleRecordOperationParams & {
   documents: Document;
 };
 
+export type SingleAddRecordOperationParams =
+  | SingleEmbeddingRecordOperationParams
+  | SingleContentRecordOperationParams;
+
 type SingleEmbeddingRecordOperationParamsWithOptionalIDs =
   BaseRecordOperationParamsWithIDsOptional & {
     embeddings: Embedding;
@@ -238,10 +242,6 @@ type MultiContentRecordOperationParamsWithOptionalIDs =
   MultiRecordOperationParamsWithIDsOptional & {
     documents: Documents;
   };
-
-export type SingleAddRecordOperationParams =
-  | SingleEmbeddingRecordOperationParams
-  | SingleContentRecordOperationParams;
 
 export type SingleAddRecordOperationParamsWithOptionalIDs =
   | SingleEmbeddingRecordOperationParamsWithOptionalIDs

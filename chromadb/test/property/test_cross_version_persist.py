@@ -321,11 +321,14 @@ def test_cycle_versions(
     # the previous versions
     version, settings = version_settings
 
+    # TODO: This conditionn is subject to change as we decide on whether we want
+    # release auto ID generation feature after 0.5.5
+
     if (
         packaging_version.Version(version) > packaging_version.Version("0.5.5")
         and should_stomp_ids
     ):
-        embeddings_strategy["ids"] = []
+        embeddings_strategy["ids"] = None
 
     # The strategies can generate metadatas of malformed inputs. Other tests
     # will error check and cover these cases to make sure they error. Here we
