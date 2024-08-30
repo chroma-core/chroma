@@ -105,7 +105,7 @@ def _field_matches(
     """
     # If there are no ids, then there are no data to test
     if normalized_record_set["ids"] is None:
-        return
+        raise ValueError("IDs should not be None")
 
     result = collection.get(ids=normalized_record_set["ids"], include=[field_name])  # type: ignore[list-item]
 
@@ -148,6 +148,9 @@ def ids_match(collection: Collection, record_set: RecordSet) -> None:
     actual_ids = collection.get(ids=normalized_record_set["ids"], include=[])["ids"]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
+
+    if normalized_record_set["ids"] is None:
+        raise ValueError("IDs should not be None")
 
     if normalized_record_set["ids"] is not None:
         embedding_id_to_index = {
@@ -241,6 +244,9 @@ def ann_accuracy(
     if n == 0:
         return  # nothing to test here
 
+    if normalized_record_set["ids"] is None:
+        raise ValueError("IDs should not be None")
+
     embeddings: Optional[types.Embeddings] = normalized_record_set["embeddings"]
     have_embeddings = embeddings is not None and len(embeddings) > 0
     if not have_embeddings:
@@ -297,8 +303,6 @@ def ann_accuracy(
     assert query_results["metadatas"] is not None
     assert query_results["embeddings"] is not None
 
-    if normalized_record_set["ids"] is None:
-        return
     # Dict of ids to indices
     id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     missing = 0

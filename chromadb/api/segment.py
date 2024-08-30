@@ -361,7 +361,7 @@ class SegmentAPI(ServerAPI):
         ids = self.generate_ids_when_not_present(record_set)
         record_set["ids"] = ids
 
-        self._validate_recrod_set(
+        self._validate_record_set(
             collection=coll,
             record_set=record_set,
             require_data=True,
@@ -405,7 +405,7 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
 
-        self._validate_recrod_set(
+        self._validate_record_set(
             collection=coll,
             record_set={
                 "ids": ids,
@@ -458,7 +458,7 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
 
-        self._validate_recrod_set(
+        self._validate_record_set(
             collection=coll,
             record_set={
                 "ids": ids,
@@ -646,7 +646,7 @@ class SegmentAPI(ServerAPI):
         if len(ids_to_delete) == 0:
             return []
 
-        self._validate_recrod_set(
+        self._validate_record_set(
             collection=coll,
             record_set={
                 "ids": ids_to_delete,
@@ -854,10 +854,7 @@ class SegmentAPI(ServerAPI):
             return ids
 
         (_, n) = get_n_items_from_record_set(record_set)
-
-        generated_ids: List[str] = []
-        for _ in range(n):
-            generated_ids.append(str(uuid4()))
+        generated_ids: List[str] = [str(uuid4()) for _ in range(n)]
 
         return generated_ids
 
@@ -865,8 +862,8 @@ class SegmentAPI(ServerAPI):
     # system, since the cache is only local.
     # TODO: promote collection -> topic to a base class method so that it can be
     # used for channel assignment in the distributed version of the system.
-    @trace_method("SegmentAPI._validate_recrod_set", OpenTelemetryGranularity.ALL)
-    def _validate_recrod_set(
+    @trace_method("SegmentAPI._validate_record_set", OpenTelemetryGranularity.ALL)
+    def _validate_record_set(
         self,
         collection: t.Collection,
         record_set: RecordSet,

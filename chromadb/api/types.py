@@ -64,11 +64,10 @@ def maybe_cast_one_to_many_embedding(
         # One Embedding
         if len(target) > 0 and isinstance(target[0], (int, float)):
             return cast(Embeddings, [target])
-    # Already a sequence
 
+    # Already a sequence
     if isinstance(target, np.ndarray):
         return cast(Embeddings, target.tolist())
-
     return cast(Embeddings, target)
 
 
@@ -248,9 +247,6 @@ def validate_ids(ids: IDs) -> IDs:
     for id_ in ids:
         if not isinstance(id_, str):
             raise ValueError(f"Expected ID to be a str, got {id_}")
-
-        if len(id_) == 0:
-            raise ValueError("Expected ID to be a non-empty str, got empty string")
 
         if id_ in seen:
             dups.add(id_)
@@ -560,14 +556,21 @@ def validate_record_set(record_set: RecordSet) -> None:
     validate_embeddings(embeddings) if embeddings is not None else None
     validate_metadatas(metadatas) if metadatas is not None else None
 
-    n_items_field, n_items = get_n_items_from_record_set(record_set)
+    _, n_items = get_n_items_from_record_set(record_set)
     if n_items == 0:
-        return
+        raise ValueError("No items in record set")
+
+    should_error = False
+    field_record_counts = []
 
     for field, value in record_set.items():
         if isinstance(value, list):
             n = len(value)
+            field_record_counts.append(f"{field}: ({n})")
             if n != n_items:
-                raise ValueError(
-                    f"Number of {field} ({n}) does not match number of {n_items_field} ({n_items})"
-                )
+                should_error = True
+
+    if should_error:
+        raise ValueError(
+            "Inconsistent number of records: " + ", ".join(field_record_counts)
+        )

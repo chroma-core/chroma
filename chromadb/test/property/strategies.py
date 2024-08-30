@@ -17,6 +17,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Metadata,
+    IDs,
 )
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
@@ -194,7 +195,7 @@ def create_embeddings_ndarray(
     dim: int,
     count: int,
     dtype: npt.DTypeLike,
-) -> npt.NDArray[Any]:
+) -> np.ndarray[Any, Any]:
     return np.random.uniform(
         low=-1.0,
         high=1.0,
@@ -466,12 +467,14 @@ def recordsets(
 ) -> RecordSet:
     collection = draw(collection_strategy)
 
-    # we could have generated n_records first but that would double the amount of entropies
+    # Generating an integer for n_records first, then a coinflip, then n_records IDs if the coinflip is heads
+    # creates a combinatorial explosion because we need to sample across all n_records and all possible IDs for n_records
+    # generating IDs and stomping them 50% of the avoids that.
     ids: Optional[List[types.ID]] = list(
         draw(st.lists(id_strategy, min_size=min_size, max_size=max_size, unique=True))
     )
 
-    n_records = len(ids)  # type: ignore[arg-type]
+    n_records = len(cast(IDs, ids))
 
     if can_ids_be_empty and draw(st.booleans()):
         ids = None
@@ -506,7 +509,9 @@ def recordsets(
     # In this case, any field may be a list or a single value.
     if n_records == 1:
         single_id: Optional[Union[str, List[str]]] = (
-            ids[0] if ids is not None and len(ids) == 1 and draw(st.booleans()) else ids
+            ids[0]
+            if (ids is not None and len(ids) == 1 and draw(st.booleans()))
+            else ids
         )
         single_embedding = (
             embeddings[0]

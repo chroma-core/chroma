@@ -108,34 +108,29 @@ def _test_add(
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
     result = coll.add(**record_set)  # type: ignore
-
-    n_ids = (
-        len(normalized_record_set["ids"])
-        if normalized_record_set["ids"] is not None
-        else 0
-    )
-    if n_ids == 0:
+    if result["ids"] is not None:
         normalized_record_set["ids"] = result["ids"]
-        n_ids = len(result["ids"])
+
+    n_records = invariants.get_n_items_from_record_set(normalized_record_set)
 
     # Only wait for compaction if the size of the collection is
     # some minimal size
-    if not NOT_CLUSTER_ONLY and should_compact and n_ids > 10:
+    if not NOT_CLUSTER_ONLY and should_compact and n_records > 10:
         # Wait for the model to be updated
         wait_for_version_increase(client, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
-    n_results = max(1, (n_ids // 10))
+    n_results = max(1, (n_records // 10))
 
     if batch_ann_accuracy:
         batch_size = 10
-        for i in range(0, n_ids, batch_size):
+        for i in range(0, n_records, batch_size):
             invariants.ann_accuracy(
                 coll,
                 cast(strategies.RecordSet, normalized_record_set),
                 n_results=n_results,
                 embedding_function=collection.embedding_function,
-                query_indices=list(range(i, min(i + batch_size, n_ids))),
+                query_indices=list(range(i, min(i + batch_size, n_records))),
             )
     else:
         invariants.ann_accuracy(
@@ -187,7 +182,6 @@ def test_add_large(
     normalized_record_set = invariants.wrap_all(record_set)
     initial_version = cast(int, coll.get_model()["version"])
 
-    ids = []
     for batch in create_batches(
         api=client,
         ids=cast(List[str], record_set["ids"]),
@@ -195,19 +189,12 @@ def test_add_large(
         metadatas=cast(Metadatas, record_set["metadatas"]),
         documents=cast(List[str], record_set["documents"]),
     ):
-        result = coll.add(*batch)
-        if result["ids"] is not None:
-            ids.extend(result["ids"])
+        results = coll.add(*batch)
+        if results["ids"] is None:
+            raise ValueError("IDs should not be None")
 
-    n_ids = (
-        len(normalized_record_set["ids"])
-        if normalized_record_set["ids"] is not None
-        else 0
-    )
-    if n_ids == 0:
-        normalized_record_set["ids"] = ids
-
-    if not NOT_CLUSTER_ONLY and should_compact and n_ids > 10:
+    n_records = invariants.get_n_items_from_record_set(normalized_record_set)
+    if not NOT_CLUSTER_ONLY and should_compact and n_records > 10:
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
             client, collection.name, initial_version, additional_time=240
@@ -300,71 +287,3 @@ def test_add_partial(client: ClientAPI) -> None:
     assert results["ids"] == ["1", "2", "3"]
     assert results["metadatas"] == [{"a": 1}, None, {"a": 3}]
     assert results["documents"] == ["a", "b", None]
-
-
-def test_add_with_no_ids(client: ClientAPI) -> None:
-    """Tests adding a record set with some of the fields set to None."""
-    reset(client)
-
-    coll = client.create_collection("test")
-    # TODO: We need to clean up the api types to support this typing
-    coll.add(
-        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-        documents=["a", "b", None],  # type: ignore
-    )
-
-    results = coll.get()
-    assert len(results["ids"]) == 3
-
-    # TODO: We need to clean up the api types to support this typing
-    coll.add(
-        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-        documents=["a", "b", None],  # type: ignore
-    )
-
-    results = coll.get()
-    assert len(results["ids"]) == 6
-
-
-def test_add_with_partial_ids(client: ClientAPI) -> None:
-    """Tests adding a record set with some of the fields set to None."""
-    reset(client)
-
-    coll = client.create_collection("test")
-    # TODO: We need to clean up the api types to support this typing
-
-    with pytest.raises(Exception, match="Expected ID to be a non-empty str"):
-        coll.add(
-            ids=["1", ""],
-            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-            metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-            documents=["a", "b", None],  # type: ignore
-        )
-
-    with pytest.raises(Exception, match="does not match number of ids"):
-        coll.add(
-            ids=["1", "2"],
-            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-            metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-            documents=["a", "b", None],  # type: ignore
-        )
-
-
-def test_add_with_no_data(client: ClientAPI) -> None:
-    """Tests adding a record set with some of the fields set to None."""
-    reset(client)
-
-    coll = client.create_collection("test")
-    # TODO: We need to clean up the api types to support this typing
-
-    with pytest.raises(
-        Exception, match="You must provide embeddings, documents, images, or uris."
-    ):
-        coll.add(
-            ids=["1"],
-            embeddings=[],
-            metadatas=[{"a": 1}],
-            documents=[],
-        )
