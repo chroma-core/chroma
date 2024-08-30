@@ -88,6 +88,11 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 		Limit:        int32(batchSize),
 		Timestamp:    timestamp,
 	})
+	// Relies on the fact that the records are ordered by offset.
+	if len(records) > 0 && records[0].Offset != offset {
+		trace_log.Error("Error in pulling records from record_log table. Some entries have been purged.", zap.String("collectionId", collectionId))
+		records, err = nil, errors.New("some entries have been purged")
+	}
 	if err != nil {
 		trace_log.Error("Error in pulling records from record_log table", zap.Error(err), zap.String("collectionId", collectionId))
 	}
