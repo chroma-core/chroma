@@ -211,7 +211,7 @@ class CountRecordsResponse(_message.Message):
     def __init__(self, count: _Optional[int] = ...) -> None: ...
 
 class QueryMetadataRequest(_message.Message):
-    __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset", "collection_id")
+    __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset", "collection_id", "include_metadata")
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     WHERE_FIELD_NUMBER: _ClassVar[int]
     WHERE_DOCUMENT_FIELD_NUMBER: _ClassVar[int]
@@ -219,6 +219,7 @@ class QueryMetadataRequest(_message.Message):
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     OFFSET_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    INCLUDE_METADATA_FIELD_NUMBER: _ClassVar[int]
     segment_id: str
     where: Where
     where_document: WhereDocument
@@ -226,7 +227,8 @@ class QueryMetadataRequest(_message.Message):
     limit: int
     offset: int
     collection_id: str
-    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Iterable[str]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ...) -> None: ...
+    include_metadata: bool
+    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Iterable[str]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ..., include_metadata: bool = ...) -> None: ...
 
 class QueryMetadataResponse(_message.Message):
     __slots__ = ("records",)

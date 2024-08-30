@@ -35,6 +35,7 @@ pub struct MergeMetadataResultsOperatorInput {
     filtered_offset_ids: Option<Vec<u32>>,
     record_segment_definition: Segment,
     blockfile_provider: BlockfileProvider,
+    include_metadata: bool,
 }
 
 impl MergeMetadataResultsOperatorInput {
@@ -44,6 +45,7 @@ impl MergeMetadataResultsOperatorInput {
         filtered_offset_ids: Option<Vec<u32>>,
         record_segment_definition: Segment,
         blockfile_provider: BlockfileProvider,
+        include_metadata: bool,
     ) -> Self {
         Self {
             filtered_log,
@@ -51,6 +53,7 @@ impl MergeMetadataResultsOperatorInput {
             filtered_offset_ids,
             record_segment_definition,
             blockfile_provider: blockfile_provider,
+            include_metadata,
         }
     }
 }
@@ -194,14 +197,18 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         // them when reading the record segment.
                         visited_ids.insert(log.offset_id);
                         if log.final_operation != MaterializedLogOperation::DeleteExisting {
-                            documents.push(log.merged_document());
-                            let final_metadata = log.merged_metadata();
-                            if !final_metadata.is_empty() {
-                                metadata.push(Some(final_metadata));
-                            } else {
-                                metadata.push(None);
-                            }
+                            // Ids get pushed irrespective of whether metadata is included or not.
                             ids.push(log.merged_user_id());
+
+                            if input.include_metadata {
+                                documents.push(log.merged_document());
+                                let final_metadata = log.merged_metadata();
+                                if !final_metadata.is_empty() {
+                                    metadata.push(Some(final_metadata));
+                                } else {
+                                    metadata.push(None);
+                                }
+                            }
                         }
                     }
                 }
@@ -247,16 +254,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     if visited_ids.contains(&merged_id) {
                         continue;
                     }
-                    let record = match record_segment_reader
-                        .get_data_for_offset_id(merged_id)
-                        .await
-                    {
-                        Ok(record) => record,
-                        Err(e) => {
-                            tracing::error!("Error reading Record Segment: {:?}", e);
-                            return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                        }
-                    };
 
                     let user_id = match record_segment_reader
                         .get_user_id_for_offset_id(merged_id)
@@ -268,12 +265,26 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                             return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
                         }
                     };
-
                     ids.push(user_id.to_string());
-                    metadata.push(record.metadata.clone());
-                    match record.document {
-                        Some(document) => documents.push(Some(document.to_string())),
-                        None => documents.push(None),
+
+                    if input.include_metadata {
+                        let record = match record_segment_reader
+                            .get_data_for_offset_id(merged_id)
+                            .await
+                        {
+                            Ok(record) => record,
+                            Err(e) => {
+                                tracing::error!("Error reading Record Segment: {:?}", e);
+                                return Err(
+                                    MergeMetadataResultsOperatorError::RecordSegmentReadError,
+                                );
+                            }
+                        };
+                        metadata.push(record.metadata.clone());
+                        match record.document {
+                            Some(document) => documents.push(Some(document.to_string())),
+                            None => documents.push(None),
+                        }
                     }
                 }
             }
@@ -288,14 +299,17 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     // so that they can be ignored when reading from the segment.
                     ids_in_log.insert(log.merged_user_id());
                     if log.final_operation != MaterializedLogOperation::DeleteExisting {
-                        documents.push(log.merged_document());
-                        let final_metadata = log.merged_metadata();
-                        if !final_metadata.is_empty() {
-                            metadata.push(Some(final_metadata));
-                        } else {
-                            metadata.push(None);
-                        }
                         ids.push(log.merged_user_id());
+
+                        if input.include_metadata {
+                            documents.push(log.merged_document());
+                            let final_metadata = log.merged_metadata();
+                            if !final_metadata.is_empty() {
+                                metadata.push(Some(final_metadata));
+                            } else {
+                                metadata.push(None);
+                            }
+                        }
                     }
                 }
                 // Second: Hydrate remaining records from record segment.
@@ -335,23 +349,46 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         }
                     }
                 };
-                let data = match record_segment_reader.get_all_data().await {
-                    Ok(data) => data,
-                    Err(e) => {
-                        tracing::error!("[Mergemetadata]: Error reading Record Segment: {:?}", e);
-                        return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                if input.include_metadata {
+                    let data = match record_segment_reader.get_all_data().await {
+                        Ok(data) => data,
+                        Err(e) => {
+                            tracing::error!(
+                                "[Mergemetadata]: Error reading Record Segment: {:?}",
+                                e
+                            );
+                            return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                        }
+                    };
+                    for record in data.iter() {
+                        // Ignore records processed from the log.
+                        if ids_in_log.contains(record.id) {
+                            continue;
+                        }
+                        ids.push(record.id.to_string());
+                        metadata.push(record.metadata.clone());
+                        match record.document {
+                            Some(document) => documents.push(Some(document.to_string())),
+                            None => documents.push(None),
+                        }
                     }
-                };
-                for record in data.iter() {
-                    // Ignore records processed from the log.
-                    if ids_in_log.contains(record.id) {
-                        continue;
-                    }
-                    ids.push(record.id.to_string());
-                    metadata.push(record.metadata.clone());
-                    match record.document {
-                        Some(document) => documents.push(Some(document.to_string())),
-                        None => documents.push(None),
+                } else {
+                    let user_ids = match record_segment_reader.get_all_user_ids().await {
+                        Ok(ids) => ids,
+                        Err(e) => {
+                            tracing::error!(
+                                "[Mergemetadata]: Error reading Record Segment: {:?}",
+                                e
+                            );
+                            return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
+                        }
+                    };
+                    for id in user_ids {
+                        // Ignore records processed from the log.
+                        if ids_in_log.contains(id) {
+                            continue;
+                        }
+                        ids.push(id.to_string());
                     }
                 }
             }
@@ -563,6 +600,7 @@ mod test {
             Some(vec![1, 2, 3]),
             record_segment,
             blockfile_provider,
+            true,
         );
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(2, output.ids.len());
@@ -856,6 +894,7 @@ mod test {
             None,
             record_segment,
             blockfile_provider,
+            true,
         );
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(3, output.ids.len());
