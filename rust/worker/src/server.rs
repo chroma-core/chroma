@@ -21,6 +21,7 @@ use chroma_types::chroma_proto::{
 };
 use chroma_types::{MetadataValue, ScalarEncoding};
 use std::collections::HashMap;
+use std::hash::Hash;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -398,6 +399,7 @@ impl WorkerServer {
             self.blockfile_provider.clone(),
             where_clause,
             where_document_clause,
+            request.include_metadata,
         );
 
         let result = orchestrator.run().await;
@@ -414,29 +416,36 @@ impl WorkerServer {
 
         let mut output = Vec::new();
         let (ids, metadatas, documents) = result;
-        for ((id, metadata), document) in ids
-            .into_iter()
-            .zip(metadatas.into_iter())
-            .zip(documents.into_iter())
-        {
-            // The transport layer assumes the document exists in the metadata
-            // with the special key "chroma:document"
-            let mut output_metadata = match metadata {
-                Some(metadata) => metadata,
-                None => HashMap::new(),
-            };
-            match document {
-                Some(document) => {
-                    output_metadata
-                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
+        if request.include_metadata {
+            for ((id, metadata), document) in ids
+                .into_iter()
+                .zip(metadatas.into_iter())
+                .zip(documents.into_iter())
+            {
+                // The transport layer assumes the document exists in the metadata
+                // with the special key "chroma:document"
+                let mut output_metadata = match metadata {
+                    Some(metadata) => metadata,
+                    None => HashMap::new(),
+                };
+                match document {
+                    Some(document) => {
+                        output_metadata
+                            .insert("chroma:document".to_string(), MetadataValue::Str(document));
+                    }
+                    None => {}
                 }
-                None => {}
+                let record = chroma_proto::MetadataEmbeddingRecord {
+                    id,
+                    metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
+                };
+                output.push(record);
             }
-            let record = chroma_proto::MetadataEmbeddingRecord {
-                id,
-                metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-            };
-            output.push(record);
+        } else {
+            for id in ids {
+                let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
+                output.push(record);
+            }
         }
 
         // This is an implementation stub

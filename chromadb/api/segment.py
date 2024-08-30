@@ -679,7 +679,7 @@ class SegmentAPI(ServerAPI):
         if where or where_document:
             metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(
-                where=where, where_document=where_document
+                where=where, where_document=where_document, include_metadata=False
             )
             allowed_ids = [r["id"] for r in records]
 
@@ -731,7 +731,9 @@ class SegmentAPI(ServerAPI):
                 metadata_reader = self._manager.get_segment(
                     collection_id, MetadataReader
                 )
-                records = metadata_reader.get_metadata(ids=list(all_ids))
+                records = metadata_reader.get_metadata(
+                    ids=list(all_ids), include_metadata=True
+                )
                 metadata_by_id = {r["id"]: r["metadata"] for r in records}
                 for id_list in ids:
                     # In the segment based architecture, it is possible for one segment
