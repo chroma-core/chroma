@@ -126,16 +126,16 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         intersection = set()
         # only find possible intersection when
         # record_set ids is not None and record_set_state ids is not None
-        if ids is not None and s_ids is not None:
+        if ids is not None:
             intersection = set(ids).intersection(s_ids)
 
         # if there is an intersection, we need to apply the non-duplicative records to the state
-        if ids is not None and s_ids is not None and len(intersection) > 0:
+        if len(intersection) > 0:
             # Partially apply the non-duplicative records to the state
-            new_ids = list(set(ids).difference(intersection))
-            indices = [ids.index(id) for id in new_ids]
+            new_ids = list(set(ids).difference(intersection))  # type: ignore[arg-type]
+            indices = [ids.index(id) for id in new_ids]  # type: ignore
             filtered_record_set: strategies.NormalizedRecordSet = {
-                "ids": [ids[i] for i in indices],
+                "ids": [ids[i] for i in indices],  # type: ignore
                 "metadatas": [normalized_record_set["metadatas"][i] for i in indices]
                 if normalized_record_set["metadatas"]
                 else None,
@@ -194,11 +194,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         self._upsert_embeddings(record_set)
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(
-        lambda self: len(self.record_set_state["ids"]) >= 3
-        if self.record_set_state["ids"] is not None
-        else False
-    )
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -457,14 +453,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         self.log_operation_count += n
 
     # Using a value < 3 causes more retries and lowers the number of valid samples
-    @precondition(
-        lambda self: len(
-            self.record_set_state["ids"]
-            if self.record_set_state["ids"] is not None
-            else []
-        )
-        >= 3
-    )
+    @precondition(lambda self: len(self.record_set_state["ids"]) >= 3)
     @rule(
         record_set=strategies.recordsets(
             collection_strategy=collection_st,
@@ -479,8 +468,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         if record_set["ids"] is None:
             raise ValueError("IDs should not be empty")
 
-        normalized_ids = invariants.wrap(record_set["ids"])
-        n_ids = len(invariants.wrap(record_set["ids"]))
+        ids = invariants.wrap(record_set["ids"])
+        n_ids = len(ids)
 
         print(
             "[test_embeddings][upsert] ids ",
@@ -489,7 +478,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             n_ids,
         )
         self.log_operation_count += n_ids
-        for id in normalized_ids:
+        for id in ids:
             if id not in self.unique_ids_in_log:
                 self.unique_ids_in_log.add(id)
 

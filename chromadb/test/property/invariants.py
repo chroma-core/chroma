@@ -152,11 +152,8 @@ def ids_match(collection: Collection, record_set: RecordSet) -> None:
     if normalized_record_set["ids"] is None:
         raise ValueError("IDs should not be None")
 
-    if normalized_record_set["ids"] is not None:
-        embedding_id_to_index = {
-            id: i for i, id in enumerate(normalized_record_set["ids"])
-        }
-        actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
+    embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
+    actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
 
     assert actual_ids == normalized_record_set["ids"]
 
