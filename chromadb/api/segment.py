@@ -888,7 +888,7 @@ class SegmentAPI(ServerAPI):
         record_set: RecordSet,
     ) -> IDs:
         ids = record_set["ids"]
-        if ids is not None and len(ids) != 0:
+        if ids is not None:
             return ids
 
         (_, n) = get_n_items_from_record_set(record_set)

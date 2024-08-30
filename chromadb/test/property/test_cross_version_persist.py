@@ -266,9 +266,8 @@ def persist_generated_data_with_old_version(
         # version
 
         check_embeddings = invariants.wrap_all(embeddings_strategy)
-        if check_embeddings["embeddings"] is not None:
-            # Check count
-            assert coll.count() == len(check_embeddings["embeddings"])
+        # Check count
+        assert coll.count() == len(check_embeddings["embeddings"])  # type: ignore[arg-type]
 
         # Check ids
         result = coll.get()

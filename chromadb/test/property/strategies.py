@@ -702,7 +702,10 @@ def filters(
     else:
         ids = recordset["ids"]
 
-    if not include_all_ids and ids is not None:
+    if ids is None:
+        raise ValueError("IDs cannot be None")
+
+    if not include_all_ids:
         ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
         if ids is not None:
             # Remove duplicates since hypothesis samples with replacement
