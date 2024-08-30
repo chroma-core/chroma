@@ -396,7 +396,7 @@ export class ChromaClient {
   /**
    * Add items to the collection
    * @param {Object} params - The parameters for the query.
-   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {ID | IDs} [params.ids] - Optional IDs of the items to add.
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.

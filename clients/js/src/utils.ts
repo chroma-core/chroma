@@ -5,6 +5,8 @@ import {
   AddRecordsParams,
   BaseRecordOperationParamsWithIDsOptional,
   Collection,
+  Embeddings,
+  Documents,
   Metadata,
   MultiRecordOperationParams,
   MultiRecordOperationParamsWithIDsOptional,
@@ -114,33 +116,14 @@ export async function prepareRecordRequest(
     throw new Error("embeddings and documents cannot both be undefined");
   }
 
-  const embeddingsArray = embeddings
-    ? embeddings
-    : documents
-    ? await embeddingFunction.generate(documents)
-    : undefined;
+  validateIDs(ids);
 
-  if (!embeddingsArray && !update) {
-    throw new Error("Failed to generate embeddings for your request.");
-  }
-
-  for (let i = 0; i < ids.length; i += 1) {
-    if (typeof ids[i] !== "string") {
-      throw new Error(
-        `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
-      );
-    }
-  }
-
-  const uniqueIds = new Set(ids);
-  if (uniqueIds.size !== ids.length) {
-    const duplicateIds = ids.filter(
-      (item, index) => ids.indexOf(item) !== index,
-    );
-    throw new Error(
-      `ID's must be unique, found duplicates for: ${duplicateIds}`,
-    );
-  }
+  const embeddingsArray = await computeEmbeddings(
+    embeddingFunction,
+    embeddings,
+    documents,
+    update,
+  );
 
   return {
     ids,
@@ -160,35 +143,15 @@ export async function prepareRecordRequestWithIDsOptional(
     throw new Error("embeddings and documents cannot both be undefined");
   }
 
-  const embeddingsArray = embeddings
-    ? embeddings
-    : documents
-    ? await embeddingFunction.generate(documents)
-    : undefined;
-
-  if (!embeddingsArray) {
-    throw new Error("Failed to generate embeddings for your request.");
-  }
-
   if (ids) {
-    for (let i = 0; i < ids.length; i += 1) {
-      if (typeof ids[i] !== "string") {
-        throw new Error(
-          `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
-        );
-      }
-    }
-
-    const uniqueIds = new Set(ids);
-    if (uniqueIds.size !== ids.length) {
-      const duplicateIds = ids.filter(
-        (item, index) => ids.indexOf(item) !== index,
-      );
-      throw new Error(
-        `ID's must be unique, found duplicates for: ${duplicateIds}`,
-      );
-    }
+    validateIDs(ids);
   }
+
+  const embeddingsArray = await computeEmbeddings(
+    embeddingFunction,
+    embeddings,
+    documents,
+  );
 
   return {
     ids,
@@ -196,6 +159,45 @@ export async function prepareRecordRequestWithIDsOptional(
     documents,
     embeddings: embeddingsArray,
   };
+}
+
+async function computeEmbeddings(
+  embeddingFunction: IEmbeddingFunction,
+  embeddings?: Embeddings,
+  documents?: Documents,
+  update?: true,
+): Promise<Embeddings | undefined> {
+  const embeddingsArray = embeddings
+    ? embeddings
+    : documents
+    ? await embeddingFunction.generate(documents)
+    : undefined;
+
+  if (!embeddingsArray && !update) {
+    throw new Error("Failed to generate embeddings for your request.");
+  }
+
+  return embeddingsArray;
+}
+
+function validateIDs(ids: string[]) {
+  for (let i = 0; i < ids.length; i += 1) {
+    if (typeof ids[i] !== "string") {
+      throw new Error(
+        `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
+      );
+    }
+  }
+
+  const uniqueIds = new Set(ids);
+  if (uniqueIds.size !== ids.length) {
+    const duplicateIds = ids.filter(
+      (item, index) => ids.indexOf(item) !== index,
+    );
+    throw new Error(
+      `ID's must be unique, found duplicates for: ${duplicateIds}`,
+    );
+  }
 }
 
 function notifyUserOfLegacyMethod(newMethod: string) {
