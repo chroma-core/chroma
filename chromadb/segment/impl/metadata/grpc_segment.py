@@ -77,6 +77,7 @@ class GrpcMetadataSegment(MetadataReader):
         ids: Optional[Sequence[str]] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        include_metadata: bool = True,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 

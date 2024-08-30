@@ -21,6 +21,7 @@ use chroma_types::chroma_proto::{
 };
 use chroma_types::{MetadataValue, ScalarEncoding};
 use std::collections::HashMap;
+use std::hash::Hash;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -387,6 +388,8 @@ impl WorkerServer {
             None => None,
         };
 
+        // TODO: propagate the include_metadata flag into the query so we don't wastefully
+        // retrieve metadata if it's not needed
         let orchestrator = MetadataQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
@@ -421,22 +424,21 @@ impl WorkerServer {
         {
             // The transport layer assumes the document exists in the metadata
             // with the special key "chroma:document"
-            let mut output_metadata = match metadata {
-                Some(metadata) => metadata,
-                None => HashMap::new(),
-            };
-            match document {
-                Some(document) => {
+            if request.include_metadata && metadata.is_some() {
+                let mut output_metadata = metadata.unwrap();
+                if let Some(document) = document {
                     output_metadata
                         .insert("chroma:document".to_string(), MetadataValue::Str(document));
-                }
-                None => {}
+                };
+                let record = chroma_proto::MetadataEmbeddingRecord {
+                    id,
+                    metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
+                };
+                output.push(record);
+            } else {
+                let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
+                output.push(record);
             }
-            let record = chroma_proto::MetadataEmbeddingRecord {
-                id,
-                metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-            };
-            output.push(record);
         }
 
         // This is an implementation stub

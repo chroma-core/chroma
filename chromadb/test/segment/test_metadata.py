@@ -11,7 +11,6 @@ from typing import (
     Optional,
     Union,
     Sequence,
-    cast,
 )
 
 from chromadb.api.types import validate_metadata
@@ -160,7 +159,7 @@ def test_insert_and_count(
 
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     max_id = produce_fns(producer, collection_id, sample_embeddings, 3)[1][-1]
 
@@ -199,7 +198,7 @@ def test_get(
     system.reset_state()
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
 
@@ -242,40 +241,64 @@ def test_get(
     assert len(result) == 3
 
     # Get with gt/gte/lt/lte on int keys
-    result = segment.get_metadata(where={"int_key": {"$gt": 5}})
+    result = segment.get_metadata(
+        where={"int_key": {"$gt": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 4
-    result = segment.get_metadata(where={"int_key": {"$gte": 5}})
+    result = segment.get_metadata(
+        where={"int_key": {"$gte": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 5
-    result = segment.get_metadata(where={"int_key": {"$lt": 5}})
+    result = segment.get_metadata(
+        where={"int_key": {"$lt": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 4
-    result = segment.get_metadata(where={"int_key": {"$lte": 5}})
+    result = segment.get_metadata(
+        where={"int_key": {"$lte": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 5
 
     # Get with gt/lt on float keys with float values
-    result = segment.get_metadata(where={"float_key": {"$gt": 5.01}})
+    result = segment.get_metadata(
+        where={"float_key": {"$gt": 5.01}}  # type:ignore[dict-item]
+    )
     assert len(result) == 5
-    result = segment.get_metadata(where={"float_key": {"$lt": 4.99}})
+    result = segment.get_metadata(
+        where={"float_key": {"$lt": 4.99}}  # type:ignore[dict-item]
+    )
     assert len(result) == 4
 
     # Get with gt/lt on float keys with int values
-    result = segment.get_metadata(where={"float_key": {"$gt": 5}})
+    result = segment.get_metadata(
+        where={"float_key": {"$gt": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 5
-    result = segment.get_metadata(where={"float_key": {"$lt": 5}})
+    result = segment.get_metadata(
+        where={"float_key": {"$lt": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 4
 
     # Get with gt/lt on int keys with float values
-    result = segment.get_metadata(where={"int_key": {"$gt": 5.01}})
+    result = segment.get_metadata(
+        where={"int_key": {"$gt": 5.01}}  # type:ignore[dict-item]
+    )
     assert len(result) == 4
-    result = segment.get_metadata(where={"int_key": {"$lt": 4.99}})
+    result = segment.get_metadata(
+        where={"int_key": {"$lt": 4.99}}  # type:ignore[dict-item]
+    )
     assert len(result) == 4
 
     # Get with $ne
     # Returns metadata that has an int_key, but not equal to 5
-    result = segment.get_metadata(where={"int_key": {"$ne": 5}})
+    result = segment.get_metadata(
+        where={"int_key": {"$ne": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 8
 
     # get with multiple heterogenous conditions
-    result = segment.get_metadata(where={"div_by_three": "true", "int_key": {"$gt": 5}})
+    result = segment.get_metadata(
+        where={"div_by_three": "true", "int_key": {"$gt": 5}}  # type:ignore[dict-item]
+    )
     assert len(result) == 2
 
     # get with OR conditions
@@ -284,11 +307,21 @@ def test_get(
 
     # get with AND conditions
     result = segment.get_metadata(
-        where={"$and": [{"int_key": 3}, {"float_key": {"$gt": 5}}]}
+        where={
+            "$and": [
+                {"int_key": 3},
+                {"float_key": {"$gt": 5}},  # type:ignore[dict-item]
+            ]
+        }
     )
     assert len(result) == 0
     result = segment.get_metadata(
-        where={"$and": [{"int_key": 3}, {"float_key": {"$lt": 5}}]}
+        where={
+            "$and": [
+                {"int_key": 3},
+                {"float_key": {"$lt": 5}},  # type:ignore[dict-item]
+            ]
+        }
     )
     assert len(result) == 1
 
@@ -302,7 +335,7 @@ def test_fulltext(
     system.reset_state()
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -375,13 +408,15 @@ def test_fulltext(
 
     # test combo with where clause (negative case)
     result = segment.get_metadata(
-        where={"int_key": {"$eq": 42}}, where_document={"$contains": "zero"}
+        where={"int_key": {"$eq": 42}},  # type:ignore[dict-item]
+        where_document={"$contains": "zero"},
     )
     assert len(result) == 0
 
     # test combo with where clause (positive case)
     result = segment.get_metadata(
-        where={"int_key": {"$eq": 42}}, where_document={"$contains": "four"}
+        where={"int_key": {"$eq": 42}},  # type:ignore[dict-item]
+        where_document={"$contains": "four"},
     )
     assert len(result) == 1
 
@@ -399,7 +434,7 @@ def test_delete(
     system.reset_state()
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -451,7 +486,7 @@ def test_update(system: System, sample_embeddings: Iterator[OperationRecord]) ->
     system.reset_state()
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -482,7 +517,7 @@ def test_upsert(
     system.reset_state()
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -597,10 +632,10 @@ def test_limit(
     producer = system.instance(Producer)
     system.reset_state()
 
-    collection_id = cast(uuid.UUID, segment_definition["collection"])
+    collection_id = segment_definition["collection"]
     max_id = produce_fns(producer, collection_id, sample_embeddings, 3)[1][-1]
 
-    collection_id_2 = cast(uuid.UUID, segment_definition2["collection"])
+    collection_id_2 = segment_definition2["collection"]
     max_id2 = produce_fns(producer, collection_id_2, sample_embeddings, 3)[1][-1]
 
     segment = SqliteMetadataSegment(system, segment_definition)
@@ -642,7 +677,7 @@ def test_delete_segment(
     system.reset_state()
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -701,7 +736,7 @@ def test_delete_single_fts_record(
     system.reset_state()
     collection_id = segment_definition["collection"]
     # We know that the collection_id exists so we can cast
-    collection_id = cast(uuid.UUID, collection_id)
+    collection_id = collection_id
 
     segment = SqliteMetadataSegment(system, segment_definition)
     segment.start()
@@ -750,6 +785,40 @@ def test_delete_single_fts_record(
         res = cur.execute(sql, params)
         # assert that the ids that are deleted from the segment are also gone from the fts table
         assert len(res.fetchall()) == 0
+
+
+def test_include_metadata(
+    system: System,
+    sample_embeddings: Iterator[OperationRecord],
+    produce_fns: ProducerFn,
+) -> None:
+    producer = system.instance(Producer)
+    system.reset_state()
+    collection_id = segment_definition["collection"]
+    # We know that the collection_id exists so we can cast
+    collection_id = collection_id
+
+    segment = SqliteMetadataSegment(system, segment_definition)
+    segment.start()
+
+    embeddings, seq_ids = produce_fns(producer, collection_id, sample_embeddings, 10)
+    max_id = seq_ids[-1]
+
+    sync(segment, max_id)
+
+    assert segment.count() == 10
+    results = segment.get_metadata(ids=["embedding_0"])
+    assert_equiv_records(embeddings[:1], results)
+
+    # Test include_metadata=False
+    results = segment.get_metadata(ids=["embedding_0"], include_metadata=False)
+    assert len(results) == 1
+    assert results[0]["metadata"] is None
+
+    # Test include_metadata=True
+    results = segment.get_metadata(ids=["embedding_0"], include_metadata=True)
+    assert len(results) == 1
+    assert results[0]["metadata"] == embeddings[0]["metadata"]
 
 
 def test_metadata_validation_forbidden_key() -> None:
