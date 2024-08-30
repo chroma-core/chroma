@@ -81,11 +81,7 @@ pub struct SparseIndex {
     pub(super) id: Uuid,
 }
 
-impl Cacheable for SparseIndex {
-    fn weight(&self) -> usize {
-        self.forward.lock().len()
-    }
-}
+impl Cacheable for SparseIndex {}
 
 impl SparseIndex {
     pub(super) fn new(id: Uuid) -> Self {

@@ -37,11 +37,7 @@ pub struct Block {
     pub id: Uuid,
 }
 
-impl Cacheable for Block {
-    fn weight(&self) -> usize {
-        self.get_size()
-    }
-}
+impl Cacheable for Block {}
 
 impl Block {
     /// Create a concrete block from an id and the underlying record batch of data
