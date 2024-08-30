@@ -199,8 +199,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity_bytes: 1 * 1024 * 1024 * 1024
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -264,8 +264,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity_bytes: 1 * 1024 * 1024 * 1024
                 "#,
             );
             let config = RootConfig::load();
@@ -343,8 +343,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity_bytes: 1 * 1024 * 1024 * 1024
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -408,8 +408,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity_bytes: 1 * 1024 * 1024 * 1024
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -505,8 +505,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity: 1 * 1024 * 1024 * 1024
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -570,8 +570,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity: 1 * 1024 * 1024 * 1024
                 "#,
             );
             let config = RootConfig::load();
@@ -669,8 +669,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity: 1 * 1024 * 1024 * 1024
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -720,8 +720,8 @@ mod tests {
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            lru:
-                                capacity: 1000
+                            weighted_lru:
+                                capacity: 1 * 1024 * 1024 * 1024
                 "#,
             );
             let config = RootConfig::load();
