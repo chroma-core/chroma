@@ -139,14 +139,19 @@ impl SparseIndex {
 
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
         let forward = self.forward.lock();
-
-        let (_, block_id) = forward
-            .range(SparseIndexDelimiter::Key(search_key.clone())..)
-            .next()
-            .or_else(|| forward.iter().next_back())
-            .expect("No blocks in the sparse index");
-
-        return *block_id;
+        let mut iter_curr = forward.iter();
+        let mut iter_next = forward.iter().skip(1);
+        let search_key = SparseIndexDelimiter::Key(search_key.clone());
+        while let Some((curr_key, curr_block_id)) = iter_curr.next() {
+            if let Some((next_key, _)) = iter_next.next() {
+                if search_key >= *curr_key && search_key < *next_key {
+                    return *curr_block_id;
+                }
+            } else {
+                return *curr_block_id;
+            }
+        }
+        panic!("No blocks in the sparse index");
     }
 
     pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
