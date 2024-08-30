@@ -140,13 +140,17 @@ impl SparseIndex {
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
         let forward = self.forward.lock();
 
-        let (_, block_id) = forward
-            .range(SparseIndexDelimiter::Key(search_key.clone())..)
-            .next()
-            .or_else(|| forward.iter().next_back())
-            .expect("No blocks in the sparse index");
-
-        return *block_id;
+        match forward
+            .range(..=SparseIndexDelimiter::Key(search_key.clone()))
+            .next_back()
+        {
+            Some((_, block_id)) => {
+                return *block_id;
+            }
+            None => {
+                panic!("No blocks in the sparse index");
+            }
+        }
     }
 
     pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
