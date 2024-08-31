@@ -25,6 +25,7 @@ describe("get collections", () => {
   });
 
   test("it should get documents from a collection", async () => {
+    console.log("test2");
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
       ids: IDS,
@@ -47,6 +48,7 @@ describe("get collections", () => {
   });
 
   test("wrong code returns an error", async () => {
+    console.log("test3");
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
       ids: IDS,
@@ -70,6 +72,7 @@ describe("get collections", () => {
   });
 
   test("it should get embedding with matching documents", async () => {
+    console.log("test4");
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
       ids: IDS,
@@ -85,6 +88,7 @@ describe("get collections", () => {
   });
 
   test("it should get records not matching", async () => {
+    console.log("test5");
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
       ids: IDS,
@@ -100,6 +104,7 @@ describe("get collections", () => {
   });
 
   test("test gt, lt, in a simple small way", async () => {
+    console.log("test6");
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
       ids: IDS,
@@ -114,6 +119,7 @@ describe("get collections", () => {
   });
 
   test("should error on non existing collection", async () => {
+    console.log("test7");
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
@@ -122,6 +128,7 @@ describe("get collections", () => {
   });
 
   test("it should throw an error if the collection does not exist", async () => {
+    console.log("test8");
     await expect(
       async () =>
         await client.getCollection({
