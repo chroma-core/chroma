@@ -74,4 +74,3 @@ yarn gen-js
 pip install -r requirements.txt
 yarn gen-python
 ```
-

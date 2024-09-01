@@ -500,4 +500,3 @@ class ServerAPI(BaseAPI, AdminAPI, Component)
 
 An API instance that extends the relevant Base API methods by passing
 in a tenant and database. This is the root component of the Chroma System
-
