@@ -24,6 +24,9 @@ describe("add collections", () => {
 
   beforeEach(async () => {
     await client.reset();
+    // the sleep assures the db is fully reset
+    // this should be further investigated
+    await new Promise((r) => setTimeout(r, 1000));
   });
 
   test("it should add single embeddings to a collection", async () => {

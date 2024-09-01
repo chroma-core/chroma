@@ -22,6 +22,9 @@ describe("update records", () => {
 
   beforeEach(async () => {
     await client.reset();
+    // the sleep assures the db is fully reset
+    // this should be further investigated
+    await new Promise((r) => setTimeout(r, 1000));
   });
 
   test("it should get embedding with matching documents", async () => {
