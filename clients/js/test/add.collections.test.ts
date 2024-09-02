@@ -142,8 +142,13 @@ describe("add collections", () => {
     const collection = await client.createCollection({ name: "test" });
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
-    const resp = await client.addRecords(collection, { embeddings, metadatas });
+    const resp = await collection.add({ embeddings, metadatas });
     expect(resp.ids.length).toEqual(4);
+    try {
+      await collection.add({ ids, embeddings, metadatas });
+    } catch (e: any) {
+      expect(e.message).toMatch("duplicates");
+    }
   });
 
   test("should error on empty embedding", async () => {

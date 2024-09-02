@@ -91,9 +91,7 @@ export type MultiQueryResponse = {
 
 export type QueryResponse = SingleQueryResponse | MultiQueryResponse;
 
-export type AddResponse = {
-  ids: IDs;
-};
+export type AddResponse = {};
 
 export interface CollectionParams {
   name: string;
@@ -166,27 +164,12 @@ export type BaseRecordOperationParams = {
   documents?: Document | Documents;
 };
 
-export type BaseRecordOperationParamsWithIDsOptional = {
-  ids?: ID | IDs;
-  embeddings?: Embedding | Embeddings;
-  metadatas?: Metadata | Metadatas;
-  documents?: Document | Documents;
-};
-
 export type SingleRecordOperationParams = BaseRecordOperationParams & {
   ids: ID;
   embeddings?: Embedding;
   metadatas?: Metadata;
   documents?: Document;
 };
-
-export type SingleRecordOperationParamsWithIDsOptional =
-  BaseRecordOperationParamsWithIDsOptional & {
-    ids?: ID;
-    embeddings?: Embedding;
-    metadatas?: Metadata;
-    documents?: Document;
-  };
 
 type SingleEmbeddingRecordOperationParams = SingleRecordOperationParams & {
   embeddings: Embedding;
@@ -200,30 +183,12 @@ export type SingleAddRecordOperationParams =
   | SingleEmbeddingRecordOperationParams
   | SingleContentRecordOperationParams;
 
-type SingleEmbeddingRecordOperationParamsWithOptionalIDs =
-  BaseRecordOperationParamsWithIDsOptional & {
-    embeddings: Embedding;
-  };
-
-type SingleContentRecordOperationParamsWithOptionalIDs =
-  BaseRecordOperationParamsWithIDsOptional & {
-    documents: Document;
-  };
-
 export type MultiRecordOperationParams = BaseRecordOperationParams & {
   ids: IDs;
   embeddings?: Embeddings;
   metadatas?: Metadatas;
   documents?: Documents;
 };
-
-export type MultiRecordOperationParamsWithIDsOptional =
-  BaseRecordOperationParamsWithIDsOptional & {
-    ids?: IDs;
-    embeddings?: Embeddings;
-    metadatas?: Metadatas;
-    documents?: Documents;
-  };
 
 type MultiEmbeddingRecordOperationParams = MultiRecordOperationParams & {
   embeddings: Embeddings;
@@ -233,36 +198,15 @@ type MultiContentRecordOperationParams = MultiRecordOperationParams & {
   documents: Documents;
 };
 
-type MultiEmbeddingRecordOperationParamsWithOptionalIDs =
-  MultiRecordOperationParamsWithIDsOptional & {
-    embeddings: Embeddings;
-  };
-
-type MultiContentRecordOperationParamsWithOptionalIDs =
-  MultiRecordOperationParamsWithIDsOptional & {
-    documents: Documents;
-  };
-
-export type SingleAddRecordOperationParamsWithOptionalIDs =
-  | SingleEmbeddingRecordOperationParamsWithOptionalIDs
-  | SingleContentRecordOperationParamsWithOptionalIDs;
-
-export type MultiAddRecordsOperationParamsWithOptionalIDs =
-  | MultiEmbeddingRecordOperationParamsWithOptionalIDs
-  | MultiContentRecordOperationParamsWithOptionalIDs;
-
 export type MultiAddRecordsOperationParams =
   | MultiEmbeddingRecordOperationParams
   | MultiContentRecordOperationParams;
 
 export type AddRecordsParams =
-  | SingleAddRecordOperationParamsWithOptionalIDs
-  | MultiAddRecordsOperationParamsWithOptionalIDs;
-
-export type UpsertRecordsParams =
   | SingleAddRecordOperationParams
   | MultiAddRecordsOperationParams;
 
+export type UpsertRecordsParams = AddRecordsParams;
 export type UpdateRecordsParams =
   | MultiRecordOperationParams
   | SingleRecordOperationParams;
