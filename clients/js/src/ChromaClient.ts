@@ -2,6 +2,7 @@ import { AdminClient } from "./AdminClient";
 import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { chromaFetch } from "./ChromaFetch";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
+import { ChromaConnectionError, ChromaServerError } from "./Errors";
 import {
   Configuration,
   ApiApi as DefaultApi,
@@ -17,6 +18,7 @@ import type {
   CreateCollectionParams,
   DeleteCollectionParams,
   DeleteParams,
+  Embedding,
   Embeddings,
   GetCollectionParams,
   GetOrCreateCollectionParams,
@@ -31,7 +33,6 @@ import type {
 } from "./types";
 import {
   prepareRecordRequest,
-  prepareRecordRequestWithIDsOptional,
   toArray,
   toArrayOfArrays,
   validateTenantDatabase,
@@ -396,7 +397,7 @@ export class ChromaClient {
   /**
    * Add items to the collection
    * @param {Object} params - The parameters for the query.
-   * @param {ID | IDs} [params.ids] - Optional IDs of the items to add.
+   * @param {ID | IDs} [params.ids] - IDs of the items to add.
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
@@ -415,20 +416,18 @@ export class ChromaClient {
   async addRecords(
     collection: Collection,
     params: AddRecordsParams,
-  ): Promise<AddResponse> {
+  ): Promise<void> {
     await this.init();
 
-    const resp = (await this.api.add(
+    await this.api.add(
       collection.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
-      (await prepareRecordRequestWithIDsOptional(
+      (await prepareRecordRequest(
         params,
         collection.embeddingFunction,
       )) as GeneratedApi.AddEmbedding,
       this.api.options,
-    )) as AddResponse;
-
-    return resp;
+    );
   }
 
   /**

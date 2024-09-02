@@ -3,15 +3,11 @@ import { ChromaConnectionError } from "./Errors";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import {
   AddRecordsParams,
-  BaseRecordOperationParamsWithIDsOptional,
+  BaseRecordOperationParams,
   Collection,
-  Embeddings,
-  Documents,
   Metadata,
   MultiRecordOperationParams,
-  MultiRecordOperationParamsWithIDsOptional,
   UpdateRecordsParams,
-  UpsertRecordsParams,
 } from "./types";
 
 // a function to convert a non-Array object to an Array
@@ -86,10 +82,10 @@ export function isBrowser() {
 }
 
 function arrayifyParams(
-  params: BaseRecordOperationParamsWithIDsOptional,
-): MultiRecordOperationParamsWithIDsOptional {
+  params: BaseRecordOperationParams,
+): MultiRecordOperationParams {
   return {
-    ids: params.ids !== undefined ? toArray(params.ids) : undefined,
+    ids: toArray(params.ids),
     embeddings: params.embeddings
       ? toArrayOfArrays(params.embeddings)
       : undefined,
@@ -101,72 +97,16 @@ function arrayifyParams(
 }
 
 export async function prepareRecordRequest(
-  reqParams: UpsertRecordsParams | UpdateRecordsParams,
+  reqParams: AddRecordsParams | UpdateRecordsParams,
   embeddingFunction: IEmbeddingFunction,
   update?: true,
 ): Promise<MultiRecordOperationParams> {
-  const {
-    ids = [],
-    embeddings,
-    metadatas,
-    documents,
-  } = arrayifyParams(reqParams);
+  const { ids, embeddings, metadatas, documents } = arrayifyParams(reqParams);
 
   if (!embeddings && !documents && !update) {
     throw new Error("embeddings and documents cannot both be undefined");
   }
 
-  validateIDs(ids);
-
-  const embeddingsArray = await computeEmbeddings(
-    embeddingFunction,
-    embeddings,
-    documents,
-    update,
-  );
-
-  return {
-    ids,
-    metadatas,
-    documents,
-    embeddings: embeddingsArray,
-  };
-}
-
-export async function prepareRecordRequestWithIDsOptional(
-  reqParams: AddRecordsParams,
-  embeddingFunction: IEmbeddingFunction,
-): Promise<MultiRecordOperationParamsWithIDsOptional> {
-  const { ids, embeddings, metadatas, documents } = arrayifyParams(reqParams);
-
-  if (!embeddings && !documents) {
-    throw new Error("embeddings and documents cannot both be undefined");
-  }
-
-  if (ids) {
-    validateIDs(ids);
-  }
-
-  const embeddingsArray = await computeEmbeddings(
-    embeddingFunction,
-    embeddings,
-    documents,
-  );
-
-  return {
-    ids,
-    metadatas,
-    documents,
-    embeddings: embeddingsArray,
-  };
-}
-
-async function computeEmbeddings(
-  embeddingFunction: IEmbeddingFunction,
-  embeddings?: Embeddings,
-  documents?: Documents,
-  update?: true,
-): Promise<Embeddings | undefined> {
   const embeddingsArray = embeddings
     ? embeddings
     : documents
@@ -177,16 +117,22 @@ async function computeEmbeddings(
     throw new Error("Failed to generate embeddings for your request.");
   }
 
-  return embeddingsArray;
-}
-
-function validateIDs(ids: string[]) {
   for (let i = 0; i < ids.length; i += 1) {
     if (typeof ids[i] !== "string") {
       throw new Error(
         `Expected ids to be strings, found ${typeof ids[i]} at index ${i}`,
       );
     }
+  }
+
+  if (
+    (embeddingsArray !== undefined && ids.length !== embeddingsArray.length) ||
+    (metadatas !== undefined && ids.length !== metadatas.length) ||
+    (documents !== undefined && ids.length !== documents.length)
+  ) {
+    throw new Error(
+      "ids, embeddings, metadatas, and documents must all be the same length",
+    );
   }
 
   const uniqueIds = new Set(ids);
@@ -198,6 +144,13 @@ function validateIDs(ids: string[]) {
       `ID's must be unique, found duplicates for: ${duplicateIds}`,
     );
   }
+
+  return {
+    ids,
+    metadatas,
+    documents,
+    embeddings: embeddingsArray,
+  };
 }
 
 function notifyUserOfLegacyMethod(newMethod: string) {
