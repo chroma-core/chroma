@@ -536,10 +536,53 @@ def validate_batch_size(
         )
 
 
+def validate_record_set_consistency(record_set: RecordSet) -> None:
+    """
+    Validate the consistency of the record set, ensuring all values are non-empty lists and have the same length.
+    """
+    error_messages = []
+    field_record_counts = []
+    count = 0
+    consistentcy_error = False
+
+    for field, value in record_set.items():
+        if value is None:
+            continue
+
+        if not isinstance(value, list):
+            error_messages.append(
+                f"Expected field {field} to be a list, got {type(value).__name__}"
+            )
+            continue
+
+        if len(value) == 0:
+            error_messages.append(
+                f"Expected field {field} to be a non-empty list, got an empty list"
+            )
+            continue
+
+        n_items = len(value)
+        field_record_counts.append(f"{field}: ({n_items})")
+        if count == 0:
+            count = n_items
+        elif count != n_items:
+            consistentcy_error = True
+
+    if consistentcy_error:
+        error_messages.append(
+            f"Inconsistent number of records: {', '.join(field_record_counts)}"
+        )
+
+    if len(error_messages) > 0:
+        raise ValueError(", ".join(error_messages))
+
+
 def get_n_items_from_record_set(record_set: RecordSet) -> Tuple[str, int]:
     """
     Get the number of items in the record set.
     """
+    validate_record_set_consistency(record_set)
+
     for field, value in record_set.items():
         if isinstance(value, list) and len(value) > 0:
             return field, len(value)
@@ -548,6 +591,10 @@ def get_n_items_from_record_set(record_set: RecordSet) -> Tuple[str, int]:
 
 
 def validate_record_set(record_set: RecordSet) -> None:
+    """
+    Validate the record set, ensuring all values within a record set are non-empty lists, have the same length and are valid.
+    """
+
     embeddings = record_set["embeddings"]
     ids = record_set["ids"]
     metadatas = record_set["metadatas"]
@@ -556,21 +603,4 @@ def validate_record_set(record_set: RecordSet) -> None:
     validate_embeddings(embeddings) if embeddings is not None else None
     validate_metadatas(metadatas) if metadatas is not None else None
 
-    _, n_items = get_n_items_from_record_set(record_set)
-    if n_items == 0:
-        raise ValueError("No items in record set")
-
-    should_error = False
-    field_record_counts = []
-
-    for field, value in record_set.items():
-        if isinstance(value, list):
-            n = len(value)
-            field_record_counts.append(f"{field}: ({n})")
-            if n != n_items:
-                should_error = True
-
-    if should_error:
-        raise ValueError(
-            "Inconsistent number of records: " + ", ".join(field_record_counts)
-        )
+    validate_record_set_consistency(record_set)
