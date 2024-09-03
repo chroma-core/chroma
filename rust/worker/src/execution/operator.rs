@@ -124,6 +124,10 @@ where
 
         match result {
             Ok(result) => {
+                if let Err(err) = result.as_ref() {
+                    tracing::error!("Task {} failed with error: {:?}", self.task_id, err);
+                }
+
                 // If this (or similarly, the .send() below) errors, it means the receiver was dropped.
                 // There are valid reasons for this to happen (e.g. the component was stopped) so we ignore the error.
                 // Another valid case is when the PrefetchIoOperator finishes
