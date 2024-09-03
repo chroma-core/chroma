@@ -17,6 +17,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "all-MiniLM-L6-v2",
         device: str = "cpu",
         normalize_embeddings: bool = False,
+        batch_size: int = 32,
         **kwargs: Any,
     ):
         """Initialize SentenceTransformerEmbeddingFunction.
@@ -25,6 +26,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
             device (str, optional): Device used for computation, defaults to "cpu"
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
+            batch_size (int, optional): Batch size for encoding, defaults to 32
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
         if model_name not in self.models:
@@ -39,6 +41,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             )
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
+        self._batch_size = batch_size
 
     def __call__(self, input: Documents) -> Embeddings:
         return cast(
@@ -47,5 +50,6 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 list(input),
                 convert_to_numpy=True,
                 normalize_embeddings=self._normalize_embeddings,
+                batch_size=self._batch_size,
             ).tolist(),
         )
