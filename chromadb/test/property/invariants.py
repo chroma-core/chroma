@@ -78,7 +78,9 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
     }
 
 
-def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> int:
+def get_n_items_from_record_set(
+    normalized_record_set: NormalizedRecordSet, should_validate: bool = True
+) -> int:
     """Get the number of items from a record set"""
     (_, n) = types.get_n_items_from_record_set(
         {
@@ -88,7 +90,8 @@ def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> i
             "documents": normalized_record_set["documents"],
             "uris": None,
             "images": None,
-        }
+        },
+        should_validate=should_validate,
     )
 
     return n
@@ -98,7 +101,8 @@ def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
     normalized_record_set = wrap_all(record_set)
-    n = get_n_items_from_record_set(normalized_record_set)
+
+    n = get_n_items_from_record_set(normalized_record_set, should_validate=False)
 
     assert count == n
 
@@ -125,7 +129,7 @@ def _field_matches(
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
 
-    n = get_n_items_from_record_set(normalized_record_set)
+    n = get_n_items_from_record_set(normalized_record_set, should_validate=False)
 
     if n == 0:
         assert actual_field == []
@@ -248,7 +252,7 @@ def ann_accuracy(
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
 
-    n = get_n_items_from_record_set(normalized_record_set)
+    n = get_n_items_from_record_set(normalized_record_set, should_validate=False)
     if n == 0:
         return  # nothing to test here
 
