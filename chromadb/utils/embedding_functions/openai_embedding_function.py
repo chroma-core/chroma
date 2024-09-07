@@ -1,5 +1,6 @@
 import logging
 from typing import Mapping, Optional, cast
+import httpx
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -17,6 +18,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         api_version: Optional[str] = None,
         deployment_id: Optional[str] = None,
         default_headers: Optional[Mapping[str, str]] = None,
+        http_client: Optional[httpx.Client] = None,
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
@@ -37,6 +39,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 point to a different deployment, such as an Azure deployment.
             deployment_id (str, optional): Deployment ID for Azure OpenAI.
             default_headers (Mapping, optional): A mapping of default headers to be sent with each API request.
+            http_client (httpx.Client, optional): A custom httpx client to be used for API requests.
 
         """
         try:
@@ -75,10 +78,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                     api_version=api_version,
                     azure_endpoint=api_base,
                     default_headers=default_headers,
+                    http_client=http_client,
                 ).embeddings
             else:
                 self._client = openai.OpenAI(
-                    api_key=api_key, base_url=api_base, default_headers=default_headers
+                    api_key=api_key, base_url=api_base, default_headers=default_headers, http_client=http_client
                 ).embeddings
         else:
             self._client = openai.Embedding
