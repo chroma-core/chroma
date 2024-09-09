@@ -60,6 +60,10 @@ The docs are deployed to Vercel.
 
 <!-- TODO: codegen -->
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 075fe0c7 ([ENH] reset back to previous JS api, keeping other improvements (#2714))
 ### JS Docs Autogen
 
 ```
