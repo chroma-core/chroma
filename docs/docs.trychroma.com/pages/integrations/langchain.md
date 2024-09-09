@@ -16,40 +16,31 @@ title: 🦜️🔗 Langchain
 
 ## Langchain - JS
 
-Here is an [example in LangChainJS](https://github.com/hwchase17/langchainjs/blob/main/examples/src/chains/chat_vector_db_chroma.ts)
+Here is an [example in LangChainJS](https://github.com/langchain-ai/langchainjs/blob/main/examples/src/indexes/vector_stores/chroma/fromDocs.ts)
 
-```javascript
-import { OpenAI } from "langchain/llms/openai";
-import { ConversationalRetrievalQAChain } from "langchain/chains";
-import { Chroma } from "langchain/vectorstores/chroma";
-import { OpenAIEmbeddings } from "langchain/embeddings/openai";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import * as fs from "fs";
+```typescript
+import { Chroma } from "@langchain/community/vectorstores/chroma";
+import { OpenAIEmbeddings } from "@langchain/openai";
+import { TextLoader } from "langchain/document_loaders/fs/text";
 
-// to run this first run a chroma server with `chroma run --path /path/to/data`
+// Create docs with a loader
+const loader = new TextLoader("src/document_loaders/example_data/example.txt");
+const docs = await loader.load();
 
-export const run = async () => {
-  /* Initialize the LLM to use to answer the question */
-  const model = new OpenAI();
-  /* Load in the file we want to do question answering over */
-  const text = fs.readFileSync("state_of_the_union.txt", "utf8");
-  /* Split the text into chunks */
-  const textSplitter = new RecursiveCharacterTextSplitter({ chunkSize: 1000 });
-  const docs = await textSplitter.createDocuments([text]);
-  /* Create the vectorstore */
-  const vectorStore = await Chroma.fromDocuments(docs, new OpenAIEmbeddings(), {
-    collectionName: "state_of_the_union",
-  });
-  /* Create the chain */
-  const chain = ConversationalRetrievalQAChain.fromLLM(
-    model,
-    vectorStore.asRetriever()
-  );
-  /* Ask it a question */
-  const question = "What did the president say about Justice Breyer?";
-  const res = await chain.call({ question, chat_history: [] });
-  console.log(res);
-};
+// Create vector store and index the docs
+const vectorStore = await Chroma.fromDocuments(docs, new OpenAIEmbeddings(), {
+  collectionName: "a-test-collection",
+  url: "http://localhost:8000", // Optional, will default to this value
+  collectionMetadata: {
+    "hnsw:space": "cosine",
+  }, // Optional, can be used to specify the distance method of the embedding space https://docs.trychroma.com/guides#changing-the-distance-function
+});
+
+// Search for the most similar document
+const response = await vectorStore.similaritySearch("hello", 1);
+
+console.log(response);
+
 ```
 
 - [LangChainJS Chroma Documentation](https://js.langchain.com/docs/modules/indexes/vector_stores/integrations/chroma)
