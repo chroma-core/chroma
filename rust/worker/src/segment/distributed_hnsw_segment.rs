@@ -156,7 +156,10 @@ impl DistributedHNSWSegmentWriter {
                 segment.id,
             )))
         } else {
-            let index = match hnsw_index_provider.create(segment, dimensionality as i32) {
+            let index = match hnsw_index_provider
+                .create(segment, dimensionality as i32)
+                .await
+            {
                 Ok(index) => index,
                 Err(e) => {
                     return Err(Box::new(
@@ -324,7 +327,7 @@ impl DistributedHNSWSegmentReader {
             };
 
             let index =
-                match hnsw_index_provider.get(&index_uuid) {
+                match hnsw_index_provider.get(&index_uuid, &segment.collection) {
                     Some(index) => index,
                     None => {
                         match hnsw_index_provider

@@ -118,6 +118,7 @@ message QueryMetadataRequest {
     optional int32 limit = 5;
     optional int32 offset = 6;
     string collection_id = 7;
+    bool include_metadata = 8;
 }
 
 message QueryMetadataResponse {

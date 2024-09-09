@@ -14,7 +14,8 @@ use crate::execution::operators::hnsw_knn::{
     HnswKnnOperator, HnswKnnOperatorInput, HnswKnnOperatorOutput,
 };
 use crate::execution::operators::merge_knn_results::{
-    MergeKnnResultsOperator, MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput,
+    MergeKnnBruteForceResultInput, MergeKnnResultsOperator, MergeKnnResultsOperatorInput,
+    MergeKnnResultsOperatorOutput,
 };
 use crate::execution::operators::normalize_vectors::normalize;
 use crate::execution::operators::pull_log::PullLogsOutput;
@@ -122,9 +123,7 @@ pub(crate) struct HnswQueryOrchestrator {
     // query_vectors index to the result
     hnsw_result_offset_ids: HashMap<usize, Vec<usize>>,
     hnsw_result_distances: HashMap<usize, Vec<f32>>,
-    brute_force_result_user_ids: HashMap<usize, Vec<String>>,
-    brute_force_result_distances: HashMap<usize, Vec<f32>>,
-    brute_force_result_embeddings: HashMap<usize, Vec<Vec<f32>>>,
+    brute_force_results: HashMap<usize, BruteForceKnnOperatorOutput>,
     // Task id to query_vectors index
     hnsw_task_id_to_query_index: HashMap<Uuid, usize>,
     brute_force_task_id_to_query_index: HashMap<Uuid, usize>,
@@ -193,9 +192,7 @@ impl HnswQueryOrchestrator {
             index_config: None,
             hnsw_result_offset_ids: HashMap::new(),
             hnsw_result_distances: HashMap::new(),
-            brute_force_result_user_ids: HashMap::new(),
-            brute_force_result_distances: HashMap::new(),
-            brute_force_result_embeddings: HashMap::new(),
+            brute_force_results: HashMap::new(),
             hnsw_task_id_to_query_index: HashMap::new(),
             brute_force_task_id_to_query_index: HashMap::new(),
             merge_task_id_to_query_index: HashMap::new(),
@@ -287,7 +284,7 @@ impl HnswQueryOrchestrator {
                 Ok(_) => (),
                 Err(e) => {
                     // Log an error
-                    println!("Error sending Brute Force KNN task: {:?}", e);
+                    tracing::error!("Error sending Brute Force KNN task: {:?}", e);
                 }
             }
         }
@@ -338,7 +335,6 @@ impl HnswQueryOrchestrator {
                 }
             }
         };
-        println!("Created HNSW Segment Reader: {:?}", hnsw_segment_reader);
 
         let record_segment = self
             .record_segment
@@ -363,7 +359,7 @@ impl HnswQueryOrchestrator {
                 Ok(_) => (),
                 Err(e) => {
                     // Log an error
-                    println!("Error sending HNSW KNN task: {:?}", e);
+                    tracing::error!("Error sending HNSW KNN task: {:?}", e);
                 }
             }
         }
@@ -463,15 +459,11 @@ impl HnswQueryOrchestrator {
                 "Invariant violation. HNSW result distances are not set for query vector index",
             );
 
-        let brute_force_result_user_ids = self.brute_force_result_user_ids.remove(&query_vector_index).expect("Invariant violation. Brute force result user ids are not set for query vector index");
-        let brute_force_result_distances = self.brute_force_result_distances.remove(&query_vector_index).expect("Invariant violation. Brute force result distances are not set for query vector index");
-        let brute_force_result_embeddings = self
-            .brute_force_result_embeddings
-            .remove(&query_vector_index);
+        let brute_force_result = self.brute_force_results.remove(&query_vector_index);
 
         tracing::info!(
             "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids",
-            brute_force_result_user_ids.len(),
+            brute_force_result.as_ref().map_or(0, |x| x.user_ids.len()),
             hnsw_result_offset_ids.len()
         );
 
@@ -479,9 +471,11 @@ impl HnswQueryOrchestrator {
         let input = MergeKnnResultsOperatorInput::new(
             hnsw_result_offset_ids,
             hnsw_result_distances,
-            brute_force_result_user_ids,
-            brute_force_result_distances,
-            brute_force_result_embeddings,
+            brute_force_result.map(|r| MergeKnnBruteForceResultInput {
+                user_ids: r.user_ids,
+                distances: r.distances,
+                vectors: r.embeddings,
+            }),
             self.include_embeddings,
             self.k as usize,
             record_segment.clone(),
@@ -495,7 +489,7 @@ impl HnswQueryOrchestrator {
             Ok(_) => (),
             Err(e) => {
                 // Log an error
-                println!("Error sending Merge KNN task: {:?}", e);
+                tracing::error!("Error sending Merge KNN task: {:?}", e);
             }
         }
     }
@@ -644,7 +638,13 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
         match message {
             Ok(pull_logs_output) => {
                 let logs = pull_logs_output.logs();
-                self.brute_force_query(logs.clone(), ctx.receiver()).await;
+                if logs.len() > 0 {
+                    self.brute_force_query(logs.clone(), ctx.receiver()).await;
+                } else {
+                    // Skip running the brute force query if there are no logs
+                    self.merge_dependency_count -= self.query_vectors.len() as u32;
+                }
+
                 self.hnsw_segment_query(logs, ctx).await;
             }
             Err(e) => {
@@ -674,19 +674,7 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>
 
         match message {
             Ok(output) => {
-                let mut user_ids = output.user_ids;
-                let mut embeddings = None;
-                if self.include_embeddings {
-                    embeddings = Some(output.embeddings);
-                }
-                self.brute_force_result_user_ids
-                    .insert(query_index, user_ids);
-                self.brute_force_result_distances
-                    .insert(query_index, output.distances);
-                if let Some(embeddings) = embeddings {
-                    self.brute_force_result_embeddings
-                        .insert(query_index, embeddings);
-                }
+                self.brute_force_results.insert(query_index, output);
             }
             Err(e) => {
                 // TODO: handle this error, technically never happens

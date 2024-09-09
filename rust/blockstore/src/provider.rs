@@ -14,7 +14,6 @@ use async_trait::async_trait;
 use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use core::fmt::{self, Debug};
 use std::fmt::Formatter;
@@ -30,10 +29,10 @@ pub enum BlockfileProvider {
 impl Debug for BlockfileProvider {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => {
+            BlockfileProvider::HashMapBlockfileProvider(_provider) => {
                 write!(f, "HashMapBlockfileProvider")
             }
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+            BlockfileProvider::ArrowBlockfileProvider(_provider) => {
                 write!(f, "ArrowBlockfileProvider")
             }
         }
@@ -83,6 +82,13 @@ impl BlockfileProvider {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create::<K, V>(),
             BlockfileProvider::ArrowBlockfileProvider(provider) => provider.create::<K, V>(),
+        }
+    }
+
+    pub fn clear(&self) {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.clear(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.clear(),
         }
     }
 

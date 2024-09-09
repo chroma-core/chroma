@@ -19,6 +19,7 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+parking_lot = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }

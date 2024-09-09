@@ -8,12 +8,11 @@ use super::memory::reader_writer::{
     MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
 };
 use super::memory::storage::{Readable, Writeable};
-use super::positional_posting_list_value::PositionalPostingList;
-use arrow::array::{Array, Int32Array};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DataRecord;
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
+use std::mem::size_of;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -79,21 +78,25 @@ pub trait Value: Clone {
     fn get_size(&self) -> usize;
 }
 
-// TODO: Maybe make writeable and readable traits'
-// TODO: we don't need this get size
-impl Value for Int32Array {
+impl Value for Vec<u32> {
     fn get_size(&self) -> usize {
-        self.get_buffer_memory_size()
+        self.len() * size_of::<u32>()
     }
 }
 
-impl Value for &Int32Array {
+impl Value for &[u32] {
     fn get_size(&self) -> usize {
-        self.get_buffer_memory_size()
+        self.len() * size_of::<u32>()
     }
 }
 
 impl Value for &str {
+    fn get_size(&self) -> usize {
+        self.len()
+    }
+}
+
+impl Value for String {
     fn get_size(&self) -> usize {
         self.len()
     }
@@ -114,12 +117,6 @@ impl Value for RoaringBitmap {
 impl Value for &RoaringBitmap {
     fn get_size(&self) -> usize {
         self.serialized_size()
-    }
-}
-
-impl Value for PositionalPostingList {
-    fn get_size(&self) -> usize {
-        return self.size_in_bytes();
     }
 }
 
@@ -353,7 +350,7 @@ impl<
 
     pub async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => unimplemented!(),
+            BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(prefixes, keys).await
             }

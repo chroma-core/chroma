@@ -125,21 +125,20 @@ impl<'me> MetadataSegmentWriter<'me> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_writer =
-                        match blockfile_provider.fork::<u32, &Int32Array>(&pls_uuid).await {
-                            Ok(writer) => writer,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                        };
-                    let pls_reader =
-                        match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(reader) => reader,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                        };
+                    let pls_writer = match blockfile_provider.fork::<u32, Vec<u32>>(&pls_uuid).await
+                    {
+                        Ok(writer) => writer,
+                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                    };
+                    let pls_reader = match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
+                        Ok(reader) => reader,
+                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                    };
                     (pls_writer, Some(pls_reader))
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider.create::<u32, &Int32Array>() {
+            None => match blockfile_provider.create::<u32, Vec<u32>>() {
                 Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
@@ -176,9 +175,9 @@ impl<'me> MetadataSegmentWriter<'me> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(
                     NgramTokenizer::new(3, 3, false).unwrap(),
-                )));
+                ));
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,
@@ -189,9 +188,9 @@ impl<'me> MetadataSegmentWriter<'me> {
             _ => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
 
-        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(3, 3, false).unwrap(),
-        )));
+        ));
         let full_text_index_writer = FullTextIndexWriter::new(
             full_text_index_reader,
             pls_writer,
@@ -212,7 +211,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let string_metadata_writer = match blockfile_provider
-                            .fork::<&str, &RoaringBitmap>(&string_metadata_uuid)
+                            .fork::<&str, RoaringBitmap>(&string_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -229,7 +228,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<&str, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<&str, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -250,7 +249,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let bool_metadata_writer = match blockfile_provider
-                            .fork::<bool, &RoaringBitmap>(&bool_metadata_uuid)
+                            .fork::<bool, RoaringBitmap>(&bool_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -267,7 +266,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<bool, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<bool, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -288,7 +287,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let f32_metadata_writer = match blockfile_provider
-                            .fork::<f32, &RoaringBitmap>(&f32_metadata_uuid)
+                            .fork::<f32, RoaringBitmap>(&f32_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -305,7 +304,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<f32, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<f32, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -326,7 +325,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let u32_metadata_writer = match blockfile_provider
-                            .fork::<u32, &RoaringBitmap>(&u32_metadata_uuid)
+                            .fork::<u32, RoaringBitmap>(&u32_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -343,7 +342,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<u32, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<u32, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -594,7 +593,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
-                                    .add_document(document, segment_offset_id as i32)
+                                    .add_document(document, segment_offset_id)
                                     .await;
                             }
                             None => panic!(
@@ -712,7 +711,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     }
                                     // Previous version of record does not contain document string.
                                     None => match writer
-                                        .add_document(doc, segment_offset_id as i32)
+                                        .add_document(doc, segment_offset_id)
                                         .await
                                     {
                                         Ok(_) => {}
@@ -800,7 +799,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
-                                    .add_document(document, segment_offset_id as i32)
+                                    .add_document(document, segment_offset_id)
                                     .await;
                             }
                             None => panic!(
@@ -984,11 +983,10 @@ impl MetadataSegmentReader<'_> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_reader =
-                        match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(reader) => Some(reader),
-                            Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                        };
+                    let pls_reader = match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
+                        Ok(reader) => Some(reader),
+                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                    };
                     pls_reader
                 }
                 None => None,
@@ -1019,9 +1017,9 @@ impl MetadataSegmentReader<'_> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(
                     NgramTokenizer::new(3, 3, false).unwrap(),
-                )));
+                ));
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,

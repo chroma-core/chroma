@@ -82,8 +82,8 @@ pub struct SparseIndex {
 
 impl SparseIndex {
     pub(super) fn new(id: Uuid) -> Self {
-        let mut forward = Arc::new(Mutex::new(BTreeMap::new()));
-        let mut reverse = Arc::new(Mutex::new(HashMap::new()));
+        let forward = Arc::new(Mutex::new(BTreeMap::new()));
+        let reverse = Arc::new(Mutex::new(HashMap::new()));
         Self {
             forward,
             reverse,
@@ -139,19 +139,18 @@ impl SparseIndex {
 
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
         let forward = self.forward.lock();
-        let mut iter_curr = forward.iter();
-        let mut iter_next = forward.iter().skip(1);
-        let search_key = SparseIndexDelimiter::Key(search_key.clone());
-        while let Some((curr_key, curr_block_id)) = iter_curr.next() {
-            if let Some((next_key, _)) = iter_next.next() {
-                if search_key >= *curr_key && search_key < *next_key {
-                    return *curr_block_id;
-                }
-            } else {
-                return *curr_block_id;
+
+        match forward
+            .range(..=SparseIndexDelimiter::Key(search_key.clone()))
+            .next_back()
+        {
+            Some((_, block_id)) => {
+                return *block_id;
+            }
+            None => {
+                panic!("No blocks in the sparse index");
             }
         }
-        panic!("No blocks in the sparse index");
     }
 
     pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
@@ -446,6 +445,7 @@ impl SparseIndex {
         }
     }
 
+    #[cfg(test)]
     /// Check if the sparse index is valid by ensuring that the keys are in order
     pub(super) fn is_valid(&self) -> bool {
         let forward = self.forward.lock();
@@ -478,32 +478,33 @@ impl SparseIndex {
 
         // TODO: we could save the uuid not as a string to be more space efficient
         // but given the scale is relatively small, this is fine for now
-        let delta = BlockDelta::new::<K, &str>(self.id);
+        let delta = BlockDelta::new::<K, String>(self.id);
         for (key, block_id) in forward.iter() {
             match key {
                 SparseIndexDelimiter::Start => {
-                    delta.add("START", K::default(), block_id.to_string().as_str());
+                    delta.add("START", K::default(), block_id.to_string());
                 }
                 SparseIndexDelimiter::Key(k) => match &k.key {
                     KeyWrapper::String(s) => {
-                        delta.add(&k.prefix, s.as_str(), block_id.to_string().as_str());
+                        delta.add(&k.prefix, s.as_str(), block_id.to_string());
                     }
                     KeyWrapper::Float32(f) => {
-                        delta.add(&k.prefix, *f, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *f, block_id.to_string());
                     }
-                    KeyWrapper::Bool(b) => {
+                    KeyWrapper::Bool(_b) => {
                         unimplemented!();
                         // delta.add("KEY", b, block_id.to_string().as_str());
                     }
                     KeyWrapper::Uint32(u) => {
-                        delta.add(&k.prefix, *u, block_id.to_string().as_str());
+                        delta.add(&k.prefix, *u, block_id.to_string());
                     }
                 },
             }
         }
 
-        let record_batch = delta.finish::<K, &str>();
-        Ok(Block::from_record_batch(delta.id, record_batch))
+        let delta_id = delta.id;
+        let record_batch = delta.finish::<K, String>();
+        Ok(Block::from_record_batch(delta_id, record_batch))
     }
 
     pub(super) fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
@@ -565,7 +566,7 @@ mod tests {
     fn test_sparse_index() {
         let file_id = uuid::Uuid::new_v4();
         let block_id_1 = uuid::Uuid::new_v4();
-        let mut sparse_index = SparseIndex::new(file_id);
+        let sparse_index = SparseIndex::new(file_id);
         sparse_index.add_initial_block(block_id_1);
         let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
         sparse_index.add_block(blockfile_key.clone(), block_id_1);
@@ -643,7 +644,7 @@ mod tests {
     fn test_get_all_block_ids() {
         let file_id = uuid::Uuid::new_v4();
         let block_id_1 = uuid::Uuid::new_v4();
-        let mut sparse_index = SparseIndex::new(file_id);
+        let sparse_index = SparseIndex::new(file_id);
         sparse_index.add_initial_block(block_id_1);
         let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
         sparse_index.add_block(blockfile_key.clone(), block_id_1);

@@ -164,12 +164,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -217,12 +222,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -238,6 +248,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -296,12 +308,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -349,12 +366,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -370,6 +392,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -446,12 +470,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -499,12 +528,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -520,6 +554,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -566,6 +602,10 @@ mod tests {
                 format!("{}", 1024 * 1024 * 8),
             );
             let _ = jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__download_part_size_bytes",
+                format!("{}", 1024 * 1024 * 8),
+            );
+            let _ = jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__CONNECT_TIMEOUT_MS",
                 5000,
             );
@@ -594,12 +634,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                            upload_part_size_bytes: 8388608
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -659,6 +704,8 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -695,6 +742,7 @@ mod tests {
                     assert_eq!(s.connect_timeout_ms, 5000);
                     assert_eq!(s.request_timeout_ms, 1000);
                     assert_eq!(s.upload_part_size_bytes, 1024 * 1024 * 8);
+                    assert_eq!(s.download_part_size_bytes, 1024 * 1024 * 8);
                 }
                 _ => panic!("Invalid storage config"),
             }

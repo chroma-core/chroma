@@ -202,6 +202,7 @@ def ann_accuracy(
     min_recall: float = 0.99,
     embedding_function: Optional[types.EmbeddingFunction] = None,  # type: ignore[type-arg]
     query_indices: Optional[List[int]] = None,
+    query_embeddings: Optional[types.Embeddings] = None,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
@@ -239,9 +240,12 @@ def ann_accuracy(
             distance_function = distance_functions.ip
 
     # Perform exact distance computation
-    query_embeddings = (
-        embeddings if query_indices is None else [embeddings[i] for i in query_indices]
-    )
+    if query_embeddings is None:
+        query_embeddings = (
+            embeddings
+            if query_indices is None
+            else [embeddings[i] for i in query_indices]
+        )
     query_documents = normalized_record_set["documents"]
     if query_indices is not None and query_documents is not None:
         query_documents = [query_documents[i] for i in query_indices]
@@ -356,10 +360,10 @@ def log_size_below_max(
         )
 
         # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
-        # And if the batch_size != sync_threshold, the queue can have up to batch_size - 1 more entries.
+        # And if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
         assert (
             _total_embedding_queue_log_size(sqlite) - 1
-            <= sync_threshold_sum + batch_size_sum - 1
+            <= sync_threshold_sum + batch_size_sum
         )
     else:
         assert _total_embedding_queue_log_size(sqlite) == 0

@@ -18,6 +18,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use core::panic;
 use futures::StreamExt;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -77,6 +78,11 @@ impl ArrowBlockfileProvider {
             self.sparse_index_manager.clone(),
         );
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+    }
+
+    pub fn clear(&self) {
+        self.block_manager.block_cache.clear();
+        self.sparse_index_manager.cache.clear();
     }
 
     pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
@@ -144,6 +150,7 @@ pub(super) struct BlockManager {
     block_cache: Cache<Uuid, Block>,
     storage: Storage,
     max_block_size_bytes: usize,
+    write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl BlockManager {
@@ -156,6 +163,7 @@ impl BlockManager {
             block_cache,
             storage,
             max_block_size_bytes,
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -197,10 +205,11 @@ impl BlockManager {
 
     pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
-        delta: &BlockDelta,
+        delta: BlockDelta,
     ) -> Block {
+        let delta_id = delta.id;
         let record_batch = delta.finish::<K, V>();
-        let block = Block::from_record_batch(delta.id, record_batch);
+        let block = Block::from_record_batch(delta_id, record_batch);
         block
     }
 
@@ -212,68 +221,51 @@ impl BlockManager {
         let block = self.block_cache.get(id);
         match block {
             Some(block) => Some(block.clone()),
-            None => {
-                // TODO: NAC register/deregister/validation goes here.
-                async {
-                    let key = format!("block/{}", id);
-                    let stream = self.storage.get(&key).instrument(
+            None => async {
+                let key = format!("block/{}", id);
+                let bytes_res = self
+                    .storage
+                    .get(&key)
+                    .instrument(
                         tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
-                    ).await;
-                    match stream {
-                        Ok(mut bytes) => {
-                            let read_block_span = tracing::trace_span!(parent: Span::current(), "BlockManager read bytes to end");
-                            let buf = read_block_span.in_scope(|| async {
-                                let mut buf: Vec<u8> = Vec::new();
-                                while let Some(res) = bytes.next().await {
-                                    match res {
-                                        Ok(chunk) => {
-                                            buf.extend(chunk);
-                                        }
-                                        Err(e) => {
-                                            tracing::error!("Error reading block from storage: {}", e);
-                                            return None;
-                                        }
+                    )
+                    .await;
+                match bytes_res {
+                    Ok(bytes) => {
+                        let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
+                        let block =
+                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
+                        match block {
+                            Ok(block) => {
+                                let _guard = self.write_mutex.lock().await;
+                                match self.block_cache.get(id) {
+                                    Some(b) => {
+                                        return Some(b);
+                                    }
+                                    None => {
+                                        self.block_cache.insert(*id, block.clone());
+                                        Some(block)
                                     }
                                 }
-                                Some(buf)
                             }
-                            ).await;
-                            let buf =  match buf {
-                                Some(buf) => {
-                                    buf
-                                }
-                                None => {
-                                    return None;
-                                }
-                            };
-                            tracing::info!("Read {:?} bytes from s3", buf.len());
-                            let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
-                            let block = deserialization_span.in_scope(|| Block::from_bytes(&buf, *id));
-                            match block {
-                                Ok(block) => {
-                                    self.block_cache.insert(*id, block.clone());
-                                    Some(block)
-                                }
-                                Err(e) => {
-                                    // TODO: Return an error to callsite instead of None.
-                                    tracing::error!(
-                                        "Error converting bytes to Block {:?}/{:?}",
-                                        key,
-                                        e
-                                    );
-                                    None
-                                }
+                            Err(e) => {
+                                // TODO: Return an error to callsite instead of None.
+                                tracing::error!(
+                                    "Error converting bytes to Block {:?}/{:?}",
+                                    key,
+                                    e
+                                );
+                                None
                             }
-                        },
-                        Err(e) => {
-                            tracing::error!("Error reading block from storage: {}", e);
-                            None
                         }
                     }
+                    Err(e) => {
+                        tracing::error!("Error converting bytes to Block {:?}", e);
+                        // TODO: Return error instead of None.
+                        return None;
+                    }
                 }
-                .instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold"))
-                .await
-            }
+            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold")).await
         }
     }
 
@@ -341,7 +333,8 @@ impl SparseIndexManager {
                 tracing::info!("Cache miss - fetching sparse index from storage");
                 let key = format!("sparse_index/{}", id);
                 tracing::debug!("Reading sparse index from storage with key: {}", key);
-                let stream = self.storage.get(&key).await;
+                // TODO: This should pass through NAC as well.
+                let stream = self.storage.get_stream(&key).await;
                 let mut buf: Vec<u8> = Vec::new();
                 match stream {
                     Ok(mut bytes) => {
@@ -399,11 +392,6 @@ impl SparseIndexManager {
                 }
             }
         }
-    }
-
-    pub fn create(&self, id: &Uuid) -> SparseIndex {
-        let index = SparseIndex::new(*id);
-        index
     }
 
     pub async fn flush<'read, K: ArrowWriteableKey + 'read>(

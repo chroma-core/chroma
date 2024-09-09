@@ -23,12 +23,17 @@ query_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
     storage:
-        S3:
-            bucket: "chroma-storage"
-            credentials: "Minio"
-            connect_timeout_ms: 5000
-            request_timeout_ms: 30000 # 1 minute
-            upload_part_size_bytes: 536870912 # 512MiB
+        AdmissionControlledS3:
+            s3_config:
+                bucket: "chroma-storage"
+                credentials: "Minio"
+                connect_timeout_ms: 5000
+                request_timeout_ms: 30000 # 1 minute
+                upload_part_size_bytes: 536870912 # 512MiB
+                download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+                CountBasedPolicy:
+                    max_concurrent_requests: 15
     log:
         Grpc:
             host: "logservice.chroma"
@@ -76,12 +81,17 @@ compaction_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
     storage:
-        S3:
-            bucket: "chroma-storage"
-            credentials: "Minio"
-            connect_timeout_ms: 5000
-            request_timeout_ms: 60000 # 1 minute
-            upload_part_size_bytes: 536870912 # 512MiB
+        AdmissionControlledS3:
+            s3_config:
+                bucket: "chroma-storage"
+                credentials: "Minio"
+                connect_timeout_ms: 5000
+                request_timeout_ms: 60000 # 1 minute
+                upload_part_size_bytes: 536870912 # 512MiB
+                download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+                CountBasedPolicy:
+                    max_concurrent_requests: 15
     log:
         Grpc:
             host: "logservice.chroma"
@@ -97,6 +107,8 @@ compaction_service:
         max_concurrent_jobs: 100
         compaction_interval_sec: 10
         min_compaction_size: 10
+        max_compaction_size: 10000
+        max_partition_size: 5000
     blockfile_provider:
         Arrow:
             block_manager_config:

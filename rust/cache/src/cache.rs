@@ -12,14 +12,14 @@ use thiserror::Error;
 #[derive(Clone)]
 pub enum Cache<K, V>
 where
-    K: Send + Sync + Hash + Eq + 'static,
+    K: Send + Sync + Clone + Hash + Eq + 'static,
     V: Send + Sync + Clone + 'static,
 {
     Unbounded(UnboundedCache<K, V>),
     Foyer(FoyerCacheWrapper<K, V>),
 }
 
-impl<K: Send + Sync + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cache<K, V> {
+impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cache<K, V> {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
             CacheConfig::Unbounded(_) => Cache::Unbounded(UnboundedCache::new(config)),
@@ -51,12 +51,46 @@ impl<K: Send + Sync + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cac
             }
         }
     }
+
+    pub fn pop(&self) -> Option<(K, V)> {
+        match self {
+            Cache::Unbounded(cache) => cache.pop(),
+            Cache::Foyer(cache) => cache
+                .cache
+                .pop()
+                .map(|entry| (entry.key().clone(), entry.value().clone())),
+        }
+    }
+
+    pub fn remove(&self, key: &K) {
+        match self {
+            Cache::Unbounded(cache) => {
+                cache.cache.write().remove(key);
+            }
+            Cache::Foyer(cache) => {
+                cache.cache.remove(key);
+            }
+        }
+    }
+
+    pub fn clear(&self) {
+        match self {
+            Cache::Unbounded(cache) => {
+                let mut write_guard = cache.cache.write();
+                write_guard.clear();
+                write_guard.shrink_to_fit();
+            }
+            Cache::Foyer(cache) => {
+                cache.clear();
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct UnboundedCache<K, V>
 where
-    K: Send + Sync + Hash + Eq + 'static,
+    K: Send + Sync + Clone + Hash + Eq + 'static,
     V: Send + Sync + Clone + 'static,
 {
     cache: Arc<RwLock<HashMap<K, V>>>,
@@ -64,7 +98,7 @@ where
 
 impl<K, V> UnboundedCache<K, V>
 where
-    K: Send + Sync + Hash + Eq + 'static,
+    K: Send + Sync + Clone + Hash + Eq + 'static,
     V: Send + Sync + Clone + 'static,
 {
     pub fn new(config: &CacheConfig) -> Self {
@@ -87,6 +121,18 @@ where
             Some(v) => Some(v.clone()),
             None => None,
         }
+    }
+
+    pub fn pop(&self) -> Option<(K, V)> {
+        let read_guard = self.cache.read();
+        let mut write_guard = self.cache.write();
+        if let Some(first_key) = read_guard.keys().next() {
+            if let Some(value) = write_guard.remove(first_key) {
+                return Some((first_key.clone(), value));
+            }
+        }
+
+        None
     }
 }
 
@@ -142,12 +188,16 @@ where
             None => None,
         }
     }
+
+    pub fn clear(&self) {
+        self.cache.clear();
+    }
 }
 
 #[async_trait]
 impl<K, V> Configurable<CacheConfig> for UnboundedCache<K, V>
 where
-    K: Send + Sync + Hash + Eq + 'static,
+    K: Send + Sync + Clone + Hash + Eq + 'static,
     V: Send + Sync + Clone + 'static,
 {
     async fn try_from_config(config: &CacheConfig) -> Result<Self, Box<dyn ChromaError>> {

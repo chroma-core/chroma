@@ -14,7 +14,7 @@ use crate::{
 /// # Note
 /// This is not intended for production use.
 #[derive(Clone)]
-pub(crate) struct MemoryBlockfileProvider {
+pub struct MemoryBlockfileProvider {
     storage_manager: StorageManager,
 }
 
@@ -49,9 +49,13 @@ impl MemoryBlockfileProvider {
         Ok(BlockfileWriter::MemoryBlockfileWriter(writer))
     }
 
+    pub(crate) fn clear(&self) {
+        self.storage_manager.clear();
+    }
+
     pub(crate) fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
-        id: &uuid::Uuid,
+        _id: &uuid::Uuid,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         todo!();
     }
@@ -101,7 +105,7 @@ mod tests {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let data_records = data
+        let _data_records = data
             .iter()
             .map(|record| DataRecord {
                 id: &record.0.record.id,
@@ -111,7 +115,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let provider = MemoryBlockfileProvider::new();
+        let _provider = MemoryBlockfileProvider::new();
         // let mut writer = provider.create::<&str, DataRecord>().unwrap();
         // let id = writer.id();
         // for record in data_records {

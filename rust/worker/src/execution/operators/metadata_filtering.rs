@@ -573,54 +573,50 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 &fts_result.expect("Already validated that it is not none"),
             ));
         }
-        // Get offset ids that satisfy where conditions from storage.
-        let metadata_segment_reader =
-            MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
-                .await;
 
-        let filtered_index_offset_ids = match metadata_segment_reader {
-            Ok(reader) => {
-                reader
-                    .query(
-                        input.where_clause.as_ref(),
-                        input.where_document_clause.as_ref(),
-                        Some(&vec![]),
-                        0,
-                        0,
-                    )
-                    .await
-            }
-            Err(e) => {
-                tracing::error!("Error querying metadata segment: {:?}", e);
-                return Err(MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e));
-            }
-        };
+        let mut filtered_index_offset_ids: Option<Vec<usize>> = None;
+        if input.where_clause.is_some() || input.where_document_clause.is_some() {
+            // Get offset ids that satisfy where conditions from storage.
+            let metadata_segment_reader = MetadataSegmentReader::from_segment(
+                &input.metadata_segment,
+                &input.blockfile_provider,
+            )
+            .await
+            .map_err(|e| MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e))?;
+
+            filtered_index_offset_ids = metadata_segment_reader
+                .query(
+                    input.where_clause.as_ref(),
+                    input.where_document_clause.as_ref(),
+                    Some(&vec![]),
+                    0,
+                    0,
+                )
+                .await
+                .map_err(|e| {
+                    MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e)
+                })?;
+        }
+
         // This will be sorted by offset id.
-        let filter_from_mt_segment = match filtered_index_offset_ids {
-            Ok(res) => {
-                match res {
-                    Some(r) => {
-                        // convert to u32 and also filter out the ones present in the
-                        // materialized log. This is strictly needed for correctness as
-                        // the ids that satisfy the predicate in the metadata segment
-                        // could have been updated more recently (in the log) to NOT
-                        // satisfy the predicate, hence we treat the materialized log
-                        // as the source of truth for ids that are present in both the
-                        // places.
-                        let ids_as_u32: Vec<u32> = r
-                            .into_iter()
-                            .map(|index| index as u32)
-                            .filter(|x| !ids_in_mat_log.contains(x))
-                            .collect();
-                        Some(ids_as_u32)
-                    }
-                    None => None,
-                }
-            }
-            Err(e) => {
-                return Err(MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e));
-            }
-        };
+        let mut filter_from_mt_segment: Option<Vec<u32>> = None;
+        if let Some(filtered_index_offset_ids) = filtered_index_offset_ids {
+            // convert to u32 and also filter out the ones present in the
+            // materialized log. This is strictly needed for correctness as
+            // the ids that satisfy the predicate in the metadata segment
+            // could have been updated more recently (in the log) to NOT
+            // satisfy the predicate, hence we treat the materialized log
+            // as the source of truth for ids that are present in both the
+            // places.
+            filter_from_mt_segment = Some(
+                filtered_index_offset_ids
+                    .into_iter()
+                    .map(|index| index as u32)
+                    .filter(|x| !ids_in_mat_log.contains(x))
+                    .collect(),
+            );
+        }
+
         // It cannot happen that one is none and other is some.
         if (filter_from_mt_segment.is_some() && merged_result.is_none())
             || (filter_from_mt_segment.is_none() && merged_result.is_some())

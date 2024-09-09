@@ -1,6 +1,8 @@
-use super::delta_storage::BlockKeyArrowBuilder;
-use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey};
-use arrow::array::{Array, Float32Builder, StringBuilder, UInt32Array, UInt32Builder};
+use crate::arrow::{
+    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
+};
+use arrow::array::{Array, StringBuilder, UInt32Array, UInt32Builder};
 use std::sync::Arc;
 
 impl ArrowWriteableKey for u32 {
@@ -33,7 +35,7 @@ impl ArrowReadableKey<'_> for u32 {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut super::delta::BlockDelta,
+        delta: &mut BlockDelta,
     ) {
         V::add_to_delta(prefix, key, value, delta);
     }

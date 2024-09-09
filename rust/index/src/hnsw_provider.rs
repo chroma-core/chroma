@@ -5,17 +5,14 @@ use super::{
 };
 use crate::types::PersistentIndex;
 use async_trait::async_trait;
-use chroma_cache::cache;
 use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
-use chroma_storage::stream::ByteStreamItem;
 use chroma_storage::Storage;
 use chroma_types::Segment;
-use futures::stream;
-use futures::stream::StreamExt;
 use parking_lot::RwLock;
+use rand::seq::index;
 use std::fmt::Debug;
 use std::path::Path;
 use std::{path::PathBuf, sync::Arc};
@@ -34,11 +31,25 @@ const FILES: [&'static str; 4] = [
     "link_lists.bin",
 ];
 
+// The key of the cache is the collection id and the value is
+// the HNSW index for that collection. This restricts the cache to
+// contain atmost one index per collection. Ideally, we would like
+// this index to be the latest index for that collection but rn it
+// is not guaranteed. For e.g. one case could be:
+// 1. get index version v1
+// 2. get index version v2 (> v1)
+// 3. get index version v1 (can happen due to an inflight query
+//    that started before compaction of v2 occured) -- this will
+//    evict v2 even though it is more recent and will be used again in future.
+// Once we have versioning propagated throughout the system we can make
+// this better. We can also do a deferred eviction for such entries when
+// their ref count goes to 0.
 #[derive(Clone)]
 pub struct HnswIndexProvider {
     cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
+    write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Debug for HnswIndexProvider {
@@ -62,6 +73,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
             cache,
             storage: storage.clone(),
             temporary_storage_path: PathBuf::from(&hnsw_config.hnsw_temporary_path),
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 }
@@ -76,12 +88,20 @@ impl HnswIndexProvider {
             cache,
             storage,
             temporary_storage_path: storage_path,
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
-    pub fn get(&self, id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
-        match self.cache.get(id) {
-            Some(index) => Some(index.clone()),
+    pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
+        match self.cache.get(collection_id) {
+            Some(index) => {
+                let index_with_lock = index.read();
+                if index_with_lock.id == *index_id {
+                    // Clone is cheap because we are just cloning the Arc.
+                    return Some(index.clone());
+                }
+                return None;
+            }
             None => None,
         }
     }
@@ -98,7 +118,9 @@ impl HnswIndexProvider {
     ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderForkError>> {
         let new_id = Uuid::new_v4();
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
-        match self.create_dir_all(&new_storage_path) {
+        // This is ok to be called from multiple threads concurrently. See
+        // the documentation of tokio::fs::create_dir_all to see why.
+        match self.create_dir_all(&new_storage_path).await {
             Ok(_) => {}
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderForkError::FileError(*e)));
@@ -143,11 +165,51 @@ impl HnswIndexProvider {
 
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
-                let index = Arc::new(RwLock::new(index));
-                self.cache.insert(new_id, index.clone());
-                Ok(index)
+                let _guard = self.write_mutex.lock().await;
+                match self.get(&new_id, &segment.collection) {
+                    Some(index) => {
+                        return Ok(index.clone());
+                    }
+                    None => {
+                        let index = Arc::new(RwLock::new(index));
+                        self.cache.insert(segment.collection, index.clone());
+                        Ok(index)
+                    }
+                }
             }
             Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
+        }
+    }
+
+    async fn copy_bytes_to_local_file(
+        &self,
+        file_path: &PathBuf,
+        buf: Arc<Vec<u8>>,
+    ) -> Result<(), Box<HnswIndexProviderFileError>> {
+        // Synchronize concurrent writes to the same file.
+        let _guard = self.write_mutex.lock().await;
+        let file_handle = tokio::fs::File::create(&file_path).await;
+        let mut file_handle = match file_handle {
+            Ok(file) => file,
+            Err(e) => {
+                tracing::error!("Failed to create file: {}", e);
+                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+            }
+        };
+        let res = file_handle.write_all(&buf).await;
+        match res {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("Failed to copy file: {}", e);
+                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+            }
+        }
+        match file_handle.flush().await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::error!("Failed to flush file: {}", e);
+                Err(Box::new(HnswIndexProviderFileError::IOError(e)))
+            }
         }
     }
 
@@ -157,78 +219,33 @@ impl HnswIndexProvider {
         source_id: &Uuid,
         index_storage_path: &Path,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
-        // Fetch the files from storage and put them in the index storage path
+        // Fetch the files from storage and put them in the index storage path.
         for file in FILES.iter() {
             let key = self.format_key(source_id, file);
             tracing::info!("Loading hnsw index file: {}", key);
-            let stream = self.storage.get(&key).await;
-            let reader = match stream {
-                Ok(reader) => reader,
+            let bytes_res = self.storage.get_parallel(&key).await;
+            let bytes_read;
+            let buf = match bytes_res {
+                Ok(buf) => {
+                    bytes_read = buf.len();
+                    buf
+                }
                 Err(e) => {
                     tracing::error!("Failed to load hnsw index file from storage: {}", e);
                     return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
                 }
             };
-
             let file_path = index_storage_path.join(file);
-            // For now, we never evict from the cache, so if the index is being loaded, the file does not exist
-            let file_handle = tokio::fs::File::create(&file_path).await;
-            let file_handle = match file_handle {
-                Ok(file) => file,
-                Err(e) => {
-                    tracing::error!("Failed to create file: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            };
-            let total_bytes_written = self
-                .copy_stream_to_local_file(reader, file_handle)
-                .instrument(tracing::info_span!(parent: Span::current(), "hnsw provider file read", file = file))
-                .await?;
+            self.copy_bytes_to_local_file(&file_path, buf).instrument(tracing::info_span!(parent: Span::current(), "hnsw provider copy bytes to local file", file = file)).await?;
             tracing::info!(
                 "Copied {} bytes from storage key: {} to file: {}",
-                total_bytes_written,
+                bytes_read,
                 key,
                 file_path.to_str().unwrap()
             );
-            // bytes is an AsyncBufRead, so we fil and consume it to a file
             tracing::info!("Loaded hnsw index file: {}", file);
         }
         Ok(())
-    }
-
-    async fn copy_stream_to_local_file(
-        &self,
-        stream: Box<dyn stream::Stream<Item = ByteStreamItem> + Unpin + Send>,
-        file_handle: tokio::fs::File,
-    ) -> Result<u64, Box<HnswIndexProviderFileError>> {
-        let mut total_bytes_written = 0;
-        let mut file_handle = file_handle;
-        let mut stream = stream;
-        while let Some(res) = stream.next().await {
-            let chunk = match res {
-                Ok(chunk) => chunk,
-                Err(e) => {
-                    return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
-                }
-            };
-
-            let res = file_handle.write_all(&chunk).await;
-            match res {
-                Ok(_) => {
-                    total_bytes_written += chunk.len() as u64;
-                }
-                Err(e) => {
-                    tracing::error!("Failed to copy file: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            }
-        }
-        match file_handle.flush().await {
-            Ok(_) => Ok(total_bytes_written),
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-            }
-        }
     }
 
     pub async fn open(
@@ -239,7 +256,8 @@ impl HnswIndexProvider {
     ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
-        match self.create_dir_all(&index_storage_path) {
+        // Create directories should be thread safe.
+        match self.create_dir_all(&index_storage_path).await {
             Ok(_) => {}
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderOpenError::FileError(*e)));
@@ -256,6 +274,7 @@ impl HnswIndexProvider {
             }
         }
 
+        // Thread safe.
         let index_config = IndexConfig::from_segment(&segment, dimensionality);
         let index_config = match index_config {
             Ok(index_config) => index_config,
@@ -264,6 +283,7 @@ impl HnswIndexProvider {
             }
         };
 
+        // Thread safe.
         let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path);
         let hnsw_config = match hnsw_config {
             Ok(hnsw_config) => hnsw_config,
@@ -275,9 +295,17 @@ impl HnswIndexProvider {
         // TODO: don't unwrap path conv here
         match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
             Ok(index) => {
-                let index = Arc::new(RwLock::new(index));
-                self.cache.insert(*id, index.clone());
-                Ok(index)
+                let _guard = self.write_mutex.lock().await;
+                match self.get(id, &segment.collection) {
+                    Some(index) => {
+                        return Ok(index.clone());
+                    }
+                    None => {
+                        let index = Arc::new(RwLock::new(index));
+                        self.cache.insert(segment.collection, index.clone());
+                        Ok(index)
+                    }
+                }
             }
             Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
         }
@@ -293,7 +321,7 @@ impl HnswIndexProvider {
     // Cases
     // A query comes in and the index is in the cache -> we can query the index based on segment files id (Same as compactor case 3 where we have the index)
     // A query comes in and the index is not in the cache -> we need to load the index from s3 based on the segment files id
-    pub fn create(
+    pub async fn create(
         &self,
         // TODO: This should not take Segment. The index layer should not know about the segment concept
         segment: &Segment,
@@ -302,7 +330,7 @@ impl HnswIndexProvider {
         let id = Uuid::new_v4();
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
-        match self.create_dir_all(&index_storage_path) {
+        match self.create_dir_all(&index_storage_path).await {
             Ok(_) => {}
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderCreateError::FileError(*e)));
@@ -329,9 +357,18 @@ impl HnswIndexProvider {
                 return Err(Box::new(HnswIndexProviderCreateError::IndexInitError(e)));
             }
         };
-        let index = Arc::new(RwLock::new(index));
-        self.cache.insert(id, index.clone());
-        Ok(index)
+
+        let _guard = self.write_mutex.lock().await;
+        match self.get(&id, &segment.collection) {
+            Some(index) => {
+                return Ok(index.clone());
+            }
+            None => {
+                let index = Arc::new(RwLock::new(index));
+                self.cache.insert(segment.collection, index.clone());
+                Ok(index)
+            }
+        }
     }
 
     pub fn commit(&self, index: Arc<RwLock<HnswIndex>>) -> Result<(), Box<dyn ChromaError>> {
@@ -366,8 +403,26 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
-        match std::fs::create_dir_all(path) {
+    /// Purge all entries from the cache and remove temporary files from disk.
+    pub async fn purge_all_entries(&mut self) {
+        while let Some((_, index)) = self.cache.pop() {
+            let index_id = index.read().id;
+            match self.remove_temporary_files(&index_id).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to remove temporary files: {}", e);
+                }
+            }
+        }
+    }
+
+    async fn remove_temporary_files(&self, id: &Uuid) -> tokio::io::Result<()> {
+        let index_storage_path = self.temporary_storage_path.join(id.to_string());
+        tokio::fs::remove_dir_all(index_storage_path).await
+    }
+
+    async fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
+        match tokio::fs::create_dir_all(path).await {
             Ok(_) => Ok(()),
             Err(e) => return Err(Box::new(HnswIndexProviderFileError::IOError(e))),
         }
@@ -507,7 +562,7 @@ mod tests {
         let hnsw_tmp_path = storage_dir.join("hnsw");
 
         // Create the directories needed
-        std::fs::create_dir_all(&hnsw_tmp_path).unwrap();
+        tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
@@ -522,7 +577,7 @@ mod tests {
         };
 
         let dimensionality = 128;
-        let created_index = provider.create(&segment, dimensionality).unwrap();
+        let created_index = provider.create(&segment, dimensionality).await.unwrap();
         let created_index_id = created_index.read().id;
 
         let forked_index = provider

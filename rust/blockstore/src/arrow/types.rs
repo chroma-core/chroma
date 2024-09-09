@@ -1,6 +1,6 @@
 use super::block::{
     delta::BlockDelta,
-    delta_storage::{BlockKeyArrowBuilder, BlockStorage},
+    delta::{BlockKeyArrowBuilder, BlockStorage},
 };
 use crate::{key::KeyWrapper, Key, Value};
 use arrow::array::Array;

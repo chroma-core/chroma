@@ -48,6 +48,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
+use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -102,6 +103,8 @@ pub struct CompactOrchestrator {
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
     // Current max offset id.
     curr_max_offset_id: Arc<AtomicU32>,
+    max_compaction_size: usize,
+    max_partition_size: usize,
 }
 
 #[derive(Error, Debug)]
@@ -169,6 +172,8 @@ impl CompactOrchestrator {
         >,
         record_segment: Option<Segment>,
         curr_max_offset_id: Arc<AtomicU32>,
+        max_compaction_size: usize,
+        max_partition_size: usize,
     ) -> Self {
         CompactOrchestrator {
             id: Uuid::new_v4(),
@@ -186,6 +191,8 @@ impl CompactOrchestrator {
             result_channel,
             record_segment,
             curr_max_offset_id,
+            max_compaction_size,
+            max_partition_size,
         }
     }
 
@@ -219,7 +226,7 @@ impl CompactOrchestrator {
             // offset is the one after the last compaction offset
             self.compaction_job.offset,
             100,
-            None,
+            Some(self.max_compaction_size as i32),
             Some(end_timestamp),
         );
         let task = wrap(operator, input, self_address);
@@ -241,11 +248,10 @@ impl CompactOrchestrator {
         self_address: Box<dyn ReceiverForMessage<TaskResult<PartitionOutput, PartitionError>>>,
     ) {
         self.state = ExecutionState::Partition;
-        // TODO: make this configurable
-        let max_partition_size = 10_000;
         let operator = PartitionOperator::new();
+        tracing::info!("Sending N Records: {:?}", records.len());
         println!("Sending N Records: {:?}", records.len());
-        let input = PartitionInput::new(records, max_partition_size);
+        let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
@@ -616,21 +622,6 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             }
         };
         if self.num_write_tasks == 0 {
-            // TODO: Ideally we shouldn't even have to make an explicit call to
-            // write_to_blockfiles since it is not the workflow for other segments
-            // and is exclusive to metadata segment. We should figure out a way
-            // to make this call a part of commit itself. It's not obvious directly
-            // how to do that since commit is per partition but write_to_blockfiles
-            // only need to be called once across all partitions combined.
-            let mut writer = output.metadata_segment_writer.clone();
-            match writer.write_to_blockfiles().await {
-                Ok(()) => (),
-                Err(e) => {
-                    tracing::error!("Error writing metadata segment out to blockfiles: {:?}", e);
-                    terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
-                    return;
-                }
-            }
             self.flush_s3(
                 output.record_segment_writer,
                 output.hnsw_segment_writer,
