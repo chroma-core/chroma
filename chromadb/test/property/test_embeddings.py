@@ -213,8 +213,14 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def count(self) -> None:
+        n = invariants.get_n_items_from_record_set_state(self.record_set_state)
+        if n == 0:
+            assert self.collection.count() == 0
+            return
+
         invariants.count(
-            self.collection, cast(strategies.RecordSet, self.record_set_state)
+            self.collection,
+            cast(strategies.RecordSet, self.record_set_state),
         )
 
     @invariant()
@@ -223,6 +229,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def ann_accuracy(self) -> None:
+        n = invariants.get_n_items_from_record_set_state(self.record_set_state)
+        if n == 0:
+            return
+
         invariants.ann_accuracy(
             collection=self.collection,
             record_set=cast(strategies.RecordSet, self.record_set_state),
@@ -232,10 +242,15 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def fields_match(self) -> None:
-        self.record_set_state = cast(strategies.RecordSet, self.record_set_state)  # type: ignore[assignment]
-        invariants.embeddings_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
-        invariants.metadatas_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
-        invariants.documents_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
+        invariants.embeddings_match_state_record_set(
+            self.collection, self.record_set_state
+        )
+        invariants.metadatas_match_state_record_set(
+            self.collection, self.record_set_state
+        )
+        invariants.documents_match_state_record_set(
+            self.collection, self.record_set_state
+        )
 
     @precondition(
         lambda self: is_client_in_process(self.client)

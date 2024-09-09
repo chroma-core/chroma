@@ -5,7 +5,11 @@ from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from time import sleep
 import psutil
-from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
+from chromadb.test.property.strategies import (
+    NormalizedRecordSet,
+    RecordSet,
+    StateMachineRecordSet,
+)
 from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Any
 from typing_extensions import Literal
 import numpy as np
@@ -78,9 +82,31 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
     }
 
 
-def get_n_items_from_record_set(
-    normalized_record_set: NormalizedRecordSet, should_validate: bool = True
-) -> int:
+def get_n_items_from_record_set_state(record_set: StateMachineRecordSet) -> int:
+    normalized_record_set = wrap_all(cast(RecordSet, record_set))
+    try:
+        """Get the number of items from a record set"""
+        (_, n) = types.get_n_items_from_record_set(
+            {
+                "ids": normalized_record_set["ids"],
+                "embeddings": normalized_record_set["embeddings"],
+                "metadatas": cast(types.Metadatas, normalized_record_set["metadatas"]),
+                "documents": normalized_record_set["documents"],
+                "uris": None,
+                "images": None,
+            }
+        )
+
+        if n is not None:
+            return n
+    except ValueError as e:
+        if "Inconsistent number of records" in str(e):
+            raise e
+
+    return 0
+
+
+def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> int:
     """Get the number of items from a record set"""
     (_, n) = types.get_n_items_from_record_set(
         {
@@ -90,9 +116,11 @@ def get_n_items_from_record_set(
             "documents": normalized_record_set["documents"],
             "uris": None,
             "images": None,
-        },
-        should_validate=should_validate,
+        }
     )
+
+    if n is None:
+        raise ValueError("Expected record set to contain at least one record")
 
     return n
 
@@ -102,7 +130,7 @@ def count(collection: Collection, record_set: RecordSet) -> None:
     count = collection.count()
     normalized_record_set = wrap_all(record_set)
 
-    n = get_n_items_from_record_set(normalized_record_set, should_validate=False)
+    n = get_n_items_from_record_set(normalized_record_set)
 
     assert count == n
 
@@ -113,6 +141,7 @@ def _field_matches(
     field_name: Union[
         Literal["documents"], Literal["metadatas"], Literal["embeddings"]
     ],
+    n: int,
 ) -> None:
     """
     The actual embedding field is equal to the expected field
@@ -128,8 +157,6 @@ def _field_matches(
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
-
-    n = get_n_items_from_record_set(normalized_record_set, should_validate=False)
 
     if n == 0:
         assert actual_field == []
@@ -176,19 +203,77 @@ def ids_match(collection: Collection, record_set: RecordSet) -> None:
 def metadatas_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding metadata is equal to the expected metadata"""
     normalized_record_set = wrap_all(record_set)
-    _field_matches(collection, normalized_record_set, "metadatas")
+
+    _field_matches(
+        collection,
+        normalized_record_set,
+        "metadatas",
+        get_n_items_from_record_set(normalized_record_set),
+    )
+
+
+def metadatas_match_state_record_set(
+    collection: Collection, record_set: StateMachineRecordSet
+) -> None:
+    """The actual embedding metadata is equal to the expected metadata"""
+    normalized_record_set = wrap_all(cast(RecordSet, record_set))
+
+    _field_matches(
+        collection,
+        normalized_record_set,
+        "metadatas",
+        get_n_items_from_record_set_state(record_set),
+    )
 
 
 def documents_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding documents is equal to the expected documents"""
     normalized_record_set = wrap_all(record_set)
-    _field_matches(collection, normalized_record_set, "documents")
+    _field_matches(
+        collection,
+        normalized_record_set,
+        "documents",
+        get_n_items_from_record_set(normalized_record_set),
+    )
+
+
+def documents_match_state_record_set(
+    collection: Collection, record_set: StateMachineRecordSet
+) -> None:
+    """The actual embedding documents is equal to the expected metadata"""
+    normalized_record_set = wrap_all(cast(RecordSet, record_set))
+
+    _field_matches(
+        collection,
+        normalized_record_set,
+        "documents",
+        get_n_items_from_record_set_state(record_set),
+    )
 
 
 def embeddings_match(collection: Collection, record_set: RecordSet) -> None:
-    """The actual embedding documents is equal to the expected documents"""
+    """The actual embedding is equal to the expected documents"""
     normalized_record_set = wrap_all(record_set)
-    _field_matches(collection, normalized_record_set, "embeddings")
+    _field_matches(
+        collection,
+        normalized_record_set,
+        "embeddings",
+        get_n_items_from_record_set(normalized_record_set),
+    )
+
+
+def embeddings_match_state_record_set(
+    collection: Collection, record_set: StateMachineRecordSet
+) -> None:
+    """The actual embedding is equal to the expected metadata"""
+    normalized_record_set = wrap_all(cast(RecordSet, record_set))
+
+    _field_matches(
+        collection,
+        normalized_record_set,
+        "embeddings",
+        get_n_items_from_record_set_state(record_set),
+    )
 
 
 def no_duplicates(collection: Collection) -> None:
@@ -252,7 +337,7 @@ def ann_accuracy(
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
 
-    n = get_n_items_from_record_set(normalized_record_set, should_validate=False)
+    n = get_n_items_from_record_set(normalized_record_set)
     if n == 0:
         return  # nothing to test here
 

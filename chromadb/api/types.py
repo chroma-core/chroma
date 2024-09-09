@@ -612,6 +612,9 @@ def validate_batch_size(
 ) -> None:
     (_, batch_size) = get_n_items_from_record_set(record_set)
 
+    if batch_size is None:
+        raise ValueError("Expected record set to contain at least one record")
+
     if batch_size > limits["max_batch_size"]:
         raise ValueError(
             f"Batch size {batch_size} exceeds maximum batch size {limits['max_batch_size']}"
@@ -691,13 +694,13 @@ def validate_record_set(
 
 
 def get_n_items_from_record_set(
-    record_set: RecordSet, should_validate: bool = True
-) -> Tuple[str, int]:
+    record_set: RecordSet,
+) -> Tuple[str | None, int | None]:
     """
     Get the number of items in the record set.
     """
-    if should_validate:
-        validate_record_set_consistency(record_set)
+
+    validate_record_set_consistency(record_set)
 
     for field, value in record_set.items():
         if isinstance(value, list) and len(value) > 0:
