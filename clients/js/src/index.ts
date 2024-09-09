@@ -41,5 +41,5 @@ export {
   QueryRecordsParams,
   PeekParams,
   DeleteParams,
-  Collection,
+  CollectionParams,
 } from "./types";

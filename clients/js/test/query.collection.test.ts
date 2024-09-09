@@ -40,8 +40,8 @@ describe("query records", () => {
 
   test("it should query a collection, singular", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, { ids: IDS, embeddings: EMBEDDINGS });
-    const results = await client.queryRecords(collection, {
+    await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
+    const results = await collection.query({
       queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       nResults: 2,
     });
@@ -55,8 +55,8 @@ describe("query records", () => {
 
   test("it should query a collection, array", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, { ids: IDS, embeddings: EMBEDDINGS });
-    const results = await client.queryRecords(collection, {
+    await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
+    const results = await collection.query({
       queryEmbeddings: [
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -77,14 +77,14 @@ describe("query records", () => {
   // test where_document
   test("it should get embedding with matching documents", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
 
-    const results = await client.queryRecords(collection, {
+    const results = await collection.query({
       queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       nResults: 3,
       whereDocument: { $contains: "This is a test" },
@@ -96,7 +96,7 @@ describe("query records", () => {
     expect(results.ids[0]).not.toContain("test2");
     expect(results.documents[0]).toContain("This is a test");
 
-    const results2 = await client.queryRecords(collection, {
+    const results2 = await collection.query({
       queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       nResults: 3,
       whereDocument: { $contains: "This is a test" },
@@ -112,14 +112,14 @@ describe("query records", () => {
 
   test("it should exclude documents matching - not_contains", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
 
-    const results = await client.queryRecords(collection, {
+    const results = await collection.query({
       queryEmbeddings: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       nResults: 3,
       whereDocument: { $not_contains: "This is a test" },
@@ -137,14 +137,14 @@ describe("query records", () => {
       name: "test",
       embeddingFunction: embeddingFunction,
     });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
 
-    const results = await client.queryRecords(collection, {
+    const results = await collection.query({
       queryTexts: "test",
       nResults: 3,
       whereDocument: { $contains: "This is a test" },
@@ -162,14 +162,14 @@ describe("query records", () => {
       name: "test",
       embeddingFunction: embeddingFunction,
     });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
 
-    const results = await client.queryRecords(collection, {
+    const results = await collection.query({
       queryTexts: "test",
       nResults: 3,
       where: { float_value: 2 },
@@ -187,14 +187,14 @@ describe("query records", () => {
       name: "test",
       embeddingFunction: embeddingFunction,
     });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
 
-    const results = await client.queryRecords(collection, {
+    const results = await collection.query({
       queryTexts: "test",
       nResults: 3,
       where: { float_value: { $in: [2, 5, 10] } },
@@ -211,14 +211,14 @@ describe("query records", () => {
       name: "test",
       embeddingFunction: new TestEmbeddingFunction(),
     });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
 
-    const results = await client.queryRecords(collection, {
+    const results = await collection.query({
       queryTexts: "test",
       nResults: 3,
       where: { float_value: { $nin: [-2, 0] } },
@@ -236,7 +236,7 @@ describe("query records", () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
-      await client.queryRecords(collection, { queryEmbeddings: [1, 2, 3] });
+      await collection.query({ queryEmbeddings: [1, 2, 3] });
     }).rejects.toThrow(InvalidCollectionError);
   });
 });

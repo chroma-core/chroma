@@ -1,14 +1,16 @@
 import { AdminClient } from "./AdminClient";
+import { ChromaClient } from "./ChromaClient";
 import { ChromaConnectionError } from "./Errors";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import {
   AddRecordsParams,
   BaseRecordOperationParams,
-  Collection,
+  CollectionParams,
   Metadata,
   MultiRecordOperationParams,
   UpdateRecordsParams,
 } from "./types";
+import { Collection } from "./Collection";
 
 // a function to convert a non-Array object to an Array
 export function toArray<T>(obj: T | T[]): Array<T> {
@@ -153,27 +155,15 @@ export async function prepareRecordRequest(
   };
 }
 
-function notifyUserOfLegacyMethod(newMethod: string) {
-  return async () => {
-    throw new Error(
-      `Collection methods have been moved to ChromaClient. Please use ${newMethod} instead.`,
-    );
-  };
-}
-
-/** This function adds some guards so that if a client is attempting to call
- *  the legacy methods, it will fail with a nice error. */
-export function wrapCollection(collection: Collection): Collection {
-  return {
-    ...collection,
-    add: notifyUserOfLegacyMethod("ChromaClient.addRecords()"),
-    upsert: notifyUserOfLegacyMethod("ChromaClient.upsertRecords()"),
-    count: notifyUserOfLegacyMethod("ChromaClient.countRecords()"),
-    modify: notifyUserOfLegacyMethod("ChromaClient.updateCollection()"),
-    get: notifyUserOfLegacyMethod("ChromaClient.updateCollection()"),
-    update: notifyUserOfLegacyMethod("ChromaClient.updateRecords()"),
-    query: notifyUserOfLegacyMethod("ChromaClient.queryRecords()"),
-    peek: notifyUserOfLegacyMethod("ChromaClient.peekRecords()"),
-    delete: notifyUserOfLegacyMethod("ChromaClient.deleteRecords()"),
-  } as Collection;
+export function wrapCollection(
+  api: ChromaClient,
+  collection: CollectionParams,
+): Collection {
+  return new Collection(
+    collection.name,
+    collection.id,
+    api,
+    collection.embeddingFunction,
+    collection.metadata,
+  );
 }

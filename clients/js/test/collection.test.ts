@@ -27,8 +27,7 @@ describe("collections", () => {
     expect(collection.name).toBe("test");
     expect(collection.metadata).toBeNull();
 
-    collection.name = "test2";
-    await client.updateCollection(collection);
+    await collection.modify({ name: "test2" });
     expect(collection.name).toBe("test2");
     expect(collection.metadata).toBeNull();
 
@@ -53,8 +52,7 @@ describe("collections", () => {
     expect(collection3.name).toBe(original_name);
     expect(collection3.metadata).toEqual(original_metadata);
 
-    collection3.name = new_name;
-    await client.updateCollection(collection3);
+    await collection3.modify({ name: new_name });
     expect(collection3.name).toBe(new_name);
     expect(collection3.metadata).toEqual(original_metadata);
 
@@ -66,7 +64,7 @@ describe("collections", () => {
     expect(collection4.metadata).toEqual(original_metadata);
 
     collection3.metadata = new_metadata;
-    await client.updateCollection(collection3);
+    await collection3.modify({ metadata: new_metadata });
     expect(collection3.name).toBe(new_name);
     expect(collection3.metadata).toEqual(new_metadata);
 
@@ -76,14 +74,6 @@ describe("collections", () => {
     });
     expect(collection5.name).toBe(new_name);
     expect(collection5.metadata).toEqual(new_metadata);
-  });
-
-  test("it fails with a nice error when calling the legacy functions", async () => {
-    const collection = await client.createCollection({ name: "test" });
-    // @ts-ignore
-    expect(collection.peek()).rejects.toThrowErrorMatchingInlineSnapshot(
-      `"Collection methods have been moved to ChromaClient. Please use ChromaClient.peekRecords() instead."`,
-    );
   });
 
   test("it should store metadata", async () => {
@@ -105,8 +95,7 @@ describe("collections", () => {
     expect(collection3.metadata).toEqual({ test: "test" });
 
     // modify
-    collection3.metadata = { test: "test2" };
-    await client.updateCollection(collection3);
+    await collection3.modify({ metadata: { test: "test2" } });
     expect(collection3.metadata).toEqual({ test: "test2" });
 
     // get it again

@@ -297,8 +297,8 @@ collection.modify(name="new_name") # Rename the collection
 There are a few useful convenience methods for working with Collections.
 
 ```javascript
-await client.peekRecords(collection); // returns a list of the first 10 items in the collection
-await client.countRecords(collection); // returns the number of items in the collection
+await collection.peek(); // returns a list of the first 10 items in the collection
+await collection.count(); // returns the number of items in the collection
 ```
 
 {% /tab %}
@@ -371,7 +371,7 @@ Add data to Chroma with `.addRecords`.
 Raw documents:
 
 ```javascript
-await client.addRecords(collection, {
+await collection.add({
     ids: ["id1", "id2", "id3", ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
     documents: ["lorem ipsum...", "doc2", "doc3", ...],
@@ -409,7 +409,7 @@ collection.add(
 {% tab label="Javascript" %}
 
 ```javascript
-await client.addRecords(collection, {
+await collection.add({
     ids: ["id1", "id2", "id3", ...],
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
@@ -441,7 +441,7 @@ collection.add(
 {% tab label="Javascript" %}
 
 ```javascript
-await client.addRecords(collection, {
+await collection.add({
     ids: ["id1", "id2", "id3", ...],
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
@@ -476,7 +476,7 @@ collection.query(
 Chroma collections can be queried in a variety of ways, using the `.queryRecords` method.
 
 ```javascript
-const result = await client.queryRecords(collection, {
+const result = await collection.query({
     queryEmbeddings: [[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
     nResults: 10,
     where: {"metadata_field": "is_equal_to_this"},
@@ -525,7 +525,7 @@ collection.get(
 {% tab label="Javascript" %}
 
 ```javascript
-await client.queryRecords(collection, {
+await collection.query({
     nResults: 10, // n_results
     where: {"metadata_field": "is_equal_to_this"}, // where
     queryTexts: ["doc10", "thus spake zarathustra", ...], // query_text
@@ -535,7 +535,7 @@ await client.queryRecords(collection, {
 You can also retrieve records from a collection by `id` using `.getRecords`.
 
 ```javascript
-await client.getRecords(collection, {
+await collection.get( {
 	ids: ["id1", "id2", "id3", ...], //ids
 	where: {"style": "style1"} // where
 })
@@ -571,11 +571,11 @@ collection.query(
 
 ```javascript
 # Only get documents and ids
-client.getRecords(collection,
+collection.get(
     {include=["documents"]}
 )
 
-client.getRecords(collection, {
+collection.get({
     queryEmbeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
     include=["documents"]
 })
@@ -753,8 +753,7 @@ collection.update(
 Any property of records in a collection can be updated using `.updateRecords`.
 
 ```javascript
-client.updateRecords(
-    collection,
+collection.update(
     {
       ids: ["id1", "id2", "id3", ...],
       embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
@@ -790,7 +789,7 @@ collection.upsert(
 {% tab label="Javascript" %}
 
 ```javascript
-await client.upsertRecords(collection, {
+await collection.upsert({
   ids: ["id1", "id2", "id3"],
   embeddings: [
     [1.1, 2.3, 3.2],
@@ -831,7 +830,7 @@ collection.delete(
 {% tab label="Javascript" %}
 
 ```javascript
-await client.deleteRecords(collection, {
+await collection.delete({
     ids: ["id1", "id2", "id3",...], //ids
 	where: {"chapter": "20"} //where
 })

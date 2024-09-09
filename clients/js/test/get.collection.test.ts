@@ -22,16 +22,19 @@ describe("get collections", () => {
 
   beforeEach(async () => {
     await client.reset();
+    // the sleep assures the db is fully reset
+    // this should be further investigated
+    await new Promise((r) => setTimeout(r, 1000));
   });
 
   test("it should get documents from a collection", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
-    const results = await client.getRecords(collection, { ids: ["test1"] });
+    const results = await collection.get({ ids: ["test1"] });
     expect(results?.ids).toHaveLength(1);
     expect(["test1"]).toEqual(expect.arrayContaining(results.ids));
     expect(["test2"]).not.toEqual(expect.arrayContaining(results.ids));
@@ -39,7 +42,7 @@ describe("get collections", () => {
       expect.arrayContaining(["metadatas", "documents"]),
     );
 
-    const results2 = await client.getRecords(collection, {
+    const results2 = await collection.get({
       where: { test: "test1" },
     });
     expect(results2?.ids).toHaveLength(1);
@@ -48,13 +51,13 @@ describe("get collections", () => {
 
   test("wrong code returns an error", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
     try {
-      await client.getRecords(collection, {
+      await collection.get({
         where: {
           //@ts-ignore supposed to fail
           test: { $contains: "hello" },
@@ -71,13 +74,13 @@ describe("get collections", () => {
 
   test("it should get embedding with matching documents", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
-    const results2 = await client.getRecords(collection, {
+    const results2 = await collection.get({
       whereDocument: { $contains: "This is a test" },
     });
     expect(results2?.ids).toHaveLength(1);
@@ -86,13 +89,13 @@ describe("get collections", () => {
 
   test("it should get records not matching", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
       documents: DOCUMENTS,
     });
-    const results2 = await client.getRecords(collection, {
+    const results2 = await collection.get({
       whereDocument: { $not_contains: "This is another" },
     });
     expect(results2?.ids).toHaveLength(2);
@@ -101,12 +104,12 @@ describe("get collections", () => {
 
   test("test gt, lt, in a simple small way", async () => {
     const collection = await client.createCollection({ name: "test" });
-    await client.addRecords(collection, {
+    await collection.add({
       ids: IDS,
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
-    const items = await client.getRecords(collection, {
+    const items = await collection.get({
       where: { float_value: { $gt: -1.4 } },
     });
     expect(items.ids).toHaveLength(2);
@@ -117,7 +120,7 @@ describe("get collections", () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
     expect(async () => {
-      await client.getRecords(collection, { ids: IDS });
+      await collection.get({ ids: IDS });
     }).rejects.toThrow(InvalidCollectionError);
   });
 
