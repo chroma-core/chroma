@@ -179,6 +179,9 @@ impl ArrowBlockfileWriter {
                 let mut deltas = self.block_deltas.lock();
                 deltas.insert(new_delta.id, new_delta);
             }
+
+            let num_blocks = self.block_deltas.lock().len();
+            println!("New num of blocks: {}", num_blocks);
         }
 
         Ok(())

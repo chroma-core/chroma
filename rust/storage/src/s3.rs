@@ -538,7 +538,7 @@ impl Configurable<StorageConfig> for S3Storage {
 
                         // Set up s3 client
                         let config = aws_sdk_s3::config::Builder::new()
-                            .endpoint_url("http://minio.chroma:9000".to_string())
+                            .endpoint_url(s3_config.endpoint.clone())
                             .credentials_provider(cred)
                             .behavior_version_latest()
                             .region(aws_sdk_s3::config::Region::new("us-east-1"))

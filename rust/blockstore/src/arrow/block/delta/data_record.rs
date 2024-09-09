@@ -14,7 +14,10 @@ use arrow::{
 use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use parking_lot::RwLock;
 use prost::Message;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 // Convenience type for the storage entry
 // (id, embedding, metadata, document)
@@ -155,7 +158,7 @@ impl DataRecordStorage {
         };
         inner
             .storage
-            .insert(composite_key.clone(), (id, embedding, metadata, document));
+            .insert(composite_key, (id, embedding, metadata, document));
         inner.id_size += id_size;
         inner.embedding_size += embedding_size;
         inner.metadata_size += metadata_size;
