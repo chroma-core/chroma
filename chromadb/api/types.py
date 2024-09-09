@@ -60,15 +60,19 @@ def maybe_cast_one_to_many_embedding(
     if target is None:
         return None
 
-    if isinstance(target, List):
-        # One Embedding
-        if len(target) > 0 and isinstance(target[0], (int, float)):
-            return cast(Embeddings, [target])
-
-    # Already a sequence
+    embeddings_list = target
     if isinstance(target, np.ndarray):
-        return cast(Embeddings, target.tolist())
-    return cast(Embeddings, target)
+        embeddings_list = target.tolist()
+
+    if isinstance(embeddings_list, List):
+        # One Embedding
+        if len(embeddings_list) == 0:
+            raise ValueError("Expected embeddings to be a list with at least one item")
+
+        if isinstance(embeddings_list[0], (int, float)):
+            return cast(Embeddings, [embeddings_list])
+
+    return cast(Embeddings, embeddings_list)
 
 
 # Metadatas
@@ -530,6 +534,9 @@ def validate_batch_size(
 ) -> None:
     (_, batch_size) = get_n_items_from_record_set(record_set)
 
+    if batch_size is None:
+        raise ValueError("Expected record set to contain at least one record")
+
     if batch_size > limits["max_batch_size"]:
         raise ValueError(
             f"Batch size {batch_size} exceeds maximum batch size {limits['max_batch_size']}"
@@ -576,21 +583,23 @@ def validate_record_set_consistency(record_set: RecordSet) -> None:
     if len(error_messages) > 0:
         raise ValueError(", ".join(error_messages))
 
+    return
+
 
 def get_n_items_from_record_set(
-    record_set: RecordSet, should_validate: bool = True
-) -> Tuple[str, int]:
+    record_set: RecordSet,
+) -> Tuple[str | None, int | None]:
     """
     Get the number of items in the record set.
     """
-    if should_validate:
-        validate_record_set_consistency(record_set)
+
+    validate_record_set_consistency(record_set)
 
     for field, value in record_set.items():
         if isinstance(value, list) and len(value) > 0:
             return field, len(value)
 
-    return "", 0
+    return None, None
 
 
 def validate_record_set(record_set: RecordSet) -> None:

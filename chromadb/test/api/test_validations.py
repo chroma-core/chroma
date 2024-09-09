@@ -1,5 +1,6 @@
 import pytest
 from typing import cast
+import numpy as np
 import chromadb.errors as errors
 from chromadb.api.types import (
     validate_embeddings,
@@ -8,6 +9,7 @@ from chromadb.api.types import (
     RecordSet,
     validate_ids,
     validate_record_set_consistency,
+    maybe_cast_one_to_many_embedding,
 )
 
 
@@ -130,3 +132,44 @@ def test_validate_record_set_consistency() -> None:
     assert "Expected field ids to be a non-empty list" in str(exc_info.value)
     assert "Expected field embeddings to be a list" in str(exc_info.value)
     assert "Inconsistent number of records:" in str(exc_info.value)
+
+
+def test_maybe_cast_one_to_many_embedding() -> None:
+    # Test with None input
+    assert maybe_cast_one_to_many_embedding(None) is None
+
+    # Test with a single embedding as a list
+    single_embedding = [1.0, 2.0, 3.0]
+    result = maybe_cast_one_to_many_embedding(single_embedding)
+    assert result == [single_embedding]
+
+    # Test with multiple embeddings as a list of lists
+    multiple_embeddings = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    result = maybe_cast_one_to_many_embedding(multiple_embeddings)  # type: ignore[arg-type]
+    assert result == multiple_embeddings
+
+    # Test with a numpy array (single embedding)
+    np_single = np.array([1.0, 2.0, 3.0])
+    result = maybe_cast_one_to_many_embedding(np_single)
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert np.array_equal(result[0], np_single)
+
+    # Test with a numpy array (multiple embeddings)
+    np_multiple = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    result = maybe_cast_one_to_many_embedding(np_multiple)
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert np.array_equal(result, np_multiple)
+
+    # Test with an empty list (should raise ValueError)
+    with pytest.raises(
+        ValueError, match="Expected embeddings to be a list with at least one item"
+    ):
+        maybe_cast_one_to_many_embedding([])
+
+    # Test with an empty list (should raise ValueError)
+    with pytest.raises(
+        ValueError, match="Expected embeddings to be a list with at least one item"
+    ):
+        maybe_cast_one_to_many_embedding(np.array([]))
