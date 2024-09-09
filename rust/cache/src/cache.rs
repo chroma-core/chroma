@@ -22,7 +22,7 @@ where
 impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cache<K, V> {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
-            CacheConfig::Unbounded(_) => Cache::Unbounded(UnboundedCache::new(config)),
+            CacheConfig::Unbounded(_) => Cache::Unbounded(UnboundedCache::new()),
             _ => Cache::Foyer(FoyerCacheWrapper::new(config)),
         }
     }
@@ -101,12 +101,9 @@ where
     K: Send + Sync + Clone + Hash + Eq + 'static,
     V: Send + Sync + Clone + 'static,
 {
-    pub fn new(config: &CacheConfig) -> Self {
-        match config {
-            CacheConfig::Unbounded(_) => UnboundedCache {
-                cache: Arc::new(RwLock::new(HashMap::new())),
-            },
-            _ => panic!("Invalid cache configuration"),
+    pub fn new() -> Self {
+        UnboundedCache {
+            cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -202,7 +199,7 @@ where
 {
     async fn try_from_config(config: &CacheConfig) -> Result<Self, Box<dyn ChromaError>> {
         match config {
-            CacheConfig::Unbounded(_) => Ok(UnboundedCache::new(config)),
+            CacheConfig::Unbounded(_) => Ok(UnboundedCache::new()),
             _ => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
         }
     }
