@@ -62,6 +62,9 @@ pub struct HnswIndexRef {
 impl Cacheable for HnswIndexRef {
     fn weight(&self) -> usize {
         let index = self.inner.read();
+        if index.len() == 0 {
+            return 1;
+        }
         index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize
     }
 }
