@@ -588,7 +588,7 @@ def validate_record_set_consistency(record_set: RecordSet) -> None:
 
 def get_n_items_from_record_set(
     record_set: RecordSet,
-) -> Tuple[str | None, int | None]:
+) -> Tuple[Union[str, None], Union[int, None]]:
     """
     Get the number of items in the record set.
     """
