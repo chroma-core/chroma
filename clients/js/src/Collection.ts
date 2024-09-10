@@ -17,7 +17,8 @@ import {
   CollectionParams,
 } from "./types";
 import {
-  prepareRecordRequest,
+  prepareRecordRequestForUpsert,
+  prepareRecordRequestForUpdate,
   prepareRecordRequestWithIDsOptional,
   toArray,
   toArrayOfArrays,
@@ -112,7 +113,7 @@ export class Collection {
     await this.client.api.upsert(
       this.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
-      (await prepareRecordRequest(
+      (await prepareRecordRequestForUpsert(
         params,
         this.embeddingFunction,
       )) as GeneratedApi.AddEmbedding,
@@ -212,7 +213,7 @@ export class Collection {
 
     await this.client.api.update(
       this.id,
-      await prepareRecordRequest(params, this.embeddingFunction, true),
+      await prepareRecordRequestForUpdate(params, this.embeddingFunction),
       this.client.api.options,
     );
   }

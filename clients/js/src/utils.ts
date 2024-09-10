@@ -7,8 +7,8 @@ import {
   CollectionParams,
   Embeddings,
   Documents,
-  BaseRecordOperationParamsWithIDsOptional,
   Metadata,
+  BaseRecordOperationParams,
   MultiRecordOperationParams,
   MultiRecordOperationParamsWithIDsOptional,
   UpdateRecordsParams,
@@ -88,7 +88,7 @@ export function isBrowser() {
 }
 
 function arrayifyParams(
-  params: BaseRecordOperationParamsWithIDsOptional,
+  params: BaseRecordOperationParams,
 ): MultiRecordOperationParamsWithIDsOptional {
   return {
     ids: params.ids !== undefined ? toArray(params.ids) : undefined,
@@ -102,93 +102,95 @@ function arrayifyParams(
   };
 }
 
-export async function prepareRecordRequest(
+export async function prepareRecordRequestForUpsert(
   reqParams: UpsertRecordsParams | UpdateRecordsParams,
   embeddingFunction: IEmbeddingFunction,
-  update?: true,
 ): Promise<MultiRecordOperationParams> {
-  const {
-    ids = [],
-    embeddings,
-    metadatas,
-    documents,
-  } = arrayifyParams(reqParams);
+  const recordSet = arrayifyParams(reqParams);
+  const { ids, embeddings, documents } = recordSet;
 
-  if (!embeddings && !documents && !update) {
+  if (!ids) {
+    throw new Error("ids cannot be undefined");
+  }
+
+  if (!embeddings && !documents) {
     throw new Error("embeddings and documents cannot both be undefined");
   }
 
   validateIDs(ids);
 
-  const embeddingsArray = await computeEmbeddings(
+  recordSet.embeddings = await computeEmbeddings(
     embeddingFunction,
     embeddings,
     documents,
-    update,
   );
 
-  return {
-    ids,
-    metadatas,
-    documents,
-    embeddings: embeddingsArray,
-  };
+  return recordSet as MultiRecordOperationParams;
 }
 
-export function wrapCollection(
-  api: ChromaClient,
-  collection: CollectionParams,
-): Collection {
-  return new Collection(
-    collection.name,
-    collection.id,
-    api,
-    collection.embeddingFunction,
-    collection.metadata,
-  );
+export async function prepareRecordRequestForUpdate(
+  reqParams: UpsertRecordsParams | UpdateRecordsParams,
+  embeddingFunction: IEmbeddingFunction,
+): Promise<MultiRecordOperationParams> {
+  const recordSet = arrayifyParams(reqParams);
+  const { ids, embeddings, documents } = recordSet;
+
+  if (!ids) {
+    throw new Error("ids cannot be undefined");
+  }
+
+  validateIDs(ids);
+
+  if (documents) {
+    recordSet.embeddings = await computeEmbeddings(
+      embeddingFunction,
+      embeddings,
+      documents,
+    );
+  }
+
+  return recordSet as MultiRecordOperationParams;
 }
 
 export async function prepareRecordRequestWithIDsOptional(
   reqParams: AddRecordsParams,
   embeddingFunction: IEmbeddingFunction,
 ): Promise<MultiRecordOperationParamsWithIDsOptional> {
-  const { ids, embeddings, metadatas, documents } = arrayifyParams(reqParams);
+  const recordSet = arrayifyParams(reqParams);
+  const { ids, embeddings, documents } = recordSet;
 
   if (!embeddings && !documents) {
     throw new Error("embeddings and documents cannot both be undefined");
   }
 
-  if (ids) {
+  if (ids !== undefined) {
     validateIDs(ids);
   }
 
-  const embeddingsArray = await computeEmbeddings(
+  recordSet.embeddings = await computeEmbeddings(
     embeddingFunction,
     embeddings,
     documents,
   );
 
-  return {
-    ids,
-    metadatas,
-    documents,
-    embeddings: embeddingsArray,
-  };
+  return recordSet;
 }
 
 async function computeEmbeddings(
   embeddingFunction: IEmbeddingFunction,
   embeddings?: Embeddings,
   documents?: Documents,
-  update?: true,
 ): Promise<Embeddings | undefined> {
-  const embeddingsArray = embeddings
-    ? embeddings
-    : documents
-      ? await embeddingFunction.generate(documents)
-      : undefined;
+  if (embeddings) {
+    return embeddings;
+  }
 
-  if (!embeddingsArray && !update) {
+  let embeddingsArray: Embeddings | undefined;
+  if (documents) {
+    embeddingsArray = await embeddingFunction.generate(documents);
+  }
+
+  if (!embeddingsArray) {
     throw new Error("Failed to generate embeddings for your request.");
   }
 
@@ -213,4 +215,17 @@ function validateIDs(ids: string[]) {
       `ID's must be unique, found duplicates for: ${duplicateIds}`,
     );
   }
+}
+
+export function wrapCollection(
+  api: ChromaClient,
+  collection: CollectionParams,
+): Collection {
+  return new Collection(
+    collection.name,
+    collection.id,
+    api,
+    collection.embeddingFunction,
+    collection.metadata,
+  );
 }

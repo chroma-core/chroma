@@ -160,28 +160,19 @@ export type DeleteCollectionParams = {
 };
 
 export type BaseRecordOperationParams = {
-  ids: ID | IDs;
-  embeddings?: Embedding | Embeddings;
-  metadatas?: Metadata | Metadatas;
-  documents?: Document | Documents;
-};
-
-export type BaseRecordOperationParamsWithIDsOptional = {
   ids?: ID | IDs;
   embeddings?: Embedding | Embeddings;
   metadatas?: Metadata | Metadatas;
   documents?: Document | Documents;
 };
 
-export type SingleRecordOperationParams = BaseRecordOperationParams & {
-  ids: ID;
-  embeddings?: Embedding;
-  metadatas?: Metadata;
-  documents?: Document;
-};
+export type SingleRecordOperationParams =
+  SingleRecordOperationParamsWithIDsOptional & {
+    ids: ID;
+  };
 
 export type SingleRecordOperationParamsWithIDsOptional =
-  BaseRecordOperationParamsWithIDsOptional & {
+  BaseRecordOperationParams & {
     ids?: ID;
     embeddings?: Embedding;
     metadatas?: Metadata;
@@ -201,24 +192,22 @@ export type SingleAddRecordOperationParams =
   | SingleContentRecordOperationParams;
 
 type SingleEmbeddingRecordOperationParamsWithOptionalIDs =
-  BaseRecordOperationParamsWithIDsOptional & {
+  BaseRecordOperationParams & {
     embeddings: Embedding;
   };
 
 type SingleContentRecordOperationParamsWithOptionalIDs =
-  BaseRecordOperationParamsWithIDsOptional & {
+  BaseRecordOperationParams & {
     documents: Document;
   };
 
-export type MultiRecordOperationParams = BaseRecordOperationParams & {
-  ids: IDs;
-  embeddings?: Embeddings;
-  metadatas?: Metadatas;
-  documents?: Documents;
-};
+export type MultiRecordOperationParams =
+  MultiRecordOperationParamsWithIDsOptional & {
+    ids: IDs;
+  };
 
 export type MultiRecordOperationParamsWithIDsOptional =
-  BaseRecordOperationParamsWithIDsOptional & {
+  BaseRecordOperationParams & {
     ids?: IDs;
     embeddings?: Embeddings;
     metadatas?: Metadatas;
