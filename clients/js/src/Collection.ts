@@ -6,6 +6,7 @@ import {
   UpsertRecordsParams,
   BaseGetParams,
   GetResponse,
+  AddResponse,
   UpdateRecordsParams,
   QueryRecordsParams,
   MultiQueryResponse,
@@ -15,7 +16,12 @@ import {
   Embeddings,
   CollectionParams,
 } from "./types";
-import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
+import {
+  prepareRecordRequest,
+  prepareRecordRequestWithIDsOptional,
+  toArray,
+  toArrayOfArrays,
+} from "./utils";
 import { Api as GeneratedApi } from "./generated";
 
 export class Collection {
@@ -51,7 +57,7 @@ export class Collection {
   /**
    * Add items to the collection
    * @param {Object} params - The parameters for the query.
-   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {ID | IDs} [params.ids] - Optional IDs of the items to add.
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
@@ -67,18 +73,18 @@ export class Collection {
    * });
    * ```
    */
-  async add(params: AddRecordsParams): Promise<void> {
+  async add(params: AddRecordsParams): Promise<AddResponse> {
     await this.client.init();
 
-    await this.client.api.add(
+    return (await this.client.api.add(
       this.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
-      (await prepareRecordRequest(
+      (await prepareRecordRequestWithIDsOptional(
         params,
         this.embeddingFunction,
       )) as GeneratedApi.AddEmbedding,
       this.client.api.options,
-    );
+    )) as AddResponse;
   }
 
   /**

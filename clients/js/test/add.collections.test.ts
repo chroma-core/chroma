@@ -1,11 +1,4 @@
-import {
-  expect,
-  test,
-  describe,
-  beforeAll,
-  afterAll,
-  beforeEach,
-} from "@jest/globals";
+import { expect, test, describe, beforeEach } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS } from "./data";
 import { METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
@@ -136,6 +129,14 @@ describe("add collections", () => {
     expect(async () => {
       await collection.add({ ids, embeddings, metadatas });
     }).rejects.toThrow("found duplicates");
+  });
+
+  test("It should generate IDs if not provided", async () => {
+    const collection = await client.createCollection({ name: "test" });
+    const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
+    const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
+    const resp = await collection.add({ embeddings, metadatas });
+    expect(resp.ids.length).toEqual(4);
   });
 
   test("should error on empty embedding", async () => {
