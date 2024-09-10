@@ -695,7 +695,7 @@ def validate_record_set(
 
 def get_n_items_from_record_set(
     record_set: RecordSet,
-) -> Tuple[Union[str, None], Union[int, None]]:
+) -> Tuple[Optional[str], Optional[int]]:
     """
     Get the number of items in the record set.
     """

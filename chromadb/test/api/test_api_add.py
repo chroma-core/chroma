@@ -9,18 +9,18 @@ def test_add_with_no_ids(client: ClientAPI) -> None:
 
     coll = client.create_collection("test")
     coll.add(
-        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-        documents=["a", "b", None],  # type: ignore
+        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
+        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore[list-item]
+        documents=["a", "b", None],  # type: ignore[list-item]
     )
 
     results = coll.get()
     assert len(results["ids"]) == 3
 
     coll.add(
-        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-        documents=["a", "b", None],  # type: ignore
+        embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
+        metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore[list-item]
+        documents=["a", "b", None],  # type: ignore[list-item]
     )
 
     results = coll.get()
@@ -36,7 +36,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
     with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2"],
-            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
             metadatas=[{"a": 1}, {"a": 2}, {"a": 3}],
             documents=["a", "b", "c"],
         )
@@ -45,7 +45,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
     with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2", "3"],
-            embeddings=[[1, 2, 3], [1, 2, 3]],  # type: ignore
+            embeddings=[[1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
             metadatas=[{"a": 1}, {"a": 2}, {"a": 3}],
             documents=["a", "b", "c"],
         )
@@ -54,7 +54,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
     with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2", "3"],
-            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
             metadatas=[{"a": 1}, {"a": 2}],
             documents=["a", "b", "c"],
         )
@@ -63,7 +63,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
     with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2", "3"],
-            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
             metadatas=[{"a": 1}, {"a": 2}, {"a": 3}],
             documents=["a", "b"],
         )
@@ -72,7 +72,7 @@ def test_add_with_inconsistent_number_of_items(client: ClientAPI) -> None:
     with pytest.raises(ValueError, match="Inconsistent number of records"):
         coll.add(
             ids=["1", "2"],
-            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
             metadatas=[{"a": 1}],
             documents=["a", "b", "c", "d"],
         )
@@ -85,10 +85,10 @@ def test_add_with_partial_ids(client: ClientAPI) -> None:
 
     with pytest.raises(ValueError, match="Expected ID to be a str"):
         coll.add(
-            ids=["1", None],  # type: ignore
-            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-            metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-            documents=["a", "b", None],  # type: ignore
+            ids=["1", None],  # type: ignore[list-item]
+            embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore[arg-type]
+            metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore[list-item]
+            documents=["a", "b", None],  # type: ignore[list-item]
         )
 
 
@@ -98,7 +98,8 @@ def test_add_with_no_data(client: ClientAPI) -> None:
     coll = client.create_collection("test")
 
     with pytest.raises(
-        Exception, match="Expected embeddings to be a list with at least one item"
+        Exception,
+        match="Expected embeddings to be a list or a numpy array with at least one item",
     ):
         coll.add(
             ids=["1"],

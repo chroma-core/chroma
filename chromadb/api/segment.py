@@ -892,6 +892,9 @@ class SegmentAPI(ServerAPI):
             return ids
 
         (_, n) = get_n_items_from_record_set(record_set)
+        if n is None:
+            raise ValueError("Expected record set to have at least one item")
+
         generated_ids: List[str] = [str(uuid4()) for _ in range(n)]
 
         return generated_ids

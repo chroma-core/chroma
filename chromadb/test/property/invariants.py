@@ -144,7 +144,7 @@ def _field_matches(
     n: int,
 ) -> None:
     """
-    The actual embedding field is equal to the expected field
+    The actual record field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
     # If there are no ids, then there are no data to test
@@ -201,7 +201,7 @@ def ids_match(collection: Collection, record_set: RecordSet) -> None:
 
 
 def metadatas_match(collection: Collection, record_set: RecordSet) -> None:
-    """The actual embedding metadata is equal to the expected metadata"""
+    """The actual record set metadatas are equal to the expected metadatas"""
     normalized_record_set = wrap_all(record_set)
 
     _field_matches(
@@ -215,7 +215,7 @@ def metadatas_match(collection: Collection, record_set: RecordSet) -> None:
 def metadatas_match_state_record_set(
     collection: Collection, record_set: StateMachineRecordSet
 ) -> None:
-    """The actual embedding metadata is equal to the expected metadata"""
+    """The actual metadatas within the state record set are equal to the expected metadata"""
     normalized_record_set = wrap_all(cast(RecordSet, record_set))
 
     _field_matches(
@@ -227,7 +227,7 @@ def metadatas_match_state_record_set(
 
 
 def documents_match(collection: Collection, record_set: RecordSet) -> None:
-    """The actual embedding documents is equal to the expected documents"""
+    """The actual record set documents are equal to the expected documents"""
     normalized_record_set = wrap_all(record_set)
     _field_matches(
         collection,
@@ -240,7 +240,7 @@ def documents_match(collection: Collection, record_set: RecordSet) -> None:
 def documents_match_state_record_set(
     collection: Collection, record_set: StateMachineRecordSet
 ) -> None:
-    """The actual embedding documents is equal to the expected metadata"""
+    """The actual documents within the state record set are equal to the expected documents"""
     normalized_record_set = wrap_all(cast(RecordSet, record_set))
 
     _field_matches(
@@ -252,7 +252,7 @@ def documents_match_state_record_set(
 
 
 def embeddings_match(collection: Collection, record_set: RecordSet) -> None:
-    """The actual embedding is equal to the expected documents"""
+    """The actual record set embeddings are equal to the expected embeddings"""
     normalized_record_set = wrap_all(record_set)
     _field_matches(
         collection,
@@ -265,7 +265,7 @@ def embeddings_match(collection: Collection, record_set: RecordSet) -> None:
 def embeddings_match_state_record_set(
     collection: Collection, record_set: StateMachineRecordSet
 ) -> None:
-    """The actual embedding is equal to the expected metadata"""
+    """The actual embeddings within the state record set are equal to the expected embeddings"""
     normalized_record_set = wrap_all(cast(RecordSet, record_set))
 
     _field_matches(

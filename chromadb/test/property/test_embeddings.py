@@ -134,7 +134,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         if len(intersection) > 0:
             # Partially apply the non-duplicative records to the state
             new_ids = list(set(ids).difference(intersection))  # type: ignore[arg-type]
-            indices = [ids.index(id) for id in new_ids]  # type: ignore
+            indices = [ids.index(id) for id in new_ids]  # type: ignore[union-attr]
             filtered_record_set: strategies.NormalizedRecordSet = {
                 "ids": [ids[i] for i in indices],  # type: ignore
                 "metadatas": [normalized_record_set["metadatas"][i] for i in indices]
