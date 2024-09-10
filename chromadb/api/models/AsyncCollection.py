@@ -261,14 +261,13 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        record_set = self._process_upsert_or_update_request(
+        record_set = self._process_update_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
-            require_embeddings_or_data=False,
         )
 
         await self._client._update(
@@ -305,14 +304,13 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        record_set = self._process_upsert_or_update_request(
+        record_set = self._process_upsert_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
-            require_embeddings_or_data=True,
         )
 
         await self._client._upsert(

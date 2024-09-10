@@ -127,6 +127,20 @@ class RecordSet(TypedDict):
     uris: Optional[URIs]
 
 
+def does_record_set_contain_data(record_set: RecordSet, ignore: List[str] = []) -> bool:
+    for key, value in record_set.items():
+        if key in ignore:
+            continue
+
+        if isinstance(value, list):
+            if len(value) == 0:
+                raise ValueError(f"Expected {key} to be a non-empty list")
+
+            return True
+
+    return False
+
+
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
 Include = List[IncludeEnum]

@@ -48,6 +48,7 @@ from chromadb.api.types import (
     validate_n_results,
     validate_where,
     validate_where_document,
+    does_record_set_contain_data,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -175,7 +176,7 @@ class CollectionCommon(Generic[ClientT]):
             "uris": unpacked_uris,
         }
 
-    def _validate_embedding_set(
+    def _validate_record_set(
         self,
         ids: IDs,
         embeddings: Optional[Embeddings],
@@ -453,7 +454,7 @@ class CollectionCommon(Generic[ClientT]):
             else None
         )
 
-        self._validate_embedding_set(
+        self._validate_record_set(
             ids=unpacked_embedding_set["ids"],
             embeddings=normalized_embeddings,
             metadatas=unpacked_embedding_set["metadatas"],
@@ -481,7 +482,7 @@ class CollectionCommon(Generic[ClientT]):
             "uris": unpacked_embedding_set["uris"],
         }
 
-    def _process_upsert_or_update_request(
+    def _process_upsert_request(
         self,
         ids: OneOrMany[ID],
         embeddings: Optional[
@@ -494,9 +495,8 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]],
         uris: Optional[OneOrMany[URI]],
-        require_embeddings_or_data: bool = True,
     ) -> RecordSet:
-        unpacked_embedding_set = self._unpack_record_set(
+        unpacked_record_set = self._unpack_record_set(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -506,45 +506,95 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         normalized_embeddings = (
-            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
-            if unpacked_embedding_set["embeddings"] is not None
+            self._normalize_embeddings(unpacked_record_set["embeddings"])
+            if unpacked_record_set["embeddings"] is not None
             else None
         )
 
-        self._validate_embedding_set(
-            ids=unpacked_embedding_set["ids"],
+        self._validate_record_set(
+            ids=unpacked_record_set["ids"],
             embeddings=normalized_embeddings,
-            metadatas=unpacked_embedding_set["metadatas"],
-            documents=unpacked_embedding_set["documents"],
-            images=unpacked_embedding_set["images"],
-            uris=unpacked_embedding_set["uris"],
-            require_embeddings_or_data=require_embeddings_or_data,
+            metadatas=unpacked_record_set["metadatas"],
+            documents=unpacked_record_set["documents"],
+            images=unpacked_record_set["images"],
+            uris=unpacked_record_set["uris"],
+        )
+
+        prepared_embeddings = (
+            self._compute_embeddings(
+                documents=unpacked_record_set["documents"],
+                images=unpacked_record_set["images"],
+                uris=None,
+            )
+            if normalized_embeddings is None
+            else normalized_embeddings
+        )
+
+        return {
+            "ids": unpacked_record_set["ids"],
+            "embeddings": prepared_embeddings,
+            "metadatas": unpacked_record_set["metadatas"],
+            "documents": unpacked_record_set["documents"],
+            "images": unpacked_record_set["images"],
+            "uris": unpacked_record_set["uris"],
+        }
+
+    def _process_update_request(
+        self,
+        ids: OneOrMany[ID],
+        embeddings: Optional[  # type: ignore[type-arg]
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[np.ndarray],
+            ]
+        ],
+        metadatas: Optional[OneOrMany[Metadata]],
+        documents: Optional[OneOrMany[Document]],
+        images: Optional[OneOrMany[Image]],
+        uris: Optional[OneOrMany[URI]],
+    ) -> RecordSet:
+        unpacked_record_set = self._unpack_record_set(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
+        )
+
+        normalized_embeddings = (
+            self._normalize_embeddings(unpacked_record_set["embeddings"])
+            if unpacked_record_set["embeddings"] is not None
+            else None
+        )
+
+        self._validate_record_set(
+            ids=unpacked_record_set["ids"],
+            embeddings=normalized_embeddings,
+            metadatas=unpacked_record_set["metadatas"],
+            documents=unpacked_record_set["documents"],
+            images=unpacked_record_set["images"],
+            uris=unpacked_record_set["uris"],
+            require_embeddings_or_data=False,
         )
 
         prepared_embeddings = normalized_embeddings
-        try:
-            prepared_embeddings = (
-                self._compute_embeddings(
-                    documents=unpacked_embedding_set["documents"],
-                    images=unpacked_embedding_set["images"],
-                    uris=None,
-                )
-                if prepared_embeddings is None
-                else prepared_embeddings
+        if does_record_set_contain_data(
+            unpacked_record_set, ignore=["ids", "metadatas", "embeddings"]
+        ):
+            prepared_embeddings = self._compute_embeddings(
+                documents=unpacked_record_set["documents"],
+                images=unpacked_record_set["images"],
+                uris=None,
             )
-        except ValueError:
-            # update doesn't require the presence of data
-            # Therefore, we don't error out when data is not provided for update
-            if require_embeddings_or_data:
-                raise ValueError("You must provide either documents or images")
 
         return {
-            "ids": unpacked_embedding_set["ids"],
+            "ids": unpacked_record_set["ids"],
             "embeddings": prepared_embeddings,
-            "metadatas": unpacked_embedding_set["metadatas"],
-            "documents": unpacked_embedding_set["documents"],
-            "images": unpacked_embedding_set["images"],
-            "uris": unpacked_embedding_set["uris"],
+            "metadatas": unpacked_record_set["metadatas"],
+            "documents": unpacked_record_set["documents"],
+            "images": unpacked_record_set["images"],
+            "uris": unpacked_record_set["uris"],
         }
 
     def _validate_and_prepare_delete_request(
