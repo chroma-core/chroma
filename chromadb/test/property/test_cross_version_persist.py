@@ -259,7 +259,13 @@ def persist_generated_data_with_old_version(
         )
         result = coll.add(**embeddings_strategy)
 
-        if result is not None and "ids" in result:
+        if embeddings_strategy["ids"] is None:
+            if result is None:
+                raise ValueError("IDs from embeddings strategy should not be None")
+
+            if result["ids"] is None:
+                raise ValueError("IDs from result should not be None")
+
             embeddings_strategy["ids"] = result["ids"]
 
         # Just use some basic checks for sanity and manual testing where you break the new
@@ -322,7 +328,6 @@ def test_cycle_versions(
 
     # TODO: This conditionn is subject to change as we decide on whether we want
     # release auto ID generation feature after 0.5.5
-
     if (
         packaging_version.Version(version) > packaging_version.Version("0.5.5")
         and should_stomp_ids

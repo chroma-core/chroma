@@ -147,10 +147,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                 if normalized_record_set["embeddings"]
                 else None,
             }
-            result = self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
+            self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
 
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
-            return multiple(*filtered_record_set["ids"])  # type: ignore
+            return multiple(*filtered_record_set["ids"])  # type: ignore[misc]
 
         # if there is no intersection, we can apply the entire record set to the state
         else:
@@ -160,7 +160,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                 normalized_record_set["ids"] = result["ids"]
 
             self._upsert_embeddings(cast(strategies.RecordSet, normalized_record_set))
-            return multiple(*normalized_record_set["ids"])  # type: ignore
+            return multiple(*normalized_record_set["ids"])  # type: ignore[misc]
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
     def delete_by_ids(self, ids: IDs) -> None:

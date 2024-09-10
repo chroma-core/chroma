@@ -94,7 +94,6 @@ def test_persist(
     )
 
     result = coll.add(**embeddings_strategy)  # type: ignore[arg-type]
-
     if embeddings_strategy["ids"] is None:
         embeddings_strategy["ids"] = result["ids"]
 
