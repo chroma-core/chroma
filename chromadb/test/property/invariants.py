@@ -84,24 +84,14 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
 
 def get_n_items_from_record_set_state(record_set: StateMachineRecordSet) -> int:
     normalized_record_set = wrap_all(cast(RecordSet, record_set))
-    try:
-        """Get the number of items from a record set"""
-        (_, n) = types.get_n_items_from_record_set(
-            {
-                "ids": normalized_record_set["ids"],
-                "embeddings": normalized_record_set["embeddings"],
-                "metadatas": cast(types.Metadatas, normalized_record_set["metadatas"]),
-                "documents": normalized_record_set["documents"],
-                "uris": None,
-                "images": None,
-            }
-        )
+    for value in normalized_record_set.values():
+        if value is None:
+            continue
 
-        if n is not None:
-            return n
-    except ValueError as e:
-        if "Inconsistent number of records" in str(e):
-            raise e
+        if isinstance(value, list):
+            if len(value) == 0:
+                continue
+            return len(value)
 
     return 0
 
@@ -119,9 +109,6 @@ def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> i
         }
     )
 
-    if n is None:
-        raise ValueError("Expected record set to contain at least one record")
-
     return n
 
 
@@ -131,7 +118,6 @@ def count(collection: Collection, record_set: RecordSet) -> None:
     normalized_record_set = wrap_all(record_set)
 
     n = get_n_items_from_record_set(normalized_record_set)
-
     assert count == n
 
 
