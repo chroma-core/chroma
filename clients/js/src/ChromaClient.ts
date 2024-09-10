@@ -14,16 +14,10 @@ import type {
   GetOrCreateCollectionParams,
   ListCollectionsParams,
 } from "./types";
-
 import {
-  prepareRecordRequest,
-  prepareRecordRequestWithIDsOptional,
-  toArray,
-  toArrayOfArrays,
   validateTenantDatabase,
   wrapCollection,
 } from "./utils";
-
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
 

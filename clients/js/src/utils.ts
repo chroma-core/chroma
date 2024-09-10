@@ -185,8 +185,8 @@ async function computeEmbeddings(
   const embeddingsArray = embeddings
     ? embeddings
     : documents
-    ? await embeddingFunction.generate(documents)
-    : undefined;
+      ? await embeddingFunction.generate(documents)
+      : undefined;
 
   if (!embeddingsArray && !update) {
     throw new Error("Failed to generate embeddings for your request.");
