@@ -28,6 +28,9 @@ opentelemetry-otlp = "0.12.0"
 regex = "1.10.5"
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 arrow = { workspace = true }
