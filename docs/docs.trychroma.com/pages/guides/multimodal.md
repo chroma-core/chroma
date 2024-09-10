@@ -65,7 +65,6 @@ You can add data to a multi-modal collection by specifying the data modality. Fo
 
 ```python
 collection.add(
-    ids=['id1', 'id2', 'id3'],
     images=[...] # A list of numpy arrays representing images
 )
 ```
@@ -76,7 +75,6 @@ However, you can use Chroma in combination with data stored elsewhere, by adding
 
 ```python
 collection.add(
-    ids=['id1', 'id2', 'id3'],
     uris=[...] #  A list of strings representing URIs to data
 )
 ```
@@ -85,8 +83,7 @@ Since the embedding function is multi-modal, you can also add text to the same c
 
 ```python
 collection.add(
-    ids=['id4', 'id5', 'id6'],
-    documents=["This is a document", "This is another document", "This is a third document"]
+    texts=["This is a document", "This is another document", "This is a third document"]
 )
 ```
 

@@ -112,8 +112,7 @@ async def main():
     collection = await client.create_collection(name="my_collection")
 
     await collection.add(
-        documents=["hello world"],
-        ids=["id1"]
+        documents=["hello world"]
     )
 
 asyncio.run(main())
@@ -358,26 +357,24 @@ Raw documents:
 ```python
 collection.add(
     documents=["lorem ipsum...", "doc2", "doc3", ...],
-    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-    ids=["id1", "id2", "id3", ...]
+    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...]
 )
 ```
 
 {% /tab %}
 {% tab label="Javascript" %}
 
-Add data to Chroma with `.addRecords`.
+Add data to Chroma with `.add`.
 
 Raw documents:
 
 ```javascript
 await collection.add({
-    ids: ["id1", "id2", "id3", ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
     documents: ["lorem ipsum...", "doc2", "doc3", ...],
 })
 // input order
-// ids - required
+// ids - optional
 // embeddings - optional
 // metadata - optional
 // documents - optional
@@ -400,8 +397,7 @@ Alternatively, you can supply a list of document-associated `embeddings` directl
 collection.add(
     documents=["doc1", "doc2", "doc3", ...],
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
-    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-    ids=["id1", "id2", "id3", ...]
+    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...]
 )
 ```
 
@@ -410,7 +406,6 @@ collection.add(
 
 ```javascript
 await collection.add({
-    ids: ["id1", "id2", "id3", ...],
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
     documents: ["lorem ipsum...", "doc2", "doc3", ...],
@@ -432,8 +427,7 @@ You can also store documents elsewhere, and just supply a list of `embeddings` a
 ```python
 collection.add(
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
-    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-    ids=["id1", "id2", "id3", ...]
+    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...]
 )
 ```
 
@@ -442,7 +436,6 @@ collection.add(
 
 ```javascript
 await collection.add({
-    ids: ["id1", "id2", "id3", ...],
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
 })

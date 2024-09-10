@@ -28,7 +28,7 @@ ___
 
 ### add
 
-▸ **add**(`params`): `Promise`\<`void`\>
+▸ **add**(`params`): `Promise`\<`AddResponse`\>
 
 Add items to the collection
 
@@ -40,7 +40,7 @@ Add items to the collection
 
 #### Returns
 
-`Promise`\<`void`\>
+`Promise`\<`AddResponse`\>
 
 - The response from the API. True if successful.
 
@@ -294,7 +294,7 @@ Upsert items to the collection
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
-| `params` | `AddRecordsParams` | The parameters for the query. |
+| `params` | `UpsertRecordsParams` | The parameters for the query. |
 
 #### Returns
 

@@ -3,7 +3,7 @@ title: Client
 ---
 
 
-## configure
+#### configure
 
 ```python
 def configure(**kwargs) -> None
@@ -11,7 +11,7 @@ def configure(**kwargs) -> None
 
 Override Chroma's default settings, environment variables or .env files
 
-## EphemeralClient
+#### EphemeralClient
 
 ```python
 def EphemeralClient(settings: Optional[Settings] = None,
@@ -27,7 +27,7 @@ development, but not recommended for production use.
 - `tenant` - The tenant to use for this client. Defaults to the default tenant.
 - `database` - The database to use for this client. Defaults to the default database.
 
-## PersistentClient
+#### PersistentClient
 
 ```python
 def PersistentClient(path: str = "./chroma",
@@ -45,7 +45,7 @@ testing and development, but not recommended for production use.
 - `tenant` - The tenant to use for this client. Defaults to the default tenant.
 - `database` - The database to use for this client. Defaults to the default database.
 
-## HttpClient
+#### HttpClient
 
 ```python
 def HttpClient(host: str = "localhost",
@@ -71,7 +71,7 @@ use Chroma in production.
 - `tenant` - The tenant to use for this client. Defaults to the default tenant.
 - `database` - The database to use for this client. Defaults to the default database.
 
-## AsyncHttpClient
+#### AsyncHttpClient
 
 ```python
 async def AsyncHttpClient(host: str = "localhost",
@@ -97,7 +97,7 @@ use Chroma in production.
 - `tenant` - The tenant to use for this client. Defaults to the default tenant.
 - `database` - The database to use for this client. Defaults to the default database.
 
-## CloudClient
+#### CloudClient
 
 ```python
 def CloudClient(tenant: str,
@@ -118,7 +118,7 @@ Creates a client to connect to a tennant and database on the Chroma cloud.
 - `database` - The database to use for this client.
 - `api_key` - The api key to use for this client.
 
-## Client
+#### Client
 
 ```python
 def Client(settings: Settings = __settings,
@@ -131,7 +131,7 @@ Return a running chroma.API instance
 tenant: The tenant to use for this client. Defaults to the default tenant.
 database: The database to use for this client. Defaults to the default database.
 
-## AdminClient
+#### AdminClient
 
 ```python
 def AdminClient(settings: Settings = Settings()) -> AdminAPI
@@ -140,15 +140,16 @@ def AdminClient(settings: Settings = Settings()) -> AdminAPI
 Creates an admin client that can be used to create tenants and databases.
 
 
-# BaseClient Methods
+## BaseAPI Objects
 
 ```python
 class BaseAPI(ABC)
 ```
 
-## heartbeat
+#### heartbeat
 
 ```python
+@abstractmethod
 def heartbeat() -> int
 ```
 
@@ -159,9 +160,10 @@ Used to check if the server is alive.
 
 - `int` - The current time in nanoseconds since epoch
 
-## count\_collections
+#### count\_collections
 
 ```python
+@abstractmethod
 def count_collections() -> int
 ```
 
@@ -179,9 +181,10 @@ Count the number of collections.
     # 1
     ```
 
-## delete\_collection
+#### delete\_collection
 
 ```python
+@abstractmethod
 def delete_collection(name: str) -> None
 ```
 
@@ -203,9 +206,10 @@ Delete a collection with the given name.
     client.delete_collection("my_collection")
     ```
 
-## reset
+#### reset
 
 ```python
+@abstractmethod
 def reset() -> bool
 ```
 
@@ -215,9 +219,10 @@ Resets the database. This will delete all collections and entries.
 
 - `bool` - True if the database was reset successfully.
 
-## get\_version
+#### get\_version
 
 ```python
+@abstractmethod
 def get_version() -> str
 ```
 
@@ -227,9 +232,10 @@ Get the version of Chroma.
 
 - `str` - The version of Chroma
 
-## get\_settings
+#### get\_settings
 
 ```python
+@abstractmethod
 def get_settings() -> Settings
 ```
 
@@ -239,23 +245,25 @@ Get the settings used to initialize.
 
 - `Settings` - The settings used to initialize.
 
-## get\_max\_batch\_size
+#### get\_max\_batch\_size
 
 ```python
+@abstractmethod
 def get_max_batch_size() -> int
 ```
 
 Return the maximum number of records that can be created or mutated in a single call.
 
-# ClientClient Methods
+## ClientAPI Objects
 
 ```python
 class ClientAPI(BaseAPI, ABC)
 ```
 
-## list\_collections
+#### list\_collections
 
 ```python
+@abstractmethod
 def list_collections(limit: Optional[int] = None,
                      offset: Optional[int] = None) -> Sequence[Collection]
 ```
@@ -280,9 +288,10 @@ List all collections.
     # [collection(name="my_collection", metadata={})]
     ```
 
-## create\_collection
+#### create\_collection
 
 ```python
+@abstractmethod
 def create_collection(name: str,
                       configuration: Optional[CollectionConfiguration] = None,
                       metadata: Optional[CollectionMetadata] = None,
@@ -325,9 +334,10 @@ Create a new collection with the given name and metadata.
     # collection(name="my_collection", metadata={"foo": "bar"})
     ```
 
-## get\_collection
+#### get\_collection
 
 ```python
+@abstractmethod
 def get_collection(
         name: str,
         id: Optional[UUID] = None,
@@ -364,9 +374,10 @@ Get a collection with the given name.
     # collection(name="my_collection", metadata={})
     ```
 
-## get\_or\_create\_collection
+#### get\_or\_create\_collection
 
 ```python
+@abstractmethod
 def get_or_create_collection(
         name: str,
         configuration: Optional[CollectionConfiguration] = None,
@@ -400,9 +411,10 @@ Get or create a collection with the given name and metadata.
     # collection(name="my_collection", metadata={})
     ```
 
-## set\_tenant
+#### set\_tenant
 
 ```python
+@abstractmethod
 def set_tenant(tenant: str, database: str = DEFAULT_DATABASE) -> None
 ```
 
@@ -414,9 +426,10 @@ database does not exist.
 - `tenant` - The tenant to set.
 - `database` - The database to set.
 
-## set\_database
+#### set\_database
 
 ```python
+@abstractmethod
 def set_database(database: str) -> None
 ```
 
@@ -426,25 +439,27 @@ Set the database for the client. Raises an error if the database does not exist.
 
 - `database` - The database to set.
 
-## clear\_system\_cache
+#### clear\_system\_cache
 
 ```python
 @staticmethod
+@abstractmethod
 def clear_system_cache() -> None
 ```
 
 Clear the system cache so that new systems can be created for an existing path.
 This should only be used for testing purposes.
 
-# AdminClient Methods
+## AdminAPI Objects
 
 ```python
 class AdminAPI(ABC)
 ```
 
-## create\_database
+#### create\_database
 
 ```python
+@abstractmethod
 def create_database(name: str, tenant: str = DEFAULT_TENANT) -> None
 ```
 
@@ -454,9 +469,10 @@ Create a new database. Raises an error if the database already exists.
 
 - `database` - The name of the database to create.
 
-## get\_database
+#### get\_database
 
 ```python
+@abstractmethod
 def get_database(name: str, tenant: str = DEFAULT_TENANT) -> Database
 ```
 
@@ -467,9 +483,10 @@ Get a database. Raises an error if the database does not exist.
 - `database` - The name of the database to get.
 - `tenant` - The tenant of the database to get.
 
-## create\_tenant
+#### create\_tenant
 
 ```python
+@abstractmethod
 def create_tenant(name: str) -> None
 ```
 
@@ -479,9 +496,10 @@ Create a new tenant. Raises an error if the tenant already exists.
 
 - `tenant` - The name of the tenant to create.
 
-## get\_tenant
+#### get\_tenant
 
 ```python
+@abstractmethod
 def get_tenant(name: str) -> Tenant
 ```
 
@@ -491,7 +509,7 @@ Get a tenant. Raises an error if the tenant does not exist.
 
 - `tenant` - The name of the tenant to get.
 
-# ServerClient Methods
+## ServerAPI Objects
 
 ```python
 class ServerAPI(BaseAPI, AdminAPI, Component)
