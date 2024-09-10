@@ -177,7 +177,7 @@ mod test {
             values_before_flush.push(read.to_vec());
         }
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&block.clone().id).await.unwrap();
+        let block = block_manager.get(&block.clone().id).await.unwrap().unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
             let read = block.get::<&str, &[u32]>("prefix", &key).unwrap();
@@ -214,7 +214,7 @@ mod test {
         }
         block_manager.flush(&block).await.unwrap();
 
-        let block = block_manager.get(&delta_id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
 
         assert_eq!(size, block.get_size());
         for i in 0..n {
@@ -232,11 +232,11 @@ mod test {
         }
 
         // test fork
-        let forked_block = block_manager.fork::<&str, String>(&delta_id).await;
+        let forked_block = block_manager.fork::<&str, String>(&delta_id).await.unwrap();
         let new_id = forked_block.id.clone();
         let block = block_manager.commit::<&str, String>(forked_block);
         block_manager.flush(&block).await.unwrap();
-        let forked_block = block_manager.get(&new_id).await.unwrap();
+        let forked_block = block_manager.get(&new_id).await.unwrap().unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
             let read = forked_block.get::<&str, &str>("prefix", &key);
@@ -271,7 +271,7 @@ mod test {
             values_before_flush.push(read);
         }
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
         assert_eq!(size, block.get_size());
         for i in 0..n {
             let key = i as f32;
@@ -303,7 +303,7 @@ mod test {
         let delta_id = delta.id.clone();
         let block = block_manager.commit::<&str, RoaringBitmap>(delta);
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
 
         assert_eq!(size, block.get_size());
 
@@ -368,7 +368,7 @@ mod test {
         let delta_id = delta.id.clone();
         let block = block_manager.commit::<&str, &DataRecord>(delta);
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
         for i in 0..3 {
             let read = block.get::<&str, DataRecord>("", ids[i]).unwrap();
             assert_eq!(read.id, ids[i]);
@@ -403,7 +403,7 @@ mod test {
         let delta_id = delta.id.clone();
         let block = block_manager.commit::<u32, String>(delta);
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
         assert_eq!(size, block.get_size());
 
         // test save/load
@@ -437,7 +437,7 @@ mod test {
         }
         block_manager.flush(&block).await.unwrap();
 
-        let block = block_manager.get(&delta_id).await.unwrap();
+        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
 
         assert_eq!(size, block.get_size());
         for i in 0..n {
@@ -455,11 +455,11 @@ mod test {
         }
 
         // test fork
-        let forked_block = block_manager.fork::<u32, u32>(&delta_id).await;
+        let forked_block = block_manager.fork::<u32, u32>(&delta_id).await.unwrap();
         let new_id = forked_block.id.clone();
         let block = block_manager.commit::<u32, u32>(forked_block);
         block_manager.flush(&block).await.unwrap();
-        let forked_block = block_manager.get(&new_id).await.unwrap();
+        let forked_block = block_manager.get(&new_id).await.unwrap().unwrap();
         for i in 0..n {
             let key = i as u32;
             let read = forked_block.get::<u32, u32>("prefix", key);

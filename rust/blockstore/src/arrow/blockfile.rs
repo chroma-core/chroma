@@ -1,3 +1,4 @@
+use super::provider::GetError;
 use super::{block::delta::BlockDelta, provider::BlockManager};
 use super::{
     block::Block,
@@ -154,8 +155,21 @@ impl ArrowBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = self.block_manager.get(&target_block_id).await.unwrap();
-                let new_delta = self.block_manager.fork::<K, V>(&block.id).await;
+                let block = match self.block_manager.get(&target_block_id).await {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
+                    Ok(delta) => delta,
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
                 let new_id = new_delta.id;
                 // Blocks can be empty.
                 self.sparse_index
@@ -206,8 +220,21 @@ impl ArrowBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = self.block_manager.get(&target_block_id).await.unwrap();
-                let new_delta = self.block_manager.fork::<K, V>(&block.id).await;
+                let block = match self.block_manager.get(&target_block_id).await {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
+                    Ok(delta) => delta,
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
                 let new_id = new_delta.id;
                 self.sparse_index
                     .replace_block(target_block_id, new_delta.id);
@@ -254,9 +281,17 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
-    pub(super) async fn get_block(&self, block_id: Uuid) -> Option<&Block> {
+    pub async fn get_block(&self, block_id: Uuid) -> Result<Option<&Block>, GetError> {
         if !self.loaded_blocks.lock().contains_key(&block_id) {
-            let block = self.block_manager.get(&block_id).await?;
+            let block = match self.block_manager.get(&block_id).await {
+                Ok(Some(block)) => block,
+                Ok(None) => {
+                    return Ok(None);
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            };
             self.loaded_blocks.lock().insert(block_id, Box::new(block));
         }
 
@@ -270,10 +305,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // We never drop the Box<Block> while the reference is still alive
             // We never drop the HashMap while the reference is still alive
             // We never drop the HashMap while the Box<Block> is still alive
-            return Some(unsafe { transmute(&**block) });
+            return Ok(Some(unsafe { transmute(&**block) }));
         }
 
-        None
+        Ok(None)
     }
 
     /// Load all required blocks into the underlying block manager so that
@@ -319,10 +354,13 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
         let block = self.get_block(target_block_id).await;
         let res = match block {
-            Some(block) => block.get(prefix, key.clone()),
-            None => {
+            Ok(Some(block)) => block.get(prefix, key.clone()),
+            Ok(None) => {
                 tracing::error!("Block with id {:?} not found", target_block_id);
                 return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+            }
+            Err(e) => {
+                return Err(Box::new(e));
             }
         };
         match res {
@@ -351,7 +389,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 let sparse_index_forward = self.sparse_index.forward.lock();
                 *sparse_index_forward.iter().nth(i).unwrap().1
             };
-            block = self.get_block(uuid).await;
+            block = match self.get_block(uuid).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    tracing::error!("Block with id {:?} not found", uuid);
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
             match block {
                 Some(b) => {
                     if block_offset + b.len() > index {
@@ -392,7 +439,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys > key.
         for block_id in block_ids {
-            let block_opt = self.get_block(block_id).await;
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
             let block = match block_opt {
                 Some(b) => b,
                 None => {
@@ -422,7 +478,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys < key.
         for block_id in block_ids {
-            let block_opt = self.get_block(block_id).await;
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
             let block = match block_opt {
                 Some(b) => b,
                 None => {
@@ -452,7 +517,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys >= key.
         for block_id in block_ids {
-            let block_opt = self.get_block(block_id).await;
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
             let block = match block_opt {
                 Some(b) => b,
                 None => {
@@ -482,7 +556,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let mut result: Vec<(&str, K, V)> = vec![];
         // Read all the blocks individually to get keys <= key.
         for block_id in block_ids {
-            let block_opt = self.get_block(block_id).await;
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
             let block = match block_opt {
                 Some(b) => b,
                 None => {
@@ -509,7 +592,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self.sparse_index.get_block_ids_prefix(prefix);
         let mut result: Vec<(&str, K, V)> = vec![];
         for block_id in block_ids {
-            let block_opt = self.get_block(block_id).await;
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
             let block = match block_opt {
                 Some(b) => b,
                 None => {
@@ -528,19 +620,25 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         Ok(result)
     }
 
-    pub(crate) async fn contains(&'me self, prefix: &str, key: K) -> bool {
+    pub(crate) async fn contains(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Result<bool, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.sparse_index.get_target_block_id(&search_key);
-        let block = self.get_block(target_block_id).await;
-        let res: Option<V> = match block {
-            Some(block) => block.get(prefix, key),
-            None => {
-                return false;
+        let block = match self.get_block(target_block_id).await {
+            Ok(Some(block)) => block,
+            Ok(None) => {
+                return Ok(false);
+            }
+            Err(e) => {
+                return Err(Box::new(e));
             }
         };
-        match res {
-            Some(_) => true,
-            None => false,
+        match block.get::<K, V>(prefix, key) {
+            Some(_) => Ok(true),
+            None => Ok(false),
         }
     }
 
@@ -558,13 +656,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         self.load_blocks(&block_ids).await;
         let mut result: usize = 0;
         for block_id in block_ids {
-            let block = self.get_block(block_id).await;
-            match block {
-                Some(b) => result = result + b.len(),
-                None => {
+            let block = match self.get_block(block_id).await {
+                Ok(Some(block)) => block,
+                Ok(None) => {
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
-            }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+            result = result + block.len();
         }
 
         Ok(result)
@@ -1394,7 +1495,7 @@ mod tests {
 
         for i in 0..delete_end {
             let key = format!("{:04}", i);
-            assert_eq!(reader.contains("key", &key).await, false);
+            assert_eq!(reader.contains("key", &key).await.unwrap(), false);
         }
 
         for i in delete_end..n * 2 {

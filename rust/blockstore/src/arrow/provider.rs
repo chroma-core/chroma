@@ -1,5 +1,5 @@
 use super::{
-    block::{delta::BlockDelta, Block},
+    block::{delta::BlockDelta, Block, BlockLoadError},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
     sparse_index::SparseIndex,
@@ -139,6 +139,40 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
     }
 }
 
+#[derive(Error, Debug)]
+pub(super) enum GetError {
+    #[error(transparent)]
+    BlockLoadError(#[from] BlockLoadError),
+    #[error(transparent)]
+    StorageGetError(#[from] chroma_storage::GetError),
+}
+
+impl ChromaError for GetError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetError::BlockLoadError(e) => e.code(),
+            GetError::StorageGetError(e) => e.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub(super) enum ForkError {
+    #[error("Block not found")]
+    BlockNotFound,
+    #[error(transparent)]
+    GetError(#[from] GetError),
+}
+
+impl ChromaError for ForkError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ForkError::BlockNotFound => ErrorCodes::NotFound,
+            ForkError::GetError(e) => e.code(),
+        }
+    }
+}
+
 /// A simple local cache of Arrow-backed blocks, the blockfile provider passes this
 /// to the ArrowBlockfile when it creates a new blockfile. So that the blockfile can manage and access blocks
 /// # Note
@@ -176,19 +210,21 @@ impl BlockManager {
     pub(super) async fn fork<KeyWrite: ArrowWriteableKey, ValueWrite: ArrowWriteableValue>(
         &self,
         block_id: &Uuid,
-    ) -> BlockDelta {
+    ) -> Result<BlockDelta, ForkError> {
         let block = self.get(block_id).await;
         let block = match block {
-            Some(block) => block,
-            None => {
-                // TODO: Err - tried to fork a block not owned by this manager
-                panic!("Tried to fork a block not owned by this manager")
+            Ok(Some(block)) => block,
+            Ok(None) => {
+                return Err(ForkError::BlockNotFound);
+            }
+            Err(e) => {
+                return Err(ForkError::GetError(e));
             }
         };
         let new_block_id = Uuid::new_v4();
         let delta = BlockDelta::new::<KeyWrite, ValueWrite>(new_block_id);
         let populated_delta = self.fork_lifetime_scope::<KeyWrite, ValueWrite>(&block, delta);
-        populated_delta
+        Ok(populated_delta)
     }
 
     fn fork_lifetime_scope<'new, KeyWrite, ValueWrite>(
@@ -217,10 +253,10 @@ impl BlockManager {
         self.block_cache.get(id).is_some()
     }
 
-    pub(super) async fn get(&self, id: &Uuid) -> Option<Block> {
+    pub(super) async fn get(&self, id: &Uuid) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.get(id);
         match block {
-            Some(block) => Some(block.clone()),
+            Some(block) => Ok(Some(block.clone())),
             None => async {
                 let key = format!("block/{}", id);
                 let bytes_res = self
@@ -240,29 +276,27 @@ impl BlockManager {
                                 let _guard = self.write_mutex.lock().await;
                                 match self.block_cache.get(id) {
                                     Some(b) => {
-                                        return Some(b);
+                                        return Ok(Some(b));
                                     }
                                     None => {
                                         self.block_cache.insert(*id, block.clone());
-                                        Some(block)
+                                        Ok(Some(block))
                                     }
                                 }
                             }
                             Err(e) => {
-                                // TODO: Return an error to callsite instead of None.
                                 tracing::error!(
                                     "Error converting bytes to Block {:?}/{:?}",
                                     key,
                                     e
                                 );
-                                None
+                                return Err(GetError::BlockLoadError(e));
                             }
                         }
                     }
                     Err(e) => {
                         tracing::error!("Error converting bytes to Block {:?}", e);
-                        // TODO: Return error instead of None.
-                        return None;
+                        return Err(GetError::StorageGetError(e));
                     }
                 }
             }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold")).await
