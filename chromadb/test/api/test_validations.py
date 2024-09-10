@@ -211,6 +211,20 @@ def test_validate_record_set_consistency() -> None:
     with pytest.raises(ValueError, match="Expected field embeddings to be a list"):
         validate_record_set_consistency(non_list_record_set)
 
+    # Test record set with all None value
+    all_none_record_set: RecordSet = {
+        "ids": None,
+        "embeddings": None,
+        "metadatas": None,
+        "documents": None,
+        "images": None,
+        "uris": None,
+    }
+    with pytest.raises(
+        ValueError, match="Expected record set to contain at least one record"
+    ):
+        validate_record_set_consistency(all_none_record_set)
+
     # Test record set with multiple errors
     multiple_error_record_set: RecordSet = {
         "ids": [],

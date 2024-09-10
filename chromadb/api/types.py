@@ -625,7 +625,7 @@ def validate_record_set_consistency(record_set: RecordSet) -> None:
     error_messages = []
     field_record_counts = []
     count = 0
-    consistentcy_error = False
+    consistency_error_found = False
 
     for field, value in record_set.items():
         if value is None:
@@ -637,20 +637,20 @@ def validate_record_set_consistency(record_set: RecordSet) -> None:
             )
             continue
 
-        if len(value) == 0:
+        n_items = len(value)
+        if n_items == 0:
             error_messages.append(
                 f"Expected field {field} to be a non-empty list, got an empty list"
             )
             continue
 
-        n_items = len(value)
         field_record_counts.append(f"{field}: ({n_items})")
         if count == 0:
             count = n_items
         elif count != n_items:
-            consistentcy_error = True
+            consistency_error_found = True
 
-    if consistentcy_error:
+    if consistency_error_found:
         error_messages.append(
             f"Inconsistent number of records: {', '.join(field_record_counts)}"
         )

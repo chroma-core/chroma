@@ -220,6 +220,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
         invariants.count(
             self.collection,
+            # this cast exists because count function is used for handling both StateMachineRecordSet and RecordSet
             cast(strategies.RecordSet, self.record_set_state),
         )
 

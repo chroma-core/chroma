@@ -84,16 +84,21 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
 
 def get_n_items_from_record_set_state(record_set: StateMachineRecordSet) -> int:
     normalized_record_set = wrap_all(cast(RecordSet, record_set))
+
+    all_fields_are_empty = True
     for value in normalized_record_set.values():
         if value is None:
             continue
 
         if isinstance(value, list):
-            if len(value) == 0:
-                continue
-            return len(value)
+            if len(value) != 0:
+                all_fields_are_empty = False
+                break
 
-    return 0
+    if all_fields_are_empty:
+        return 0
+
+    return get_n_items_from_record_set(normalized_record_set)
 
 
 def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> int:
