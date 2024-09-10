@@ -439,7 +439,7 @@ class CollectionCommon(Generic[ClientT]):
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
-        unpacked_embedding_set = self._unpack_record_set(
+        unpacked_record_set = self._unpack_record_set(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -449,37 +449,37 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         normalized_embeddings = (
-            self._normalize_embeddings(unpacked_embedding_set["embeddings"])
-            if unpacked_embedding_set["embeddings"] is not None
+            self._normalize_embeddings(unpacked_record_set["embeddings"])
+            if unpacked_record_set["embeddings"] is not None
             else None
         )
 
         self._validate_record_set(
-            ids=unpacked_embedding_set["ids"],
+            ids=unpacked_record_set["ids"],
             embeddings=normalized_embeddings,
-            metadatas=unpacked_embedding_set["metadatas"],
-            documents=unpacked_embedding_set["documents"],
-            images=unpacked_embedding_set["images"],
-            uris=unpacked_embedding_set["uris"],
+            metadatas=unpacked_record_set["metadatas"],
+            documents=unpacked_record_set["documents"],
+            images=unpacked_record_set["images"],
+            uris=unpacked_record_set["uris"],
         )
 
         prepared_embeddings = (
             self._compute_embeddings(
-                documents=unpacked_embedding_set["documents"],
-                images=unpacked_embedding_set["images"],
-                uris=unpacked_embedding_set["uris"],
+                documents=unpacked_record_set["documents"],
+                images=unpacked_record_set["images"],
+                uris=unpacked_record_set["uris"],
             )
             if normalized_embeddings is None
             else normalized_embeddings
         )
 
         return {
-            "ids": unpacked_embedding_set["ids"],
+            "ids": unpacked_record_set["ids"],
             "embeddings": prepared_embeddings,
-            "metadatas": unpacked_embedding_set["metadatas"],
-            "documents": unpacked_embedding_set["documents"],
-            "images": unpacked_embedding_set["images"],
-            "uris": unpacked_embedding_set["uris"],
+            "metadatas": unpacked_record_set["metadatas"],
+            "documents": unpacked_record_set["documents"],
+            "images": unpacked_record_set["images"],
+            "uris": unpacked_record_set["uris"],
         }
 
     def _process_upsert_request(
