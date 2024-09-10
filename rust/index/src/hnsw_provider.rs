@@ -7,7 +7,7 @@ use super::{
 };
 
 use async_trait::async_trait;
-use chroma_cache::cache::Cache;
+use chroma_cache::cache::{Cache, Cacheable};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
@@ -52,7 +52,6 @@ pub struct HnswIndexProvider {
     pub temporary_storage_path: PathBuf,
     storage: Storage,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
-<<<<<<< HEAD
 }
 
 #[derive(Clone)]
@@ -68,8 +67,6 @@ impl Cacheable for HnswIndexRef {
         }
         index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize
     }
-=======
->>>>>>> aa93cb31 ([ENH] Synchronize post s3.get() operations in providers (#2712))
 }
 
 impl Debug for HnswIndexProvider {
@@ -188,12 +185,18 @@ impl HnswIndexProvider {
                     }
                     None => {
 <<<<<<< HEAD
+<<<<<<< HEAD
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
 =======
                         let index = Arc::new(RwLock::new(index));
 >>>>>>> aa93cb31 ([ENH] Synchronize post s3.get() operations in providers (#2712))
+=======
+                        let index = HnswIndexRef {
+                            inner: Arc::new(RwLock::new(index)),
+                        };
+>>>>>>> 9606a09a ([ENH] Weighted LRU for HNSW provider cache (#2697))
                         self.cache.insert(segment.collection, index.clone());
                         Ok(index)
                     }
@@ -324,12 +327,18 @@ impl HnswIndexProvider {
                     }
                     None => {
 <<<<<<< HEAD
+<<<<<<< HEAD
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
 =======
                         let index = Arc::new(RwLock::new(index));
 >>>>>>> aa93cb31 ([ENH] Synchronize post s3.get() operations in providers (#2712))
+=======
+                        let index = HnswIndexRef {
+                            inner: Arc::new(RwLock::new(index)),
+                        };
+>>>>>>> 9606a09a ([ENH] Weighted LRU for HNSW provider cache (#2697))
                         self.cache.insert(segment.collection, index.clone());
                         Ok(index)
                     }
@@ -393,12 +402,18 @@ impl HnswIndexProvider {
             }
             None => {
 <<<<<<< HEAD
+<<<<<<< HEAD
                 let index = HnswIndexRef {
                     inner: Arc::new(RwLock::new(index)),
                 };
 =======
                 let index = Arc::new(RwLock::new(index));
 >>>>>>> aa93cb31 ([ENH] Synchronize post s3.get() operations in providers (#2712))
+=======
+                let index = HnswIndexRef {
+                    inner: Arc::new(RwLock::new(index)),
+                };
+>>>>>>> 9606a09a ([ENH] Weighted LRU for HNSW provider cache (#2697))
                 self.cache.insert(segment.collection, index.clone());
                 Ok(index)
             }
@@ -613,10 +628,14 @@ mod tests {
         let dimensionality = 128;
         let created_index = provider.create(&segment, dimensionality).await.unwrap();
 <<<<<<< HEAD
+<<<<<<< HEAD
         let created_index_id = created_index.inner.read().id;
 =======
         let created_index_id = created_index.read().id;
 >>>>>>> aa93cb31 ([ENH] Synchronize post s3.get() operations in providers (#2712))
+=======
+        let created_index_id = created_index.inner.read().id;
+>>>>>>> 9606a09a ([ENH] Weighted LRU for HNSW provider cache (#2697))
 
         let forked_index = provider
             .fork(&created_index_id, &segment, dimensionality)
