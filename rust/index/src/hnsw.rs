@@ -330,6 +330,10 @@ impl HnswIndex {
         // Does not return an error
     }
 
+    pub fn dimensionality(&self) -> i32 {
+        self.dimensionality
+    }
+
     pub fn capacity(&self) -> usize {
         unsafe { capacity(self.ffi_ptr) as usize }
         // Does not return an error

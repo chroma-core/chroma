@@ -1043,6 +1043,7 @@ dependencies = [
  "async-trait",
  "chroma-config",
  "chroma-error",
+ "chroma-types",
  "foyer",
  "parking_lot",
  "serde",

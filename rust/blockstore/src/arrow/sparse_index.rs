@@ -1,4 +1,5 @@
 use crate::key::{CompositeKey, KeyWrapper};
+use chroma_cache::cache::Cacheable;
 use chroma_error::ChromaError;
 use core::panic;
 use parking_lot::Mutex;
@@ -79,6 +80,8 @@ pub struct SparseIndex {
     reverse: Arc<Mutex<HashMap<Uuid, SparseIndexDelimiter>>>,
     pub(super) id: Uuid,
 }
+
+impl Cacheable for SparseIndex {}
 
 impl SparseIndex {
     pub(super) fn new(id: Uuid) -> Self {

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
-    HnswIndexProviderOpenError,
+    HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
@@ -22,7 +22,7 @@ const HNSW_INDEX: &str = "hnsw_index";
 
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegmentWriter {
-    index: Arc<RwLock<HnswIndex>>,
+    index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
     pub(crate) id: Uuid,
 }
@@ -70,7 +70,7 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
 
 impl DistributedHNSWSegmentWriter {
     pub(crate) fn new(
-        index: Arc<RwLock<HnswIndex>>,
+        index: HnswIndexRef,
         hnsw_index_provider: HnswIndexProvider,
         id: Uuid,
     ) -> Self {
@@ -191,7 +191,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                 | MaterializedLogOperation::OverwriteExisting => {
                     let embedding = record.merged_embeddings();
 
-                    let mut index = self.index.upgradable_read();
+                    let mut index = self.index.inner.upgradable_read();
                     let index_len = index.len();
                     let index_capacity = index.capacity();
                     if index_len + 1 > index_capacity {
@@ -213,7 +213,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                     // the assumption here is that the materialized log records
                     // contain the correct offset ids pertaining to records that
                     // are actually meant to be deleted.
-                    match self.index.read().delete(record.offset_id as usize) {
+                    match self.index.inner.read().delete(record.offset_id as usize) {
                         Ok(_) => {}
                         Err(e) => {
                             return Err(ApplyMaterializedLogError::HnswIndexError(e));
@@ -240,7 +240,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
 #[async_trait]
 impl SegmentFlusher for DistributedHNSWSegmentWriter {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        let hnsw_index_id = self.index.read().id;
+        let hnsw_index_id = self.index.inner.read().id;
         match self.hnsw_index_provider.flush(&hnsw_index_id).await {
             Ok(_) => {}
             Err(e) => return Err(e),
@@ -253,7 +253,7 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegmentReader {
-    index: Arc<RwLock<HnswIndex>>,
+    index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
     pub(crate) id: Uuid,
 }
@@ -265,11 +265,7 @@ impl Debug for DistributedHNSWSegmentReader {
 }
 
 impl DistributedHNSWSegmentReader {
-    fn new(
-        index: Arc<RwLock<HnswIndex>>,
-        hnsw_index_provider: HnswIndexProvider,
-        id: Uuid,
-    ) -> Self {
+    fn new(index: HnswIndexRef, hnsw_index_provider: HnswIndexProvider, id: Uuid) -> Self {
         return DistributedHNSWSegmentReader {
             index,
             hnsw_index_provider,
@@ -363,7 +359,7 @@ impl DistributedHNSWSegmentReader {
         allowed_ids: &[usize],
         disallowd_ids: &[usize],
     ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>> {
-        let index = self.index.read();
+        let index = self.index.inner.read();
         index.query(vector, k, allowed_ids, disallowd_ids)
     }
 }

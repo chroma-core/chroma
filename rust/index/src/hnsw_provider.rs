@@ -1,11 +1,13 @@
+use crate::PersistentIndex;
+
 use super::config::HnswProviderConfig;
 use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError,
 };
-use crate::types::PersistentIndex;
+
 use async_trait::async_trait;
-use chroma_cache::cache::Cache;
+use chroma_cache::cache::{Cache, Cacheable};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
@@ -46,10 +48,25 @@ const FILES: [&'static str; 4] = [
 // their ref count goes to 0.
 #[derive(Clone)]
 pub struct HnswIndexProvider {
-    cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
+    cache: Cache<Uuid, HnswIndexRef>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
+}
+
+#[derive(Clone)]
+pub struct HnswIndexRef {
+    pub inner: Arc<RwLock<HnswIndex>>,
+}
+
+impl Cacheable for HnswIndexRef {
+    fn weight(&self) -> usize {
+        let index = self.inner.read();
+        if index.len() == 0 {
+            return 1;
+        }
+        index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize
+    }
 }
 
 impl Debug for HnswIndexProvider {
@@ -79,11 +96,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
 }
 
 impl HnswIndexProvider {
-    pub fn new(
-        storage: Storage,
-        storage_path: PathBuf,
-        cache: Cache<Uuid, Arc<RwLock<HnswIndex>>>,
-    ) -> Self {
+    pub fn new(storage: Storage, storage_path: PathBuf, cache: Cache<Uuid, HnswIndexRef>) -> Self {
         Self {
             cache,
             storage,
@@ -92,10 +105,10 @@ impl HnswIndexProvider {
         }
     }
 
-    pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<Arc<RwLock<HnswIndex>>> {
+    pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<HnswIndexRef> {
         match self.cache.get(collection_id) {
             Some(index) => {
-                let index_with_lock = index.read();
+                let index_with_lock = index.inner.read();
                 if index_with_lock.id == *index_id {
                     // Clone is cheap because we are just cloning the Arc.
                     return Some(index.clone());
@@ -115,7 +128,7 @@ impl HnswIndexProvider {
         source_id: &Uuid,
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderForkError>> {
+    ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
         let new_id = Uuid::new_v4();
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
         // This is ok to be called from multiple threads concurrently. See
@@ -171,7 +184,9 @@ impl HnswIndexProvider {
                         return Ok(index.clone());
                     }
                     None => {
-                        let index = Arc::new(RwLock::new(index));
+                        let index = HnswIndexRef {
+                            inner: Arc::new(RwLock::new(index)),
+                        };
                         self.cache.insert(segment.collection, index.clone());
                         Ok(index)
                     }
@@ -253,7 +268,7 @@ impl HnswIndexProvider {
         id: &Uuid,
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderOpenError>> {
+    ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
         // Create directories should be thread safe.
@@ -301,7 +316,9 @@ impl HnswIndexProvider {
                         return Ok(index.clone());
                     }
                     None => {
-                        let index = Arc::new(RwLock::new(index));
+                        let index = HnswIndexRef {
+                            inner: Arc::new(RwLock::new(index)),
+                        };
                         self.cache.insert(segment.collection, index.clone());
                         Ok(index)
                     }
@@ -326,7 +343,7 @@ impl HnswIndexProvider {
         // TODO: This should not take Segment. The index layer should not know about the segment concept
         segment: &Segment,
         dimensionality: i32,
-    ) -> Result<Arc<RwLock<HnswIndex>>, Box<HnswIndexProviderCreateError>> {
+    ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
         let id = Uuid::new_v4();
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
@@ -364,15 +381,17 @@ impl HnswIndexProvider {
                 return Ok(index.clone());
             }
             None => {
-                let index = Arc::new(RwLock::new(index));
+                let index = HnswIndexRef {
+                    inner: Arc::new(RwLock::new(index)),
+                };
                 self.cache.insert(segment.collection, index.clone());
                 Ok(index)
             }
         }
     }
 
-    pub fn commit(&self, index: Arc<RwLock<HnswIndex>>) -> Result<(), Box<dyn ChromaError>> {
-        match index.write().save() {
+    pub fn commit(&self, index: HnswIndexRef) -> Result<(), Box<dyn ChromaError>> {
+        match index.inner.write().save() {
             Ok(_) => {}
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderCommitError::HnswSaveError(e)));
@@ -406,7 +425,7 @@ impl HnswIndexProvider {
     /// Purge all entries from the cache and remove temporary files from disk.
     pub async fn purge_all_entries(&mut self) {
         while let Some((_, index)) = self.cache.pop() {
-            let index_id = index.read().id;
+            let index_id = index.inner.read().id;
             match self.remove_temporary_files(&index_id).await {
                 Ok(_) => {}
                 Err(e) => {
@@ -578,13 +597,13 @@ mod tests {
 
         let dimensionality = 128;
         let created_index = provider.create(&segment, dimensionality).await.unwrap();
-        let created_index_id = created_index.read().id;
+        let created_index_id = created_index.inner.read().id;
 
         let forked_index = provider
             .fork(&created_index_id, &segment, dimensionality)
             .await
             .unwrap();
-        let forked_index_id = forked_index.read().id;
+        let forked_index_id = forked_index.inner.read().id;
 
         assert_ne!(created_index_id, forked_index_id);
     }

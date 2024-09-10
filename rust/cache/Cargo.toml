@@ -16,3 +16,4 @@ parking_lot = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
+chroma-types = { workspace = true}

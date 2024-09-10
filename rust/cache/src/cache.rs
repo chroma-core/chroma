@@ -13,17 +13,23 @@ use thiserror::Error;
 pub enum Cache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Send + Sync + Clone + Cacheable + 'static,
 {
     Unbounded(UnboundedCache<K, V>),
     Foyer(FoyerCacheWrapper<K, V>),
 }
 
-impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'static> Cache<K, V> {
+impl<
+        K: Send + Sync + Clone + Hash + Eq + 'static,
+        V: Send + Sync + Clone + Cacheable + 'static,
+    > Cache<K, V>
+{
     pub fn new(config: &CacheConfig) -> Self {
         match config {
             CacheConfig::Unbounded(_) => Cache::Unbounded(UnboundedCache::new(config)),
-            _ => Cache::Foyer(FoyerCacheWrapper::new(config)),
+            CacheConfig::Lru(_) => Cache::Foyer(FoyerCacheWrapper::new(config)),
+            CacheConfig::Lfu(_) => Cache::Foyer(FoyerCacheWrapper::new(config)),
+            CacheConfig::WeightedLru(_) => Cache::Foyer(FoyerCacheWrapper::new(config)),
         }
     }
 
@@ -91,7 +97,7 @@ impl<K: Send + Sync + Clone + Hash + Eq + 'static, V: Send + Sync + Clone + 'sta
 pub struct UnboundedCache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Send + Sync + Clone + Cacheable + 'static,
 {
     cache: Arc<RwLock<HashMap<K, V>>>,
 }
@@ -99,14 +105,16 @@ where
 impl<K, V> UnboundedCache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Send + Sync + Clone + Cacheable + 'static,
 {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
             CacheConfig::Unbounded(_) => UnboundedCache {
                 cache: Arc::new(RwLock::new(HashMap::new())),
             },
-            _ => panic!("Invalid cache configuration"),
+            CacheConfig::Lru(_) => panic!("Invalid cache configuration"),
+            CacheConfig::Lfu(_) => panic!("Invalid cache configuration"),
+            CacheConfig::WeightedLru(_) => panic!("Invalid cache configuration"),
         }
     }
 
@@ -140,7 +148,7 @@ where
 pub struct FoyerCacheWrapper<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Send + Sync + Clone + Cacheable + 'static,
 {
     cache: FoyerCache<K, V>,
 }
@@ -148,7 +156,7 @@ where
 impl<K, V> FoyerCacheWrapper<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Send + Sync + Clone + Cacheable + 'static,
 {
     pub fn new(config: &CacheConfig) -> Self {
         match config {
@@ -170,7 +178,17 @@ where
                     cache: cache_builder.build(),
                 }
             }
-            _ => panic!("Invalid cache configuration"),
+            CacheConfig::WeightedLru(weighted_lru) => {
+                // TODO: add more eviction config
+                let eviction_config = LruConfig::default();
+                let cache_builder = CacheBuilder::new(weighted_lru.capacity)
+                    .with_eviction_config(eviction_config)
+                    .with_weighter(|_key: &_, value: &V| value.weight());
+                FoyerCacheWrapper {
+                    cache: cache_builder.build(),
+                }
+            }
+            CacheConfig::Unbounded(_) => panic!("Invalid cache configuration"),
         }
     }
 
@@ -198,12 +216,14 @@ where
 impl<K, V> Configurable<CacheConfig> for UnboundedCache<K, V>
 where
     K: Send + Sync + Clone + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Send + Sync + Clone + Cacheable + 'static,
 {
     async fn try_from_config(config: &CacheConfig) -> Result<Self, Box<dyn ChromaError>> {
         match config {
             CacheConfig::Unbounded(_) => Ok(UnboundedCache::new(config)),
-            _ => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
+            CacheConfig::Lfu(_) => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
+            CacheConfig::Lru(_) => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
+            CacheConfig::WeightedLru(_) => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
         }
     }
 }
@@ -212,13 +232,14 @@ where
 impl<K, V> Configurable<CacheConfig> for FoyerCacheWrapper<K, V>
 where
     K: Send + Sync + Hash + Eq + 'static,
-    V: Send + Sync + Clone + 'static,
+    V: Send + Sync + Clone + Cacheable + 'static,
 {
     async fn try_from_config(config: &CacheConfig) -> Result<Self, Box<dyn ChromaError>> {
         match config {
             CacheConfig::Lru(_lru) => Ok(FoyerCacheWrapper::new(config)),
             CacheConfig::Lfu(_lfu) => Ok(FoyerCacheWrapper::new(config)),
-            _ => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
+            CacheConfig::WeightedLru(_weighted_lru) => Ok(FoyerCacheWrapper::new(config)),
+            CacheConfig::Unbounded(_) => Err(Box::new(CacheConfigError::InvalidCacheConfig)),
         }
     }
 }
@@ -234,5 +255,12 @@ impl ChromaError for CacheConfigError {
         match self {
             CacheConfigError::InvalidCacheConfig => ErrorCodes::InvalidArgument,
         }
+    }
+}
+
+pub trait Cacheable {
+    // By default the weight of a type that is cacheable is 1.
+    fn weight(&self) -> usize {
+        return 1;
     }
 }

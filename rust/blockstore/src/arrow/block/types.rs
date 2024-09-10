@@ -9,6 +9,7 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
+use chroma_cache::cache::Cacheable;
 use chroma_error::{ChromaError, ErrorCodes};
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::io::SeekFrom;
@@ -35,6 +36,8 @@ pub struct Block {
     pub data: RecordBatch,
     pub id: Uuid,
 }
+
+impl Cacheable for Block {}
 
 impl Block {
     /// Create a concrete block from an id and the underlying record batch of data
