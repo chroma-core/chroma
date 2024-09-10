@@ -98,7 +98,7 @@ def test_add_with_no_data(client: ClientAPI) -> None:
     coll = client.create_collection("test")
 
     with pytest.raises(
-        Exception, match="You must provide embeddings, documents, images, or uris."
+        Exception, match="Expected embeddings to be a list with at least one item"
     ):
         coll.add(
             ids=["1"],
