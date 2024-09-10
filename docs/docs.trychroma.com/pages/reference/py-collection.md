@@ -23,17 +23,17 @@ The total number of embeddings added to the database
 ### add
 
 ```python
-def add(ids: OneOrMany[ID],
+def add(ids: Optiona[OneOrMany[ID]] = None,
         embeddings: Optional[OneOrMany[Embedding]] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
-        documents: Optional[OneOrMany[Document]] = None) -> None
+        documents: Optional[OneOrMany[Document]] = None) -> AddResult
 ```
 
 Add embeddings to the data store.
 
 **Arguments**:
 
-- `ids` - The ids of the embeddings you wish to add
+- `ids` - The ids of the embeddings you wish to add. If None, Chroma will generate the ids using uuid v4.
 - `embeddings` - The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
 - `metadatas` - The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
 - `documents` - The documents to associate with the embeddings. Optional.
@@ -41,7 +41,7 @@ Add embeddings to the data store.
 
 **Returns**:
 
-  None
+  - `AddResult` - An AddResult object containing IDs.
 
 
 **Raises**:
