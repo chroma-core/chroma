@@ -244,6 +244,7 @@ class CollectionCommon(Generic[ClientT]):
     ) -> Embeddings:
         # We need to compute the embeddings if they're not provided
 
+        embeddings = None
         if documents is not None:
             embeddings = self._embed(input=documents)
         elif images is not None:
