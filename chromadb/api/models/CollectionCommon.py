@@ -579,7 +579,7 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         prepared_embeddings = normalized_embeddings
-        if does_record_set_contain_data(
+        if prepared_embeddings is None and does_record_set_contain_data(
             unpacked_record_set, ignore=["ids", "metadatas", "embeddings"]
         ):
             prepared_embeddings = self._compute_embeddings(
