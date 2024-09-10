@@ -133,17 +133,6 @@ describe("add collections", () => {
     const ids = IDS.concat(["test1"]);
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
-    expect(async () => {
-      await collection.add({ ids, embeddings, metadatas });
-    }).rejects.toThrow("found duplicates");
-  });
-
-  test("It should generate IDs if not provided", async () => {
-    const collection = await client.createCollection({ name: "test" });
-    const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
-    const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
-    const resp = await collection.add({ embeddings, metadatas });
-    expect(resp.ids.length).toEqual(4);
     try {
       await collection.add({ ids, embeddings, metadatas });
     } catch (e: any) {
@@ -156,9 +145,11 @@ describe("add collections", () => {
     const ids = ["id1"];
     const embeddings = [[]];
     const metadatas = [{ test: "test1", float_value: 0.1 }];
-    expect(async () => {
+    try {
       await collection.add({ ids, embeddings, metadatas });
-    }).rejects.toThrow("got empty embedding at pos");
+    } catch (e: any) {
+      expect(e.message).toMatch("got empty embedding at pos");
+    }
   });
 
   if (!process.env.OLLAMA_SERVER_URL) {

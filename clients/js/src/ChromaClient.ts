@@ -14,10 +14,7 @@ import type {
   GetOrCreateCollectionParams,
   ListCollectionsParams,
 } from "./types";
-import {
-  validateTenantDatabase,
-  wrapCollection,
-} from "./utils";
+import { validateTenantDatabase, wrapCollection } from "./utils";
 
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";

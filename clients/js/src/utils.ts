@@ -4,10 +4,8 @@ import { ChromaConnectionError } from "./Errors";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 import {
   AddRecordsParams,
-  CollectionParams,
-  Embeddings,
-  Documents,
   BaseRecordOperationParams,
+  CollectionParams,
   Metadata,
   MultiRecordOperationParams,
   UpdateRecordsParams,
@@ -111,75 +109,11 @@ export async function prepareRecordRequest(
     throw new Error("embeddings and documents cannot both be undefined");
   }
 
-  validateIDs(ids);
-
-  const embeddingsArray = await computeEmbeddings(
-    embeddingFunction,
-    embeddings,
-    documents,
-    update,
-  );
-
-  return {
-    ids,
-    metadatas,
-    documents,
-    embeddings: embeddingsArray,
-  };
-}
-
-export function wrapCollection(
-  api: ChromaClient,
-  collection: CollectionParams,
-): Collection {
-  return new Collection(
-    collection.name,
-    collection.id,
-    api,
-    collection.embeddingFunction,
-    collection.metadata,
-  );
-}
-
-export async function prepareRecordRequestWithIDsOptional(
-  reqParams: AddRecordsParams,
-  embeddingFunction: IEmbeddingFunction,
-): Promise<MultiRecordOperationParamsWithIDsOptional> {
-  const { ids, embeddings, metadatas, documents } = arrayifyParams(reqParams);
-
-  if (!embeddings && !documents) {
-    throw new Error("embeddings and documents cannot both be undefined");
-  }
-
-  if (ids) {
-    validateIDs(ids);
-  }
-
-  const embeddingsArray = await computeEmbeddings(
-    embeddingFunction,
-    embeddings,
-    documents,
-  );
-
-  return {
-    ids,
-    metadatas,
-    documents,
-    embeddings: embeddingsArray,
-  };
-}
-
-async function computeEmbeddings(
-  embeddingFunction: IEmbeddingFunction,
-  embeddings?: Embeddings,
-  documents?: Documents,
-  update?: true,
-): Promise<Embeddings | undefined> {
   const embeddingsArray = embeddings
     ? embeddings
     : documents
-      ? await embeddingFunction.generate(documents)
-      : undefined;
+    ? await embeddingFunction.generate(documents)
+    : undefined;
 
   if (!embeddingsArray && !update) {
     throw new Error("Failed to generate embeddings for your request.");
@@ -212,12 +146,24 @@ async function computeEmbeddings(
       `ID's must be unique, found duplicates for: ${duplicateIds}`,
     );
   }
+
+  return {
+    ids,
+    metadatas,
+    documents,
+    embeddings: embeddingsArray,
+  };
 }
 
-return {
-  ids,
-  metadatas,
-  documents,
-  embeddings: embeddingsArray,
-};
+export function wrapCollection(
+  api: ChromaClient,
+  collection: CollectionParams,
+): Collection {
+  return new Collection(
+    collection.name,
+    collection.id,
+    api,
+    collection.embeddingFunction,
+    collection.metadata,
+  );
 }
