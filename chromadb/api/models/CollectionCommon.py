@@ -346,15 +346,14 @@ class CollectionCommon(Generic[ClientT]):
         valid_where_document = (
             validate_where_document(where_document) if where_document else {}
         )
-        valid_query_embeddings = (
-            validate_embeddings(
-                self._normalize_embeddings(
-                    cast(Embeddings, maybe_cast_one_to_many_embedding(query_embeddings))
-                )
+
+        valid_query_embeddings = None
+        embeddings_to_normalize = maybe_cast_one_to_many_embedding(query_embeddings)
+        if embeddings_to_normalize is not None:
+            valid_query_embeddings = validate_embeddings(
+                self._normalize_embeddings(embeddings_to_normalize)
             )
-            if query_embeddings is not None
-            else None
-        )
+
         valid_query_texts = (
             maybe_cast_one_to_many(query_texts) if query_texts is not None else None
         )
