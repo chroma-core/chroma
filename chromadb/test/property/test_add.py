@@ -1,4 +1,3 @@
-import random
 import uuid
 from random import randint
 from typing import cast, List, Any, Dict
@@ -99,13 +98,20 @@ def _test_add(
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    initial_version = coll.get_model()["version"]
+    initial_version = cast(int, coll.get_model()["version"])
 
     normalized_record_set = invariants.wrap_all(record_set)
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
-    coll.add(**record_set)  # type: ignore
+    for batch in create_batches(
+        api=client,
+        ids=cast(List[str], record_set["ids"]),
+        embeddings=cast(Embeddings, record_set["embeddings"]),
+        metadatas=cast(Metadatas, record_set["metadatas"]),
+        documents=cast(List[str], record_set["documents"]),
+    ):
+        coll.add(*batch)
     # Only wait for compaction if the size of the collection is
     # some minimal size
     if (
@@ -170,8 +176,7 @@ def test_add_large(
 
     record_set = create_large_recordset(
         min_size=client.get_max_batch_size(),
-        max_size=client.get_max_batch_size()
-        + int(client.get_max_batch_size() * random.random()),
+        max_size=client.get_max_batch_size() * 250,
     )
     coll = client.create_collection(
         name=collection.name,
@@ -179,7 +184,7 @@ def test_add_large(
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
-    initial_version = coll.get_model()["version"]
+    initial_version = cast(int, coll.get_model()["version"])
 
     for batch in create_batches(
         api=client,
@@ -213,7 +218,7 @@ def test_add_large_exceeding(
     record_set = create_large_recordset(
         min_size=client.get_max_batch_size(),
         max_size=client.get_max_batch_size()
-        + int(client.get_max_batch_size() * random.random()),
+        + 100,  # Exceed the max batch size by 100 records
     )
     coll = client.create_collection(
         name=collection.name,
