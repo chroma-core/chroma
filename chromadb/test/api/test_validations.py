@@ -281,3 +281,10 @@ def test_maybe_cast_one_to_many_embedding() -> None:
         ValueError, match="Expected embeddings to be a list with at least one item"
     ):
         maybe_cast_one_to_many_embedding(np.array([]))
+
+    # Test with an empty str (should raise ValueError)
+    with pytest.raises(
+        ValueError,
+        match="Expected embeddings to be a list or a numpy array, got str",
+    ):
+        maybe_cast_one_to_many_embedding("")  # type: ignore[arg-type]
