@@ -347,13 +347,6 @@ class CollectionCommon(Generic[ClientT]):
             validate_where_document(where_document) if where_document else {}
         )
 
-        valid_query_embeddings = None
-        embeddings_to_normalize = maybe_cast_one_to_many_embedding(query_embeddings)
-        if embeddings_to_normalize is not None:
-            valid_query_embeddings = validate_embeddings(
-                self._normalize_embeddings(embeddings_to_normalize)
-            )
-
         valid_query_texts = (
             maybe_cast_one_to_many(query_texts) if query_texts is not None else None
         )
@@ -366,16 +359,24 @@ class CollectionCommon(Generic[ClientT]):
         valid_include = validate_include(include, allow_distances=True)
         valid_n_results = validate_n_results(n_results)
 
-        # If query_embeddings are not provided, we need to compute them from the inputs
-        valid_query_embeddings = (
-            self._compute_embeddings(
-                documents=valid_query_texts,
-                images=valid_query_images,
-                uris=valid_query_uris,
+        embeddings_to_normalize = maybe_cast_one_to_many_embedding(query_embeddings)
+        valid_query_embeddings = None
+        if embeddings_to_normalize is not None:
+            valid_query_embeddings = validate_embeddings(
+                self._normalize_embeddings(embeddings_to_normalize)
             )
-            if valid_query_embeddings is None
-            else valid_query_embeddings
-        )
+
+            if valid_query_embeddings is None:
+                # If query_embeddings are not provided, we need to compute them from the inputs
+                valid_query_embeddings = self._compute_embeddings(
+                    documents=valid_query_texts,
+                    images=valid_query_images,
+                    uris=valid_query_uris,
+                )
+
+        # the only way this can happen is when embeddings function returns None
+        if valid_query_embeddings is None:
+            raise ValueError("Query embeddings cannot be None.")
 
         if "data" in include and "uris" not in include:
             valid_include.append("uris")  # type: ignore[arg-type]
@@ -432,9 +433,9 @@ class CollectionCommon(Generic[ClientT]):
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
             ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
+        ] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
@@ -472,6 +473,10 @@ class CollectionCommon(Generic[ClientT]):
             else normalized_embeddings
         )
 
+        # the only way this can happen is when embeddings function returns None
+        if prepared_embeddings is None:
+            raise ValueError("Prepared embeddings cannot be None.")
+
         return {
             "ids": unpacked_record_set["ids"],
             "embeddings": prepared_embeddings,
@@ -489,11 +494,11 @@ class CollectionCommon(Generic[ClientT]):
                 OneOrMany[Embedding],
                 OneOrMany[PyEmbedding],
             ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
+        ] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
+        images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
         unpacked_record_set = self._unpack_record_set(
             ids=ids,
@@ -519,15 +524,17 @@ class CollectionCommon(Generic[ClientT]):
             uris=unpacked_record_set["uris"],
         )
 
-        prepared_embeddings = (
-            self._compute_embeddings(
+        prepared_embeddings = normalized_embeddings
+        if prepared_embeddings is None:
+            prepared_embeddings = self._compute_embeddings(
                 documents=unpacked_record_set["documents"],
                 images=unpacked_record_set["images"],
                 uris=None,
             )
-            if normalized_embeddings is None
-            else normalized_embeddings
-        )
+
+        # the only way this can happen is when embeddings function returns None
+        if prepared_embeddings is None:
+            raise ValueError("Prepared embeddings cannot be None.")
 
         return {
             "ids": unpacked_record_set["ids"],
@@ -546,11 +553,11 @@ class CollectionCommon(Generic[ClientT]):
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
             ]
-        ],
-        metadatas: Optional[OneOrMany[Metadata]],
-        documents: Optional[OneOrMany[Document]],
-        images: Optional[OneOrMany[Image]],
-        uris: Optional[OneOrMany[URI]],
+        ] = None,
+        metadatas: Optional[OneOrMany[Metadata]] = None,
+        documents: Optional[OneOrMany[Document]] = None,
+        images: Optional[OneOrMany[Image]] = None,
+        uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
         unpacked_record_set = self._unpack_record_set(
             ids=ids,
