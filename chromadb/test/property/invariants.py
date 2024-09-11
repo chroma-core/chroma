@@ -82,23 +82,36 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
     }
 
 
-def get_n_items_from_record_set_state(record_set: StateMachineRecordSet) -> int:
-    normalized_record_set = wrap_all(cast(RecordSet, record_set))
+def get_n_items_from_record_set_state(state_record_set: StateMachineRecordSet) -> int:
+    normalized_record_set = wrap_all(cast(RecordSet, state_record_set))
+
+    # we need to replace empty lists with None to use get_n_items_from_record_set
+    # get_n_items_from_record_set would throw an error if it encounters an empty list
+    record_set_with_empty_lists_replaced: NormalizedRecordSet = {
+        "ids": None,
+        "documents": None,
+        "metadatas": None,
+        "embeddings": None,
+    }
 
     all_fields_are_empty = True
-    for value in normalized_record_set.values():
+    for key, value in normalized_record_set.items():
         if value is None:
             continue
 
         if isinstance(value, list):
-            if len(value) != 0:
-                all_fields_are_empty = False
-                break
+            if len(value) == 0:
+                record_set_with_empty_lists_replaced[key] = None  # type: ignore[literal-required]
+                continue
+
+            all_fields_are_empty = False
+
+        record_set_with_empty_lists_replaced[key] = value  # type: ignore[literal-required]
 
     if all_fields_are_empty:
         return 0
 
-    return get_n_items_from_record_set(normalized_record_set)
+    return get_n_items_from_record_set(record_set_with_empty_lists_replaced)
 
 
 def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> int:
