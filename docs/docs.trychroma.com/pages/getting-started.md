@@ -66,7 +66,7 @@ pip install chromadb # [!code $]
 
 ```python
 import chromadb
-chroma_client = chromadb.Client()
+chroma_client = chromadb.PersistentClient(path="LOCAL_PATH")
 ```
 
 {% /tab %}
