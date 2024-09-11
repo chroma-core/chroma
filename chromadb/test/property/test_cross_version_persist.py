@@ -326,7 +326,7 @@ def test_cycle_versions(
     # the previous versions
     version, settings = version_settings
 
-    # TODO: This conditionn is subject to change as we decide on whether we want
+    # TODO: This condition is subject to change as we decide on whether we want to
     # release auto ID generation feature after 0.5.5
     if (
         packaging_version.Version(version) > packaging_version.Version("0.5.5")

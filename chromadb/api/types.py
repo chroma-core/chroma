@@ -1,4 +1,4 @@
-from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Union, TypeVar, List, Dict, Any, cast
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
@@ -610,7 +610,7 @@ def validate_batch_size(
     record_set: RecordSet,
     limits: Dict[str, Any],
 ) -> None:
-    (_, batch_size) = get_n_items_from_record_set(record_set)
+    batch_size = get_n_items_from_record_set(record_set)
 
     if batch_size > limits["max_batch_size"]:
         raise ValueError(
@@ -692,16 +692,15 @@ def validate_record_set(
 
 def get_n_items_from_record_set(
     record_set: RecordSet,
-) -> Tuple[str, int]:
+) -> int:
     """
     Get the number of items in the record set.
     """
 
     validate_record_set_consistency(record_set)
-
-    for field, value in record_set.items():
+    for value in record_set.values():
         if isinstance(value, list) and len(value) > 0:
-            return field, len(value)
+            return len(value)
 
     return "", 0
 

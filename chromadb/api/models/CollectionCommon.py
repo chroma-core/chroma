@@ -186,7 +186,7 @@ class CollectionCommon(Generic[ClientT]):
         else:
             if uris is None:
                 raise ValueError(
-                    "You must provide either embeddings, documents, images, or uris."
+                    "You must provide either embeddings, documents, images, or URIs."
                 )
             if self._data_loader is None:
                 raise ValueError(

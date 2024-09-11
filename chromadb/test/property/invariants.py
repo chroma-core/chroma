@@ -113,15 +113,14 @@ def get_n_items_from_record_set_state(state_record_set: StateMachineRecordSet) -
     if all_fields_are_empty:
         return 0
 
-    (_, n) = types.get_n_items_from_record_set(record_set_with_empty_lists_replaced)
-    return n
+    return types.get_n_items_from_record_set(record_set_with_empty_lists_replaced)
 
 
 def get_n_items_from_record_set(record_set: RecordSet) -> int:
     """Get the number of items from a record set"""
     normalized_record_set = wrap_all(record_set)
 
-    (_, n) = types.get_n_items_from_record_set(
+    return types.get_n_items_from_record_set(
         {
             "ids": normalized_record_set["ids"],
             "embeddings": normalized_record_set["embeddings"],
@@ -131,8 +130,6 @@ def get_n_items_from_record_set(record_set: RecordSet) -> int:
             "images": None,
         }
     )
-
-    return n
 
 
 def count(collection: Collection, record_set: RecordSet) -> None:
