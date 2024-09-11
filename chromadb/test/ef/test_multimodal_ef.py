@@ -17,7 +17,7 @@ from chromadb.test.property.invariants import _exact_distances
 # then hashes them to a fixed dimension.
 class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
     def __init__(self) -> None:
-        self._hef = hashing_embedding_function(dim=10, dtype=np.float_)
+        self._hef = hashing_embedding_function(dim=10, dtype=np.float64)
 
     def __call__(self, input: Embeddable) -> Embeddings:
         to_texts = [str(i) for i in input]
@@ -82,7 +82,7 @@ def test_multimodal(
 
     # get() should return all the documents and images
     # ids corresponding to images should not have documents
-    get_result = multimodal_collection.get(include=["documents"])
+    get_result = multimodal_collection.get(include=["documents"])  # type: ignore[list-item]
     assert len(get_result["ids"]) == len(document_ids) + len(image_ids)
     for i, id in enumerate(get_result["ids"]):
         assert id in document_ids or id in image_ids
@@ -124,14 +124,14 @@ def test_multimodal(
 
     # Query with images
     query_result = multimodal_collection.query(
-        query_images=[query_image], n_results=n_query_results, include=["documents"]
+        query_images=[query_image], n_results=n_query_results, include=["documents"]  # type: ignore[list-item]
     )
 
     assert query_result["ids"][0] == nearest_image_neighbor_ids
 
     # Query with documents
     query_result = multimodal_collection.query(
-        query_texts=[query_document], n_results=n_query_results, include=["documents"]
+        query_texts=[query_document], n_results=n_query_results, include=["documents"]  # type: ignore[list-item]
     )
 
     assert query_result["ids"][0] == nearest_document_neighbor_ids
@@ -152,6 +152,6 @@ def test_multimodal_update_with_image(
 
     multimodal_collection.update(ids=id, images=image)
 
-    get_result = multimodal_collection.get(ids=id, include=["documents"])
+    get_result = multimodal_collection.get(ids=id, include=["documents"])  # type: ignore[list-item]
     assert get_result["documents"] is not None
     assert get_result["documents"][0] is None
