@@ -8,7 +8,14 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-from chromadb.api.types import ID, Embeddings, Include, IDs, validate_embeddings
+from chromadb.api.types import (
+    ID,
+    Embeddings,
+    Include,
+    IDs,
+    validate_embeddings,
+    maybe_cast_one_to_many_embedding,
+)
 from chromadb.config import System
 import chromadb.errors as errors
 from chromadb.api import ClientAPI
@@ -796,7 +803,8 @@ def test_autocasting_validate_embeddings_for_compatible_types(
     supported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings(10, 10, supported_types)
-    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
+
+    validated_embeddings = validate_embeddings(maybe_cast_one_to_many_embedding(embds))  # type: ignore[arg-type]
     assert all(
         [
             isinstance(value, np.ndarray)
@@ -816,7 +824,7 @@ def test_autocasting_validate_embeddings_with_ndarray(
     supported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings_ndarray(10, 10, supported_types)
-    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
+    validated_embeddings = validate_embeddings(maybe_cast_one_to_many_embedding(embds))  # type: ignore[arg-type]
     assert all(
         [
             isinstance(value, np.ndarray)
@@ -837,7 +845,7 @@ def test_autocasting_validate_embeddings_incompatible_types(
 ) -> None:
     embds = strategies.create_embeddings(10, 10, unsupported_types)
     with pytest.raises(ValueError) as e:
-        validate_embeddings(Collection._normalize_embeddings(embds))
+        validate_embeddings(maybe_cast_one_to_many_embedding(embds))  # type: ignore[arg-type]
 
     assert "Expected each value in the embedding to be a int or float" in str(e)
 

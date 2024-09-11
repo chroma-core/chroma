@@ -2,7 +2,7 @@ import pytest
 from chromadb.api import ClientAPI
 
 
-def test_update_query(client: ClientAPI) -> None:
+def test_update_query_with_none_data(client: ClientAPI) -> None:
     client.reset()
     collection = client.create_collection("test_update_query")
 
@@ -16,4 +16,6 @@ def test_update_query(client: ClientAPI) -> None:
     with pytest.raises(ValueError) as e:
         collection.update(**invalid_updated_records)  # type: ignore[arg-type]
 
-    assert "You must provide either data or metadatas" in str(e)
+    assert e.match(
+        "You must provide one of embeddings, documents, images, uris, metadatas"
+    )

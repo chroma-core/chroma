@@ -62,14 +62,44 @@ def maybe_cast_one_to_many_embedding(
     if target is None:
         return None
 
-    if isinstance(target, List):
-        # One Embedding
+    if not isinstance(target, list) and not isinstance(target, np.ndarray):
+        raise ValueError(
+            f"Expected embeddings to be a list or a numpy array, got {type(target).__name__}"
+        )
+
+    if len(target) == 0:
+        raise ValueError(
+            "Expected embeddings to be a list or a numpy array with at least one item"
+        )
+
+    if isinstance(target, np.ndarray):
+        dim = target.ndim
+        if dim == 1:
+            # TODO: Remove this conversion when unpacking
+            return cast(Embeddings, [target.tolist()])
+        if dim == 2:
+            return cast(Embeddings, target.tolist())
+        raise ValueError(
+            f"Expected embeddings to be a 1D or 2D numpy array, got {dim}D"
+        )
+
+    if isinstance(target, list):
+        # target represents a single embedding as a list
         if isinstance(target[0], (int, float)):
             return cast(Embeddings, [target])
-    elif isinstance(target, np.ndarray):
-        if isinstance(target[0], (np.floating, np.integer)):
-            return cast(Embeddings, [target])
-    # Already a sequence
+
+        # Check if the first item is a numpy array - target is a list of numpy arrays
+        if isinstance(target[0], np.ndarray):
+            # Check all the embeddings are 1D
+            for embedding in target:
+                dim = (cast(np.ndarray, embedding)).ndim  # type: ignore[type-arg]
+                if dim != 1:
+                    raise ValueError(
+                        f"Expected embeddings to be a list of 1D numpy arrays, got a {dim}D numpy array"
+                    )
+            return [cast(np.ndarray, embedding).tolist() for embedding in target]  # type: ignore[type-arg]
+
+    # target is a list of lists representing embeddings
     return cast(Embeddings, target)
 
 
@@ -117,43 +147,6 @@ class IncludeEnum(str, Enum):
     data = "data"
 
 
-# Record set
-class RecordSet(TypedDict):
-    ids: IDs
-    embeddings: Optional[Embeddings]
-    metadatas: Optional[Metadatas]
-    documents: Optional[Documents]
-    images: Optional[Images]
-    uris: Optional[URIs]
-
-
-def does_record_set_contain_any_data(record_set: RecordSet, include: List[str]) -> bool:
-    if len(include) == 0:
-        raise ValueError("Expected include to be a non-empty list")
-
-    error_messages = []
-    for key in include:
-        if key not in record_set:
-            error_messages.append(
-                f"Expected include key to be a a known field of RecordSet, got {key}"
-            )
-
-    if len(error_messages) > 0:
-        raise ValueError(", ".join(error_messages))
-
-    for key, value in record_set.items():
-        if key not in include:
-            continue
-
-        if isinstance(value, list):
-            if len(value) == 0:
-                raise ValueError(f"Expected {key} to be a non-empty list")
-
-            return True
-
-    return False
-
-
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
 Include = List[IncludeEnum]
@@ -167,6 +160,44 @@ IncludeMetadataDocumentsEmbeddingsDistances = Field(
 IncludeMetadataDocumentsDistances = Field(
     default=["metadatas", "documents", "distances"]
 )
+
+
+class RecordSet(TypedDict):
+    ids: IDs
+    embeddings: Optional[Embeddings]
+    metadatas: Optional[Metadatas]
+    documents: Optional[Documents]
+    images: Optional[Images]
+    uris: Optional[URIs]
+
+
+def record_set_contains_one_of(record_set: RecordSet, include: Include) -> bool:
+    """Check if the record set contains data for any of the given include keys"""
+    if len(include) == 0:
+        raise ValueError("Expected include to be a non-empty list")
+
+    error_messages = []
+    for include_key in include:
+        if include_key not in record_set:
+            error_messages.append(
+                f"Expected include key to be a a known field of RecordSet, got {include_key}"
+            )
+
+    if len(error_messages) > 0:
+        raise ValueError(", ".join(error_messages))
+
+    for record_key, value in record_set.items():
+        if record_key not in include:
+            continue
+
+        if isinstance(value, list):
+            if len(value) == 0:
+                raise ValueError(f"Expected {record_key} to be a non-empty list")
+
+            return True
+
+    return False
+
 
 # Re-export types from chromadb.types
 LiteralValue = LiteralValue
