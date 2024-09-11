@@ -116,7 +116,7 @@ def _test_add(
         coll.add(*batch)
     
     result = coll.add(**record_set)  # type: ignore
-    if normalized_record_set["ids"] is not None:
+    if normalized_record_set["ids"] is None:
         normalized_record_set["ids"] = result["ids"]
 
     n_records = invariants.get_n_items_from_record_set(record_set)
