@@ -1,4 +1,5 @@
 import path from "node:path";
+import { exec } from "node:child_process";
 import { GenericContainer, Wait } from "testcontainers";
 import bcrypt from "bcrypt";
 
@@ -12,6 +13,44 @@ const BASIC_AUTH_PASSWORD_FILE_CONTENTS = `admin:${bcrypt.hashSync(
   1,
 )}`;
 
+// Manually build image--as of September 2024, testcontainers does not support BuildKit
+async function buildDockerImage(
+  dockerfilePath: string,
+  imageName: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const absoluteDockerfilePath = path.resolve(dockerfilePath);
+
+    const buildContextDir = path.dirname(absoluteDockerfilePath);
+    const buildCommand = `docker build -f ${absoluteDockerfilePath} -t ${imageName} ${buildContextDir}`;
+
+    // Execute the Docker build command
+    exec(buildCommand, (error, stdout, stderr) => {
+      if (error) {
+        reject(`Error building Docker image: ${stderr}`);
+        return;
+      }
+
+      // After building, inspect the image to get its sha256 hash
+      const inspectCommand = `docker inspect --format="{{.Id}}" ${imageName}`;
+      exec(inspectCommand, (inspectError, inspectStdout, inspectStderr) => {
+        if (inspectError) {
+          reject(`Error inspecting Docker image: ${inspectStderr}`);
+          return;
+        }
+
+        // Extract the sha256 hash from the output and resolve the promise
+        const imageId = inspectStdout.trim();
+        if (imageId.startsWith("sha256:")) {
+          resolve(imageId);
+        } else {
+          reject("Could not retrieve the sha256 hash of the Docker image.");
+        }
+      });
+    });
+  });
+}
+
 export async function startChromaContainer({
   authType,
 }: {
@@ -21,12 +60,11 @@ export async function startChromaContainer({
   if (process.env.PREBUILT_CHROMADB_IMAGE) {
     container = new GenericContainer(process.env.PREBUILT_CHROMADB_IMAGE);
   } else {
-    container = await GenericContainer.fromDockerfile(BUILD_CONTEXT_DIR).build(
-      undefined,
-      {
-        deleteOnExit: false,
-      },
+    const imageHash = await buildDockerImage(
+      path.join(BUILD_CONTEXT_DIR, "Dockerfile"),
+      "chromadb-test",
     );
+    container = new GenericContainer(imageHash);
     container = container.withCopyContentToContainer([
       {
         content: BASIC_AUTH_PASSWORD_FILE_CONTENTS,
