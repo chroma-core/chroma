@@ -56,6 +56,7 @@ def test_add_small(
         num_unique_metadata=5,
         min_metadata_size=1,
         max_metadata_size=5,
+        can_ids_be_empty=True,
     ),
     should_compact=st.booleans(),
 )
