@@ -4,6 +4,7 @@ from overrides import overrides
 import pytest
 import logging
 import hypothesis
+from packaging import version
 import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
@@ -51,9 +52,13 @@ def print_traces() -> None:
         print(f"{key}: {value}")
 
 
-dtype_shared_st: st.SearchStrategy[
-    Union[np.float16, np.float32, np.float64]
-] = st.shared(st.sampled_from(strategies.float_types), key="dtype")
+SearchStrategyType = None
+if version.parse(np.__version__) < version.parse("2.0.0"):
+    SearchStrategyType = Union[np.float16, np.float32, np.float_]  # type: ignore[attr-defined]
+else:
+    SearchStrategyType = Union[np.float16, np.float32, np.float64]
+
+dtype_shared_st: SearchStrategyType = st.shared(st.sampled_from(strategies.float_types), key="dtype")  # type: ignore[valid-type, arg-type]
 
 dimension_shared_st: st.SearchStrategy[int] = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"

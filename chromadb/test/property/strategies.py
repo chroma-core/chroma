@@ -5,6 +5,7 @@ from typing import Any, Optional, List, Dict, Union, cast
 from typing_extensions import TypedDict
 import uuid
 import numpy as np
+from packaging import version
 import numpy.typing as npt
 import chromadb.api.types as types
 import re
@@ -148,7 +149,12 @@ legal_id_characters = (
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./+"
 )
 
-float_types = [np.float16, np.float32, np.float64]
+float_types = None
+if version.parse(np.__version__) < version.parse("2.0.0"):
+    float_types = [np.float16, np.float32, np.float_]  # type: ignore[attr-defined]
+else:
+    float_types = [np.float16, np.float32, np.float64]
+
 int_types = [np.int16, np.int32, np.int64]  # TODO: handle int types
 
 
@@ -194,7 +200,7 @@ def create_embeddings_ndarray(
     dim: int,
     count: int,
     dtype: npt.DTypeLike,
-) -> np.typing.NDArray[Any]:
+) -> npt.NDArray[Any]:
     return np.random.uniform(
         low=-1.0,
         high=1.0,
@@ -295,7 +301,7 @@ def collections(
     name = draw(collection_name())
     metadata = draw(collection_metadata)
     dimension = draw(st.integers(min_value=2, max_value=2048))
-    dtype = draw(st.sampled_from(float_types))
+    dtype = draw(st.sampled_from(float_types))  # type: ignore[arg-type]
 
     use_persistent_hnsw_params = draw(with_persistent_hnsw_params)
 
@@ -376,7 +382,10 @@ def collections(
 
 @st.composite
 def metadata(
-    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+    draw: st.DrawFn,
+    collection: Collection,
+    min_size: int = 0,
+    max_size: Optional[int] = None,
 ) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
@@ -429,7 +438,7 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
 
     # Blacklist certain unicode characters that affect sqlite processing.
     # For example, the null (/x00) character makes sqlite stop processing a string.
-    blacklist_categories = ("Cc", "Cs")
+    blacklist_categories = ("Cc", "Cs")  # type: ignore[assignment]
     if collection.known_document_keywords:
         known_words_st = st.sampled_from(collection.known_document_keywords)
     else:
@@ -553,7 +562,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     if not NOT_CLUSTER_ONLY:
         legal_ops: List[Optional[str]] = [None, "$eq"]
     else:
-        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]  # type: ignore[no-redef]
 
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
@@ -605,10 +614,10 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     else:
         op = draw(st.sampled_from(["$contains", "$not_contains"]))
 
-    if op == "$contains":
+    if op == "$contains":  # type: ignore[comparison-overlap]
         return {"$contains": word}
     else:
-        assert op == "$not_contains"
+        assert op == "$not_contains"  # type: ignore[comparison-overlap]
         return {"$not_contains": word}
 
 

@@ -1,5 +1,6 @@
 from typing import Optional, Union, TypeVar, List, Dict, Any, Tuple, cast
 from numpy.typing import NDArray
+from packaging import version
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
 from enum import Enum
@@ -103,8 +104,13 @@ def maybe_cast_one_to_many_document(target: OneOrMany[Document]) -> Documents:
 
 
 # Images
-ImageDType = Union[np.uint, np.int_, np.float64]
-Image = NDArray[ImageDType]
+ImageDType = None
+if version.parse(np.__version__) < version.parse("2.0.0"):
+    ImageDType = Union[np.uint, np.int_, np.float_]  # type: ignore[attr-defined]
+else:
+    ImageDType = Union[np.uint, np.int_, np.float64]
+
+Image = NDArray[ImageDType]  # type: ignore[valid-type]
 Images = List[Image]
 
 
