@@ -363,7 +363,6 @@ impl SparseIndexManager {
         match index {
             Some(index) => Some(index),
             None => {
-                // TODO: move this to a separate function
                 tracing::info!("Cache miss - fetching sparse index from storage");
                 let key = format!("sparse_index/{}", id);
                 tracing::debug!("Reading sparse index from storage with key: {}", key);

@@ -292,8 +292,16 @@ impl HnswIndexProvider {
             }
         };
 
-        // TODO: don't unwrap path conv here
-        match HnswIndex::load(index_storage_path.to_str().unwrap(), &index_config, *id) {
+        let index_storage_path_str = match index_storage_path.to_str() {
+            Some(index_storage_path_str) => index_storage_path_str,
+            None => {
+                return Err(Box::new(HnswIndexProviderOpenError::PathToStringError(
+                    index_storage_path,
+                )));
+            }
+        };
+
+        match HnswIndex::load(index_storage_path_str, &index_config, *id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
                 match self.get(id, &segment.collection) {
@@ -439,6 +447,8 @@ pub enum HnswIndexProviderOpenError {
     HnswConfigError(#[from] HnswIndexFromSegmentError),
     #[error("Index load error")]
     IndexLoadError(#[from] Box<dyn ChromaError>),
+    #[error("Path: {0} could not be converted to string")]
+    PathToStringError(PathBuf),
 }
 
 impl ChromaError for HnswIndexProviderOpenError {
@@ -448,6 +458,7 @@ impl ChromaError for HnswIndexProviderOpenError {
             HnswIndexProviderOpenError::FileError(_) => ErrorCodes::Internal,
             HnswIndexProviderOpenError::HnswConfigError(e) => e.code(),
             HnswIndexProviderOpenError::IndexLoadError(e) => e.code(),
+            HnswIndexProviderOpenError::PathToStringError(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

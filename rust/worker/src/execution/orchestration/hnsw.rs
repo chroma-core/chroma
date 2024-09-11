@@ -242,6 +242,7 @@ impl HnswQueryOrchestrator {
             Ok(_) => (),
             Err(e) => {
                 // TODO: log an error and reply to caller
+                tracing::error!("Error sending PullLogs task: {:?}", e);
             }
         }
     }
@@ -677,7 +678,8 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>
                 self.brute_force_results.insert(query_index, output);
             }
             Err(e) => {
-                // TODO: handle this error, technically never happens
+                terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
+                return;
             }
         }
 
@@ -713,6 +715,7 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
             }
             Err(e) => {
                 terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
+                return;
             }
         }
 

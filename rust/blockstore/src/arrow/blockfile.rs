@@ -106,7 +106,6 @@ impl ArrowBlockfileWriter {
                 removed = self.sparse_index.remove_block(&delta.id);
             }
             if !removed {
-                // TODO: might these error?
                 let block = self.block_manager.commit::<K, V>(delta);
                 blocks.push(block);
             }
@@ -120,7 +119,6 @@ impl ArrowBlockfileWriter {
             self.id,
         );
 
-        // TODO: we need to update the sparse index with the new min keys?
         Ok(flusher)
     }
 
@@ -143,7 +141,6 @@ impl ArrowBlockfileWriter {
         // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
         // Creating a delta loads the block entirely into memory
 
-        // TODO: replace with R/W lock
         let delta = {
             let deltas = self.block_deltas.lock();
             let delta = match deltas.get(&target_block_id) {

@@ -27,9 +27,6 @@ pub(crate) struct RecordSegmentWriter {
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
     pub(crate) id: Uuid,
-    // If there is an old version of the data, we need to keep it around to be able to
-    // materialize the log records
-    // old_id_to_data: Option<BlockfileReader<'a, u32, DataRecord<'a>>>,
 }
 
 impl Debug for RecordSegmentWriter {

@@ -472,8 +472,7 @@ impl SparseIndex {
     pub(super) fn to_block<K: ArrowWriteableKey>(&self) -> Result<Block, Box<dyn ChromaError>> {
         let forward = self.forward.lock();
         if forward.is_empty() {
-            // TODO: error here
-            panic!("No blocks in the sparse index");
+            panic!("Invariant violation. No blocks in the sparse index");
         }
 
         // TODO: we could save the uuid not as a string to be more space efficient
