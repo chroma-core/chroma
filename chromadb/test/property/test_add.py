@@ -106,16 +106,7 @@ def _test_add(
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
-    for batch in create_batches(
-        api=client,
-        ids=cast(List[str], record_set["ids"]),
-        embeddings=cast(Embeddings, record_set["embeddings"]),
-        metadatas=cast(Metadatas, record_set["metadatas"]),
-        documents=cast(List[str], record_set["documents"]),
-    ):
-        coll.add(*batch)
-    
-    result = coll.add(**record_set)  # type: ignore
+    result = coll.add(**record_set)  # type: ignore[arg-type]
     if normalized_record_set["ids"] is None:
         normalized_record_set["ids"] = result["ids"]
 
