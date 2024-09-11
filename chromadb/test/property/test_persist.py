@@ -198,7 +198,7 @@ def test_sync_threshold(settings: Settings) -> None:
 def load_and_check(
     settings: Settings,
     collection_name: str,
-    record_set: strategies.RecordSet,
+    record_set: strategies.StateMachineRecordSet,
     conn: Connection,
 ) -> None:
     try:
@@ -210,10 +210,10 @@ def load_and_check(
             name=collection_name,
             embedding_function=strategies.not_implemented_embedding_function(),  # type: ignore[arg-type]
         )
-        invariants.count_state_record_set(coll, record_set)  # type: ignore[arg-type]
-        invariants.metadatas_match_state_record_set(coll, record_set)  # type: ignore[arg-type]
-        invariants.documents_match_state_record_set(coll, record_set)  # type: ignore[arg-type]
-        invariants.ids_match(coll, record_set)
+        invariants.count_state_record_set(coll, record_set)
+        invariants.metadatas_match_state_record_set(coll, record_set)
+        invariants.documents_match_state_record_set(coll, record_set)
+        invariants.ids_match(coll, record_set)  # type: ignore[arg-type]
         invariants.ann_accuracy(coll, record_set, n_records=invariants.get_n_items_from_record_set_state(record_set))  # type: ignore[arg-type]
 
         system.stop()
