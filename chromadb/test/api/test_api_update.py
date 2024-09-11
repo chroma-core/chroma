@@ -19,3 +19,11 @@ def test_update_query_with_none_data(client: ClientAPI) -> None:
     assert e.match(
         "You must provide one of embeddings, documents, images, uris, metadatas"
     )
+
+
+def test_update_with_none_ids(client: ClientAPI) -> None:
+    client.reset()
+    collection = client.create_collection("test")
+    with pytest.raises(ValueError) as e:
+        collection.update(ids=None, embeddings=[[0.1, 0.2, 0.3]])  # type: ignore[arg-type]
+    assert "You must provide ids." in str(e)
