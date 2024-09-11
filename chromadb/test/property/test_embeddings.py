@@ -136,7 +136,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             new_ids = list(set(ids).difference(intersection))  # type: ignore[arg-type]
             indices = [ids.index(id) for id in new_ids]  # type: ignore[union-attr]
             filtered_record_set: strategies.NormalizedRecordSet = {
-                "ids": [ids[i] for i in indices],  # type: ignore
+                "ids": [ids[i] for i in indices],  # type: ignore[index]
                 "metadatas": [normalized_record_set["metadatas"][i] for i in indices]
                 if normalized_record_set["metadatas"]
                 else None,

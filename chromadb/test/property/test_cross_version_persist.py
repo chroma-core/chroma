@@ -411,7 +411,7 @@ def test_cycle_versions(
     invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings
-    result = coll.add(**embeddings_strategy)  # type: ignore
+    result = coll.add(**embeddings_strategy)  # type: ignore[arg-type]
     if embeddings_strategy["ids"] is None:
         embeddings_strategy["ids"] = result["ids"]
 
