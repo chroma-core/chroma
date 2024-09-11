@@ -261,6 +261,9 @@ class CollectionCommon(Generic[ClientT]):
                 )
             embeddings = self._embed(self._data_loader(uris))
 
+        if embeddings is None:
+            raise ValueError("Computed embeddings cannot be None.")
+
         return embeddings
 
     def _validate_and_prepare_get_request(
@@ -360,23 +363,22 @@ class CollectionCommon(Generic[ClientT]):
         valid_n_results = validate_n_results(n_results)
 
         embeddings_to_normalize = maybe_cast_one_to_many_embedding(query_embeddings)
+        normalized_embeddings = (
+            self._normalize_embeddings(embeddings_to_normalize)
+            if embeddings_to_normalize is not None
+            else None
+        )
+
         valid_query_embeddings = None
-        if embeddings_to_normalize is not None:
-            valid_query_embeddings = validate_embeddings(
-                self._normalize_embeddings(embeddings_to_normalize)
+        if normalized_embeddings is not None:
+            valid_query_embeddings = validate_embeddings(normalized_embeddings)
+        else:
+            # If query_embeddings are not provided, we need to compute them from the inputs
+            valid_query_embeddings = self._compute_embeddings(
+                documents=valid_query_texts,
+                images=valid_query_images,
+                uris=valid_query_uris,
             )
-
-            if valid_query_embeddings is None:
-                # If query_embeddings are not provided, we need to compute them from the inputs
-                valid_query_embeddings = self._compute_embeddings(
-                    documents=valid_query_texts,
-                    images=valid_query_images,
-                    uris=valid_query_uris,
-                )
-
-        # the only way this can happen is when embeddings function returns None
-        if valid_query_embeddings is None:
-            raise ValueError("Query embeddings cannot be None.")
 
         if "data" in include and "uris" not in include:
             valid_include.append("uris")  # type: ignore[arg-type]
@@ -473,10 +475,6 @@ class CollectionCommon(Generic[ClientT]):
             else normalized_embeddings
         )
 
-        # the only way this can happen is when embeddings function returns None
-        if prepared_embeddings is None:
-            raise ValueError("Prepared embeddings cannot be None.")
-
         return {
             "ids": unpacked_record_set["ids"],
             "embeddings": prepared_embeddings,
@@ -531,10 +529,6 @@ class CollectionCommon(Generic[ClientT]):
                 images=unpacked_record_set["images"],
                 uris=None,
             )
-
-        # the only way this can happen is when embeddings function returns None
-        if prepared_embeddings is None:
-            raise ValueError("Prepared embeddings cannot be None.")
 
         return {
             "ids": unpacked_record_set["ids"],
