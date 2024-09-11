@@ -48,7 +48,7 @@ from chromadb.api.types import (
     validate_n_results,
     validate_where,
     validate_where_document,
-    does_record_set_contain_data,
+    does_record_set_contain_any_data,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -579,7 +579,7 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         prepared_embeddings = normalized_embeddings
-        if prepared_embeddings is None and does_record_set_contain_data(
+        if prepared_embeddings is None and does_record_set_contain_any_data(
             unpacked_record_set, include=["documents", "images"]
         ):
             prepared_embeddings = self._compute_embeddings(

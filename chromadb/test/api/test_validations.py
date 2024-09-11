@@ -1,8 +1,8 @@
 import pytest
-from chromadb.api.types import RecordSet, does_record_set_contain_data
+from chromadb.api.types import RecordSet, does_record_set_contain_any_data
 
 
-def test_does_record_set_contain_data() -> None:
+def test_does_record_set_contain_any_data() -> None:
     valid_record_set: RecordSet = {
         "ids": ["1", "2", "3"],
         "embeddings": None,
@@ -23,19 +23,21 @@ def test_does_record_set_contain_data() -> None:
     }
 
     with pytest.raises(ValueError) as e:
-        does_record_set_contain_data(record_set_non_list, include=["embeddings"])
+        does_record_set_contain_any_data(record_set_non_list, include=["embeddings"])
 
     assert "Expected embeddings to be a non-empty list" in str(e)
 
     # Test case 2: Non-list field
     with pytest.raises(ValueError) as e:
-        does_record_set_contain_data(valid_record_set, include=[])
+        does_record_set_contain_any_data(valid_record_set, include=[])
 
     assert "Expected include to be a non-empty list" in str(e)
 
     # Test case 3: Non-existent field
     with pytest.raises(ValueError) as e:
-        does_record_set_contain_data(valid_record_set, include=["non_existent_field"])
+        does_record_set_contain_any_data(
+            valid_record_set, include=["non_existent_field"]
+        )
 
     assert (
         "Expected include key to be a a known field of RecordSet, got non_existent_field"

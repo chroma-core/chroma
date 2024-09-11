@@ -127,7 +127,7 @@ class RecordSet(TypedDict):
     uris: Optional[URIs]
 
 
-def does_record_set_contain_data(record_set: RecordSet, include: List[str]) -> bool:
+def does_record_set_contain_any_data(record_set: RecordSet, include: List[str]) -> bool:
     if len(include) == 0:
         raise ValueError("Expected include to be a non-empty list")
 
