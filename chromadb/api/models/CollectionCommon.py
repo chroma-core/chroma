@@ -210,6 +210,16 @@ class CollectionCommon(Generic[ClientT]):
                 raise ValueError(
                     "You must provide embeddings, documents, images, or uris."
                 )
+        else:
+            # will replace this with does_record_set_contain_any_data in the following PR
+            if (
+                valid_embeddings is None
+                and valid_documents is None
+                and valid_images is None
+                and valid_uris is None
+                and valid_metadatas is None
+            ):
+                raise ValueError("You must provide either data or metadatas.")
 
         # Only one of documents or images can be provided
         if valid_documents is not None and valid_images is not None:
