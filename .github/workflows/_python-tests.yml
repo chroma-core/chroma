@@ -123,7 +123,7 @@ jobs:
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: logs
           path: ${{ steps.get-logs.outputs.logs_zip_path }}
