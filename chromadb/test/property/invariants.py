@@ -85,13 +85,15 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
 def get_n_items_from_record_set_state(state_record_set: StateMachineRecordSet) -> int:
     normalized_record_set = wrap_all(cast(RecordSet, state_record_set))
 
-    # we need to replace empty lists with None to use get_n_items_from_record_set
+    # we need to replace empty lists with None within the record set state to use get_n_items_from_record_set
     # get_n_items_from_record_set would throw an error if it encounters an empty list
-    record_set_with_empty_lists_replaced: NormalizedRecordSet = {
+    record_set_with_empty_lists_replaced: types.RecordSet = {
         "ids": None,
         "documents": None,
         "metadatas": None,
         "embeddings": None,
+        "images": None,
+        "uris": None,
     }
 
     all_fields_are_empty = True
@@ -111,11 +113,14 @@ def get_n_items_from_record_set_state(state_record_set: StateMachineRecordSet) -
     if all_fields_are_empty:
         return 0
 
-    return get_n_items_from_record_set(record_set_with_empty_lists_replaced)
+    (_, n) = types.get_n_items_from_record_set(record_set_with_empty_lists_replaced)
+    return n
 
 
-def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> int:
+def get_n_items_from_record_set(record_set: RecordSet) -> int:
     """Get the number of items from a record set"""
+    normalized_record_set = wrap_all(record_set)
+
     (_, n) = types.get_n_items_from_record_set(
         {
             "ids": normalized_record_set["ids"],
@@ -133,9 +138,16 @@ def get_n_items_from_record_set(normalized_record_set: NormalizedRecordSet) -> i
 def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
-    normalized_record_set = wrap_all(record_set)
+    n = get_n_items_from_record_set(record_set)
+    assert count == n
 
-    n = get_n_items_from_record_set(normalized_record_set)
+
+def count_state_record_set(
+    collection: Collection, record_set: StateMachineRecordSet
+) -> None:
+    """The given collection count is equal to the number of embeddings within the state record set"""
+    count = collection.count()
+    n = get_n_items_from_record_set_state(record_set)
     assert count == n
 
 
@@ -212,7 +224,7 @@ def metadatas_match(collection: Collection, record_set: RecordSet) -> None:
         collection,
         normalized_record_set,
         "metadatas",
-        get_n_items_from_record_set(normalized_record_set),
+        get_n_items_from_record_set(record_set),
     )
 
 
@@ -237,7 +249,7 @@ def documents_match(collection: Collection, record_set: RecordSet) -> None:
         collection,
         normalized_record_set,
         "documents",
-        get_n_items_from_record_set(normalized_record_set),
+        get_n_items_from_record_set(record_set),
     )
 
 
@@ -262,7 +274,7 @@ def embeddings_match(collection: Collection, record_set: RecordSet) -> None:
         collection,
         normalized_record_set,
         "embeddings",
-        get_n_items_from_record_set(normalized_record_set),
+        get_n_items_from_record_set(record_set),
     )
 
 
@@ -332,6 +344,7 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
 def ann_accuracy(
     collection: Collection,
     record_set: RecordSet,
+    n_records: int,
     n_results: int = 1,
     min_recall: float = 0.99,
     embedding_function: Optional[types.EmbeddingFunction] = None,  # type: ignore[type-arg]
@@ -341,8 +354,7 @@ def ann_accuracy(
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
 
-    n = get_n_items_from_record_set(normalized_record_set)
-    if n == 0:
+    if n_records == 0:
         return  # nothing to test here
 
     if normalized_record_set["ids"] is None:

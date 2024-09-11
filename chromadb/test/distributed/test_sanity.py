@@ -49,7 +49,8 @@ def test_add(
             "metadatas": None,
             "documents": None,
         },
-        10,
+        n_records=len(ids),
+        n_results=10,
         query_embeddings=[random_query],
     )
 
@@ -93,6 +94,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
             "metadatas": None,
             "documents": documents,
         },
-        10,
+        n_records=len(ids),
+        n_results=10,
         query_embeddings=[random_query_1, random_query_2],
     )

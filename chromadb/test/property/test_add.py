@@ -116,10 +116,10 @@ def _test_add(
         coll.add(*batch)
     
     result = coll.add(**record_set)  # type: ignore
-    if result["ids"] is not None:
+    if normalized_record_set["ids"] is not None:
         normalized_record_set["ids"] = result["ids"]
 
-    n_records = invariants.get_n_items_from_record_set(normalized_record_set)
+    n_records = invariants.get_n_items_from_record_set(record_set)
 
     # Only wait for compaction if the size of the collection is
     # some minimal size
@@ -136,6 +136,7 @@ def _test_add(
             invariants.ann_accuracy(
                 coll,
                 cast(strategies.RecordSet, normalized_record_set),
+                n_records=n_records,
                 n_results=n_results,
                 embedding_function=collection.embedding_function,
                 query_indices=list(range(i, min(i + batch_size, n_records))),
@@ -144,6 +145,7 @@ def _test_add(
         invariants.ann_accuracy(
             coll,
             cast(strategies.RecordSet, normalized_record_set),
+            n_records=n_records,
             n_results=n_results,
             embedding_function=collection.embedding_function,
         )
@@ -200,7 +202,7 @@ def test_add_large(
         if results["ids"] is None:
             raise ValueError("IDs should not be None")
 
-    n_records = invariants.get_n_items_from_record_set(normalized_record_set)
+    n_records = invariants.get_n_items_from_record_set(record_set)
     if not NOT_CLUSTER_ONLY and should_compact and n_records > 10:
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(

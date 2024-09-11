@@ -55,17 +55,17 @@ def _test_multithreaded_add(
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures: List[Future[Any]] = []
         total_sent = -1
-        while total_sent < len(ids):
+        while total_sent < len(ids):  # type: ignore[arg-type]
             # Randomly grab up to 10% of the dataset and send it to the executor
             batch_size = random.randint(1, N // 10)
-            to_send = min(batch_size, len(ids) - total_sent)
+            to_send = min(batch_size, len(ids) - total_sent)  # type: ignore[arg-type]
             start = total_sent + 1
             end = total_sent + to_send + 1
             if embeddings is not None and len(embeddings[start:end]) == 0:
                 break
             future = executor.submit(
                 coll.add,
-                ids=ids[start:end],
+                ids=ids[start:end],  # type: ignore[index]
                 embeddings=embeddings[start:end] if embeddings is not None else None,
                 metadatas=metadatas[start:end] if metadatas is not None else None,  # type: ignore
                 documents=documents[start:end] if documents is not None else None,
@@ -93,6 +93,7 @@ def _test_multithreaded_add(
     invariants.ann_accuracy(
         coll,
         records_set,
+        n_records=invariants.get_n_items_from_record_set(records_set),
         n_results=n_results,
         query_indices=query_indices,
     )
@@ -210,6 +211,7 @@ def _test_interleaved_add_query(
     invariants.ann_accuracy(
         coll,
         records_set,
+        n_records=invariants.get_n_items_from_record_set(records_set),
         n_results=n_results,
         query_indices=query_indices,
     )

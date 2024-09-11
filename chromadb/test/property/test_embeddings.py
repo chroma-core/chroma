@@ -213,15 +213,9 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def count(self) -> None:
-        n = invariants.get_n_items_from_record_set_state(self.record_set_state)
-        if n == 0:
-            assert self.collection.count() == 0
-            return
-
-        invariants.count(
+        invariants.count_state_record_set(
             self.collection,
-            # this cast exists because count function is used for handling both StateMachineRecordSet and RecordSet
-            cast(strategies.RecordSet, self.record_set_state),
+            self.record_set_state,
         )
 
     @invariant()
@@ -230,11 +224,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def ann_accuracy(self) -> None:
-        n = invariants.get_n_items_from_record_set_state(self.record_set_state)
-        if n == 0:
-            return
-
         invariants.ann_accuracy(
+            n_records=invariants.get_n_items_from_record_set_state(
+                self.record_set_state
+            ),
             collection=self.collection,
             record_set=cast(strategies.RecordSet, self.record_set_state),
             min_recall=0.95,
@@ -412,11 +405,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     )
     def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         res = super().add_embeddings(record_set)
-        normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
-            record_set
-        )
 
-        n_records = invariants.get_n_items_from_record_set(normalized_record_set)
+        n_records = invariants.get_n_items_from_record_set(record_set)
         ids = [id for id in res]
 
         print(

@@ -105,6 +105,7 @@ def test_persist(
         coll,
         embeddings_strategy,
         embedding_function=collection_strategy.embedding_function,
+        n_records=invariants.get_n_items_from_record_set(embeddings_strategy),
     )
 
     system_1.stop()
@@ -127,6 +128,7 @@ def test_persist(
         coll,
         embeddings_strategy,
         embedding_function=collection_strategy.embedding_function,
+        n_records=invariants.get_n_items_from_record_set(embeddings_strategy),
     )
 
     system_2.stop()
@@ -208,13 +210,11 @@ def load_and_check(
             name=collection_name,
             embedding_function=strategies.not_implemented_embedding_function(),  # type: ignore[arg-type]
         )
-        invariants.count(coll, record_set)
+        invariants.count_state_record_set(coll, record_set)  # type: ignore[arg-type]
         invariants.metadatas_match_state_record_set(coll, record_set)  # type: ignore[arg-type]
         invariants.documents_match_state_record_set(coll, record_set)  # type: ignore[arg-type]
         invariants.ids_match(coll, record_set)
-
-        if invariants.get_n_items_from_record_set_state(record_set) > 0:  # type: ignore[arg-type]
-            invariants.ann_accuracy(coll, record_set)
+        invariants.ann_accuracy(coll, record_set, n_records=invariants.get_n_items_from_record_set_state(record_set))  # type: ignore[arg-type]
 
         system.stop()
     except Exception as e:

@@ -419,7 +419,11 @@ def test_cycle_versions(
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
-    invariants.ann_accuracy(coll, embeddings_strategy)
+    invariants.ann_accuracy(
+        coll,
+        embeddings_strategy,
+        n_records=invariants.get_n_items_from_record_set(embeddings_strategy),
+    )
     invariants.log_size_below_max(system, [coll], True)
 
     # Shutdown system
