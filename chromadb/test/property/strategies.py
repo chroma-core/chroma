@@ -695,18 +695,18 @@ def filters(
         st.one_of(st.none(), recursive_where_doc_clause(collection))
     )
 
-    ids: Optional[Union[List[types.ID], types.ID]]
+    if recordset["ids"] is None:
+        raise ValueError("Record set IDs cannot be None")
+
+    ids: Union[List[types.ID], types.ID]
     # Record sets can be a value instead of a list of values if there is only one record
     if isinstance(recordset["ids"], str):
         ids = [recordset["ids"]]
     else:
         ids = recordset["ids"]
 
-    if ids is None:
-        raise ValueError("IDs cannot be None")
-
     if not include_all_ids:
-        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
+        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))  # type: ignore[assignment]
         if ids is not None:
             # Remove duplicates since hypothesis samples with replacement
             ids = list(set(ids))

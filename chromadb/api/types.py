@@ -312,8 +312,10 @@ class DataLoader(Protocol[L]):
         ...
 
 
-def validate_ids(ids: IDs) -> IDs:
+def validate_ids(ids: Optional[IDs]) -> IDs:
     """Validates ids to ensure it is a list of strings"""
+    if ids is None:
+        raise ValueError("Expected IDs to be a non-empty list of str, got None")
     if not isinstance(ids, list):
         raise ValueError(f"Expected IDs to be a list, got {type(ids).__name__} as IDs")
     if len(ids) == 0:
@@ -610,7 +612,7 @@ def validate_batch_size(
     record_set: RecordSet,
     limits: Dict[str, Any],
 ) -> None:
-    batch_size = get_n_items_from_record_set(record_set)
+    batch_size = count_records(record_set)
 
     if batch_size > limits["max_batch_size"]:
         raise ValueError(
@@ -618,44 +620,34 @@ def validate_batch_size(
         )
 
 
-def validate_record_set_consistency(record_set: RecordSet) -> None:
+def validate_record_set_count(record_set: RecordSet) -> None:
     """
     Validate the consistency of the record set, ensuring all values are non-empty lists and have the same length.
     """
     error_messages = []
-    field_record_counts = []
-    count = 0
-    consistency_error_found = False
+    counts = {
+        field: len(
+            cast(Union[IDs, Metadatas, Embeddings, Documents, Images, URIs], value)
+        )
+        for field, value in record_set.items()
+        if value is not None
+    }
 
-    for field, value in record_set.items():
-        if value is None:
-            continue
+    if len(counts) == 0:
+        raise ValueError("Expected at least one record set field to be non-empty")
 
-        if not isinstance(value, list):
-            error_messages.append(
-                f"Expected field {field} to be a list, got {type(value).__name__}"
-            )
-            continue
+    if any(count == 0 for count in counts.values()):
+        error_messages.append(
+            f"Expected all fields to be non-empty lists, got empty lists in: {', '.join(field for field, count in counts.items() if count == 0)}"
+        )
 
-        n_items = len(value)
-        if n_items == 0:
-            error_messages.append(
-                f"Expected field {field} to be a non-empty list, got an empty list"
-            )
-            continue
-
-        field_record_counts.append(f"{field}: ({n_items})")
-        if count == 0:
-            count = n_items
-        elif count != n_items:
-            consistency_error_found = True
-
-    if consistency_error_found:
+    if len(counts) > 1:
+        field_record_counts = [f"{field}: ({count})" for field, count in counts.items()]
         error_messages.append(
             f"Inconsistent number of records: {', '.join(field_record_counts)}"
         )
 
-    if len(error_messages) > 0:
+    if error_messages:
         raise ValueError(", ".join(error_messages))
 
 
@@ -663,6 +655,7 @@ def validate_record_set(
     record_set: RecordSet,
     require_data: bool,
 ) -> None:
+    validate_record_set_count(record_set)
     validate_ids(record_set["ids"])
     validate_embeddings(record_set["embeddings"]) if record_set[
         "embeddings"
@@ -682,7 +675,8 @@ def validate_record_set(
     if not record_set_contains_one_of(record_set, include=required_fields):
         raise ValueError(f"You must provide one of {', '.join(required_fields)}")
 
-    valid_ids = record_set["ids"]
+    # The ID validator checks for None
+    valid_ids = cast(IDs, record_set["ids"])
     for key in ["embeddings", "metadatas", "documents", "images", "uris"]:
         if record_set[key] is not None and len(record_set[key]) != len(valid_ids):  # type: ignore[literal-required]
             raise ValueError(
@@ -690,19 +684,21 @@ def validate_record_set(
             )
 
 
-def get_n_items_from_record_set(
+def count_records(
     record_set: RecordSet,
 ) -> int:
     """
     Get the number of items in the record set.
     """
 
-    validate_record_set_consistency(record_set)
+    validate_record_set_count(record_set)
     for value in record_set.values():
-        if isinstance(value, list) and len(value) > 0:
-            return len(value)
+        if value is not None:
+            return len(
+                cast(Union[IDs, Embeddings, Metadatas, Documents, Images, URIs], value)
+            )
 
-    return "", 0
+    raise ValueError("Expected at least one record set field to be non-empty")
 
 
 def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:

@@ -98,7 +98,7 @@ version_patches: List[
 def patch_for_version(
     version: str,
     collection: strategies.Collection,
-    embeddings: strategies.RecordSet,
+    record_set: strategies.RecordSet,
     settings: Settings,
 ) -> None:
     """Override aspects of the collection and embeddings, before testing, to account for
@@ -108,7 +108,7 @@ def patch_for_version(
         if packaging_version.Version(version) <= packaging_version.Version(
             patch_version
         ):
-            patch(collection, embeddings, settings)
+            patch(collection, record_set, settings)
 
 
 def api_import_for_version(module: Any, version: str) -> Type:  # type: ignore
@@ -235,7 +235,7 @@ def persist_generated_data_with_old_version(
     version: str,
     settings: Settings,
     collection_strategy: strategies.Collection,
-    embeddings_strategy: strategies.RecordSet,
+    record_set: strategies.RecordSet,
     conn: Connection,
 ) -> None:
     try:
@@ -257,21 +257,24 @@ def persist_generated_data_with_old_version(
             # In order to test old versions, we can't rely on the not_implemented function
             embedding_function=not_implemented_ef(),
         )
-        result = coll.add(**embeddings_strategy)
+        result = coll.add(**record_set)
 
-        if embeddings_strategy["ids"] is None:
+        if (
+            packaging_version.Version(version) >= packaging_version.Version("0.5.5")
+            and record_set["ids"] is None
+        ):
             if result is None:
                 raise ValueError("IDs from embeddings strategy should not be None")
 
             if result["ids"] is None:
                 raise ValueError("IDs from result should not be None")
 
-            embeddings_strategy["ids"] = result["ids"]
+            record_set["ids"] = result["ids"]
 
         # Just use some basic checks for sanity and manual testing where you break the new
         # version
 
-        check_embeddings = invariants.wrap_all(embeddings_strategy)
+        check_embeddings = invariants.wrap_all(record_set)
         # Check count
         assert coll.count() == len(check_embeddings["embeddings"])  # type: ignore[arg-type]
 
@@ -311,14 +314,14 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 
 @given(
     collection_strategy=collection_st,
-    embeddings_strategy=strategies.recordsets(collection_strategy=collection_st),
+    record_set=strategies.recordsets(collection_strategy=collection_st),
     should_stomp_ids=st.booleans(),
 )
 @settings(deadline=None)
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
-    embeddings_strategy: strategies.RecordSet,
+    record_set: strategies.RecordSet,
     should_stomp_ids: bool,
 ) -> None:
     # Test backwards compatibility
@@ -328,26 +331,26 @@ def test_cycle_versions(
 
     # TODO: This condition is subject to change as we decide on whether we want to
     # release auto ID generation feature after 0.5.5
+
     if (
         packaging_version.Version(version) > packaging_version.Version("0.5.5")
         and should_stomp_ids
     ):
-        embeddings_strategy["ids"] = None
+        record_set["ids"] = None
 
     # The strategies can generate metadatas of malformed inputs. Other tests
     # will error check and cover these cases to make sure they error. Here we
     # just convert them to valid values since the error cases are already tested
-    if embeddings_strategy["metadatas"] == {}:
-        embeddings_strategy["metadatas"] = None
-    if embeddings_strategy["metadatas"] is not None and isinstance(
-        embeddings_strategy["metadatas"], list
+    if record_set["metadatas"] == {}:
+        record_set["metadatas"] = None
+    if record_set["metadatas"] is not None and isinstance(
+        record_set["metadatas"], list
     ):
-        embeddings_strategy["metadatas"] = [
-            m if m is None or len(m) > 0 else None
-            for m in embeddings_strategy["metadatas"]
+        record_set["metadatas"] = [
+            m if m is None or len(m) > 0 else None for m in record_set["metadatas"]
         ]
 
-    patch_for_version(version, collection_strategy, embeddings_strategy, settings)
+    patch_for_version(version, collection_strategy, record_set, settings)
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
@@ -360,7 +363,7 @@ def test_cycle_versions(
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
-        args=(version, settings, collection_strategy, embeddings_strategy, conn2),
+        args=(version, settings, collection_strategy, record_set, conn2),
     )
     p.start()
     p.join()
@@ -411,18 +414,18 @@ def test_cycle_versions(
     invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings
-    result = coll.add(**embeddings_strategy)  # type: ignore[arg-type]
-    if embeddings_strategy["ids"] is None:
-        embeddings_strategy["ids"] = result["ids"]
+    result = coll.add(**record_set)  # type: ignore[arg-type]
+    if record_set["ids"] is None:
+        record_set["ids"] = result["ids"]
 
-    invariants.count(coll, embeddings_strategy)
-    invariants.metadatas_match(coll, embeddings_strategy)
-    invariants.documents_match(coll, embeddings_strategy)
-    invariants.ids_match(coll, embeddings_strategy)
+    invariants.count(coll, record_set)
+    invariants.metadatas_match(coll, record_set)
+    invariants.documents_match(coll, record_set)
+    invariants.ids_match(coll, record_set)
     invariants.ann_accuracy(
         coll,
-        embeddings_strategy,
-        n_records=invariants.get_n_items_from_record_set(embeddings_strategy),
+        record_set,
+        n_records=invariants.get_n_items_from_record_set(record_set),
     )
     invariants.log_size_below_max(system, [coll], True)
 

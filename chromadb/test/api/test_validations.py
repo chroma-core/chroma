@@ -9,7 +9,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many_embedding,
     validate_embeddings,
     validate_ids,
-    validate_record_set_consistency,
+    validate_record_set_count,
 )
 
 import chromadb.errors as errors
@@ -35,19 +35,18 @@ def test_does_record_set_contain_any_data() -> None:
         "uris": None,
     }
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match="Expected embeddings to be a non-empty list"):
         record_set_contains_one_of(record_set_non_list, include=["embeddings"])  # type: ignore[list-item]
 
-    assert "Expected embeddings to be a non-empty list" in str(e)
-
     # Test case 2: Non-list field
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match="Expected include to be a non-empty list"):
         record_set_contains_one_of(valid_record_set, include=[])
 
-    assert "Expected include to be a non-empty list" in str(e)
-
     # Test case 3: Non-existent field
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(
+        ValueError,
+        match="Expected include key to be a a known field of RecordSet, got non_existent_field",
+    ):
         record_set_contains_one_of(valid_record_set, include=["non_existent_field"])  # type: ignore[list-item]
 
     assert (
@@ -109,29 +108,29 @@ def test_maybe_cast_one_to_many_embedding() -> None:
 def test_embeddings_validation() -> None:
     invalid_embeddings = [[0, 0, True], [1.2, 2.24, 3.2]]
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(
+        ValueError, match="Expected each value in the embedding to be a int or float"
+    ):
         validate_embeddings(invalid_embeddings)  # type: ignore[arg-type]
-
-    assert "Expected each value in the embedding to be a int or float" in str(e)
 
     invalid_embeddings = [[0, 0, "invalid"], [1.2, 2.24, 3.2]]
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(
+        ValueError, match="Expected each value in the embedding to be a int or float"
+    ):
         validate_embeddings(invalid_embeddings)  # type: ignore[arg-type]
 
-    assert "Expected each value in the embedding to be a int or float" in str(e)
-
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match="Expected embeddings to be a list, got str"):
         validate_embeddings("invalid")  # type: ignore[arg-type]
-
-    assert "Expected embeddings to be a list, got str" in str(e)
 
 
 def test_0dim_embedding_validation() -> None:
-    embds: Embeddings = [[]]  # type: ignore[list-item]
-    with pytest.raises(ValueError) as e:
+    embds: Embeddings = [[]]
+    with pytest.raises(
+        ValueError,
+        match="Expected each embedding in the embeddings to be a non-empty list",
+    ):
         validate_embeddings(embds)
-    assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)
 
 
 def test_ids_validation() -> None:
@@ -182,7 +181,7 @@ def test_validate_record_set_consistency() -> None:
         "uris": None,
     }
     with pytest.raises(ValueError, match="Inconsistent number of records:"):
-        validate_record_set_consistency(inconsistent_record_set)
+        validate_record_set_count(inconsistent_record_set)
 
     # Test record set with empty list
     empty_list_record_set: RecordSet = {
@@ -193,22 +192,8 @@ def test_validate_record_set_consistency() -> None:
         "images": None,
         "uris": None,
     }
-    with pytest.raises(
-        ValueError, match="Expected field embeddings to be a non-empty list"
-    ):
-        validate_record_set_consistency(empty_list_record_set)
-
-    # Test record set with non-list value
-    non_list_record_set: RecordSet = {
-        "ids": ["1", "2", "3"],
-        "embeddings": "not a list",  # type: ignore[typeddict-item]
-        "metadatas": [{"key": "value1"}, {"key": "value2"}, {"key": "value3"}],
-        "documents": ["doc1", "doc2", "doc3"],
-        "images": None,
-        "uris": None,
-    }
-    with pytest.raises(ValueError, match="Expected field embeddings to be a list"):
-        validate_record_set_consistency(non_list_record_set)
+    with pytest.raises(ValueError, match="got empty lists in: * embeddings"):
+        validate_record_set_count(empty_list_record_set)
 
     # Test record set with all None value
     all_none_record_set: RecordSet = {
@@ -220,9 +205,9 @@ def test_validate_record_set_consistency() -> None:
         "uris": None,
     }
     with pytest.raises(
-        ValueError, match="Expected record set to contain at least one record"
+        ValueError, match="Expected at least one record set field to be non-empty"
     ):
-        validate_record_set_consistency(all_none_record_set)
+        validate_record_set_count(all_none_record_set)
 
     # Test record set with multiple errors
     multiple_error_record_set: RecordSet = {
@@ -233,11 +218,9 @@ def test_validate_record_set_consistency() -> None:
         "images": None,
         "uris": None,
     }
-    with pytest.raises(ValueError) as exc_info:
-        validate_record_set_consistency(multiple_error_record_set)
+    with pytest.raises(ValueError, match="got empty lists in: * ids") as exc_info:
+        validate_record_set_count(multiple_error_record_set)
 
-    assert "Expected field ids to be a non-empty list" in str(exc_info.value)
-    assert "Expected field embeddings to be a list" in str(exc_info.value)
     assert "Inconsistent number of records:" in str(exc_info.value)
 
 

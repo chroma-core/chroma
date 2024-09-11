@@ -123,7 +123,7 @@ def _filter_embedding_set(
     """Return IDs from the embedding set that match the given filter object"""
 
     normalized_record_set = invariants.wrap_all(record_set)
-    ids = set(normalized_record_set["ids"])
+    ids = set(normalized_record_set["ids"])  # type: ignore[arg-type]
 
     filter_ids = filter["ids"]
 
@@ -134,23 +134,23 @@ def _filter_embedding_set(
         if len(filter_ids) != 0:
             ids = ids.intersection(filter_ids)
 
-    for i in range(len(normalized_record_set["ids"])):
+    for i in range(len(normalized_record_set["ids"])):  # type: ignore[arg-type]
         if filter["where"]:
             metadatas: Metadatas
             if isinstance(normalized_record_set["metadatas"], list):
                 metadatas = normalized_record_set["metadatas"]  # type: ignore[assignment]
             else:
-                metadatas = [EMPTY_DICT] * len(normalized_record_set["ids"])
+                metadatas = [EMPTY_DICT] * len(normalized_record_set["ids"])  # type: ignore[arg-type]
             filter_where: Where = filter["where"]
             if not _filter_where_clause(filter_where, metadatas[i]):
-                ids.discard(normalized_record_set["ids"][i])
+                ids.discard(normalized_record_set["ids"][i])  # type: ignore[index]
 
         if filter["where_document"]:
             documents = normalized_record_set["documents"] or [EMPTY_STRING] * len(
-                normalized_record_set["ids"]
+                normalized_record_set["ids"]  # type: ignore[arg-type]
             )
             if not _filter_where_doc_clause(filter["where_document"], documents[i]):
-                ids.discard(normalized_record_set["ids"][i])
+                ids.discard(normalized_record_set["ids"][i])  # type: ignore[index]
 
     return list(ids)
 
@@ -197,6 +197,9 @@ def test_filterable_metadata_get(
     )
 
     initial_version = cast(int, coll.get_model()["version"])
+
+    if record_set["ids"] is None:
+        raise ValueError("Record set IDs cannot be None")
 
     coll.add(**record_set)
 
@@ -317,11 +320,11 @@ def test_filterable_metadata_query(
     if not NOT_CLUSTER_ONLY:
         # Only wait for compaction if the size of the collection is
         # some minimal size
-        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+        if should_compact and len(invariants.wrap(record_set["ids"])) > 10:  # type: ignore[arg-type]
             # Wait for the model to be updated
             wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
 
-    total_count = len(normalized_record_set["ids"])
+    total_count = len(normalized_record_set["ids"])  # type: ignore[arg-type]
     # Pick a random vector
     random_query: Embedding
     if collection.has_embeddings:

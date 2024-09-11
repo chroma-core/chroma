@@ -162,7 +162,7 @@ class CollectionCommon(Generic[ClientT]):
         uris: Optional[OneOrMany[URI]] = None,
     ) -> RecordSet:
         return {
-            "ids": cast(IDs, maybe_cast_one_to_many(ids)),
+            "ids": maybe_cast_one_to_many(ids),
             "embeddings": maybe_cast_one_to_many_embedding(embeddings),
             "metadatas": maybe_cast_one_to_many(metadatas),
             "documents": maybe_cast_one_to_many(documents),

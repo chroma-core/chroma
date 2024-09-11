@@ -45,7 +45,7 @@ from chromadb.api.types import (
     validate_where_document,
     validate_batch_size,
     validate_record_set,
-    get_n_items_from_record_set,
+    count_records,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -347,6 +347,7 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
 
+        # TODO: We slightly abuse the record_set type here
         record_set: RecordSet = {
             "ids": ids,
             "embeddings": embeddings,
@@ -355,9 +356,12 @@ class SegmentAPI(ServerAPI):
             "metadatas": metadatas,
             "images": None,
         }
+        n = count_records(record_set)
 
-        ids = self.generate_ids_when_not_present(record_set)
-        record_set["ids"] = ids
+        # Generate ids if not provided
+        if record_set["ids"] is None:
+            n = count_records(record_set)
+            record_set["ids"] = [str(uuid4()) for _ in range(n)]
 
         self._validate_record_set(
             collection=coll,
@@ -368,11 +372,11 @@ class SegmentAPI(ServerAPI):
         records_to_submit = list(
             _records(
                 t.Operation.ADD,
-                ids=ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=documents,
-                uris=uris,
+                ids=cast(IDs, record_set["ids"]),  # IDs validator checks for None
+                embeddings=record_set["embeddings"],
+                metadatas=record_set["metadatas"],
+                documents=record_set["documents"],
+                uris=record_set["uris"],
             )
         )
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -380,13 +384,15 @@ class SegmentAPI(ServerAPI):
         self._product_telemetry_client.capture(
             CollectionAddEvent(
                 collection_uuid=str(collection_id),
-                add_amount=len(ids),
-                with_metadata=len(ids) if metadatas is not None else 0,
-                with_documents=len(ids) if documents is not None else 0,
-                with_uris=len(ids) if uris is not None else 0,
+                add_amount=n,
+                with_metadata=n if metadatas is not None else 0,
+                with_documents=n if documents is not None else 0,
+                with_uris=n if uris is not None else 0,
             )
         )
-        return AddResult(ids=ids)
+        return AddResult(
+            ids=cast(IDs, record_set["ids"])
+        )  # IDs validator checks for None
 
     @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)
     @override
@@ -882,19 +888,6 @@ class SegmentAPI(ServerAPI):
     @override
     def get_max_batch_size(self) -> int:
         return self._producer.max_batch_size
-
-    @staticmethod
-    def generate_ids_when_not_present(
-        record_set: RecordSet,
-    ) -> IDs:
-        ids = record_set["ids"]
-        if ids is not None:
-            return ids
-
-        n = get_n_items_from_record_set(record_set)
-        generated_ids: List[str] = [str(uuid4()) for _ in range(n)]
-
-        return generated_ids
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.

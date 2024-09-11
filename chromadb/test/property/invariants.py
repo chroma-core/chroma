@@ -83,10 +83,11 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
 
 
 def get_n_items_from_record_set_state(state_record_set: StateMachineRecordSet) -> int:
-    normalized_record_set = wrap_all(cast(RecordSet, state_record_set))
-
     # we need to replace empty lists with None within the record set state to use get_n_items_from_record_set
     # get_n_items_from_record_set would throw an error if it encounters an empty list
+    if all(len(value) == 0 for value in state_record_set.values()):  # type: ignore[arg-type]
+        return 0
+
     record_set_with_empty_lists_replaced: types.RecordSet = {
         "ids": None,
         "documents": None,
@@ -96,31 +97,17 @@ def get_n_items_from_record_set_state(state_record_set: StateMachineRecordSet) -
         "uris": None,
     }
 
-    all_fields_are_empty = True
-    for key, value in normalized_record_set.items():
-        if value is None:
-            continue
+    for key, value in state_record_set.items():
+        record_set_with_empty_lists_replaced[key] = None if len(value) == 0 else value  # type: ignore[literal-required, arg-type]
 
-        if isinstance(value, list):
-            if len(value) == 0:
-                record_set_with_empty_lists_replaced[key] = None  # type: ignore[literal-required]
-                continue
-
-            all_fields_are_empty = False
-
-        record_set_with_empty_lists_replaced[key] = value  # type: ignore[literal-required]
-
-    if all_fields_are_empty:
-        return 0
-
-    return types.get_n_items_from_record_set(record_set_with_empty_lists_replaced)
+    return types.count_records(record_set_with_empty_lists_replaced)
 
 
 def get_n_items_from_record_set(record_set: RecordSet) -> int:
     """Get the number of items from a record set"""
     normalized_record_set = wrap_all(record_set)
 
-    return types.get_n_items_from_record_set(
+    return types.count_records(
         {
             "ids": normalized_record_set["ids"],
             "embeddings": normalized_record_set["embeddings"],
