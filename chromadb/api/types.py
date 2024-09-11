@@ -131,11 +131,15 @@ def does_record_set_contain_data(record_set: RecordSet, include: List[str]) -> b
     if len(include) == 0:
         raise ValueError("Expected include to be a non-empty list")
 
+    error_messages = []
     for key in include:
         if key not in record_set:
-            raise ValueError(
+            error_messages.append(
                 f"Expected include key to be a a known field of RecordSet, got {key}"
             )
+
+    if len(error_messages) > 0:
+        raise ValueError(", ".join(error_messages))
 
     for key, value in record_set.items():
         if key not in include:

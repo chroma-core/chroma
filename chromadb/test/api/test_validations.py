@@ -2,17 +2,16 @@ import pytest
 from chromadb.api.types import RecordSet, does_record_set_contain_data
 
 
-valid_record_set: RecordSet = {
-    "ids": ["1", "2", "3"],
-    "embeddings": None,
-    "metadatas": None,
-    "documents": ["doc1", "doc2", "doc3"],
-    "images": None,
-    "uris": None,
-}
-
-
 def test_does_record_set_contain_data() -> None:
+    valid_record_set: RecordSet = {
+        "ids": ["1", "2", "3"],
+        "embeddings": None,
+        "metadatas": None,
+        "documents": ["doc1", "doc2", "doc3"],
+        "images": None,
+        "uris": None,
+    }
+
     # Test case 1: Empty-list field
     record_set_non_list: RecordSet = {
         "ids": ["1", "2", "3"],
