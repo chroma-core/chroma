@@ -1,7 +1,6 @@
 import pytest
 import numpy as np
 from typing import cast
-import numpy as np
 from chromadb.api.types import (
     Embeddings,
     IDs,
