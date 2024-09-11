@@ -51,6 +51,16 @@ def DefaultEmbeddingFunction() -> Optional[EmbeddingFunction[Documents]]:
     if is_thin_client:
         return None
     else:
+        # Onxx doesn't support all operation systems.
+        # For example Onxx doesn't support alpine
+        has_onnxruntime = False
+        try:
+            importlib.import_module("onnxruntime")
+            has_onnxruntime = True
+        except ImportError:
+            pass
+        if not has_onnxruntime:
+            return None
         return cast(
             EmbeddingFunction[Documents],
             # This is implicitly imported above

@@ -1,24 +1,19 @@
-FROM python:3.11-slim-bookworm AS builder
+FROM python:3.11-alpine AS builder
 ARG REBUILD_HNSWLIB
-RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
-    build-essential \
-    gcc \
-    g++ \
-    cmake \
-    autoconf && \
+RUN apk add build-base && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir /install
 
 WORKDIR /install
 
 COPY ./requirements.txt requirements.txt
-COPY ./requirements_optional.txt requirements_optional.txt
+# COPY ./requirements_optional.txt requirements_optional.txt  onxxruntime doesn't support alpine T_T
 
 RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements.txt
-RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements_optional.txt
+# RUN pip install --no-cache-dir --upgrade --prefix="/install" -r requirements_optional.txt onxxrutime doesn't support alpoine T_T
 RUN if [ "$REBUILD_HNSWLIB" = "true" ]; then pip install --no-binary :all: --force-reinstall --no-cache-dir --prefix="/install" chroma-hnswlib; fi
 
-FROM python:3.11-slim-bookworm AS final
+FROM python:3.11-alpine AS final
 
 RUN mkdir /chroma
 WORKDIR /chroma
@@ -27,7 +22,7 @@ COPY --from=builder /install /usr/local
 COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
 COPY ./ /chroma
 
-RUN apt-get update --fix-missing && apt-get install -y curl && \
+RUN apk add curl libstdc++ && \
     chmod +x /docker_entrypoint.sh && \
     rm -rf /var/lib/apt/lists/*
 
@@ -39,5 +34,5 @@ ENV CHROMA_TIMEOUT_KEEP_ALIVE 30
 
 EXPOSE 8000
 
-ENTRYPOINT ["/docker_entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "/docker_entrypoint.sh"]
 CMD [ "--workers ${CHROMA_WORKERS} --host ${CHROMA_HOST_ADDR} --port ${CHROMA_HOST_PORT} --proxy-headers --log-config ${CHROMA_LOG_CONFIG} --timeout-keep-alive ${CHROMA_TIMEOUT_KEEP_ALIVE}"]

@@ -7,8 +7,10 @@ RUN [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tl
 WORKDIR C:\\chroma
 
 COPY ./requirements.txt requirements.txt
+COPY ./requirements_optional.txt requirements_optional.txt
 
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
+RUN pip install --no-cache-dir --upgrade -r requirements_optional.txt
 RUN if ($env:REBUILD_HNSWLIB -eq 'true') { pip install --no-binary :all: --force-reinstall --no-cache-dir chroma-hnswlib }
 
 COPY ./bin/docker_entrypoint.ps1 C:\\docker_entrypoint.ps1
