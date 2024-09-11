@@ -25,7 +25,7 @@ The total number of embeddings added to the database
 ```python
 def add(
         ids: Optional[OneOrMany[ID]] = None,
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -110,7 +110,7 @@ Get the first few results in the database up to limit
 
 ```python
 def query(
-        query_embeddings: Optional[  # type: ignore[type-arg]
+        query_embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -174,7 +174,7 @@ Modify the collection name or metadata
 ```python
 def update(
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -204,7 +204,7 @@ Update the embeddings, metadatas or documents for provided ids.
 ```python
 def upsert(
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
