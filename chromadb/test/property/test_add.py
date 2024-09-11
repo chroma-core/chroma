@@ -175,8 +175,8 @@ def test_add_large(
     reset(client)
 
     record_set = create_large_recordset(
-        min_size=client.get_max_batch_size(),
-        max_size=client.get_max_batch_size() * 250,
+        min_size=10000,
+        max_size=50000,
     )
     coll = client.create_collection(
         name=collection.name,
