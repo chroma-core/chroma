@@ -64,9 +64,12 @@ class ProductTelemetryClient(Component):
         for whitelisted in TELEMETRY_WHITELISTED_SETTINGS:
             telemetry_settings[whitelisted] = settings[whitelisted]
 
+        hosted = self._system.settings.chroma_server_host == "api.trychroma.com"
+
         self._context = {
             "chroma_version": chroma_version,
             "server_context": self.SERVER_CONTEXT.value,
+            "hosted": hosted,
             **telemetry_settings,
         }
         return self._context
