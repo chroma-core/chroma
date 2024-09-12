@@ -640,7 +640,7 @@ mod tests {
             .unwrap();
 
         let buf = storage.get("test").await.unwrap();
-        let buf = String::from_utf8_lossy(&buf);
+        let buf = String::from_utf8(buf.to_vec()).unwrap();
         assert_eq!(buf, test_data);
     }
 
