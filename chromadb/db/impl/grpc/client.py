@@ -4,8 +4,9 @@ from uuid import UUID
 from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
-from chromadb.db.base import NotFoundError, UniqueConstraintError
+from chromadb.db.base import UniqueConstraintError
 from chromadb.db.system import SysDB
+from chromadb.errors import NotFoundError
 from chromadb.proto.convert import (
     from_proto_collection,
     from_proto_segment,

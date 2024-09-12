@@ -22,7 +22,7 @@ from chromadb.api.types import (
     URIs,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-from chromadb.errors import ChromaError
+from chromadb.errors import ChromaError, NotFoundError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
@@ -122,10 +122,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
-        except Exception:
-            raise ValueError(
-                f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
-            )
+        except Exception as e:
+            if isinstance(e, NotFoundError):
+                raise ValueError(
+                    f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
+                )
+
+            raise e
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking

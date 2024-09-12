@@ -17,10 +17,10 @@ from chromadb.db.base import (
     SqlDB,
     ParameterValue,
     get_sql,
-    NotFoundError,
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.errors import NotFoundError
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -342,14 +342,14 @@ class SqlSysDB(SqlDB, SysDB):
                 rows = list(segment_rows)
                 type = str(rows[0][1])
                 scope = SegmentScope(str(rows[0][2]))
-                collection = self.uuid_from_db(rows[0][3])
+                collection = self.uuid_from_db(rows[0][3])  # type: ignore[assignment]
                 metadata = self._metadata_from_rows(rows)
                 segments.append(
                     Segment(
                         id=cast(UUID, id),
                         type=type,
                         scope=scope,
-                        collection=cast(UUID, collection),
+                        collection=collection,
                         metadata=metadata,
                     )
                 )
