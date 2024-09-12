@@ -24,7 +24,7 @@ from chromadb.api.types import (
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
-from chromadb.errors import ChromaError, NotFoundError
+from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
@@ -387,13 +387,6 @@ class Client(SharedSystemClient, ClientAPI):
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
-        except Exception as e:
-            if isinstance(e, NotFoundError):
-                raise ValueError(
-                    f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
-                )
-
-            raise e
 
     # endregion
 

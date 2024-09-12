@@ -105,7 +105,9 @@ class GrpcSysDB(SysDB):
             request, timeout=self._request_timeout_seconds
         )
         if response.status.code == 404:
-            raise NotFoundError()
+            raise NotFoundError(
+                f"Could not fetch database {name} for tenant {tenant}. Are you sure it exists?"
+            )
         return Database(
             id=UUID(hex=response.database.id),
             name=response.database.name,
@@ -128,7 +130,9 @@ class GrpcSysDB(SysDB):
             request, timeout=self._request_timeout_seconds
         )
         if response.status.code == 404:
-            raise NotFoundError()
+            raise NotFoundError(
+                f"Could not fetch tenant {name}. Are you sure it exists?"
+            )
         return Tenant(
             name=response.tenant.name,
         )
