@@ -141,34 +141,6 @@ impl<'me> FullTextIndexWriter<'me> {
                 .positional_postings
                 .insert(token.text.clone(), doc_and_positions);
         }
-
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-        for token in tokens {
-            if uncommitted_postings
-                .positional_postings
-                .contains_key(&token.text)
-            {
-                continue;
-            }
-
-            let results = match &self.full_text_index_reader {
-                // Readers are uninitialized until the first compaction finishes
-                // so there is a case when this is none hence not an error.
-                None => vec![],
-                Some(reader) => match reader.get_all_results_for_token(&token.text).await {
-                    Ok(results) => results,
-                    // New token so start with empty postings list.
-                    Err(_) => vec![],
-                },
-            };
-            let mut doc_and_positions = HashMap::new();
-            for result in results {
-                doc_and_positions.insert(result.0, result.1);
-            }
-            uncommitted_postings
-                .positional_postings
-                .insert(token.text.clone(), doc_and_positions);
-        }
         Ok(())
     }
 
