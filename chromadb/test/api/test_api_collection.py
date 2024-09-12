@@ -3,7 +3,7 @@ import numpy as np
 
 from chromadb.api import ClientAPI
 from chromadb.api.types import EmbeddingFunction, Documents
-from chromadb.test.api.utils import batch_records, records
+from chromadb.test.api.utils import batch_records
 from chromadb.errors import InvalidCollectionException, ChromaError
 from chromadb.test.api.utils import (
     local_persist_api,
@@ -68,34 +68,6 @@ def test_persist(api_fixture, request) -> None:
 
     client = request.getfixturevalue(api_fixture.__name__)
     assert client.list_collections() == []
-
-
-def test_get_or_create(client: ClientAPI) -> None:
-    client.reset()
-
-    collection = client.create_collection("testspace")
-
-    collection.add(**batch_records)  # type: ignore[arg-type]
-
-    assert collection.count() == 2
-
-    with pytest.raises(Exception):
-        collection = client.create_collection("testspace")
-
-    collection = client.get_or_create_collection("testspace")
-
-    assert collection.count() == 2
-
-
-# test delete_collection
-def test_delete_collection(client: ClientAPI) -> None:
-    client.reset()
-    collection = client.create_collection("test_delete_collection")
-    collection.add(**records)  # type: ignore[arg-type]
-
-    assert len(client.list_collections()) == 1
-    client.delete_collection("test_delete_collection")
-    assert len(client.list_collections()) == 0
 
 
 def test_multiple_collections(client: ClientAPI) -> None:
@@ -250,17 +222,6 @@ def test_collection_modify_with_invalid_collection_throws(client: ClientAPI) -> 
         InvalidCollectionException, match=r"Collection .* does not exist."
     ):
         collection.modify(name="test2")
-
-
-def test_collection_delete_with_invalid_collection_throws(client: ClientAPI) -> None:
-    client.reset()
-    collection = client.create_collection("test")
-    client.delete_collection("test")
-
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
-        collection.delete(ids=["id1"])
 
 
 def test_collection_count_with_invalid_collection_throws(client: ClientAPI) -> None:

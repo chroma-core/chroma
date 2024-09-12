@@ -4,12 +4,12 @@ from chromadb.errors import InvalidCollectionException
 from chromadb.api.types import QueryResult, IncludeEnum
 from chromadb.api import ClientAPI
 from chromadb.test.api.utils import (
-    approx_equal,
     metadata_records,
     contains_records,
     logical_operator_records,
     records,
     batch_records,
+    approx_equal,
     operator_records,
 )
 

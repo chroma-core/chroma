@@ -56,12 +56,6 @@ def approx_equal(a: float, b: float, tolerance: float = 1e-6) -> bool:
     return abs(a - b) < tolerance
 
 
-def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:  # type: ignore[no-untyped-def]
-    if len(a) != len(b):
-        return False
-    return all([approx_equal(a, b, tolerance) for a, b in zip(a, b)])
-
-
 initial_records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2], [2.2, 3.24, 4.2]],
     "ids": ["id1", "id2", "id3"],

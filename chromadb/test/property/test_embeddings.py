@@ -14,6 +14,7 @@ import chromadb.errors as errors
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
+from chromadb.test.api.utils import contains_records
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,
@@ -789,6 +790,21 @@ def test_delete_success(client: ClientAPI, kwargs: Any) -> None:
     coll = client.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
+
+
+def test_delete_where_document(client: ClientAPI) -> None:
+    client.reset()
+    collection = client.create_collection("test_delete_where_document")
+    collection.add(**contains_records)  # type: ignore[arg-type]
+
+    collection.delete(where_document={"$contains": "doc1"})
+    assert collection.count() == 1
+
+    collection.delete(where_document={"$contains": "bad"})
+    assert collection.count() == 1
+
+    collection.delete(where_document={"$contains": "great"})
+    assert collection.count() == 0
 
 
 @given(supported_types=st.sampled_from([np.float32, np.int32, np.int64, int, float]))

@@ -1,6 +1,7 @@
 import pytest
 from chromadb.api import ClientAPI
-from chromadb.test.api.utils import contains_records, batch_records
+from chromadb.test.api.utils import batch_records
+from chromadb.errors import InvalidCollectionException
 
 
 # test to make sure delete error on invalid id input
@@ -14,19 +15,15 @@ def test_delete_invalid_id(client: ClientAPI) -> None:
     assert "ID" in str(e.value)
 
 
-def test_delete_where_document(client: ClientAPI) -> None:
+def test_collection_delete_with_invalid_collection_throws(client: ClientAPI) -> None:
     client.reset()
-    collection = client.create_collection("test_delete_where_document")
-    collection.add(**contains_records)  # type: ignore[arg-type]
+    collection = client.create_collection("test")
+    client.delete_collection("test")
 
-    collection.delete(where_document={"$contains": "doc1"})
-    assert collection.count() == 1
-
-    collection.delete(where_document={"$contains": "bad"})
-    assert collection.count() == 1
-
-    collection.delete(where_document={"$contains": "great"})
-    assert collection.count() == 0
+    with pytest.raises(
+        InvalidCollectionException, match=r"Collection .* does not exist."
+    ):
+        collection.delete(ids=["id1"])
 
 
 def test_delete(client: ClientAPI) -> None:
