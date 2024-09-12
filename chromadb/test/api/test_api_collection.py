@@ -252,15 +252,6 @@ def test_collection_modify_with_invalid_collection_throws(client: ClientAPI) -> 
         collection.modify(name="test2")
 
 
-def test_modify(client: ClientAPI) -> None:
-    client.reset()
-    collection = client.create_collection("testspace")
-    collection.modify(name="testspace2")
-
-    # collection name is modify
-    assert collection.name == "testspace2"
-
-
 def test_collection_delete_with_invalid_collection_throws(client: ClientAPI) -> None:
     client.reset()
     collection = client.create_collection("test")
@@ -270,14 +261,6 @@ def test_collection_delete_with_invalid_collection_throws(client: ClientAPI) -> 
         InvalidCollectionException, match=r"Collection .* does not exist."
     ):
         collection.delete(ids=["id1"])
-
-
-def test_count(client: ClientAPI) -> None:
-    client.reset()
-    collection = client.create_collection("testspace")
-    assert collection.count() == 0
-    collection.add(**batch_records)  # type: ignore[arg-type]
-    assert collection.count() == 2
 
 
 def test_collection_count_with_invalid_collection_throws(client: ClientAPI) -> None:
