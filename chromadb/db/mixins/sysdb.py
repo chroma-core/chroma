@@ -99,9 +99,13 @@ class SqlSysDB(SqlDB, SysDB):
             sql, params = get_sql(q, self.parameter_format())
             row = cur.execute(sql, params).fetchone()
             if not row:
-                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+                raise NotFoundError(
+                    f"Database {name} not found for tenant {tenant}. Are you sure it exists?"
+                )
             if row[0] is None:
-                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+                raise NotFoundError(
+                    f"Database {name} not found for tenant {tenant}. Are you sure it exists?"
+                )
             id: UUID = cast(UUID, self.uuid_from_db(row[0]))
             return Database(
                 id=id,
