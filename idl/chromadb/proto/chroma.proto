@@ -115,8 +115,8 @@ message QueryMetadataRequest {
     Where where = 2;
     WhereDocument where_document = 3;
     repeated string ids = 4;
-    optional int32 limit = 5;
-    optional int32 offset = 6;
+    optional uint32 limit = 5;
+    optional uint32 offset = 6;
     string collection_id = 7;
     bool include_metadata = 8;
 }

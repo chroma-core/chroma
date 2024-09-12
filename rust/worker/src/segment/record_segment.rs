@@ -5,8 +5,13 @@ use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
+use futures::future::join_all;
+use futures::stream::{unfold, Unfold};
+use futures::{stream, Stream};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
+use std::future::Future;
+use std::ops::Range;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
@@ -828,6 +833,27 @@ impl RecordSegmentReader<'_> {
             }
         }
         Ok(ids)
+    }
+
+    /// Returns all offset_ids in the record segment sorted.
+    pub(crate) async fn get_all_offset_ids(&self) -> Result<Vec<u32>, Box<dyn ChromaError>> {
+        let offset_id_count = self.count().await?;
+        join_all((0..offset_id_count).map(|i| async move {
+            match self.id_to_user_id.get_at_index(i).await {
+                Ok((_, offset_id, _)) => Ok(offset_id),
+                Err(e) => {
+                    tracing::error!(
+                        "[GetAllData] Error getting offset id for index {}: {}",
+                        i,
+                        e
+                    );
+                    Err(e)
+                }
+            }
+        }))
+        .await
+        .into_iter()
+        .collect()
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
