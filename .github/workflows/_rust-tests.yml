@@ -9,6 +9,8 @@ jobs:
       matrix:
         platform: [depot-ubuntu-22.04]
     runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -17,12 +19,14 @@ jobs:
       - name: Build
         run: cargo build --verbose
       - name: Test
-        run: cargo test --verbose
+        run: cargo nextest run
   test-integration:
     strategy:
       matrix:
         platform: [depot-ubuntu-22.04-16]
     runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -31,6 +35,4 @@ jobs:
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
       - name: Run tests
-        run: cargo test --verbose
-        env:
-          CHROMA_KUBERNETES_INTEGRATION: "true"
+        run: cargo nextest run --profile k8s_integration

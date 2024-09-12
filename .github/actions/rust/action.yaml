@@ -17,3 +17,5 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: rust/worker
+    - name: Setup Nextest
+      uses: taiki-e/install-action@nextest

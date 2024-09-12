@@ -257,8 +257,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn it_can_work() {
+    async fn test_k8s_integration_it_can_work() {
         // TODO: This only works if you have a kubernetes cluster running locally with a memberlist
         // We need to implement a test harness for this. For now, it will silently do nothing
         // if you don't have a kubernetes cluster running locally and only serve as a reminder

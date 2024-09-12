@@ -413,8 +413,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_put_get_key() {
+    async fn test_k8s_integration_put_get_key() {
         let client = get_s3_client();
 
         let storage = S3Storage {
@@ -443,8 +442,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_multipart_get() {
+    async fn test_k8s_integration_multipart_get() {
         // At 8 MB.
         test_multipart_get_for_size(1024 * 1024 * 8).await;
         // At < 8 MB.

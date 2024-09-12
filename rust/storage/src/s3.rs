@@ -622,8 +622,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_put_get_key() {
+    async fn test_k8s_integration_put_get_key() {
         let client = get_s3_client();
 
         let storage = S3Storage {
@@ -640,21 +639,8 @@ mod tests {
             .await
             .unwrap();
 
-        let mut stream = storage.get("test").await.unwrap();
-
-        let mut buf = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(data) => {
-                    buf.extend_from_slice(&data);
-                }
-                Err(e) => {
-                    panic!("Error reading stream: {}", e);
-                }
-            }
-        }
-
-        let buf = String::from_utf8(buf).unwrap();
+        let buf = storage.get("test").await.unwrap();
+        let buf = String::from_utf8_lossy(&buf);
         assert_eq!(buf, test_data);
     }
 
@@ -710,8 +696,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_put_file_scenarios() {
+    async fn test_k8s_integration_put_file_scenarios() {
         let test_upload_part_size_bytes = 1024 * 1024 * 8; // 8MB
         let test_download_part_size_bytes = 1024 * 1024 * 8; // 8MB
 
