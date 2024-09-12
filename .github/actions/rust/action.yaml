@@ -8,9 +8,12 @@ runs:
       with:
         repository: chroma-core/hnswlib
         path: hnswlib
+    - name: Symlink hnswlib to parent
+      run: ln -s "$(pwd)/hnswlib" ../hnswlib
+      shell: bash
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
     - name: Cache
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: chroma/rust/worker
+        workspaces: rust/worker

@@ -9,16 +9,11 @@ jobs:
       matrix:
         platform: [depot-ubuntu-22.04]
     runs-on: ${{ matrix.platform }}
-    defaults:
-      run:
-        working-directory: chroma
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-        with:
-          path: chroma
       - name: Setup
-        uses: ./chroma/.github/actions/rust
+        uses: ./.github/actions/rust
       - name: Build
         run: cargo build --verbose
       - name: Test
@@ -28,20 +23,13 @@ jobs:
       matrix:
         platform: [depot-ubuntu-22.04-16]
     runs-on: ${{ matrix.platform }}
-    defaults:
-      run:
-        working-directory: chroma
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-        with:
-          path: chroma
       - name: Setup
-        uses: ./chroma/.github/actions/rust
+        uses: ./.github/actions/rust
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
-        with:
-          working-directory: chroma
       - name: Run tests
         run: cargo test --verbose
         env:
