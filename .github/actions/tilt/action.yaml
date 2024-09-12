@@ -1,5 +1,10 @@
 name: Start Tilt services
 description: "This action starts Tilt services"
+inputs:
+  working-directory:
+    description: "The working directory to run Tilt in"
+    required: false
+
 runs:
   using: "composite"
   steps:
@@ -9,15 +14,19 @@ runs:
         TILT_VERSION="0.33.3"
         curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
           tar -xzv -C /usr/local/bin tilt
+      working-directory: ${{ inputs.working-directory }}
     - name: Install ctlptlc
       shell: bash
       run: |
         CTLPTL_VERSION="0.8.20"
         curl -fsSL https://github.com/tilt-dev/ctlptl/releases/download/v$CTLPTL_VERSION/ctlptl.$CTLPTL_VERSION.linux.x86_64.tar.gz | \
           tar -xzv -C /usr/local/bin ctlptl
+      working-directory: ${{ inputs.working-directory }}
     - name: Set up kind
       shell: bash
       run: ctlptl create cluster kind --registry=ctlptl-registry
+      working-directory: ${{ inputs.working-directory }}
     - name: Start Tilt
       shell: bash
       run: tilt ci
+      working-directory: ${{ inputs.working-directory }}
