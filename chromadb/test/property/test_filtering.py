@@ -13,6 +13,8 @@ from chromadb.api.types import (
     Metadatas,
     Where,
     WhereDocument,
+    IncludeEnum,
+    QueryResult,
 )
 from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
@@ -21,6 +23,12 @@ import logging
 import random
 import re
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
+from chromadb.test.api.utils import (
+    metadata_records,
+    batch_records,
+    approx_equal,
+    records,
+)
 
 
 def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
@@ -215,7 +223,7 @@ def test_filterable_metadata_get(
         # some minimal size
         if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
             # Wait for the model to be updated
-            wait_for_version_increase(client, collection.name, initial_version)
+            wait_for_version_increase(client, collection.name, initial_version)  # type: ignore[arg-type]
 
     for filter in filters:
         result_ids = coll.get(**filter)["ids"]
@@ -326,7 +334,7 @@ def test_filterable_metadata_query(
         # some minimal size
         if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
             # Wait for the model to be updated
-            wait_for_version_increase(client, collection.name, initial_version)
+            wait_for_version_increase(client, collection.name, initial_version)  # type: ignore[arg-type]
 
     total_count = len(normalized_record_set["ids"])
     # Pick a random vector
@@ -438,3 +446,80 @@ def test_get_empty(client: ClientAPI) -> None:
         include=["embeddings", "metadatas", "documents"], where={"test": 100}  # type: ignore[list-item]
     )
     check_empty_res(res)
+
+
+def test_get_from_db(client: ClientAPI) -> None:
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)  # type: ignore[arg-type]
+    includes: List[IncludeEnum] = cast(
+        List[IncludeEnum], ["embeddings", "documents", "metadatas"]
+    )
+    records = collection.get(include=includes)
+    for key in records.keys():
+        if (key in includes) or (key == "ids"):
+            assert len(records[key]) == 2  # type: ignore[literal-required]
+        elif key == "included":
+            assert set(records[key]) == set(includes)  # type: ignore[literal-required]
+        else:
+            assert records[key] is None  # type: ignore[literal-required]
+
+
+# Keeping this test because property testing does not check the type consistency
+# between add input metadatas and get output metadatas.
+def test_metadata_add_get_int_float(client: ClientAPI) -> None:
+    client.reset()
+    collection = client.create_collection("test_int")
+    collection.add(**metadata_records)  # type: ignore[arg-type]
+
+    items = collection.get(ids=["id1", "id2"])
+    assert (items["metadatas"])[0]["int_value"] == 1  # type: ignore[index]
+    assert (items["metadatas"])[0]["float_value"] == 1.001  # type: ignore[index]
+    assert (items["metadatas"])[1]["int_value"] == 2  # type: ignore[index]
+    assert isinstance((items["metadatas"])[0]["int_value"], int)  # type: ignore[index]
+    assert isinstance((items["metadatas"])[0]["float_value"], float)  # type: ignore[index]
+
+
+# Keeping this test because property testing does not check the type consistency
+# between add input metadatas and get output metadatas.
+def test_metadata_add_query_int_float(client: ClientAPI) -> None:
+    client.reset()
+    collection = client.create_collection("test_int")
+    collection.add(**metadata_records)  # type: ignore[arg-type]
+
+    items: QueryResult = collection.query(
+        query_embeddings=[[1.1, 2.3, 3.2]], n_results=1  # type: ignore[arg-type]
+    )
+    assert items["metadatas"] is not None
+    assert items["metadatas"][0][0]["int_value"] == 1
+    assert items["metadatas"][0][0]["float_value"] == 1.001
+    assert isinstance(items["metadatas"][0][0]["int_value"], int)
+    assert isinstance(items["metadatas"][0][0]["float_value"], float)
+
+
+def test_get_include(client: ClientAPI) -> None:
+    client.reset()
+    collection = client.create_collection("test_get_include")
+    collection.add(**records)  # type: ignore[arg-type]
+
+    include: List[IncludeEnum] = cast(List[IncludeEnum], ["metadatas", "documents"])
+    items = collection.get(include=include, where={"int_value": 1})
+    assert items["embeddings"] is None
+    assert items["ids"][0] == "id1"
+    assert (items["metadatas"])[0]["int_value"] == 1  # type: ignore[index]
+    assert (items["documents"])[0] == "this document is first"  # type: ignore[index]
+    assert set(items["included"]) == set(include)
+
+    include = cast(List[IncludeEnum], ["embeddings", "documents"])
+    items = collection.get(include=include)
+    assert items["metadatas"] is None
+    assert items["ids"][0] == "id1"
+    assert approx_equal((items["embeddings"])[1][0], 1.2)  # type: ignore[index]
+    assert set(items["included"]) == set(include)
+
+    items = collection.get(include=[])
+    assert items["documents"] is None
+    assert items["metadatas"] is None
+    assert items["embeddings"] is None
+    assert items["ids"][0] == "id1"
+    assert items["included"] == []

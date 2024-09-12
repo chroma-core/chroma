@@ -2,19 +2,10 @@ import os
 import pytest
 import chromadb
 import traceback
-import tempfile
 import httpx
 from datetime import datetime, timedelta
 from chromadb.api.fastapi import FastAPI
 from chromadb.api import ClientAPI
-
-persist_dir = tempfile.mkdtemp()
-
-
-def test_ssl_self_signed(client_ssl: ClientAPI) -> None:
-    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
-        pytest.skip("Skipping test for integration test")
-    client_ssl.heartbeat()
 
 
 def test_ssl_self_signed_without_ssl_verify(client_ssl: ClientAPI) -> None:
@@ -73,9 +64,3 @@ def test_pre_flight_checks(client: ClientAPI) -> None:
     assert resp.status_code == 200
     assert resp.json() is not None
     assert "max_batch_size" in resp.json().keys()
-
-
-def test_max_batch_size(client: ClientAPI) -> None:
-    print(client)
-    batch_size = client.get_max_batch_size()
-    assert batch_size > 0

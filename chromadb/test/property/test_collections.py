@@ -17,6 +17,7 @@ from hypothesis.stateful import (
 from typing import Any, Dict, Mapping, Optional
 import numpy
 from chromadb.test.property.strategies import hashing_embedding_function
+from chromadb.test.api.utils import batch_records
 
 
 class CollectionStateMachine(RuleBasedStateMachine):
@@ -343,3 +344,20 @@ def test_previously_failing_two(client: ClientAPI) -> None:
         ),
         new_metadata=None,
     )
+
+
+def test_peek(client: ClientAPI) -> None:
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)  # type: ignore[arg-type]
+    assert collection.count() == 2
+
+    # peek
+    peek = collection.peek()
+    for key in peek.keys():
+        if key in ["embeddings", "documents", "metadatas"] or key == "ids":
+            assert len(peek[key]) == 2  # type: ignore[literal-required]
+        elif key == "included":
+            assert set(peek[key]) == set(["embeddings", "metadatas", "documents"])  # type: ignore[literal-required]
+        else:
+            assert peek[key] is None  # type: ignore[literal-required]

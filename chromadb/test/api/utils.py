@@ -56,12 +56,6 @@ def approx_equal(a: float, b: float, tolerance: float = 1e-6) -> bool:
     return abs(a - b) < tolerance
 
 
-def vector_approx_equal(a, b, tolerance: float = 1e-6) -> bool:  # type: ignore[no-untyped-def]
-    if len(a) != len(b):
-        return False
-    return all([approx_equal(a, b, tolerance) for a, b in zip(a, b)])
-
-
 initial_records = {
     "embeddings": [[0, 0, 0], [1.2, 2.24, 3.2], [2.2, 3.24, 4.2]],
     "ids": ["id1", "id2", "id3"],
@@ -129,28 +123,6 @@ contains_records = {
     "metadatas": [
         {"int_value": 1, "string_value": "one", "float_value": 1.001},
         {"int_value": 2, "float_value": 2.002, "string_value": "two"},
-    ],
-}
-
-logical_operator_records = {
-    "embeddings": [
-        [1.1, 2.3, 3.2],
-        [1.2, 2.24, 3.2],
-        [1.3, 2.25, 3.2],
-        [1.4, 2.26, 3.2],
-    ],
-    "ids": ["id1", "id2", "id3", "id4"],
-    "metadatas": [
-        {"int_value": 1, "string_value": "one", "float_value": 1.001, "is": "doc"},
-        {"int_value": 2, "float_value": 2.002, "string_value": "two", "is": "doc"},
-        {"int_value": 3, "float_value": 3.003, "string_value": "three", "is": "doc"},
-        {"int_value": 4, "float_value": 4.004, "string_value": "four", "is": "doc"},
-    ],
-    "documents": [
-        "this document is first and great",
-        "this document is second and great",
-        "this document is third and great",
-        "this document is fourth and great",
     ],
 }
 
