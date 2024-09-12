@@ -368,7 +368,7 @@ mod tests {
         let client = get_s3_client();
 
         let storage = S3Storage {
-            bucket: "test".to_string(),
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
@@ -417,7 +417,7 @@ mod tests {
         let client = get_s3_client();
 
         let storage = S3Storage {
-            bucket: "test".to_string(),
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
