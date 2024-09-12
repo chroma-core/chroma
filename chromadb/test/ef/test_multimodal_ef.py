@@ -1,6 +1,7 @@
 from typing import Generator, cast
 import numpy as np
 import pytest
+from packaging import version
 import chromadb
 from chromadb.api.types import (
     Embeddable,
@@ -17,7 +18,10 @@ from chromadb.test.property.invariants import _exact_distances
 # then hashes them to a fixed dimension.
 class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
     def __init__(self) -> None:
-        self._hef = hashing_embedding_function(dim=10, dtype=np.float64)
+        if version.parse(np.__version__) < version.parse("2.0.0"):
+            self._hef = hashing_embedding_function(dim=10, dtype=np.float_)  # type: ignore[attr-defined]
+        else:
+            self._hef = hashing_embedding_function(dim=10, dtype=np.float64)
 
     def __call__(self, input: Embeddable) -> Embeddings:
         to_texts = [str(i) for i in input]
