@@ -13,12 +13,6 @@ from itertools import islice, count
 from chromadb.types import SeqId
 
 
-class NotFoundError(Exception):
-    """Raised when a delete or update operation affects no rows"""
-
-    pass
-
-
 class UniqueConstraintError(Exception):
     """Raised when an insert operation would violate a unique constraint"""
 

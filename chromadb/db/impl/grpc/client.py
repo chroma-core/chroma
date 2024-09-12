@@ -4,8 +4,9 @@ from uuid import UUID
 from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
-from chromadb.db.base import NotFoundError, UniqueConstraintError
+from chromadb.db.base import UniqueConstraintError
 from chromadb.db.system import SysDB
+from chromadb.errors import NotFoundError
 from chromadb.proto.convert import (
     from_proto_collection,
     from_proto_segment,
@@ -104,7 +105,9 @@ class GrpcSysDB(SysDB):
             request, timeout=self._request_timeout_seconds
         )
         if response.status.code == 404:
-            raise NotFoundError()
+            raise NotFoundError(
+                f"Could not fetch database {name} for tenant {tenant}. Are you sure it exists?"
+            )
         return Database(
             id=UUID(hex=response.database.id),
             name=response.database.name,
@@ -127,7 +130,9 @@ class GrpcSysDB(SysDB):
             request, timeout=self._request_timeout_seconds
         )
         if response.status.code == 404:
-            raise NotFoundError()
+            raise NotFoundError(
+                f"Could not fetch tenant {name}. Are you sure it exists?"
+            )
         return Tenant(
             name=response.tenant.name,
         )
