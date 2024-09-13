@@ -154,42 +154,38 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             .reduce(|user_ids, filter_ids| merge_sorted_vecs_conjunction(&user_ids, &filter_ids));
 
         // If the merged offset ids is None, it suggests user did not specify any filter. We fetch all offset ids using the record segment reader
-        if merged_offset_ids.is_none() {
-            let mut log_offset_ids = mat_records
-                .iter()
-                .map(|(log, _)| log.offset_id)
-                .collect::<Vec<_>>();
-            log_offset_ids.sort();
-            if let Some(reader) = &record_segment_reader {
-                let compact_offset_ids = reader.get_all_offset_ids().await.map_err(|e| {
-                    error!("Error reading record segment: {}", e);
-                    MergeMetadataResultsOperatorError::RecordSegmentReadError
-                })?;
-                merged_offset_ids = Some(merge_sorted_vecs_disjunction(
-                    &log_offset_ids,
-                    &compact_offset_ids,
-                ));
+        let offset_ids = match merged_offset_ids {
+            Some(moids) => moids,
+            None => {
+                let mut log_offset_ids = mat_records
+                    .iter()
+                    .map(|(log, _)| log.offset_id)
+                    .collect::<Vec<_>>();
+                log_offset_ids.sort();
+                match &record_segment_reader {
+                    Some(reader) => {
+                        let compact_offset_ids =
+                            reader.get_all_offset_ids().await.map_err(|e| {
+                                error!("Error reading record segment: {}", e);
+                                MergeMetadataResultsOperatorError::RecordSegmentReadError
+                            })?;
+                        merge_sorted_vecs_disjunction(&log_offset_ids, &compact_offset_ids)
+                    }
+                    None => log_offset_ids,
+                }
             }
-        }
+        };
 
         // Truncate the offset ids using offset and limit
-        merged_offset_ids = merged_offset_ids.map(|offset_ids| {
-            if input.offset.is_some() || input.limit.is_some() {
-                let skip_count = input.offset.map(|o| o as usize).unwrap_or(0);
-                let take_count = input.limit.map(|l| l as usize).unwrap_or(offset_ids.len());
-                offset_ids
-                    .into_iter()
-                    .skip(skip_count)
-                    .take(take_count)
-                    .collect()
-            } else {
-                offset_ids
-            }
-        });
+        let skip_count = input.offset.map(|o| o as usize).unwrap_or(0);
+        let take_count = input.limit.map(|l| l as usize).unwrap_or(offset_ids.len());
 
         // Hydrate data
-        let merged_ids: HashSet<u32> =
-            HashSet::from_iter(merged_offset_ids.unwrap_or_default().iter().cloned());
+        let merged_ids: HashSet<u32> = HashSet::from_iter(
+            offset_ids[skip_count..(skip_count + take_count)]
+                .iter()
+                .cloned(),
+        );
         let mut ids: Vec<String> = Vec::new();
         let mut metadata = Vec::new();
         let mut documents = Vec::new();
