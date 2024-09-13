@@ -125,7 +125,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             // segment is not yet initialized in storage.
             Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => None,
             Err(e) => {
-                error!("Error creating record segment reader {}", e);
+                tracing::error!("Error creating record segment reader {}", e);
                 return Err(MergeMetadataResultsOperatorError::RecordSegmentCreationError(*e));
             }
         };
@@ -141,22 +141,20 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
             .map_err(|e| {
-                error!("Error materializing log: {}", e);
+                tracing::error!("Error materializing log: {}", e);
                 MergeMetadataResultsOperatorError::LogMaterializationError(e)
             })?;
 
         // Merge the offset ids, assuming the user_offset_ids and filtered_offset_ids are ordered.
-        let mut merged_offset_ids = input
-            .user_offset_ids
-            .iter()
-            .chain(&input.filtered_offset_ids)
-            .map(Vec::clone)
-            .reduce(|user_ids, filter_ids| merge_sorted_vecs_conjunction(&user_ids, &filter_ids));
-
-        // If the merged offset ids is None, it suggests user did not specify any filter. We fetch all offset ids using the record segment reader
-        let offset_ids = match merged_offset_ids {
-            Some(moids) => moids,
-            None => {
+        let merged_oids_holder: Vec<u32>;
+        let merged_offset_ids = match (&input.filtered_offset_ids, &input.user_offset_ids) {
+            (Some(fids), Some(uids)) => {
+                merged_oids_holder = merge_sorted_vecs_conjunction(fids, uids);
+                &merged_oids_holder
+            }
+            (Some(oids), None) | (None, Some(oids)) => oids,
+            // If both filter and user offset ids are None, it suggests user did not specify any filter. We fetch all offset ids using the record segment reader
+            _ => {
                 let mut log_offset_ids = mat_records
                     .iter()
                     .map(|(log, _)| log.offset_id)
@@ -166,23 +164,31 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     Some(reader) => {
                         let compact_offset_ids =
                             reader.get_all_offset_ids().await.map_err(|e| {
-                                error!("Error reading record segment: {}", e);
+                                tracing::error!("Error reading record segment: {}", e);
                                 MergeMetadataResultsOperatorError::RecordSegmentReadError
                             })?;
-                        merge_sorted_vecs_disjunction(&log_offset_ids, &compact_offset_ids)
+                        merged_oids_holder =
+                            merge_sorted_vecs_disjunction(&log_offset_ids, &compact_offset_ids);
+                        &merged_oids_holder
                     }
-                    None => log_offset_ids,
+                    None => {
+                        merged_oids_holder = log_offset_ids;
+                        &merged_oids_holder
+                    }
                 }
             }
         };
 
         // Truncate the offset ids using offset and limit
         let skip_count = input.offset.map(|o| o as usize).unwrap_or(0);
-        let take_count = input.limit.map(|l| l as usize).unwrap_or(offset_ids.len());
+        let take_count = input
+            .limit
+            .map(|l| l as usize)
+            .unwrap_or(merged_offset_ids.len());
 
         // Hydrate data
         let merged_ids: HashSet<u32> = HashSet::from_iter(
-            offset_ids[skip_count..(skip_count + take_count)]
+            merged_offset_ids[skip_count..(skip_count + take_count)]
                 .iter()
                 .cloned(),
         );
@@ -217,7 +223,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     .get_user_id_for_offset_id(*merged_id)
                     .await
                     .map_err(|e| {
-                        error!("Error reading record segment: {}", e);
+                        tracing::error!("Error reading record segment: {}", e);
                         MergeMetadataResultsOperatorError::RecordSegmentReadError
                     })?;
                 ids.push(user_id.to_string());
@@ -226,7 +232,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         .get_data_for_offset_id(*merged_id)
                         .await
                         .map_err(|e| {
-                            error!("Error reading Record Segment: {}", e);
+                            tracing::error!("Error reading Record Segment: {}", e);
                             MergeMetadataResultsOperatorError::RecordSegmentReadError
                         })?;
                     metadata.push(record.metadata.clone());

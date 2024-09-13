@@ -5,6 +5,7 @@ use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
+use flatbuffers::Push;
 use futures::future::join_all;
 use futures::stream::unfold;
 use futures::TryStreamExt;
@@ -816,21 +817,22 @@ impl RecordSegmentReader<'_> {
     /// Returns all offset_ids in the record segment sorted.
     pub(crate) async fn get_all_offset_ids(&self) -> Result<Vec<u32>, Box<dyn ChromaError>> {
         let offset_id_count = self.count().await?;
-        unfold(0, |i| async move {
-            (i < offset_id_count).then_some(match self.id_to_user_id.get_at_index(i).await {
-                Ok((_, offset_id, _)) => (Ok(offset_id), i + 1),
+        let mut colllected_offset_ids = Vec::with_capacity(offset_id_count);
+        for i in 0..offset_id_count {
+            let record = self.id_to_user_id.get_at_index(i).await;
+            match record {
+                Ok((_, offset_id, _)) => colllected_offset_ids.push(offset_id),
                 Err(e) => {
                     tracing::error!(
                         "[GetAllData] Error getting offset id for index {}: {}",
                         i,
                         e
                     );
-                    (Err(e), offset_id_count)
+                    return Err(e);
                 }
-            })
-        })
-        .try_collect()
-        .await
+            }
+        }
+        Ok(colllected_offset_ids)
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
