@@ -1,5 +1,4 @@
-use benchmark_datasets::scidocs::SciDocsDataset;
-use benchmark_datasets::traits::TestDataset;
+use benchmark_datasets::{datasets::scidocs::SciDocsDataset, traits::TestDataset};
 use futures::StreamExt;
 
 #[tokio::main]
