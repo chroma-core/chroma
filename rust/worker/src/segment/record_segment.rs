@@ -27,9 +27,6 @@ pub(crate) struct RecordSegmentWriter {
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
     pub(crate) id: Uuid,
-    // If there is an old version of the data, we need to keep it around to be able to
-    // materialize the log records
-    // old_id_to_data: Option<BlockfileReader<'a, u32, DataRecord<'a>>>,
 }
 
 impl Debug for RecordSegmentWriter {
@@ -773,7 +770,7 @@ impl RecordSegmentReader<'_> {
         &self,
         user_id: &str,
     ) -> Result<bool, Box<dyn ChromaError>> {
-        if !self.user_id_to_id.contains("", user_id).await {
+        if !self.user_id_to_id.contains("", user_id).await? {
             return Ok(false);
         }
         let offset_id = match self.user_id_to_id.get("", user_id).await {
@@ -782,7 +779,7 @@ impl RecordSegmentReader<'_> {
                 return Err(e);
             }
         };
-        Ok(self.id_to_data.contains("", offset_id).await)
+        self.id_to_data.contains("", offset_id).await
     }
 
     /// Returns all data in the record segment, sorted by

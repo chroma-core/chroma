@@ -564,6 +564,17 @@ pub enum BlockLoadError {
     NoRecordBatches,
 }
 
+impl ChromaError for BlockLoadError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BlockLoadError::IOError(_) => ErrorCodes::Internal,
+            BlockLoadError::ArrowError(_) => ErrorCodes::Internal,
+            BlockLoadError::ArrowLayoutVerificationError(_) => ErrorCodes::Internal,
+            BlockLoadError::NoRecordBatches => ErrorCodes::Internal,
+        }
+    }
+}
+
 /*
 ===== Layout Verification =====
 */

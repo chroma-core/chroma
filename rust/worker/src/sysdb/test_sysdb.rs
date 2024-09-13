@@ -155,7 +155,6 @@ impl TestSysDb {
             let last_compaction_time = match inner.tenant_last_compaction_time.get(&tenant_id) {
                 Some(last_compaction_time) => *last_compaction_time,
                 None => {
-                    // TODO: Log an error
                     return Err(GetLastCompactionTimeError::TenantNotFound);
                 }
             };

@@ -1,5 +1,3 @@
-use std::{fmt::Debug, sync::RwLock};
-
 use super::config::MemberlistProviderConfig;
 use crate::system::ReceiverForMessage;
 use crate::system::{Component, ComponentContext, Handler, StreamHandler};
@@ -13,8 +11,10 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, CustomResource,
 };
+use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use thiserror::Error;
 
 /* =========== Basic Types ============== */
@@ -164,13 +164,7 @@ impl CustomResourceMemberlistProvider {
     }
 
     async fn notify_subscribers(&self) -> () {
-        let curr_memberlist = match self.current_memberlist.read() {
-            Ok(curr_memberlist) => curr_memberlist.clone(),
-            Err(_err) => {
-                // TODO: Log error and attempt recovery
-                return;
-            }
-        };
+        let curr_memberlist = self.current_memberlist.read().clone();
 
         for subscriber in self.subscribers.iter() {
             let _ = subscriber.send(curr_memberlist.clone(), None).await;
@@ -208,7 +202,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                 let name = match &memberlist.metadata.name {
                     Some(name) => name,
                     None => {
-                        // TODO: Log an error
+                        tracing::error!("Memberlist event without memberlist name");
                         return;
                     }
                 };
@@ -221,15 +215,8 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                     .map(|member| member.member_id.clone())
                     .collect::<Vec<String>>();
                 {
-                    let curr_memberlist_handle = self.current_memberlist.write();
-                    match curr_memberlist_handle {
-                        Ok(mut curr_memberlist) => {
-                            *curr_memberlist = memberlist;
-                        }
-                        Err(_err) => {
-                            // TODO: Log an error
-                        }
-                    }
+                    let mut curr_memberlist_handle = self.current_memberlist.write();
+                    *curr_memberlist_handle = memberlist;
                 }
                 // Inform subscribers
                 self.notify_subscribers().await;
@@ -252,9 +239,8 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::system::System;
-
     use super::*;
+    use crate::system::System;
 
     #[tokio::test]
     // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.

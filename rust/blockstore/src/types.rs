@@ -252,10 +252,14 @@ impl<
         }
     }
 
-    pub async fn contains(&'referred_data self, prefix: &str, key: K) -> bool {
+    pub async fn contains(
+        &'referred_data self,
+        prefix: &str,
+        key: K,
+    ) -> Result<bool, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::ArrowBlockfileReader(reader) => reader.contains(prefix, key).await,
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.contains(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.contains(prefix, key)),
         }
     }
 
@@ -276,7 +280,6 @@ impl<
         }
     }
 
-    // TODO: make prefix &str
     pub async fn get_by_prefix(
         &'referred_data self,
         prefix: &str,

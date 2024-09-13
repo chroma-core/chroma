@@ -196,9 +196,6 @@ impl CompactOrchestrator {
         }
     }
 
-    // TODO: It is possible that the offset_id from the compaction job is wrong since the log service
-    // can have an outdated view of the offset. We should filter out entries from the log based on the start offset
-    // of the segment, and not fully respect the offset_id from the compaction job
     async fn pull_logs(
         &mut self,
         self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,

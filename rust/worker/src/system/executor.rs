@@ -88,7 +88,7 @@ where
                             task_future.instrument(child_span).await;
                         }
                         None => {
-                            // TODO: Log error
+                            tracing::error!("Channel closed");
                         }
                     }
                 }

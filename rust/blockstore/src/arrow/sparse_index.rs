@@ -475,8 +475,7 @@ impl SparseIndex {
     pub(super) fn to_block<K: ArrowWriteableKey>(&self) -> Result<Block, Box<dyn ChromaError>> {
         let forward = self.forward.lock();
         if forward.is_empty() {
-            // TODO: error here
-            panic!("No blocks in the sparse index");
+            panic!("Invariant violation. No blocks in the sparse index");
         }
 
         // TODO: we could save the uuid not as a string to be more space efficient
@@ -512,7 +511,7 @@ impl SparseIndex {
 
     pub(super) fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
         block: &'block Block,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    ) -> Result<Self, uuid::Error> {
         let mut forward = BTreeMap::new();
         let mut reverse = HashMap::new();
         let id = block.id;
@@ -523,7 +522,7 @@ impl SparseIndex {
                     let block_id = Uuid::parse_str(value);
                     match block_id {
                         Ok(block_id) => (SparseIndexDelimiter::Start, block_id),
-                        Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
+                        Err(e) => return Err(e),
                     }
                 }
                 _ => {
@@ -533,7 +532,7 @@ impl SparseIndex {
                             SparseIndexDelimiter::Key(CompositeKey::new(prefix.to_string(), key)),
                             block_id,
                         ),
-                        Err(e) => panic!("Failed to parse block id: {}", e), // TODO: error here
+                        Err(e) => return Err(e),
                     }
                 }
             };

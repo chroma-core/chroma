@@ -78,7 +78,6 @@ impl<
     > MemoryBlockfileReader<K, V>
 {
     pub(crate) fn open(id: uuid::Uuid, storage_manager: StorageManager) -> Self {
-        // TODO: don't unwrap
         let storage = storage_manager.get(id).unwrap();
         Self {
             storage_manager,

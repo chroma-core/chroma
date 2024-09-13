@@ -1,7 +1,6 @@
 use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
-use arrow::array::Int32Array;
 use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -73,8 +72,6 @@ pub enum MetadataSegmentError {
     UuidParseError(String),
     #[error("No writer found")]
     NoWriter,
-    #[error("Could not write to fulltext index blockfiles {0}")]
-    FullTextIndexWriteError(Box<dyn ChromaError>),
     #[error("Path vector exists but is empty?")]
     EmptyPathVector,
     #[error("Failed to write to blockfile")]
@@ -83,14 +80,25 @@ pub enum MetadataSegmentError {
     LimitOffsetNotSupported,
     #[error("Could not query metadata index {0}")]
     MetadataIndexQueryError(#[from] MetadataIndexError),
-    #[error("Attempted to delete a document that does not exist")]
-    DocumentDoesNotExist,
 }
 
 impl ChromaError for MetadataSegmentError {
     fn code(&self) -> ErrorCodes {
-        // TODO
-        ErrorCodes::Internal
+        match self {
+            MetadataSegmentError::InvalidSegmentType => ErrorCodes::Internal,
+            MetadataSegmentError::FullTextIndexWriterError(e) => e.code(),
+            MetadataSegmentError::BlockfileError(e) => e.code(),
+            MetadataSegmentError::BlockfileOpenError(e) => e.code(),
+            MetadataSegmentError::FullTextIndexFilesIntegrityError => ErrorCodes::Internal,
+            MetadataSegmentError::IncorrectNumberOfFiles => ErrorCodes::Internal,
+            MetadataSegmentError::MissingFile(_) => ErrorCodes::Internal,
+            MetadataSegmentError::UuidParseError(_) => ErrorCodes::Internal,
+            MetadataSegmentError::NoWriter => ErrorCodes::Internal,
+            MetadataSegmentError::EmptyPathVector => ErrorCodes::Internal,
+            MetadataSegmentError::BlockfileWriteError => ErrorCodes::Internal,
+            MetadataSegmentError::LimitOffsetNotSupported => ErrorCodes::Internal,
+            MetadataSegmentError::MetadataIndexQueryError(_) => ErrorCodes::Internal,
+        }
     }
 }
 

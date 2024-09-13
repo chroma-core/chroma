@@ -99,7 +99,9 @@ impl CompositeKey {
 
 impl Hash for CompositeKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // TODO: Implement a better hash function
+        // TODO: Implement a better hash function. This is only used by the
+        // memory blockfile, so its not a performance issue, since that
+        // is only used for testing.
         self.prefix.hash(state)
     }
 }
