@@ -890,7 +890,6 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
             prefix: prefix.to_string(),
             key,
         });
-        // TODO: don't unwrap
         Some(DataRecord {
             id: &id.unwrap(),
             embedding: &embedding.unwrap(),

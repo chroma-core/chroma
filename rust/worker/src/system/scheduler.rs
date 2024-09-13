@@ -54,8 +54,7 @@ impl Scheduler {
                             return;
                         },
                         Err(e) => {
-                            // TODO: log error
-                            println!("Error: {:?}", e);
+                            tracing::error!("Error: {:?}", e);
                             return;
                         }
                     }
@@ -101,8 +100,7 @@ impl Scheduler {
                             Ok(_) => {
                             },
                             Err(e) => {
-                                // TODO: log error
-                                println!("Error: {:?}", e);
+                                tracing::error!("Error: {:?}", e);
                             }
                         }
                     }

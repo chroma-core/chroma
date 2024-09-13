@@ -280,7 +280,6 @@ impl<
         }
     }
 
-    // TODO: make prefix &str
     pub async fn get_by_prefix(
         &'referred_data self,
         prefix: &str,
