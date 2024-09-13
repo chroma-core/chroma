@@ -5,8 +5,7 @@ import hypothesis.strategies as st
 from chromadb.api import ClientAPI
 from chromadb.test.conftest import NOT_CLUSTER_ONLY, reset
 from chromadb.test.property import invariants
-from chromadb.test.utils.wait_for_version_increase import \
-    wait_for_version_increase
+from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from hypothesis import HealthCheck, given, settings
 
 collection_st = st.shared(
@@ -16,6 +15,8 @@ collection_st = st.shared(
 recordset_st = st.shared(
     strategies.recordsets(collection_st, max_size=1000), key="recordset"
 )
+
+
 @settings(
     deadline=90000,
     suppress_health_check=[
@@ -63,4 +64,3 @@ def test_get_limit_offset(
     result_ids = coll.get(offset=offset, limit=limit)["ids"]
     all_offset_ids = coll.get()["ids"]
     assert result_ids == all_offset_ids[offset : offset + limit]
-    
