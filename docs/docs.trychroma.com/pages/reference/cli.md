@@ -4,7 +4,13 @@ title: CLI
 
 ## Vacuuming
 
-Vacuuming shrinks and optimizes your database. In general, you only need to vacuum once, after upgrading from an older version of Chroma (<0.6). **It does not need to be run regularly**. Vacuuming blocks all reads and writes to your database while it's running, so it should only be run when absolutely necessary. In most cases, vacuuming will save very little disk space. We recommend shutting down your Chroma server before vacuuming (although it's not strictly required).
+Vacuuming shrinks and optimizes your database.
+
+Vacuuming after upgrading from a version of Chroma below 0.6 will greatly reduce the size of your database and enable continuous database pruning. A warning is logged during server startup if this is necessary.
+
+In most other cases, vacuuming is unnecessary. **It does not need to be run regularly**.
+
+Vacuuming blocks all reads and writes to your database while it's running, so we recommend shutting down your Chroma server before vacuuming (although it's not strictly required).
 
 To vacuum your database, run:
 
@@ -13,5 +19,3 @@ chroma utils vacuum --path <your-data-directory>
 ```
 
 For large databases, expect this to take up to a few minutes.
-
-Vacuuming after upgrading from an older version of Chroma (<0.6) will greatly reduce the size of your database and enable continuous database pruning. A warning is logged during server startup if this is necessary.
