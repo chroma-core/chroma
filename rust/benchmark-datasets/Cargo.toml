@@ -7,7 +7,12 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-async-compression = { version = "0.4.12", features = ["tokio", "gzip"] }
+anyhow = "1.0.88"
+async-compression = { version = "0.4.12", features = [
+  "tokio",
+  "gzip",
+  "bzip2",
+] }
 async-tempfile = "0.6.0"
 dirs = "5.0.1"
 futures.workspace = true
