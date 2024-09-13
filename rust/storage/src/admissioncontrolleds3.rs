@@ -368,7 +368,7 @@ mod tests {
         let client = get_s3_client();
 
         let storage = S3Storage {
-            bucket: "test".to_string(),
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
@@ -413,12 +413,12 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_put_get_key() {
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_put_get_key() {
         let client = get_s3_client();
 
         let storage = S3Storage {
-            bucket: "test".to_string(),
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
@@ -443,8 +443,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn test_multipart_get() {
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_multipart_get() {
         // At 8 MB.
         test_multipart_get_for_size(1024 * 1024 * 8).await;
         // At < 8 MB.
