@@ -8,6 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 async-compression = { version = "0.4.12", features = ["tokio", "gzip"] }
+async-tempfile = "0.6.0"
 dirs = "5.0.1"
 futures.workspace = true
 reqwest = { version = "0.12.7", features = ["stream"] }

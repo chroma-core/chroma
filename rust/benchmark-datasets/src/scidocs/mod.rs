@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::traits::{get_dataset_cache_path, TestDataset, TestDatasetDocument};
+use crate::traits::{get_or_populate_cached_dataset, TestDataset, TestDatasetDocument};
 use async_compression::tokio::bufread::GzipDecoder;
-use futures::{StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use serde::Deserialize;
 use tokio::{fs::File, io::AsyncBufReadExt};
 use tokio_stream::{wrappers::LinesStream, Stream};
@@ -16,50 +16,50 @@ struct SciDocsCorpusLine {
 }
 
 /// Dataset from https://huggingface.co/datasets/BeIR/scidocs
-pub struct SciDocsDataset {}
-
-impl SciDocsDataset {
-    async fn get_filepath() -> Result<PathBuf, std::io::Error> {
-        let dataset_dir = get_dataset_cache_path("scidocs").await?;
-        Ok(dataset_dir.join("corpus.jsonl"))
-    }
+pub struct SciDocsDataset {
+    file_path: PathBuf,
 }
 
 impl TestDataset for SciDocsDataset {
     async fn init() -> Result<Self, std::io::Error> {
-        let corpus_filepath = SciDocsDataset::get_filepath().await?;
+        let file_path = get_or_populate_cached_dataset("scidocs", "corpus.jsonl", |mut writer| {
+            async move {
+                let client = reqwest::Client::new();
+                let response = client
+                    .get(
+                        "https://huggingface.co/datasets/BeIR/scidocs/resolve/main/corpus.jsonl.gz",
+                    )
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e))
+                    })?;
 
-        if !corpus_filepath.exists() {
-            let file = File::create(corpus_filepath).await?;
+                if !response.status().is_success() {
+                    panic!("Failed to download SciDocs dataset");
+                }
 
-            let client = reqwest::Client::new();
-            let response = client
-                .get("https://huggingface.co/datasets/BeIR/scidocs/resolve/main/corpus.jsonl.gz")
-                .send()
-                .await
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
+                let byte_stream = response.bytes_stream();
+                let stream_reader = StreamReader::new(
+                    byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+                );
 
-            if !response.status().is_success() {
-                panic!("Failed to download SciDocs dataset");
+                let mut decoder = GzipDecoder::new(stream_reader);
+                tokio::io::copy(&mut decoder, &mut writer).await?;
+
+                Ok(())
             }
+            .boxed()
+        })
+        .await?;
 
-            let byte_stream = response.bytes_stream();
-            let stream_reader = StreamReader::new(
-                byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-            );
-
-            let mut decoder = GzipDecoder::new(stream_reader);
-            let mut file_writer = tokio::io::BufWriter::new(file);
-            tokio::io::copy(&mut decoder, &mut file_writer).await?;
-        }
-
-        Ok(SciDocsDataset {})
+        Ok(SciDocsDataset { file_path })
     }
 
     async fn create_documents_stream(
         &self,
     ) -> Result<impl Stream<Item = TestDatasetDocument>, std::io::Error> {
-        let file = File::open(SciDocsDataset::get_filepath().await?).await?;
+        let file = File::open(self.file_path.clone()).await?;
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
 
