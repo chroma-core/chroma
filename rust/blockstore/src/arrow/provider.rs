@@ -54,11 +54,14 @@ impl ArrowBlockfileProvider {
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         let sparse_index = self.sparse_index_manager.get::<K>(id).await;
         match sparse_index {
-            Some(sparse_index) => Ok(BlockfileReader::ArrowBlockfileReader(
+            Ok(Some(sparse_index)) => Ok(BlockfileReader::ArrowBlockfileReader(
                 ArrowBlockfileReader::new(*id, self.block_manager.clone(), sparse_index),
             )),
-            None => {
+            Ok(None) => {
                 return Err(Box::new(OpenError::NotFound));
+            }
+            Err(e) => {
+                return Err(Box::new(OpenError::Other(Box::new(e))));
             }
         }
     }
@@ -91,7 +94,14 @@ impl ArrowBlockfileProvider {
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
         tracing::info!("Forking blockfile from {:?}", id);
         let new_id = Uuid::new_v4();
-        let new_sparse_index = self.sparse_index_manager.fork::<K>(id, new_id).await;
+        let new_sparse_index = self
+            .sparse_index_manager
+            .fork::<K>(id, new_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error forking sparse index: {:?}", e);
+                Box::new(CreateError::Other(Box::new(e)))
+            })?;
         let file = ArrowBlockfileWriter::from_sparse_index(
             new_id,
             self.block_manager.clone(),
@@ -344,6 +354,29 @@ impl ChromaError for BlockFlushError {
     }
 }
 
+#[derive(Error, Debug)]
+pub(super) enum SparseIndexManagerError {
+    #[error("Not found")]
+    NotFound,
+    #[error(transparent)]
+    BlockLoadError(#[from] BlockLoadError),
+    #[error(transparent)]
+    UUIDParseError(#[from] uuid::Error),
+    #[error(transparent)]
+    StorageGetError(#[from] chroma_storage::GetError),
+}
+
+impl ChromaError for SparseIndexManagerError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SparseIndexManagerError::NotFound => ErrorCodes::NotFound,
+            SparseIndexManagerError::BlockLoadError(e) => e.code(),
+            SparseIndexManagerError::StorageGetError(e) => e.code(),
+            SparseIndexManagerError::UUIDParseError(_) => ErrorCodes::DataLoss,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct SparseIndexManager {
     cache: Cache<Uuid, SparseIndex>,
@@ -358,10 +391,10 @@ impl SparseIndexManager {
     pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
         &self,
         id: &Uuid,
-    ) -> Option<SparseIndex> {
+    ) -> Result<Option<SparseIndex>, SparseIndexManagerError> {
         let index = self.cache.get(id);
         match index {
-            Some(index) => Some(index),
+            Some(index) => Ok(Some(index)),
             None => {
                 tracing::info!("Cache miss - fetching sparse index from storage");
                 let key = format!("sparse_index/{}", id);
@@ -381,7 +414,7 @@ impl SparseIndexManager {
                                         "Error reading sparse index from storage: {}",
                                         e
                                     );
-                                    return None;
+                                    return Err(SparseIndexManagerError::StorageGetError(e));
                                 }
                             }
                         }
@@ -398,29 +431,26 @@ impl SparseIndexManager {
                                 match index {
                                     Ok(index) => {
                                         self.cache.insert(*id, index.clone());
-                                        return Some(index);
+                                        return Ok(Some(index));
                                     }
                                     Err(e) => {
-                                        // TODO: return error
                                         tracing::error!(
                                             "Error turning block into sparse index: {}",
                                             e
                                         );
-                                        return None;
+                                        return Err(SparseIndexManagerError::UUIDParseError(e));
                                     }
                                 }
                             }
                             Err(e) => {
-                                // TODO: return error
                                 tracing::error!("Error turning bytes into block: {}", e);
-                                return None;
+                                return Err(SparseIndexManagerError::BlockLoadError(e));
                             }
                         }
                     }
                     Err(e) => {
-                        // TODO: return error
                         tracing::error!("Error reading sparse index from storage: {}", e);
-                        return None;
+                        return Err(SparseIndexManagerError::StorageGetError(e));
                     }
                 }
             }
@@ -465,12 +495,16 @@ impl SparseIndexManager {
         &self,
         old_id: &Uuid,
         new_id: Uuid,
-    ) -> SparseIndex {
-        // TODO: error handling
+    ) -> Result<SparseIndex, SparseIndexManagerError> {
         tracing::info!("Forking sparse index from {:?}", old_id);
-        let original = self.get::<K::ReadableKey<'key>>(old_id).await.unwrap();
-        let forked = original.fork(new_id);
-        forked
+        let original = self.get::<K::ReadableKey<'key>>(old_id).await?;
+        match original {
+            Some(original) => {
+                let forked = original.fork(new_id);
+                Ok(forked)
+            }
+            None => Err(SparseIndexManagerError::NotFound),
+        }
     }
 }
 

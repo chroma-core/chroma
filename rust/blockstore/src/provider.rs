@@ -133,11 +133,16 @@ impl Configurable<(BlockfileProviderConfig, Storage)> for BlockfileProvider {
 pub enum OpenError {
     #[error("Blockfile not found")]
     NotFound,
+    #[error(transparent)]
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for OpenError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::NotFound
+        match self {
+            OpenError::NotFound => ErrorCodes::NotFound,
+            OpenError::Other(e) => e.code(),
+        }
     }
 }
 
@@ -145,10 +150,15 @@ impl ChromaError for OpenError {
 pub enum CreateError {
     #[error("Blockfile already exists")]
     AlreadyExists,
+    #[error(transparent)]
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CreateError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::AlreadyExists
+        match self {
+            CreateError::AlreadyExists => ErrorCodes::AlreadyExists,
+            CreateError::Other(e) => e.code(),
+        }
     }
 }
