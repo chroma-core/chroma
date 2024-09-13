@@ -1,0 +1,18 @@
+[package]
+name = "test-datasets"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-compression = { version = "0.4.12", features = ["tokio", "gzip"] }
+dirs = "5.0.1"
+futures.workspace = true
+reqwest = { version = "0.12.7", features = ["stream"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true }
+tokio-stream = { version = "0.1.16", features = ["full"] }
+tokio-util = "0.7.12"
