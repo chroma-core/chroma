@@ -10,7 +10,7 @@ members = [
    "rust/storage",
    "rust/types",
    "rust/worker",
-   "rust/test-datasets",
+   "rust/benchmark-datasets",
 ]
 
 [workspace.dependencies]
