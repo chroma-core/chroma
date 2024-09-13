@@ -154,7 +154,7 @@ class SqliteMetadataSegment(MetadataReader):
                 .on(embeddings_t.id == metadata_t.id)
             )
             .select(*select_clause)
-            .orderby(embeddings_t.embedding_id)
+            .orderby(embeddings_t.id)
         )
 
         # If there is a query that touches the metadata table, it uses
@@ -166,7 +166,7 @@ class SqliteMetadataSegment(MetadataReader):
                 .select(metadata_t.id)
                 .join(embeddings_t)
                 .on(embeddings_t.id == metadata_t.id)
-                .orderby(embeddings_t.embedding_id)
+                .orderby(embeddings_t.id)
                 .where(
                     embeddings_t.segment_id
                     == ParameterValue(self._db.uuid_to_db(self._id))
@@ -207,7 +207,7 @@ class SqliteMetadataSegment(MetadataReader):
                     embeddings_t.segment_id
                     == ParameterValue(self._db.uuid_to_db(self._id))
                 )
-                .orderby(embeddings_t.embedding_id)
+                .orderby(embeddings_t.id)
                 .limit(limit)
                 .offset(offset)
             )
