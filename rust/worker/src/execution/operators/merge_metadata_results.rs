@@ -12,7 +12,7 @@ use chroma_index::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disju
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
@@ -157,7 +157,12 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             _ => {
                 let mut log_offset_ids = mat_records
                     .iter()
-                    .map(|(log, _)| log.offset_id)
+                    .filter_map(|(log, _)| {
+                        (log.final_operation != MaterializedLogOperation::DeleteExisting)
+                            .then_some(log.offset_id)
+                    })
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
                     .collect::<Vec<_>>();
                 log_offset_ids.sort();
                 match &record_segment_reader {
