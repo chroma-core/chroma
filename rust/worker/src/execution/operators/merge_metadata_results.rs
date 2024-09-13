@@ -155,7 +155,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             (Some(oids), None) | (None, Some(oids)) => oids,
             // If both filter and user offset ids are None, it suggests user did not specify any filter. We fetch all offset ids using the record segment reader
             _ => {
-                let mut log_offset_ids = mat_records
+                let log_offset_ids = mat_records
                     .iter()
                     .filter_map(|(log, _)| {
                         (log.final_operation != MaterializedLogOperation::DeleteExisting)
@@ -164,7 +164,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     .collect::<BTreeSet<_>>()
                     .into_iter()
                     .collect::<Vec<_>>();
-                log_offset_ids.sort();
                 match &record_segment_reader {
                     Some(reader) => {
                         let compact_offset_ids =
