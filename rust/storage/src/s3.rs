@@ -622,6 +622,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_put_get_key() {
         let client = get_s3_client();
 
@@ -696,6 +697,7 @@ mod tests {
     }
 
     #[tokio::test]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
     async fn test_k8s_integration_put_file_scenarios() {
         let test_upload_part_size_bytes = 1024 * 1024 * 8; // 8MB
         let test_download_part_size_bytes = 1024 * 1024 * 8; // 8MB
