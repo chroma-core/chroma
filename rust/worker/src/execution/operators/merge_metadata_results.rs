@@ -12,7 +12,7 @@ use chroma_index::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disju
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
@@ -187,30 +187,35 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             .unwrap_or(merged_offset_ids.len());
 
         // Hydrate data
-        let merged_ids: HashSet<u32> = HashSet::from_iter(
-            merged_offset_ids[skip_count..(skip_count + take_count)]
-                .iter()
-                .cloned(),
-        );
-        let mut ids: Vec<String> = Vec::new();
+        let truncated_offset_ids = merged_offset_ids[skip_count..(skip_count + take_count)].iter();
+        let truncated_offset_id_order: HashMap<u32, usize> = truncated_offset_ids
+            .clone()
+            .enumerate()
+            .map(|(i, offset_id)| (*offset_id, i))
+            .collect();
+        let mut ids: Vec<String> = vec![String::new(); take_count];
         let mut metadata = Vec::new();
         let mut documents = Vec::new();
         let mut logged_offset_ids: HashSet<u32> = HashSet::new();
+        if input.include_metadata {
+            metadata = vec![None; take_count];
+            documents = vec![None; take_count];
+        }
 
         // Hydrate the data from the materialized logs first
         for (log, _) in mat_records.iter() {
-            if merged_ids.contains(&log.offset_id) {
+            if let Some(&index) = truncated_offset_id_order.get(&log.offset_id) {
                 // It's important to account for the records that are
                 // deleted also here so that we can subsequently ignore
                 // them when reading the record segment.
                 logged_offset_ids.insert(log.offset_id);
                 if log.final_operation != MaterializedLogOperation::DeleteExisting {
                     // Ids get pushed irrespective of whether metadata is included or not.
-                    ids.push(log.merged_user_id());
+                    ids[index] = log.merged_user_id();
                     if input.include_metadata {
                         let final_metadata = log.merged_metadata();
-                        metadata.push((!final_metadata.is_empty()).then_some(final_metadata));
-                        documents.push(log.merged_document());
+                        metadata[index] = (!final_metadata.is_empty()).then_some(final_metadata);
+                        documents[index] = log.merged_document();
                     }
                 }
             }
@@ -218,25 +223,28 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
         // Hydrate the remaining data from the record segment
         if let Some(reader) = record_segment_reader {
-            for merged_id in merged_ids.difference(&logged_offset_ids) {
+            for (&offset_id, &index) in truncated_offset_id_order
+                .iter()
+                .filter(|(o, _)| !logged_offset_ids.contains(*o))
+            {
                 let user_id = reader
-                    .get_user_id_for_offset_id(*merged_id)
+                    .get_user_id_for_offset_id(offset_id)
                     .await
                     .map_err(|e| {
                         tracing::error!("Error reading record segment: {}", e);
                         MergeMetadataResultsOperatorError::RecordSegmentReadError
                     })?;
-                ids.push(user_id.to_string());
+                ids[index] = user_id.to_string();
                 if input.include_metadata {
                     let record = reader
-                        .get_data_for_offset_id(*merged_id)
+                        .get_data_for_offset_id(offset_id)
                         .await
                         .map_err(|e| {
                             tracing::error!("Error reading Record Segment: {}", e);
                             MergeMetadataResultsOperatorError::RecordSegmentReadError
                         })?;
-                    metadata.push(record.metadata.clone());
-                    documents.push(record.document.map(str::to_string))
+                    metadata[index] = record.metadata;
+                    documents[index] = record.document.map(str::to_string);
                 }
             }
         }
