@@ -1,2 +1,2 @@
-pub mod scidocs;
+pub mod datasets;
 pub mod traits;
