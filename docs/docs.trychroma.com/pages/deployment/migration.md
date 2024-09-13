@@ -45,7 +45,7 @@ That will now become:
 const collection = await client.getOrCreateCollection({
   name: "my_collection",
 });
-const records = await client.getRecords(collection, { ids: ["id1"] });
+const records = await collection.get({ ids: ["id1"] });
 ```
 
 Finally, the `modify()` method on Collection has been moved to Chroma Client as `updateCollection(collection: Collection)`.

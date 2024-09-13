@@ -238,6 +238,13 @@ class Settings(BaseSettings):  # type: ignore
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
 
+    # ==========
+    # gRPC service config
+    # ==========
+    chroma_logservice_request_timeout_seconds: int = 3
+    chroma_sysdb_request_timeout_seconds: int = 3
+    chroma_query_request_timeout_seconds: int = 60
+
     # ======
     # Legacy
     # ======

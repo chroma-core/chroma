@@ -50,8 +50,8 @@ const ibmPlexMono = IBM_Plex_Mono({
   variable: '--font-ibm-plex-mono',
 })
 
-const TITLE = 'Markdoc';
-const DESCRIPTION = 'A powerful, flexible, Markdown-based authoring framework';
+const TITLE = 'Chroma Docs';
+const DESCRIPTION = 'Chroma is the open-source AI application database. Batteries included.';
 
 function collectHeadings(node, sections = []) {
   if (node) {

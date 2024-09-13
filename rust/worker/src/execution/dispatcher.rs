@@ -1,13 +1,12 @@
+use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
-use crate::{
-    config::Configurable,
-    errors::ChromaError,
-    system::{Component, ComponentContext, Handler, ReceiverForMessage, System},
-};
+use crate::system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
 use std::fmt::Debug;
-use tracing::Span;
+use tracing::{trace_span, Instrument, Span};
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.
@@ -95,21 +94,31 @@ impl Dispatcher {
     /// # Parameters
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, task: TaskMessage) {
-        // If a worker is waiting for a task, send it to the worker in FIFO order
-        // Otherwise, add it to the task queue
-        match self.waiters.pop() {
-            Some(channel) => match channel
-                .reply_to
-                .send(task, Some(Span::current().clone()))
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("Error sending task to worker: {:?}", e);
+        match task.get_type() {
+            OperatorType::IO => {
+                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
+                tokio::spawn(async move {
+                    task.run().instrument(child_span).await;
+                });
+            }
+            OperatorType::Other => {
+                // If a worker is waiting for a task, send it to the worker in FIFO order
+                // Otherwise, add it to the task queue
+                match self.waiters.pop() {
+                    Some(channel) => match channel
+                        .reply_to
+                        .send(task, Some(Span::current().clone()))
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!("Error sending task to worker: {:?}", e);
+                        }
+                    },
+                    None => {
+                        self.task_queue.push(task);
+                    }
                 }
-            },
-            None => {
-                self.task_queue.push(task);
             }
         }
     }
@@ -206,6 +215,11 @@ impl Handler<TaskRequestMessage> for Dispatcher {
 #[cfg(test)]
 mod tests {
     use parking_lot::Mutex;
+    use rand::{distributions::Alphanumeric, Rng};
+    use tokio::{
+        fs::File,
+        io::{AsyncReadExt, AsyncWriteExt},
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -251,6 +265,102 @@ mod tests {
     }
 
     #[derive(Debug)]
+    struct MockIoOperator {}
+    #[async_trait]
+    impl Operator<String, String> for MockIoOperator {
+        type Error = ();
+
+        fn get_name(&self) -> &'static str {
+            "MockIoOperator"
+        }
+
+        async fn run(&self, input: &String) -> Result<String, Self::Error> {
+            // perform some io to simulate work.
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let file_path = tmp_dir.path().join(input);
+            let mut tmp_file = File::create(file_path.clone()).await.unwrap();
+            tmp_file.write(b"Test write").await.unwrap();
+            tmp_file.flush().await.unwrap();
+            let mut read_fs = File::open(file_path)
+                .await
+                .expect("Error opening file previously created");
+            let mut buffer = [0; 10];
+            read_fs.read(&mut buffer[..]).await.unwrap();
+            let read_value =
+                String::from_utf8(buffer.to_vec()).expect("Error creating string from utf8");
+            assert_eq!(read_value, String::from("Test write"));
+            Ok(input.to_string())
+        }
+
+        fn get_type(&self) -> OperatorType {
+            OperatorType::IO
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockIoDispatchUser {
+        pub dispatcher: ComponentHandle<Dispatcher>,
+        counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
+        sent_tasks: Arc<Mutex<HashSet<Uuid>>>,
+        received_tasks: Arc<Mutex<HashSet<Uuid>>>,
+    }
+    #[async_trait]
+    impl Component for MockIoDispatchUser {
+        fn get_name() -> &'static str {
+            "Mock Io dispatcher"
+        }
+
+        fn queue_size(&self) -> usize {
+            1000
+        }
+
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+            // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
+            let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
+            ctx.scheduler
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx, || None);
+        }
+    }
+    #[async_trait]
+    impl Handler<TaskResult<String, ()>> for MockIoDispatchUser {
+        type Result = ();
+
+        async fn handle(
+            &mut self,
+            _message: TaskResult<String, ()>,
+            ctx: &ComponentContext<MockIoDispatchUser>,
+        ) {
+            self.counter.fetch_add(1, Ordering::SeqCst);
+            let curr_count = self.counter.load(Ordering::SeqCst);
+            // Cancel self
+            if curr_count == DISPATCH_COUNT {
+                ctx.cancellation_token.cancel();
+            }
+            self.received_tasks.lock().insert(_message.id());
+        }
+    }
+
+    #[async_trait]
+    impl Handler<()> for MockIoDispatchUser {
+        type Result = ();
+
+        async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockIoDispatchUser>) {
+            let rng = rand::thread_rng();
+            // Generate a random filename for writing and reading.
+            let filename = rng
+                .sample_iter(&Alphanumeric)
+                .take(5)
+                .map(char::from)
+                .collect();
+            println!("Scheduling mock io operator with filename {}", filename);
+            let task = wrap(Box::new(MockIoOperator {}), filename, ctx.receiver());
+            let task_id = task.id();
+            self.sent_tasks.lock().insert(task_id);
+            let res = self.dispatcher.send(task, None).await;
+        }
+    }
+
+    #[derive(Debug)]
     struct MockDispatchUser {
         pub dispatcher: ComponentHandle<Dispatcher>,
         counter: Arc<AtomicUsize>, // We expect to recieve DISPATCH_COUNT messages
@@ -271,7 +381,7 @@ mod tests {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
-                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx);
+                .schedule_interval((), duration, Some(DISPATCH_COUNT), ctx, || None);
         }
     }
     #[async_trait]
@@ -298,6 +408,7 @@ mod tests {
         type Result = ();
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
+            println!("Scheduling mock cpu operator with input {}", 42.0);
             let task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
@@ -306,7 +417,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dispatcher() {
+    async fn test_dispatcher_io_tasks() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher_handle = system.start_component(dispatcher);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let dispatch_user = MockIoDispatchUser {
+            dispatcher: dispatcher_handle,
+            counter: counter.clone(),
+            sent_tasks: sent_tasks.clone(),
+            received_tasks: received_tasks.clone(),
+        };
+        let mut dispatch_user_handle = system.start_component(dispatch_user);
+        // yield to allow the component to process the messages
+        tokio::task::yield_now().await;
+        // Join on the dispatch user, since it will kill itself after DISPATCH_COUNT messages
+        dispatch_user_handle.join().await;
+        // We should have received DISPATCH_COUNT messages
+        assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
+        // The sent tasks should be equal to the received tasks
+        assert_eq!(*sent_tasks.lock(), *received_tasks.lock());
+        // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
+        assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
+        assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_non_io_tasks() {
         let system = System::new();
         let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
         let dispatcher_handle = system.start_component(dispatcher);

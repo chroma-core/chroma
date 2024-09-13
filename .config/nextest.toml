@@ -1,0 +1,5 @@
+[profile.default]
+default-filter = "not test(/test_k8s_integration_/)"
+
+[profile.k8s_integration]
+default-filter = "test(/test_k8s_integration_/)"

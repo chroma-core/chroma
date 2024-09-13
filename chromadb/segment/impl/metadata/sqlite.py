@@ -117,6 +117,7 @@ class SqliteMetadataSegment(MetadataReader):
         ids: Optional[Sequence[str]] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        include_metadata: bool = True,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
         embeddings_t, metadata_t, fulltext_t = Tables(
@@ -129,6 +130,22 @@ class SqliteMetadataSegment(MetadataReader):
         if limit < 0:
             raise ValueError("Limit cannot be negative")
 
+        select_clause = [
+            embeddings_t.id,
+            embeddings_t.embedding_id,
+            embeddings_t.seq_id,
+        ]
+        if include_metadata:
+            select_clause.extend(
+                [
+                    metadata_t.key,
+                    metadata_t.string_value,
+                    metadata_t.int_value,
+                    metadata_t.float_value,
+                    metadata_t.bool_value,
+                ]
+            )
+
         q = (
             (
                 self._db.querybuilder()
@@ -136,16 +153,7 @@ class SqliteMetadataSegment(MetadataReader):
                 .left_join(metadata_t)
                 .on(embeddings_t.id == metadata_t.id)
             )
-            .select(
-                embeddings_t.id,
-                embeddings_t.embedding_id,
-                embeddings_t.seq_id,
-                metadata_t.key,
-                metadata_t.string_value,
-                metadata_t.int_value,
-                metadata_t.float_value,
-                metadata_t.bool_value,
-            )
+            .select(*select_clause)
             .orderby(embeddings_t.embedding_id)
         )
 
@@ -213,10 +221,10 @@ class SqliteMetadataSegment(MetadataReader):
 
         with self._db.tx() as cur:
             # Execute the query with the limit and offset already applied
-            return list(self._records(cur, q))
+            return list(self._records(cur, q, include_metadata))
 
     def _records(
-        self, cur: Cursor, q: QueryBuilder
+        self, cur: Cursor, q: QueryBuilder, include_metadata: bool
     ) -> Generator[MetadataEmbeddingRecord, None, None]:
         """Given a cursor and a QueryBuilder, yield a generator of records. Assumes
         cursor returns rows in ID order."""
@@ -228,13 +236,18 @@ class SqliteMetadataSegment(MetadataReader):
         group_iterator = groupby(cur_iterator, lambda r: int(r[0]))
 
         for _, group in group_iterator:
-            yield self._record(list(group))
+            yield self._record(list(group), include_metadata)
 
     @trace_method("SqliteMetadataSegment._record", OpenTelemetryGranularity.ALL)
-    def _record(self, rows: Sequence[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
+    def _record(
+        self, rows: Sequence[Tuple[Any, ...]], include_metadata: bool
+    ) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
         MetadataEmbeddingRecord"""
         _, embedding_id, seq_id = rows[0][:3]
+        if not include_metadata:
+            return MetadataEmbeddingRecord(id=embedding_id, metadata=None)
+
         metadata = {}
         for row in rows:
             key, string_value, int_value, float_value, bool_value = row[3:]

@@ -24,7 +24,7 @@ def unstarted_grpc_metadata_segment() -> GrpcMetadataSegment:
         id=uuid.uuid4(),
         type="test",
         scope=SegmentScope.METADATA,
-        collection=None,
+        collection=uuid.uuid4(),
         metadata={
             "grpc_url": "test",
         },

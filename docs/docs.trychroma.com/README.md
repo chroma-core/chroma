@@ -59,3 +59,17 @@ The docs are deployed to Vercel.
 
 
 <!-- TODO: codegen -->
+
+### JS Docs Autogen
+
+```
+yarn
+yarn gen-js
+```
+
+### Python Docs Autogen
+
+```
+pip install -r requirements.txt
+yarn gen-python
+```

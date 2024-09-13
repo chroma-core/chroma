@@ -458,7 +458,7 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 			}
 		}
 		// get segment
-		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(createSegment.ID, nil, nil, types.NilUniqueID())
+		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(createSegment.ID, nil, nil, createSegment.CollectionID)
 		if err != nil {
 			log.Error("error getting segment", zap.Error(err))
 			return err
@@ -506,9 +506,9 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	return segments, nil
 }
 
-func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID) error {
+func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, types.NilUniqueID())
+		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, collectionID)
 		if err != nil {
 			return err
 		}
@@ -531,30 +531,33 @@ func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID) 
 }
 
 func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment, ts types.Timestamp) (*model.Segment, error) {
+	if updateSegment.Collection == nil {
+		return nil, common.ErrMissingCollectionID
+	}
+
+	parsedCollectionID, err := types.Parse(*updateSegment.Collection)
+	if err != nil {
+		return nil, err
+	}
+
 	var result *model.Segment
 
-	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// TODO: we should push in collection_id here, add a GET to fix test for now
-		if updateSegment.Collection == nil {
-			results, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, types.NilUniqueID())
+	err = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		{
+			results, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, parsedCollectionID)
 			if err != nil {
 				return err
 			}
-			if results == nil || len(results) == 0 {
+			if len(results) == 0 {
 				return common.ErrSegmentUpdateNonExistingSegment
-			}
-			if results != nil && len(results) > 1 {
-				// TODO: fix this error
-				return common.ErrInvalidCollectionUpdate
 			}
 			updateSegment.Collection = results[0].Segment.CollectionID
 		}
 
 		// update segment
 		dbSegment := &dbmodel.UpdateSegment{
-			ID:              updateSegment.ID.String(),
-			Collection:      updateSegment.Collection,
-			ResetCollection: updateSegment.ResetCollection,
+			ID:         updateSegment.ID.String(),
+			Collection: updateSegment.Collection,
 		}
 
 		err := tc.metaDomain.SegmentDb(txCtx).Update(dbSegment)
@@ -603,7 +606,7 @@ func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.Updat
 		}
 
 		// get segment
-		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, types.NilUniqueID())
+		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(updateSegment.ID, nil, nil, parsedCollectionID)
 		if err != nil {
 			log.Error("error getting segment", zap.Error(err))
 			return err

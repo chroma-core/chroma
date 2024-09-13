@@ -1,0 +1,36 @@
+[package]
+name = "chroma-index"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rand = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+parking_lot = { workspace = true }
+arrow = { workspace = true }
+serde = { workspace = true }
+tantivy = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+roaring = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+chroma-error = { workspace = true }
+chroma-types = { workspace = true }
+chroma-blockstore = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
+chroma-storage = { workspace = true }
+chroma-distance = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rayon = { workspace = true }
+
+[build-dependencies]
+cc = "1.0"

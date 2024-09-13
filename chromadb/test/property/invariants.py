@@ -1,6 +1,5 @@
 import gc
 import math
-from chromadb.api.configuration import HNSWConfigurationInternal
 from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
@@ -203,6 +202,7 @@ def ann_accuracy(
     min_recall: float = 0.99,
     embedding_function: Optional[types.EmbeddingFunction] = None,  # type: ignore[type-arg]
     query_indices: Optional[List[int]] = None,
+    query_embeddings: Optional[types.Embeddings] = None,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
@@ -240,9 +240,12 @@ def ann_accuracy(
             distance_function = distance_functions.ip
 
     # Perform exact distance computation
-    query_embeddings = (
-        embeddings if query_indices is None else [embeddings[i] for i in query_indices]
-    )
+    if query_embeddings is None:
+        query_embeddings = (
+            embeddings
+            if query_indices is None
+            else [embeddings[i] for i in query_indices]
+        )
     query_documents = normalized_record_set["documents"]
     if query_indices is not None and query_documents is not None:
         query_documents = [query_documents[i] for i in query_indices]
@@ -334,7 +337,7 @@ def _total_embedding_queue_log_size(sqlite: SqliteDB) -> int:
 
 
 def log_size_below_max(
-    system: System, collection: Collection, has_collection_mutated: bool
+    system: System, collections: List[Collection], has_collection_mutated: bool
 ) -> None:
     sqlite = system.instance(SqliteDB)
 
@@ -342,21 +345,25 @@ def log_size_below_max(
         # Must always keep one entry to avoid reusing seq_ids
         assert _total_embedding_queue_log_size(sqlite) >= 1
 
-        hnsw_config = cast(
-            HNSWConfigurationInternal,
-            collection.get_model()
-            .get_configuration()
-            .get_parameter("hnsw_configuration")
-            .value,
+        # We purge per-collection as the sync_threshold is a per-collection setting
+        sync_threshold_sum = sum(
+            collection.metadata.get("hnsw:sync_threshold", 1000)
+            if collection.metadata is not None
+            else 1000
+            for collection in collections
         )
-        sync_threshold = cast(int, hnsw_config.get_parameter("sync_threshold").value)
-        batch_size = cast(int, hnsw_config.get_parameter("batch_size").value)
+        batch_size_sum = sum(
+            collection.metadata.get("hnsw:batch_size", 100)
+            if collection.metadata is not None
+            else 100
+            for collection in collections
+        )
 
         # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
-        # And if the batch_size != sync_threshold, the queue can have up to batch_size - 1 more entries.
+        # And if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
         assert (
             _total_embedding_queue_log_size(sqlite) - 1
-            <= sync_threshold + batch_size - 1
+            <= sync_threshold_sum + batch_size_sum
         )
     else:
         assert _total_embedding_queue_log_size(sqlite) == 0

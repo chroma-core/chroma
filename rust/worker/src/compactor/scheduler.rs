@@ -48,12 +48,10 @@ impl Scheduler {
             .log
             .get_collections_with_new_data(self.min_compaction_size as u64)
             .await;
-        // TODO: filter collecitons based on memberlist
         let collections = match collections {
             Ok(collections) => collections,
             Err(e) => {
-                // TODO: Log error
-                println!("Error: {:?}", e);
+                tracing::error!("Error: {:?}", e);
                 return Vec::new();
             }
         };
@@ -68,8 +66,7 @@ impl Scheduler {
         for collection_info in collections {
             let collection_id = Uuid::parse_str(collection_info.collection_id.as_str());
             if collection_id.is_err() {
-                // TODO: Log error
-                println!("Error: {:?}", collection_id.err());
+                tracing::error!("Error: {:?}", collection_id.err());
                 continue;
             }
             let collection_id = Some(collection_id.unwrap());
@@ -82,8 +79,10 @@ impl Scheduler {
             match result {
                 Ok(collection) => {
                     if collection.is_empty() {
-                        // TODO: Log error
-                        println!("Collection not found: {:?}", collection_info.collection_id);
+                        tracing::error!(
+                            "Collection not found: {:?}",
+                            collection_info.collection_id
+                        );
                         continue;
                     }
 
@@ -95,10 +94,12 @@ impl Scheduler {
                     let last_compaction_time = match tenant {
                         Ok(tenant) => tenant[0].last_compaction_time,
                         Err(e) => {
-                            // TODO: Log error
-                            println!("Error: {:?}", e);
+                            tracing::error!("Error: {:?}", e);
                             // Ignore this collection id for this compaction iteration
-                            println!("Ignoring collection: {:?}", collection_info.collection_id);
+                            tracing::info!(
+                                "Ignoring collection: {:?}",
+                                collection_info.collection_id
+                            );
                             continue;
                         }
                     };
@@ -127,8 +128,7 @@ impl Scheduler {
                     });
                 }
                 Err(e) => {
-                    // TODO: Log error
-                    println!("Error: {:?}", e);
+                    tracing::error!("Error: {:?}", e);
                 }
             }
         }
@@ -150,8 +150,7 @@ impl Scheduler {
                     }
                 }
                 Err(e) => {
-                    // TODO: Log error
-                    println!("Error: {:?}", e);
+                    tracing::error!("Error: {:?}", e);
                     continue;
                 }
             }
@@ -171,8 +170,7 @@ impl Scheduler {
         // For now, we clear the job queue every time, assuming we will not have any pending jobs running
         self.job_queue.clear();
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
-            // TODO: Log error
-            println!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
+            tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
         }
         let collections = self.get_collections_with_new_data().await;
@@ -200,10 +198,7 @@ mod tests {
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
     use crate::sysdb::test_sysdb::TestSysDb;
-    use crate::types::Collection;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
+    use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
     use std::str::FromStr;
 
     #[tokio::test]

@@ -17,10 +17,10 @@ from chromadb.db.base import (
     SqlDB,
     ParameterValue,
     get_sql,
-    NotFoundError,
     UniqueConstraintError,
 )
 from chromadb.db.system import SysDB
+from chromadb.errors import NotFoundError
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -99,9 +99,13 @@ class SqlSysDB(SqlDB, SysDB):
             sql, params = get_sql(q, self.parameter_format())
             row = cur.execute(sql, params).fetchone()
             if not row:
-                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+                raise NotFoundError(
+                    f"Database {name} not found for tenant {tenant}. Are you sure it exists?"
+                )
             if row[0] is None:
-                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+                raise NotFoundError(
+                    f"Database {name} not found for tenant {tenant}. Are you sure it exists?"
+                )
             id: UUID = cast(UUID, self.uuid_from_db(row[0]))
             return Database(
                 id=id,
@@ -288,10 +292,10 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         add_attributes_to_current_span(
             {
@@ -342,7 +346,7 @@ class SqlSysDB(SqlDB, SysDB):
                 rows = list(segment_rows)
                 type = str(rows[0][1])
                 scope = SegmentScope(str(rows[0][2]))
-                collection = self.uuid_from_db(rows[0][3]) if rows[0][3] else None
+                collection = self.uuid_from_db(rows[0][3])  # type: ignore[assignment]
                 metadata = self._metadata_from_rows(rows)
                 segments.append(
                     Segment(
@@ -474,7 +478,7 @@ class SqlSysDB(SqlDB, SysDB):
 
     @trace_method("SqlSysDB.delete_segment", OpenTelemetryGranularity.ALL)
     @override
-    def delete_segment(self, id: UUID) -> None:
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
         """Delete a segment from the SysDB"""
         add_attributes_to_current_span(
             {
@@ -540,8 +544,8 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         add_attributes_to_current_span(
@@ -557,13 +561,8 @@ class SqlSysDB(SqlDB, SysDB):
             self.querybuilder()
             .update(segments_t)
             .where(segments_t.id == ParameterValue(self.uuid_to_db(id)))
+            .set(segments_t.collection, ParameterValue(self.uuid_to_db(collection)))
         )
-
-        if not collection == Unspecified():
-            collection = cast(Optional[UUID], collection)
-            q = q.set(
-                segments_t.collection, ParameterValue(self.uuid_to_db(collection))
-            )
 
         with self.tx() as cur:
             sql, params = get_sql(q, self.parameter_format())

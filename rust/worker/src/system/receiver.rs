@@ -1,9 +1,7 @@
-use std::fmt::Debug;
-
-use crate::errors::{ChromaError, ErrorCodes};
-
 use super::{Component, ComponentSender, Handler, Message};
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use std::fmt::Debug;
 use thiserror::Error;
 
 /// A ReceiverForMessage is generic over a message type, and useful if you want to send a given message type to any component that can handle it.

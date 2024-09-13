@@ -319,7 +319,7 @@ class SegmentAPI(ServerAPI):
                 existing[0].id, tenant=tenant, database=database
             )
             for s in self._manager.delete_segments(existing[0].id):
-                self._sysdb.delete_segment(s)
+                self._sysdb.delete_segment(existing[0].id, s)
             if existing and existing[0].id in self._collection_cache:
                 del self._collection_cache[existing[0].id]
         else:
@@ -344,17 +344,17 @@ class SegmentAPI(ServerAPI):
             (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.get_max_batch_size()},
         )
-        records_to_submit = []
-        for r in _records(
-            t.Operation.ADD,
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=documents,
-            uris=uris,
-        ):
-            self._validate_embedding_record(coll, r)
-            records_to_submit.append(r)
+        records_to_submit = list(
+            _records(
+                t.Operation.ADD,
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=documents,
+                uris=uris,
+            )
+        )
+        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -386,17 +386,17 @@ class SegmentAPI(ServerAPI):
             (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.get_max_batch_size()},
         )
-        records_to_submit = []
-        for r in _records(
-            t.Operation.UPDATE,
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=documents,
-            uris=uris,
-        ):
-            self._validate_embedding_record(coll, r)
-            records_to_submit.append(r)
+        records_to_submit = list(
+            _records(
+                t.Operation.UPDATE,
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=documents,
+                uris=uris,
+            )
+        )
+        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -430,17 +430,17 @@ class SegmentAPI(ServerAPI):
             (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.get_max_batch_size()},
         )
-        records_to_submit = []
-        for r in _records(
-            t.Operation.UPSERT,
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=documents,
-            uris=uris,
-        ):
-            self._validate_embedding_record(coll, r)
-            records_to_submit.append(r)
+        records_to_submit = list(
+            _records(
+                t.Operation.UPSERT,
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=documents,
+                uris=uris,
+            )
+        )
+        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         return True
@@ -606,10 +606,10 @@ class SegmentAPI(ServerAPI):
         if len(ids_to_delete) == 0:
             return []
 
-        records_to_submit = []
-        for r in _records(operation=t.Operation.DELETE, ids=ids_to_delete):
-            self._validate_embedding_record(coll, r)
-            records_to_submit.append(r)
+        records_to_submit = list(
+            _records(operation=t.Operation.DELETE, ids=ids_to_delete)
+        )
+        self._validate_embedding_record_set(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -679,7 +679,7 @@ class SegmentAPI(ServerAPI):
         if where or where_document:
             metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(
-                where=where, where_document=where_document
+                where=where, where_document=where_document, include_metadata=False
             )
             allowed_ids = [r["id"] for r in records]
 
@@ -731,7 +731,9 @@ class SegmentAPI(ServerAPI):
                 metadata_reader = self._manager.get_segment(
                     collection_id, MetadataReader
                 )
-                records = metadata_reader.get_metadata(ids=list(all_ids))
+                records = metadata_reader.get_metadata(
+                    ids=list(all_ids), include_metadata=True
+                )
                 metadata_by_id = {r["id"]: r["metadata"] for r in records}
                 for id_list in ids:
                     # In the segment based architecture, it is possible for one segment
@@ -795,16 +797,21 @@ class SegmentAPI(ServerAPI):
     # system, since the cache is only local.
     # TODO: promote collection -> topic to a base class method so that it can be
     # used for channel assignment in the distributed version of the system.
-    @trace_method("SegmentAPI._validate_embedding_record", OpenTelemetryGranularity.ALL)
-    def _validate_embedding_record(
-        self, collection: t.Collection, record: t.OperationRecord
+    @trace_method(
+        "SegmentAPI._validate_embedding_record_set", OpenTelemetryGranularity.ALL
+    )
+    def _validate_embedding_record_set(
+        self, collection: t.Collection, records: List[t.OperationRecord]
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
-        if record["embedding"]:
-            self._validate_dimension(collection, len(record["embedding"]), update=True)
+        for record in records:
+            if record["embedding"]:
+                self._validate_dimension(
+                    collection, len(record["embedding"]), update=True
+                )
 
-    @trace_method("SegmentAPI._validate_dimension", OpenTelemetryGranularity.ALL)
+    # This method is intentionally left untraced because otherwise it can emit thousands of spans for requests containing many embeddings.
     def _validate_dimension(
         self, collection: t.Collection, dim: int, update: bool
     ) -> None:

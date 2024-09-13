@@ -162,7 +162,7 @@ collection.add(
 {% tab label="Javascript" %}
 
 ```js
-await client.addRecords(collection, {
+await collection.add({
   documents: [
     "This is a document about pineapple",
     "This is a document about oranges",
@@ -194,7 +194,7 @@ print(results)
 {% tab label="Javascript" %}
 
 ```js
-const results = await client.queryRecords(collection, {
+const results = await collection.query({
   queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
   nResults: 2, // how many results to return
 });
@@ -294,7 +294,7 @@ const collection = await client.getOrCreateCollection({
 });
 
 // switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
-await client.upsertRecords(collection, {
+await collection.upsert({
   documents: [
     "This is a document about pineapple",
     "This is a document about oranges",
@@ -302,7 +302,7 @@ await client.upsertRecords(collection, {
   ids: ["id1", "id2"],
 });
 
-const results = await client.queryRecords(collection, {
+const results = await collection.query({
   queryTexts: "This is a query document about florida", // Chroma will embed this for you
   nResults: 2, // how many results to return
 });

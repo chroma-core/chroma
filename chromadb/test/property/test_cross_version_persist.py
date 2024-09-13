@@ -372,8 +372,8 @@ def test_cycle_versions(
         embeddings_queue, system.instance(SegmentManager)
     )
 
-    embeddings_queue.purge_log()
-    invariants.log_size_below_max(system, coll, True)
+    embeddings_queue.purge_log(coll.id)
+    invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings
     coll.add(**embeddings_strategy)  # type: ignore
@@ -383,7 +383,7 @@ def test_cycle_versions(
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
-    invariants.log_size_below_max(system, coll, True)
+    invariants.log_size_below_max(system, [coll], True)
 
     # Shutdown system
     system.stop()
