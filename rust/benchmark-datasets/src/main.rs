@@ -1,6 +1,6 @@
-use test_datasets::scidocs::SciDocsDataset;
-use test_datasets::traits::TestDataset;
-use tokio_stream::StreamExt;
+use benchmark_datasets::scidocs::SciDocsDataset;
+use benchmark_datasets::traits::TestDataset;
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() {
