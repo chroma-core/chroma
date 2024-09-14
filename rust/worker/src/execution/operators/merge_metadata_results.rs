@@ -155,7 +155,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             (Some(oids), None) | (None, Some(oids)) => oids,
             // If both filter and user offset ids are None, it suggests user did not specify any filter. We fetch all offset ids using the record segment reader
             _ => {
-                let log_offset_ids = mat_records
+                let live_log_offset_ids = mat_records
                     .iter()
                     .filter_map(|(log, _)| {
                         (log.final_operation != MaterializedLogOperation::DeleteExisting)
@@ -164,22 +164,18 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     .collect::<BTreeSet<_>>()
                     .into_iter()
                     .collect::<Vec<_>>();
-                match &record_segment_reader {
+                merged_oids_holder = match &record_segment_reader {
                     Some(reader) => {
                         let compact_offset_ids =
                             reader.get_all_offset_ids().await.map_err(|e| {
                                 tracing::error!("Error reading record segment: {}", e);
                                 MergeMetadataResultsOperatorError::RecordSegmentReadError
                             })?;
-                        merged_oids_holder =
-                            merge_sorted_vecs_disjunction(&log_offset_ids, &compact_offset_ids);
-                        &merged_oids_holder
+                        merge_sorted_vecs_disjunction(&live_log_offset_ids, &compact_offset_ids)
                     }
-                    None => {
-                        merged_oids_holder = log_offset_ids;
-                        &merged_oids_holder
-                    }
-                }
+                    None => live_log_offset_ids,
+                };
+                &merged_oids_holder
             }
         };
 
@@ -208,19 +204,17 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
         // Hydrate the data from the materialized logs first
         for (log, _) in mat_records.iter() {
+            // It's important to account for the records that are
+            // deleted also here so that we can subsequently ignore
+            // them when reading the record segment.
+            logged_offset_ids.insert(log.offset_id);
             if let Some(&index) = truncated_offset_id_order.get(&log.offset_id) {
-                // It's important to account for the records that are
-                // deleted also here so that we can subsequently ignore
-                // them when reading the record segment.
-                logged_offset_ids.insert(log.offset_id);
-                if log.final_operation != MaterializedLogOperation::DeleteExisting {
-                    // Ids get pushed irrespective of whether metadata is included or not.
-                    ids[index] = log.merged_user_id();
-                    if input.include_metadata {
-                        let final_metadata = log.merged_metadata();
-                        metadata[index] = (!final_metadata.is_empty()).then_some(final_metadata);
-                        documents[index] = log.merged_document();
-                    }
+                // Ids get pushed irrespective of whether metadata is included or not.
+                ids[index] = log.merged_user_id();
+                if input.include_metadata {
+                    let final_metadata = log.merged_metadata();
+                    metadata[index] = (!final_metadata.is_empty()).then_some(final_metadata);
+                    documents[index] = log.merged_document();
                 }
             }
         }
