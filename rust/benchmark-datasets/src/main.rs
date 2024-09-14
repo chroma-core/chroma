@@ -1,6 +1,6 @@
 use benchmark_datasets::{
     datasets::{scidocs::SciDocsDataset, wikipedia::WikipediaDataset},
-    traits::TestDataset,
+    types::BenchmarkDataset,
 };
 use futures::StreamExt;
 
