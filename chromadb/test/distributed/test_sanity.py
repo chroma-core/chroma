@@ -10,6 +10,7 @@ from chromadb.test.conftest import (
     skip_if_not_cluster,
 )
 from chromadb.test.property import invariants
+import numpy as np
 
 
 @skip_if_not_cluster()
@@ -31,13 +32,13 @@ def test_add(
     embeddings = []
     for i in range(1000):
         ids.append(str(i))
-        embeddings.append([random.random(), random.random(), random.random()])
+        embeddings.append(np.array([random.random(), random.random(), random.random()]))
         collection.add(
             ids=[str(i)],
             embeddings=[embeddings[-1]],  # type: ignore
         )
 
-    random_query = [random.random(), random.random(), random.random()]
+    random_query = np.array([random.random(), random.random(), random.random()])
     print("Generated data with seed ", seed)
 
     invariants.ann_accuracy(
@@ -69,7 +70,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
     documents = []
     for i in range(1000):
         ids.append(str(i))
-        embeddings.append([random.random(), random.random(), random.random()])
+        embeddings.append(np.array([random.random(), random.random(), random.random()]))
         documents.append(f"document_{i}")
         collection.add(
             ids=[str(i)],
@@ -79,8 +80,8 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
 
     time.sleep(COMPACTION_SLEEP)  # Wait for the documents to be compacted
 
-    random_query_1 = [random.random(), random.random(), random.random()]
-    random_query_2 = [random.random(), random.random(), random.random()]
+    random_query_1 = np.array([random.random(), random.random(), random.random()])
+    random_query_2 = np.array([random.random(), random.random(), random.random()])
     print("Generated data with seed ", seed)
 
     # Query the collection with a random query

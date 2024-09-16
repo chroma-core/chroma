@@ -118,7 +118,7 @@ class BruteForceIndex:
         ]
 
     def query(self, query: VectorQuery) -> Sequence[Sequence[VectorQueryResult]]:
-        np_query = np.array(query["vectors"])
+        np_query = np.array(query["vectors"], dtype=np.float32)
         allowed_ids = (
             None if query["allowed_ids"] is None else set(query["allowed_ids"])
         )
