@@ -90,7 +90,7 @@ Chroma is a rapidly developing project. We welcome PR contributors and ideas for
 - [Read our contributing guide](https://docs.trychroma.com/contributing)
 
 **Release Cadence**
-We currently release new tagged versions of the `pypi` and `npm` packages on Mondays. Hotfixes go out at any time during the week.
+We currently release new tagged versions of the `pypi` and `npm` packages on Mondays. Hotfixes go out at any time during the week. 
 
 ## License
 
