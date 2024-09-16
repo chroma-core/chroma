@@ -2,6 +2,15 @@
 title: 🔒 Auth
 ---
 
+{% tabs group="code-lang" hideContent=true %}
+
+{% tab label="Python" %}
+{% /tab %}
+
+{% tab label="Javascript" %}
+{% /tab %}
+
+{% /tabs %}
 
 You can configure Chroma to use authentication when in server/client mode only.
 
@@ -51,11 +60,10 @@ And run the server as normal:
 chroma run --path /db_path
 ```
 
+#### Client Setup
+
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
-
-#### Client Setup (Python)
-
 
 ```python
 import chromadb
@@ -72,8 +80,6 @@ client.list_collections()  # this is a protected endpoint and requires authentic
 
 {% /tab %}
 {% tab label="Javascript" %}
-
-#### Client Setup (JavaScript/TypeScript)
 
 ##### Basic authentication (username & password)
 ```javascript

@@ -12,7 +12,7 @@ title: JS Client
 
 Creates a new ChromaClient instance.
 
-##### Basic
+**`Example`**
 
 ```javascript
 const client = new ChromaClient({
