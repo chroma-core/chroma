@@ -28,30 +28,6 @@ In v0.5.6 the write-ahead log is pruned automatically. However, this is not enab
 
 This does not need to be run regularly and does not need to be run on new databases created with v0.5.6 or later.
 
-### Javascript Client Refactor (v2.0.0) - July 2024
-
-We've moved to a flat client on the JS/TS client. Whereas previously, you would construct a Collection object that you would then call methods on, Collections are now data objects which are passed into methods on the ChromaClient object.
-
-For example, if you currently have the following code:
-
-```javascript
-const collection = await client.getOrCreateCollection({
-  name: "my_collection",
-});
-const records = await collection.get({ ids: ["id1"] });
-```
-
-That will now become:
-
-```javascript
-const collection = await client.getOrCreateCollection({
-  name: "my_collection",
-});
-const records = await collection.get({ ids: ["id1"] });
-```
-
-Finally, the `modify()` method on Collection has been moved to Chroma Client as `updateCollection(collection: Collection)`.
-
 ### v0.5.1
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
