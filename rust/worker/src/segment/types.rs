@@ -855,7 +855,7 @@ pub trait SegmentWriter<'a> {
 }
 
 #[async_trait]
-pub(crate) trait SegmentFlusher {
+pub trait SegmentFlusher {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>>;
 }
 
