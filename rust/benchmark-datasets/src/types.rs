@@ -1,5 +1,6 @@
 use anyhow::Result;
-use rand::seq::SliceRandom;
+use chroma_types::{OperationRecord, UpdateMetadataValue};
+use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, future::Future, path::PathBuf};
 use tantivy::{
@@ -31,6 +32,47 @@ where
     fn create_records_stream(
         &self,
     ) -> impl Future<Output = Result<impl Stream<Item = Result<Record>>>> + Send;
+    fn create_log_stream<F, Fut>(
+        &self,
+        compute_embedding: F,
+    ) -> impl Future<Output = Result<impl Stream<Item = Result<OperationRecord>>>>
+    where
+        F: Fn(&Record) -> Fut + Clone,
+        Fut: Future<Output = Vec<f32>>,
+    {
+        async {
+            let doc_stream = self.create_records_stream().await?;
+
+            Ok(
+                futures::StreamExt::enumerate(doc_stream).then(move |(i, doc)| {
+                    let compute_embedding = compute_embedding.clone();
+
+                    async move {
+                        match doc {
+                            Ok(record) => {
+                                let embedding = compute_embedding(&record).await;
+
+                                let mut metadata = HashMap::new();
+                                for (key, value) in record.metadata {
+                                    metadata.insert(key, UpdateMetadataValue::Str(value));
+                                }
+
+                                Ok(OperationRecord {
+                                    id: i.to_string(),
+                                    embedding: Some(embedding),
+                                    encoding: Some(chroma_types::ScalarEncoding::FLOAT32),
+                                    metadata: Some(metadata),
+                                    document: Some(record.document),
+                                    operation: chroma_types::Operation::Add,
+                                })
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                }),
+            )
+        }
+    }
 }
 
 /// Represents a "known good" subset of queries from a query dataset that have at least `min_results_per_query` results in a corpus dataset.

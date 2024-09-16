@@ -26,3 +26,4 @@ tantivy.workspace = true
 tokio = { workspace = true }
 tokio-stream = { version = "0.1.16", features = ["full"] }
 tokio-util = "0.7.12"
+chroma-types = { workspace = true }
