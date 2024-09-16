@@ -29,6 +29,7 @@ from chromadb.types import (
 from chromadb.config import System, Settings
 from pytest import FixtureRequest, approx
 from asyncio import Event, wait_for, TimeoutError
+import numpy as np
 
 
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:
@@ -73,7 +74,7 @@ def producer_consumer(
 @pytest.fixture(scope="module")
 def sample_embeddings() -> Iterator[OperationRecord]:
     def create_record(i: int) -> OperationRecord:
-        vector = [i + i * 0.1, i + 1 + i * 0.1]
+        vector = np.array([i + i * 0.1, i + 1 + i * 0.1])
         metadata: Optional[Dict[str, Union[str, int, float]]]
         if i % 2 == 0:
             metadata = None

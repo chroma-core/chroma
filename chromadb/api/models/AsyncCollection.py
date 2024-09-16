@@ -9,6 +9,7 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
+    PyEmbedding,
     Include,
     Metadata,
     Document,
@@ -35,7 +36,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,

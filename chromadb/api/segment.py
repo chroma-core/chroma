@@ -58,6 +58,7 @@ from uuid import UUID, uuid4
 import time
 import logging
 import re
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -860,7 +861,7 @@ class SegmentAPI(ServerAPI):
         """Validate the dimension of an embedding record before submitting it to the system."""
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
         for record in records:
-            if record["embedding"]:
+            if record["embedding"] is not None:
                 self._validate_dimension(
                     collection, len(record["embedding"]), update=True
                 )
@@ -916,7 +917,7 @@ def _records(
         if documents:
             document = documents[i]
             if metadata:
-                metadata = {**metadata, "chroma:document": document}
+                metadata = {**metadata, "chroma:document": document}    
             else:
                 metadata = {"chroma:document": document}
 
@@ -929,7 +930,7 @@ def _records(
 
         record = t.OperationRecord(
             id=id,
-            embedding=embeddings[i] if embeddings else None,
+            embedding=embeddings[i] if embeddings is not None else None,
             encoding=t.ScalarEncoding.FLOAT32,  # Hardcode for now
             metadata=metadata,
             operation=operation,

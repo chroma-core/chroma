@@ -219,10 +219,7 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
         ]
 
         # Convert the hex strings to dtype
-        embeddings: types.Embeddings = np.array(
-            [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
-            dtype=self.dtype,
-        ).tolist()
+        embeddings: types.Embeddings = [np.array([int(char, 16) / 15.0 for char in text], dtype=self.dtype) for text in padded_texts]
 
         return embeddings
 

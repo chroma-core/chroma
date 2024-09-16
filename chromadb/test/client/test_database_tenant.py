@@ -101,12 +101,22 @@ def test_database_collections_add(client_factories: ClientFactories) -> None:
     # Make sure the collections are isolated
     res = coll_new.get(include=["embeddings", "documents"])
     assert res["ids"] == records_new["ids"]
-    assert res["embeddings"] == records_new["embeddings"]
+    if res["embeddings"] is not None:
+        for i, embedding in enumerate(res["embeddings"]):
+            for j, value in enumerate(embedding):
+                assert value == records_new["embeddings"][i][j]
+    else:
+        assert records_new["embeddings"] is None
     assert res["documents"] == records_new["documents"]
 
     res = coll_default.get(include=["embeddings", "documents"])
     assert res["ids"] == records_default["ids"]
-    assert res["embeddings"] == records_default["embeddings"]
+    if res["embeddings"] is not None:
+        for i, embedding in enumerate(res["embeddings"]):
+            for j, value in enumerate(embedding):
+                assert value == records_default["embeddings"][i][j]
+    else:
+        assert records_default["embeddings"] is None
     assert res["documents"] == records_default["documents"]
 
 
@@ -148,12 +158,22 @@ def test_tenant_collections_add(client_factories: ClientFactories) -> None:
     # Make sure the collections are isolated
     res = coll_tenant1.get(include=["embeddings", "documents"])
     assert res["ids"] == records_tenant1["ids"]
-    assert res["embeddings"] == records_tenant1["embeddings"]
+    if res["embeddings"] is not None:
+        for i, embedding in enumerate(res["embeddings"]):
+            for j, value in enumerate(embedding):
+                assert value == records_tenant1["embeddings"][i][j]
+    else:
+        assert records_tenant1["embeddings"] is None
     assert res["documents"] == records_tenant1["documents"]
 
     res = coll_tenant2.get(include=["embeddings", "documents"])
     assert res["ids"] == records_tenant2["ids"]
-    assert res["embeddings"] == records_tenant2["embeddings"]
+    if res["embeddings"] is not None:
+        for i, embedding in enumerate(res["embeddings"]):
+            for j, value in enumerate(embedding):
+                assert value == records_tenant2["embeddings"][i][j]
+    else:
+        assert records_tenant2["embeddings"] is None
     assert res["documents"] == records_tenant2["documents"]
 
 

@@ -9,6 +9,7 @@ from chromadb.types import (
     Metadata,
     UpdateMetadata,
     Vector,
+    PyVector,
     LiteralValue,
     LogicalOperator,
     WhereOperator,
@@ -53,16 +54,17 @@ def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
 
 
 # Embeddings
+PyEmbedding = PyVector
 Embedding = Vector
 Embeddings = List[Embedding]
 
 
 def maybe_cast_one_to_many_embedding(
-    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]  # type: ignore[type-arg]
+    target: Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]  # type: ignore[type-arg]
 ) -> Embeddings:
-    if isinstance(target, List):
+    if isinstance(target, (List, np.ndarray)):
         # One Embedding
-        if isinstance(target[0], (int, float)):
+        if isinstance(target[0], (int, float, np.floating, np.integer)):
             return cast(Embeddings, [target])
     # Already a sequence
     return cast(Embeddings, target)
@@ -167,7 +169,7 @@ L = TypeVar("L", covariant=True, bound=Loadable)
 
 class GetResult(TypedDict):
     ids: List[ID]
-    embeddings: Optional[List[Embedding]]
+    embeddings: Optional[Union[List[Embedding], List[PyEmbedding], NDArray]]
     documents: Optional[List[Document]]
     uris: Optional[URIs]
     data: Optional[Loadable]
@@ -177,7 +179,7 @@ class GetResult(TypedDict):
 
 class QueryResult(TypedDict):
     ids: List[IDs]
-    embeddings: Optional[List[List[Embedding]]]
+    embeddings: Optional[Union[List[List[Embedding]], List[List[PyEmbedding]], NDArray]]
     documents: Optional[List[List[Document]]]
     uris: Optional[List[List[URI]]]
     data: Optional[List[Loadable]]
@@ -209,7 +211,7 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-            return validate_embeddings(maybe_cast_one_to_many_embedding(result))
+            return validate_embeddings(normalize_embeddings(maybe_cast_one_to_many_embedding(result)))
 
         setattr(cls, "__call__", __call__)
 
@@ -218,6 +220,17 @@ class EmbeddingFunction(Protocol[D]):
     ) -> Embeddings:
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
 
+
+def normalize_embeddings(
+        embeddings: Union[  # type: ignore[type-arg]
+            OneOrMany[Embedding],
+            OneOrMany[PyEmbedding],
+        ]
+    ) -> Embeddings:
+        # if isinstance(embeddings, np.ndarray):
+        #     return cast(Embeddings, [embedding for embedding in embeddings])
+        # else:
+        return cast(Embeddings, [np.array(embedding) for embedding in embeddings])
 
 def validate_embedding_function(
     embedding_function: EmbeddingFunction[Embeddable],
@@ -495,8 +508,8 @@ def validate_n_results(n_results: int) -> int:
 
 
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
-    """Validates embeddings to ensure it is a list of list of ints, or floats"""
-    if not isinstance(embeddings, list):
+    """Validates embeddings to ensure it is a list of numpy arrays of ints, or floats"""
+    if not isinstance(embeddings, (list, np.ndarray)):
         raise ValueError(
             f"Expected embeddings to be a list, got {type(embeddings).__name__}"
         )
@@ -504,19 +517,23 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         raise ValueError(
             f"Expected embeddings to be a list with at least one item, got {len(embeddings)} embeddings"
         )
-    if not all([isinstance(e, list) for e in embeddings]):
+    if not all([isinstance(e, np.ndarray) for e in embeddings]):
         raise ValueError(
-            "Expected each embedding in the embeddings to be a list, got "
+            "Expected each embedding in the embeddings to be a numpy array, got "
             f"{list(set([type(e).__name__ for e in embeddings]))}"
         )
     for i, embedding in enumerate(embeddings):
-        if len(embedding) == 0:
+        if embedding.ndim == 0:
             raise ValueError(
-                f"Expected each embedding in the embeddings to be a non-empty list, got empty embedding at pos {i}"
+                f"Expected a 1D array, got {embedding}"
+            )
+        if embedding.size == 0:
+            raise ValueError(
+                f"Expected each embedding in the embeddings to be a non-empty numpy array, got empty embedding at pos {i}"
             )
         if not all(
             [
-                isinstance(value, (int, float)) and not isinstance(value, bool)
+                isinstance(value, (np.integer, float, np.floating)) and not isinstance(value, bool)
                 for value in embedding
             ]
         ):

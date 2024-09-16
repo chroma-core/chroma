@@ -32,6 +32,7 @@ from itertools import count
 import tempfile
 import os
 import shutil
+import numpy as np
 
 
 def sqlite() -> Generator[System, None, None]:
@@ -426,7 +427,7 @@ def _test_update(
             collection_id,
             OperationRecord(
                 id=embeddings[0]["id"],
-                embedding=[10.0, 10.0],
+                embedding=np.array([10.0, 10.0]),
                 encoding=ScalarEncoding.FLOAT32,
                 metadata=None,
                 operation=operation,
@@ -440,10 +441,8 @@ def _test_update(
     assert segment.count(request_version_context=request_version_context) == 3
     results = segment.get_vectors(request_version_context=request_version_context)
     assert len(results) == 3
-    results = segment.get_vectors(
-        ids=[embeddings[0]["id"]], request_version_context=request_version_context
-    )
-    assert results[0]["embedding"] == [10.0, 10.0]
+    results = segment.get_vectors(ids=[embeddings[0]["id"]], request_version_context=request_version_context)
+    assert np.array_equal(results[0]["embedding"], np.array([10.0, 10.0]))
 
     # Test querying at the old location
     vector = cast(Vector, embeddings[0]["embedding"])
@@ -461,7 +460,7 @@ def _test_update(
     assert knn_results[2]["id"] == embeddings[0]["id"]
 
     # Test querying at the new location
-    vector = [10.0, 10.0]
+    vector = np.array([10.0, 10.0])
     query = VectorQuery(
         vectors=[vector],
         k=3,
@@ -497,7 +496,7 @@ def test_update(
     # test updating a nonexistent record
     update_record = OperationRecord(
         id="no_such_record",
-        embedding=[10.0, 10.0],
+        embedding=np.array([10.0, 10.0]),
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPDATE,
@@ -541,7 +540,7 @@ def test_upsert(
     # test updating a nonexistent record
     upsert_record = OperationRecord(
         id="no_such_record",
-        embedding=[42, 42],
+        embedding=np.array([42, 42]),
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPSERT,
@@ -560,7 +559,7 @@ def test_upsert(
         ids=["no_such_record"], request_version_context=request_version_context
     )
     assert len(result) == 1
-    assert approx_equal_vector(result[0]["embedding"], [42, 42])
+    assert approx_equal_vector(result[0]["embedding"], np.array([42, 42]))
 
 
 def test_delete_without_add(

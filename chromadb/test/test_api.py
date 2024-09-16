@@ -102,7 +102,7 @@ def test_persist_index_loading(api_fixture, request):
 def test_persist_index_loading_embedding_function(api_fixture, request):
     class TestEF(EmbeddingFunction[Document]):
         def __call__(self, input):
-            return [[1, 2, 3] for _ in range(len(input))]
+            return [np.array([1, 2, 3]) for _ in range(len(input))]
 
     client = request.getfixturevalue("local_persist_api")
     client.reset()
@@ -131,7 +131,7 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
 def test_persist_index_get_or_create_embedding_function(api_fixture, request):
     class TestEF(EmbeddingFunction[Document]):
         def __call__(self, input):
-            return [[1, 2, 3] for _ in range(len(input))]
+            return [np.array([1, 2, 3]) for _ in range(len(input))]
 
     api = request.getfixturevalue("local_persist_api")
     api.reset()
@@ -157,7 +157,7 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
             assert nn[key] is None
 
     assert nn["ids"] == [["id1"]]
-    assert nn["embeddings"] == [[[1, 2, 3]]]
+    assert nn["embeddings"][0][0].tolist() == [1, 2, 3]
     assert nn["documents"] == [["hello"]]
     assert nn["distances"] == [[0]]
 
