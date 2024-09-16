@@ -25,7 +25,7 @@ from uuid import UUID
 
 from chromadb.api.configuration import CollectionConfigurationInternal
 from pydantic import BaseModel
-from chromadb.api.types import GetResult, QueryResult
+from chromadb.api.types import GetResult, QueryResult, Embeddings
 from chromadb.auth import (
     AuthzAction,
     AuthzResource,
@@ -67,6 +67,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import Collection as CollectionModel
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -762,7 +763,7 @@ class FastAPI(Server):
                 return self._api._add(
                     collection_id=_uuid(collection_id),
                     ids=add.ids,
-                    embeddings=add.embeddings,  # type: ignore
+                    embeddings=[np.array(embedding) for embedding in add.embeddings] if add.embeddings else None,  # type: ignore 
                     metadatas=add.metadatas,  # type: ignore
                     documents=add.documents,  # type: ignore
                     uris=add.uris,  # type: ignore
@@ -798,7 +799,7 @@ class FastAPI(Server):
             return self._api._update(
                 collection_id=_uuid(collection_id),
                 ids=update.ids,
-                embeddings=update.embeddings,
+                embeddings=[np.array(embedding) for embedding in update.embeddings] if update.embeddings else None,
                 metadatas=update.metadatas,  # type: ignore
                 documents=update.documents,  # type: ignore
                 uris=update.uris,  # type: ignore
@@ -829,7 +830,7 @@ class FastAPI(Server):
             return self._api._upsert(
                 collection_id=_uuid(collection_id),
                 ids=upsert.ids,
-                embeddings=upsert.embeddings,  # type: ignore
+                embeddings = [np.array(embedding) for embedding in upsert.embeddings] if upsert.embeddings else None,  # type: ignore 
                 metadatas=upsert.metadatas,  # type: ignore
                 documents=upsert.documents,  # type: ignore
                 uris=upsert.uris,  # type: ignore
@@ -866,7 +867,7 @@ class FastAPI(Server):
                 include=get.include,
             )
 
-        return cast(
+        get_result = cast(
             GetResult,
             await to_thread.run_sync(
                 process_get,
@@ -875,6 +876,11 @@ class FastAPI(Server):
                 limiter=self._capacity_limiter,
             ),
         )
+
+        if get_result["embeddings"] is not None:
+            get_result["embeddings"]= [embedding.tolist() if isinstance(embedding, np.ndarray) else embedding for embedding in get_result["embeddings"]]
+
+        return get_result
 
     @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
     async def delete(
@@ -986,6 +992,10 @@ class FastAPI(Server):
                 limiter=self._capacity_limiter,
             ),
         )
+
+        if nnresult["embeddings"] is not None:
+            nnresult["embeddings"]= [[embedding.tolist() if isinstance(embedding, np.ndarray) else embedding for embedding in result] for result in nnresult["embeddings"]]
+
         return nnresult
 
     async def pre_flight_checks(self) -> Dict[str, Any]:

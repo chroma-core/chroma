@@ -418,7 +418,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
@@ -438,7 +438,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/update")
         return True
@@ -458,7 +458,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/upsert")
         return True
@@ -479,7 +479,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             "post",
             "/collections/" + str(collection_id) + "/query",
             json={
-                "query_embeddings": query_embeddings,
+                "query_embeddings": [embedding.tolist() for embedding in query_embeddings] if query_embeddings is not None else None,
                 "n_results": n_results,
                 "where": where,
                 "where_document": where_document,

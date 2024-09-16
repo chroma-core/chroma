@@ -6,6 +6,7 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
+    PyEmbedding,
     Include,
     Metadata,
     Document,
@@ -43,7 +44,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
@@ -136,14 +137,14 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             GetResult: A GetResult object containing the results.
         """
-        return self._client._peek(self.id, limit)
+        return self._transform_peek_response(self._client._peek(self.id, limit))
 
     def query(
         self,
         query_embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
@@ -269,7 +270,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,

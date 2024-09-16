@@ -31,6 +31,7 @@ from itertools import count
 import tempfile
 import os
 import shutil
+import numpy as np
 
 
 def sqlite() -> Generator[System, None, None]:
@@ -388,7 +389,7 @@ def _test_update(
             collection_id,
             OperationRecord(
                 id=embeddings[0]["id"],
-                embedding=[10.0, 10.0],
+                embedding=np.array([10.0, 10.0]),
                 encoding=ScalarEncoding.FLOAT32,
                 metadata=None,
                 operation=operation,
@@ -403,7 +404,7 @@ def _test_update(
     results = segment.get_vectors()
     assert len(results) == 3
     results = segment.get_vectors(ids=[embeddings[0]["id"]])
-    assert results[0]["embedding"] == [10.0, 10.0]
+    assert results[0]["embedding"].tolist() == [10.0, 10.0]
 
     # Test querying at the old location
     vector = cast(Vector, embeddings[0]["embedding"])
@@ -416,7 +417,7 @@ def _test_update(
     assert knn_results[2]["id"] == embeddings[0]["id"]
 
     # Test querying at the new location
-    vector = [10.0, 10.0]
+    vector = np.array([10.0, 10.0])
     query = VectorQuery(
         vectors=[vector], k=3, allowed_ids=None, options=None, include_embeddings=False
     )
@@ -445,7 +446,7 @@ def test_update(
     # test updating a nonexistent record
     update_record = OperationRecord(
         id="no_such_record",
-        embedding=[10.0, 10.0],
+        embedding=np.array([10.0, 10.0]),
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPDATE,
@@ -482,7 +483,7 @@ def test_upsert(
     # test updating a nonexistent record
     upsert_record = OperationRecord(
         id="no_such_record",
-        embedding=[42, 42],
+        embedding=np.array([42, 42]),
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPSERT,
@@ -499,7 +500,7 @@ def test_upsert(
     assert segment.count() == 4
     result = segment.get_vectors(ids=["no_such_record"])
     assert len(result) == 1
-    assert approx_equal_vector(result[0]["embedding"], [42, 42])
+    assert approx_equal_vector(result[0]["embedding"], np.array([42, 42]))
 
 
 def test_delete_without_add(
