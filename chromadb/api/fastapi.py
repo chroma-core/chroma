@@ -73,7 +73,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
     def _make_request(self, method: str, path: str, **kwargs: Dict[str, Any]) -> Any:
         # If the request has json in kwargs, use orjson to serialize it,
-        # remove it from kwargs, and add it to the data parameter
+        # remove it from kwargs, and add it to the content parameter
         # This is because httpx uses a slower json serializer
         if "json" in kwargs:
             data = orjson.dumps(kwargs.pop("json"))
