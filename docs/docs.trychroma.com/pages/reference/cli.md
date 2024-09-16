@@ -6,7 +6,7 @@ title: CLI
 
 Vacuuming shrinks and optimizes your database.
 
-Vacuuming after upgrading from a version of Chroma below 0.6 will greatly reduce the size of your database and enable continuous database pruning. A warning is logged during server startup if this is necessary.
+Vacuuming after upgrading from a version of Chroma below v0.5.6 will greatly reduce the size of your database and enable continuous database pruning. A warning is logged during server startup if this is necessary.
 
 In most other cases, vacuuming is unnecessary. **It does not need to be run regularly**.
 

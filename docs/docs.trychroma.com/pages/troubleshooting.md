@@ -60,4 +60,4 @@ If you encounter an error like this during setup and are using Docker - you may 
 
 ## My data directory is too large
 
-If you were using Chroma prior to v0.6, you may be able to significantly shrink your database by [vacuuming it](/reference/cli#vacuuming). After vacuuming once, automatic pruning (a new feature in v0.6) is enabled and will keep your database size in check.
+If you were using Chroma prior to v0.5.6, you may be able to significantly shrink your database by [vacuuming it](/reference/cli#vacuuming). After vacuuming once, automatic pruning (a new feature in v0.5.6) is enabled and will keep your database size in check.
