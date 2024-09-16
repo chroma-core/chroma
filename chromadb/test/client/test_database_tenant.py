@@ -1,6 +1,7 @@
 import pytest
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.test.conftest import ClientFactories
+from chromadb.api.types import GetResult
 
 
 def test_database_tenant_collections(client_factories: ClientFactories) -> None:
@@ -101,22 +102,12 @@ def test_database_collections_add(client_factories: ClientFactories) -> None:
     # Make sure the collections are isolated
     res = coll_new.get(include=["embeddings", "documents"])
     assert res["ids"] == records_new["ids"]
-    if res["embeddings"] is not None:
-        for i, embedding in enumerate(res["embeddings"]):
-            for j, value in enumerate(embedding):
-                assert value == records_new["embeddings"][i][j]
-    else:
-        assert records_new["embeddings"] is None
+    check_embeddings(res=res, records=records_new)
     assert res["documents"] == records_new["documents"]
 
     res = coll_default.get(include=["embeddings", "documents"])
     assert res["ids"] == records_default["ids"]
-    if res["embeddings"] is not None:
-        for i, embedding in enumerate(res["embeddings"]):
-            for j, value in enumerate(embedding):
-                assert value == records_default["embeddings"][i][j]
-    else:
-        assert records_default["embeddings"] is None
+    check_embeddings(res=res, records=records_default)
     assert res["documents"] == records_default["documents"]
 
 
@@ -158,22 +149,12 @@ def test_tenant_collections_add(client_factories: ClientFactories) -> None:
     # Make sure the collections are isolated
     res = coll_tenant1.get(include=["embeddings", "documents"])
     assert res["ids"] == records_tenant1["ids"]
-    if res["embeddings"] is not None:
-        for i, embedding in enumerate(res["embeddings"]):
-            for j, value in enumerate(embedding):
-                assert value == records_tenant1["embeddings"][i][j]
-    else:
-        assert records_tenant1["embeddings"] is None
+    check_embeddings(res=res, records=records_tenant1)
     assert res["documents"] == records_tenant1["documents"]
 
     res = coll_tenant2.get(include=["embeddings", "documents"])
     assert res["ids"] == records_tenant2["ids"]
-    if res["embeddings"] is not None:
-        for i, embedding in enumerate(res["embeddings"]):
-            for j, value in enumerate(embedding):
-                assert value == records_tenant2["embeddings"][i][j]
-    else:
-        assert records_tenant2["embeddings"] is None
+    check_embeddings(res=res, records=records_tenant2)
     assert res["documents"] == records_tenant2["documents"]
 
 
@@ -190,3 +171,11 @@ def test_min_len_name(client_factories: ClientFactories) -> None:
     # Create a tenant with a name of length 1 and expect an error
     with pytest.raises(Exception):
         admin_client.create_tenant("a")
+
+def check_embeddings(res: GetResult, records: dict) -> None:
+    if res["embeddings"] is not None:
+        for i, embedding in enumerate(res["embeddings"]):
+            for j, value in enumerate(embedding):
+                assert value == records["embeddings"][i][j]
+    else:
+        assert records["embeddings"] is None
