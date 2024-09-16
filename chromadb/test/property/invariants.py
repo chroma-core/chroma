@@ -261,10 +261,7 @@ def ann_accuracy(
         include=["embeddings", "documents", "metadatas", "distances"],  # type: ignore[list-item]
     )
 
-    assert query_results["distances"] is not None
-    assert query_results["documents"] is not None
-    assert query_results["metadatas"] is not None
-    assert query_results["embeddings"] is not None
+    assert _query_results_are_correct_shape(query_results, n_results)
 
     # Dict of ids to indices
     id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
@@ -323,6 +320,18 @@ def ann_accuracy(
     for distance_result in query_results["distances"]:
         assert np.allclose(np.sort(distance_result), distance_result)
 
+
+def _query_results_are_correct_shape(query_results: types.QueryResult, n_results: int) -> bool:
+    if query_results["distances"] is None or query_results["embeddings"] is None or query_results["documents"] or query_results["metadatas"] is None:
+        return False
+
+    for result_type in ["distances", "embeddings", "documents", "metadatas"]:
+        if query_results[result_type] is None:
+            return False
+        if any([len(result) != n_results for result in query_results[result_type]]):
+            return False
+    
+    return True
 
 def _total_embedding_queue_log_size(sqlite: SqliteDB) -> int:
     t = Table("embeddings_queue")
