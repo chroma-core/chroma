@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chroma_types::{OperationRecord, UpdateMetadataValue};
+use chroma_types::{LogRecord, OperationRecord, UpdateMetadataValue};
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, future::Future, path::PathBuf};
@@ -35,7 +35,7 @@ where
     fn create_log_stream<F, Fut>(
         &self,
         compute_embedding: F,
-    ) -> impl Future<Output = Result<impl Stream<Item = Result<OperationRecord>>>>
+    ) -> impl Future<Output = Result<impl Stream<Item = Result<LogRecord>>>>
     where
         F: Fn(&Record) -> Fut + Clone,
         Fut: Future<Output = Vec<f32>>,
@@ -57,13 +57,16 @@ where
                                     metadata.insert(key, UpdateMetadataValue::Str(value));
                                 }
 
-                                Ok(OperationRecord {
-                                    id: i.to_string(),
-                                    embedding: Some(embedding),
-                                    encoding: Some(chroma_types::ScalarEncoding::FLOAT32),
-                                    metadata: Some(metadata),
-                                    document: Some(record.document),
-                                    operation: chroma_types::Operation::Add,
+                                Ok(LogRecord {
+                                    log_offset: i as i64,
+                                    record: OperationRecord {
+                                        id: i.to_string(),
+                                        embedding: Some(embedding),
+                                        encoding: Some(chroma_types::ScalarEncoding::FLOAT32),
+                                        metadata: Some(metadata),
+                                        document: Some(record.document),
+                                        operation: chroma_types::Operation::Add,
+                                    },
                                 })
                             }
                             Err(e) => Err(e),
