@@ -50,7 +50,7 @@ pnpm add chromadb chromadb-default-embed # [!code $]
 {% /codetab %}
 {% /codetabs %}
 
-Install chroma via `pypi` to easily run the backend server. (Docker also available)
+Install Chroma via `pypi` to easily run the backend server. (Docker also available)
 
 ```bash
 pip install chromadb # [!code $]
