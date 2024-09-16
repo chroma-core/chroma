@@ -30,7 +30,8 @@ jobs:
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
+                   "chromadb/test/property/test_persist.py",
+                   "chromadb/test/property/test_restart_persist.py"]
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
             parallelized: true
@@ -116,16 +117,27 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}"
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
           # Output the logs zip file path as a job output
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: logs
+          name: ${{ steps.get-logs.outputs.artifact_name }}
           path: ${{ steps.get-logs.outputs.logs_zip_path }}
+
+  merge-cluster-logs:
+    runs-on: ubuntu-latest
+    needs: test-cluster-integration
+    steps:
+      - name: Merge
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: cluster_test_logs
+          pattern: cluster_logs_*
 
   test-thin-client:
     strategy:

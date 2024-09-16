@@ -17,7 +17,7 @@ classifiers = [
 dependencies = [
   'build >= 1.0.3',
   'pydantic >= 1.9',
-  'chroma-hnswlib==0.7.5',
+  'chroma-hnswlib==0.7.6',
   'fastapi >= 0.95.2',
   'uvicorn[standard] >= 0.18.3',
   'numpy >= 1.22.5, < 2.0.0',
@@ -43,6 +43,7 @@ dependencies = [
   'mmh3>=4.0.1',
   'orjson>=3.9.12',
   'httpx>=0.27.0',
+  'rich>=10.11.0',
 ]
 
 [tool.black]

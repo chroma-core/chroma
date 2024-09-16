@@ -1,9 +1,11 @@
 from abc import abstractmethod
-from typing import Dict, Type
+from typing import Dict, Optional, Type
 from overrides import overrides, EnforceOverrides
 
 
 class ChromaError(Exception, EnforceOverrides):
+    trace_id: Optional[str] = None
+
     def code(self) -> int:
         """Return an appropriate HTTP response code for this error"""
         return 400  # Bad Request
@@ -90,6 +92,17 @@ class AuthorizationError(ChromaError):
         return "AuthorizationError"
 
 
+class NotFoundError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 404
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "NotFoundError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
@@ -98,4 +111,5 @@ error_types: Dict[str, Type[ChromaError]] = {
     "InvalidUUID": InvalidUUIDError,
     "InvalidHTTPVersion": InvalidHTTPVersion,
     "AuthorizationError": AuthorizationError,
+    "NotFoundError": NotFoundError,
 }

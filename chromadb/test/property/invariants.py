@@ -1,4 +1,12 @@
+import gc
 import math
+from chromadb.config import System
+from chromadb.db.base import get_sql
+from chromadb.db.impl.sqlite import SqliteDB
+from time import sleep
+
+import psutil
+
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
 from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
 from typing_extensions import Literal
@@ -8,6 +16,7 @@ from chromadb.api import types
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
+from pypika import Table, functions
 
 from chromadb.utils import distance_functions
 
@@ -76,7 +85,7 @@ def _field_matches(
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
-    result = collection.get(ids=normalized_record_set["ids"], include=[field_name])
+    result = collection.get(ids=normalized_record_set["ids"], include=[field_name])  # type: ignore[list-item]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
@@ -163,13 +172,37 @@ def _exact_distances(
     return np.argsort(distances).tolist(), distances.tolist()
 
 
+def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
+    """
+    Checks that the open file descriptors are not exceeding the threadpool size
+    works only for SegmentAPI
+    """
+    current_process = psutil.Process()
+    open_files = current_process.open_files()
+    max_retries = 5
+    retry_count = 0
+    # we probably don't need the below but we keep it to avoid flaky tests.
+    while (
+        len([p.path for p in open_files if "sqlite3" in p.path]) - 1 > threadpool_size
+        and retry_count < max_retries
+    ):
+        gc.collect()  # GC to collect the orphaned TLS objects
+        open_files = current_process.open_files()
+        retry_count += 1
+        sleep(1)
+    assert (
+        len([p.path for p in open_files if "sqlite3" in p.path]) - 1 <= threadpool_size
+    )
+
+
 def ann_accuracy(
     collection: Collection,
     record_set: RecordSet,
     n_results: int = 1,
     min_recall: float = 0.99,
-    embedding_function: Optional[types.EmbeddingFunction] = None,
+    embedding_function: Optional[types.EmbeddingFunction] = None,  # type: ignore[type-arg]
     query_indices: Optional[List[int]] = None,
+    query_embeddings: Optional[types.Embeddings] = None,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
@@ -207,9 +240,12 @@ def ann_accuracy(
             distance_function = distance_functions.ip
 
     # Perform exact distance computation
-    query_embeddings = (
-        embeddings if query_indices is None else [embeddings[i] for i in query_indices]
-    )
+    if query_embeddings is None:
+        query_embeddings = (
+            embeddings
+            if query_indices is None
+            else [embeddings[i] for i in query_indices]
+        )
     query_documents = normalized_record_set["documents"]
     if query_indices is not None and query_documents is not None:
         query_documents = [query_documents[i] for i in query_indices]
@@ -222,7 +258,7 @@ def ann_accuracy(
         query_embeddings=query_embeddings if have_embeddings else None,
         query_texts=query_documents if not have_embeddings else None,
         n_results=n_results,
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=["embeddings", "documents", "metadatas", "distances"],  # type: ignore[list-item]
     )
 
     assert query_results["distances"] is not None
@@ -276,7 +312,7 @@ def ann_accuracy(
 
     try:
         note(
-            f"recall: {recall}, missing {missing} out of {size}, accuracy threshold {accuracy_threshold}"
+            f"# recall: {recall}, missing {missing} out of {size}, accuracy threshold {accuracy_threshold}"
         )
     except InvalidArgument:
         pass  # it's ok if we're running outside hypothesis
@@ -286,3 +322,48 @@ def ann_accuracy(
     # Ensure that the query results are sorted by distance
     for distance_result in query_results["distances"]:
         assert np.allclose(np.sort(distance_result), distance_result)
+
+
+def _total_embedding_queue_log_size(sqlite: SqliteDB) -> int:
+    t = Table("embeddings_queue")
+    q = sqlite.querybuilder().from_(t)
+
+    with sqlite.tx() as cur:
+        sql, params = get_sql(
+            q.select(functions.Count(t.seq_id)), sqlite.parameter_format()
+        )
+        result = cur.execute(sql, params)
+        return cast(int, result.fetchone()[0])
+
+
+def log_size_below_max(
+    system: System, collections: List[Collection], has_collection_mutated: bool
+) -> None:
+    sqlite = system.instance(SqliteDB)
+
+    if has_collection_mutated:
+        # Must always keep one entry to avoid reusing seq_ids
+        assert _total_embedding_queue_log_size(sqlite) >= 1
+
+        # We purge per-collection as the sync_threshold is a per-collection setting
+        sync_threshold_sum = sum(
+            collection.metadata.get("hnsw:sync_threshold", 1000)
+            if collection.metadata is not None
+            else 1000
+            for collection in collections
+        )
+        batch_size_sum = sum(
+            collection.metadata.get("hnsw:batch_size", 100)
+            if collection.metadata is not None
+            else 100
+            for collection in collections
+        )
+
+        # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
+        # And if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
+        assert (
+            _total_embedding_queue_log_size(sqlite) - 1
+            <= sync_threshold_sum + batch_size_sum
+        )
+    else:
+        assert _total_embedding_queue_log_size(sqlite) == 0

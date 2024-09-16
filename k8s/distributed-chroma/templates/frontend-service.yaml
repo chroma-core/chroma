@@ -4,7 +4,7 @@ metadata:
   name: frontend-service
   namespace: {{ .Values.namespace }}
 spec:
-  replicas: 2
+  replicas: {{ .Values.frontendService.replicaCount }}
   selector:
     matchLabels:
       app: frontend-service
@@ -50,6 +50,14 @@ spec:
             - name: CHROMA_LOGSERVICE_PORT
               {{ .Values.frontendService.logServicePort }}
 {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
+      {{if .Values.frontendService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.frontendService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.frontendService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.frontendService.nodeSelector | nindent 8 }}
+      {{ end }}
       volumes:
         - name: chroma
           emptyDir: {}

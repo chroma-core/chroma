@@ -1,10 +1,9 @@
 pub(crate) mod assignment_policy;
 pub(crate) mod config;
 pub(crate) mod rendezvous_hash;
-
-use crate::{config::Configurable, errors::ChromaError};
-
 use self::{assignment_policy::AssignmentPolicy, config::AssignmentPolicyConfig};
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
 
 pub(crate) async fn from_config(
     config: &AssignmentPolicyConfig,

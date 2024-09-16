@@ -201,9 +201,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             if request.HasField("scope")
             else None
         )
-        target_collection = (
-            UUID(hex=request.collection) if request.HasField("collection") else None
-        )
+        target_collection = UUID(hex=request.collection)
 
         found_segments = []
         for segment in self._segments.values():
@@ -233,10 +231,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
             )
         else:
             segment = self._segments[id_to_update.hex]
-            if request.HasField("collection"):
-                segment["collection"] = UUID(hex=request.collection)
-            if request.HasField("reset_collection") and request.reset_collection:
-                segment["collection"] = None
             if request.HasField("metadata"):
                 target = cast(Dict[str, Any], segment["metadata"])
                 if segment["metadata"] is None:

@@ -32,6 +32,7 @@ frontendService:
         value: "http://jaeger:4317"
       - name: CHROMA_OTEL_GRANULARITY
         value: all
+  replicaCount: 2
 sysdb:
   image:
     repository: 'local'
@@ -40,6 +41,13 @@ sysdb:
   env:
     - name: OPTL_TRACING_ENDPOINT
       value: 'value: "jaeger:4317"'
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'
   flags:
 
 logService:
@@ -48,8 +56,11 @@ logService:
     tag: 'log-service'
   env:
     - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "jaeger:4317"'
+      value: 'value: "otel-collector:4317"'
+    - name: SYSDB_CONN
+      value: 'value: "sysdb.chroma:50051"'
   flags:
+  replicaCount: 1
 
 queryService:
   image:
@@ -62,6 +73,7 @@ compactionService:
     repository: 'local'
     tag: 'compaction-service'
   env:
+  replicaCount: 1
 
 sysdbMigration:
   image:

@@ -1,13 +1,9 @@
-use std::{fmt::Debug, sync::RwLock};
-
 use super::config::MemberlistProviderConfig;
 use crate::system::ReceiverForMessage;
-use crate::{
-    config::Configurable,
-    errors::{ChromaError, ErrorCodes},
-    system::{Component, ComponentContext, Handler, StreamHandler},
-};
+use crate::system::{Component, ComponentContext, Handler, StreamHandler};
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
 use kube::runtime::watcher::Config;
 use kube::{
@@ -15,8 +11,10 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, CustomResource,
 };
+use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use thiserror::Error;
 
 /* =========== Basic Types ============== */
@@ -76,7 +74,7 @@ pub(crate) enum CustomResourceMemberlistProviderConfigurationError {
 }
 
 impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             CustomResourceMemberlistProviderConfigurationError::FailedToLoadKubeClient(_e) => {
                 ErrorCodes::Internal
@@ -166,13 +164,7 @@ impl CustomResourceMemberlistProvider {
     }
 
     async fn notify_subscribers(&self) -> () {
-        let curr_memberlist = match self.current_memberlist.read() {
-            Ok(curr_memberlist) => curr_memberlist.clone(),
-            Err(_err) => {
-                // TODO: Log error and attempt recovery
-                return;
-            }
-        };
+        let curr_memberlist = self.current_memberlist.read().clone();
 
         for subscriber in self.subscribers.iter() {
             let _ = subscriber.send(curr_memberlist.clone(), None).await;
@@ -210,7 +202,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                 let name = match &memberlist.metadata.name {
                     Some(name) => name,
                     None => {
-                        // TODO: Log an error
+                        tracing::error!("Memberlist event without memberlist name");
                         return;
                     }
                 };
@@ -223,15 +215,8 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                     .map(|member| member.member_id.clone())
                     .collect::<Vec<String>>();
                 {
-                    let curr_memberlist_handle = self.current_memberlist.write();
-                    match curr_memberlist_handle {
-                        Ok(mut curr_memberlist) => {
-                            *curr_memberlist = memberlist;
-                        }
-                        Err(_err) => {
-                            // TODO: Log an error
-                        }
-                    }
+                    let mut curr_memberlist_handle = self.current_memberlist.write();
+                    *curr_memberlist_handle = memberlist;
                 }
                 // Inform subscribers
                 self.notify_subscribers().await;
@@ -254,13 +239,12 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::system::System;
 
-    use super::*;
-
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn it_can_work() {
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_it_can_work() {
         // TODO: This only works if you have a kubernetes cluster running locally with a memberlist
         // We need to implement a test harness for this. For now, it will silently do nothing
         // if you don't have a kubernetes cluster running locally and only serve as a reminder

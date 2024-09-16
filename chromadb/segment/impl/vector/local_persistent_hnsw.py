@@ -2,8 +2,10 @@ import os
 import shutil
 from overrides import override
 import pickle
-from typing import Any, Dict, List, Optional, Sequence, Set, cast
+from typing import Dict, List, Optional, Sequence, Set, cast
 from chromadb.config import System
+from chromadb.db.base import ParameterValue, get_sql
+from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.segment.impl.vector.batch import Batch
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
@@ -29,6 +31,7 @@ from chromadb.types import (
 )
 import hnswlib
 import logging
+from pypika import Table
 
 from chromadb.utils.read_write_lock import ReadRWLock, WriteRWLock
 
@@ -41,9 +44,9 @@ class PersistentData:
 
     dimensionality: Optional[int]
     total_elements_added: int
-    total_elements_updated: int
-    total_invalid_operations: int
+
     max_seq_id: SeqId
+    "This is a legacy field. It is no longer mutated, but kept to allow automatic migration of the `max_seq_id` from the pickled file to the `max_seq_id` table in SQLite."
 
     id_to_label: Dict[str, int]
     label_to_id: Dict[int, str]
@@ -53,27 +56,15 @@ class PersistentData:
         self,
         dimensionality: Optional[int],
         total_elements_added: int,
-        total_elements_updated: int,
-        total_invalid_operations: int,
-        max_seq_id: int,
         id_to_label: Dict[str, int],
         label_to_id: Dict[int, str],
         id_to_seq_id: Dict[str, SeqId],
     ):
         self.dimensionality = dimensionality
         self.total_elements_added = total_elements_added
-        self.total_elements_updated = total_elements_updated
-        self.total_invalid_operations = total_invalid_operations
-        self.max_seq_id = max_seq_id
         self.id_to_label = id_to_label
         self.label_to_id = label_to_id
         self.id_to_seq_id = id_to_seq_id
-
-    def __setstate__(self, state: Any) -> None:
-        # Fields were added after the initial implementation
-        self.total_elements_updated = 0
-        self.total_invalid_operations = 0
-        self.__dict__.update(state)
 
     @staticmethod
     def load_from_file(filename: str) -> "PersistentData":
@@ -98,11 +89,16 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     _persist_directory: str
     _allow_reset: bool
 
+    _db: SqliteDB
     _opentelemtry_client: OpenTelemetryClient
+
+    _num_log_records_since_last_batch: int = 0
+    _num_log_records_since_last_persist: int = 0
 
     def __init__(self, system: System, segment: Segment):
         super().__init__(system, segment)
 
+        self._db = system.instance(SqliteDB)
         self._opentelemtry_client = system.require(OpenTelemetryClient)
 
         self._params = PersistentHnswParams(segment["metadata"] or {})
@@ -121,7 +117,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             )
             self._dimensionality = self._persist_data.dimensionality
             self._total_elements_added = self._persist_data.total_elements_added
-            self._max_seq_id = self._persist_data.max_seq_id
             self._id_to_label = self._persist_data.id_to_label
             self._label_to_id = self._persist_data.label_to_id
             self._id_to_seq_id = self._persist_data.id_to_seq_id
@@ -133,13 +128,46 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             self._persist_data = PersistentData(
                 self._dimensionality,
                 self._total_elements_added,
-                self._total_elements_updated,
-                self._total_invalid_operations,
-                self._max_seq_id,
                 self._id_to_label,
                 self._label_to_id,
                 self._id_to_seq_id,
             )
+
+        # Hydrate the max_seq_id
+        with self._db.tx() as cur:
+            t = Table("max_seq_id")
+            q = (
+                self._db.querybuilder()
+                .from_(t)
+                .select(t.seq_id)
+                .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+                .limit(1)
+            )
+            sql, params = get_sql(q)
+            cur.execute(sql, params)
+            result = cur.fetchone()
+
+            if result:
+                self._max_seq_id = self._db.decode_seq_id(result[0])
+            elif self._index_exists():
+                # Migrate the max_seq_id from the legacy field in the pickled file to the SQLite database
+                q = (
+                    self._db.querybuilder()
+                    .into(Table("max_seq_id"))
+                    .columns("segment_id", "seq_id")
+                    .insert(
+                        ParameterValue(self._db.uuid_to_db(self._id)),
+                        ParameterValue(
+                            self._db.encode_seq_id(self._persist_data.max_seq_id)
+                        ),
+                    )
+                )
+                sql, params = get_sql(q)
+                cur.execute(sql, params)
+
+                self._max_seq_id = self._persist_data.max_seq_id
+            else:
+                self._max_seq_id = self._consumer.min_seqid()
 
     @staticmethod
     @override
@@ -209,8 +237,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Persist the metadata
         self._persist_data.dimensionality = self._dimensionality
         self._persist_data.total_elements_added = self._total_elements_added
-        self._persist_data.total_elements_updated = self._total_elements_updated
-        self._persist_data.max_seq_id = self._max_seq_id
 
         # TODO: This should really be stored in sqlite, the index itself, or a better
         # storage format
@@ -221,29 +247,32 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         with open(self._get_metadata_file(), "wb") as metadata_file:
             pickle.dump(self._persist_data, metadata_file, pickle.HIGHEST_PROTOCOL)
 
+        with self._db.tx() as cur:
+            q = (
+                self._db.querybuilder()
+                .into(Table("max_seq_id"))
+                .columns("segment_id", "seq_id")
+                .insert(
+                    ParameterValue(self._db.uuid_to_db(self._id)),
+                    ParameterValue(self._db.encode_seq_id(self._max_seq_id)),
+                )
+            )
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            cur.execute(sql, params)
+
+        self._num_log_records_since_last_persist = 0
+
     @trace_method(
         "PersistentLocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL
     )
     @override
     def _apply_batch(self, batch: Batch) -> None:
         super()._apply_batch(batch)
-        num_elements_added_since_last_persist = (
-            self._total_elements_added - self._persist_data.total_elements_added
-        )
-        num_elements_updated_since_last_persist = (
-            self._total_elements_updated - self._persist_data.total_elements_updated
-        )
-        num_invalid_operations_since_last_persist = (
-            self._total_invalid_operations - self._persist_data.total_invalid_operations
-        )
-
-        if (
-            num_elements_added_since_last_persist
-            + num_elements_updated_since_last_persist
-            + num_invalid_operations_since_last_persist
-            >= self._sync_threshold
-        ):
+        if self._num_log_records_since_last_persist >= self._sync_threshold:
             self._persist()
+
+        self._num_log_records_since_last_batch = 0
 
     @trace_method(
         "PersistentLocalHnswSegment._write_records", OpenTelemetryGranularity.ALL
@@ -255,6 +284,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             raise RuntimeError("Cannot add embeddings to stopped component")
         with WriteRWLock(self._lock):
             for record in records:
+                self._num_log_records_since_last_batch += 1
+                self._num_log_records_since_last_persist += 1
+
                 if record["record"]["embedding"] is not None:
                     self._ensure_index(len(records), len(record["record"]["embedding"]))
                 if not self._index_initialized:
@@ -291,12 +323,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                             logger.warning(
                                 f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
-                            self._total_invalid_operations += 1
                 elif op == Operation.ADD:
                     if record["record"]["embedding"] is not None:
                         if exists_in_index and not id_is_pending_delete:
                             logger.warning(f"Add of existing embedding ID: {id}")
-                            self._total_invalid_operations += 1
                         else:
                             self._curr_batch.apply(record, not exists_in_index)
                             self._brute_force_index.upsert([record])
@@ -305,15 +335,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
 
-                num_invalid_operations_since_last_persist = (
-                    self._total_invalid_operations
-                    - self._persist_data.total_invalid_operations
-                )
-
-                if (
-                    len(self._curr_batch) + num_invalid_operations_since_last_persist
-                    >= self._batch_size
-                ):
+                if self._num_log_records_since_last_batch >= self._batch_size:
                     self._apply_batch(self._curr_batch)
                     self._curr_batch = Batch()
                     self._brute_force_index.clear()

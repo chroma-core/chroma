@@ -1,23 +1,28 @@
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::ChromaError,
     execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    types::Segment,
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Segment;
 use thiserror::Error;
 
 #[derive(Debug)]
 pub struct MergeKnnResultsOperator {}
 
 #[derive(Debug)]
+pub struct MergeKnnBruteForceResultInput {
+    pub user_ids: Vec<String>,
+    pub distances: Vec<f32>,
+    pub vectors: Vec<Vec<f32>>,
+}
+
+#[derive(Debug)]
 pub struct MergeKnnResultsOperatorInput {
     hnsw_result_offset_ids: Vec<usize>,
     hnsw_result_distances: Vec<f32>,
-    brute_force_result_user_ids: Vec<String>,
-    brute_force_result_distances: Vec<f32>,
-    brute_force_result_vectors: Option<Vec<Vec<f32>>>,
+    brute_force_result: Option<MergeKnnBruteForceResultInput>,
     include_vectors: bool,
     k: usize,
     record_segment_definition: Segment,
@@ -28,9 +33,7 @@ impl MergeKnnResultsOperatorInput {
     pub fn new(
         hnsw_result_offset_ids: Vec<usize>,
         hnsw_result_distances: Vec<f32>,
-        brute_force_result_user_ids: Vec<String>,
-        brute_force_result_distances: Vec<f32>,
-        brute_force_result_vectors: Option<Vec<Vec<f32>>>,
+        brute_force_result: Option<MergeKnnBruteForceResultInput>,
         include_vectors: bool,
         k: usize,
         record_segment_definition: Segment,
@@ -39,9 +42,7 @@ impl MergeKnnResultsOperatorInput {
         Self {
             hnsw_result_offset_ids,
             hnsw_result_distances,
-            brute_force_result_user_ids,
-            brute_force_result_distances,
-            brute_force_result_vectors,
+            brute_force_result,
             include_vectors,
             k,
             record_segment_definition,
@@ -61,8 +62,8 @@ pub struct MergeKnnResultsOperatorOutput {
 pub enum MergeKnnResultsOperatorError {}
 
 impl ChromaError for MergeKnnResultsOperatorError {
-    fn code(&self) -> crate::errors::ErrorCodes {
-        return crate::errors::ErrorCodes::UNKNOWN;
+    fn code(&self) -> ErrorCodes {
+        return ErrorCodes::UNKNOWN;
     }
 }
 
@@ -88,14 +89,12 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
             .await
             {
                 Ok(reader) => {
-                    println!("Record Segment Reader created successfully");
                     // Convert the HNSW result offset IDs to user IDs
                     let mut hnsw_result_user_ids = Vec::new();
                     let mut hnsw_result_vectors = None;
                     if input.include_vectors {
                         hnsw_result_vectors = Some(Vec::new());
                     }
-
                     for offset_id in &input.hnsw_result_offset_ids {
                         let user_id = reader.get_user_id_for_offset_id(*offset_id as u32).await;
                         match user_id {
@@ -110,16 +109,30 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                             }
                         }
                     }
-                    merge_results(
-                        &hnsw_result_user_ids,
-                        &input.hnsw_result_distances,
-                        &hnsw_result_vectors,
-                        &input.brute_force_result_user_ids,
-                        &input.brute_force_result_distances,
-                        &input.brute_force_result_vectors,
-                        input.include_vectors,
-                        input.k,
-                    )
+
+                    match &input.brute_force_result {
+                        Some(brute_force_result) => merge_results(
+                            &hnsw_result_user_ids,
+                            &input.hnsw_result_distances,
+                            &hnsw_result_vectors,
+                            &brute_force_result.user_ids,
+                            &brute_force_result.distances,
+                            &brute_force_result.vectors,
+                            input.include_vectors,
+                            input.k,
+                        ),
+                        None => {
+                            // There are no brute force results
+                            (
+                                hnsw_result_user_ids
+                                    .iter()
+                                    .map(|x| x.to_string())
+                                    .collect::<Vec<_>>(),
+                                input.hnsw_result_distances.clone(),
+                                hnsw_result_vectors,
+                            )
+                        }
+                    }
                 }
                 Err(e) => match *e {
                     RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
@@ -133,16 +146,31 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                         let hnsw_result_user_ids = Vec::new();
                         let hnsw_result_distances = Vec::new();
                         let hnsw_result_vectors = None;
-                        merge_results(
-                            &hnsw_result_user_ids,
-                            &hnsw_result_distances,
-                            &hnsw_result_vectors,
-                            &input.brute_force_result_user_ids,
-                            &input.brute_force_result_distances,
-                            &input.brute_force_result_vectors,
-                            input.include_vectors,
-                            input.k,
-                        )
+
+                        match &input.brute_force_result {
+                            Some(brute_force_result) => merge_results(
+                                &hnsw_result_user_ids,
+                                &hnsw_result_distances,
+                                &hnsw_result_vectors,
+                                &brute_force_result.user_ids,
+                                &brute_force_result.distances,
+                                &brute_force_result.vectors,
+                                input.include_vectors,
+                                input.k,
+                            ),
+                            None => {
+                                // There are no HNSW results and no brute force results
+                                (
+                                    Vec::new(),
+                                    Vec::new(),
+                                    if input.include_vectors {
+                                        Some(Vec::new())
+                                    } else {
+                                        None
+                                    },
+                                )
+                            }
+                        }
                     }
                 },
             };
@@ -161,7 +189,7 @@ fn merge_results(
     hnsw_result_vectors: &Option<Vec<Vec<f32>>>,
     brute_force_result_user_ids: &Vec<String>,
     brute_force_result_distances: &Vec<f32>,
-    brute_force_result_vectors: &Option<Vec<Vec<f32>>>,
+    brute_force_result_vectors: &Vec<Vec<f32>>,
     include_vectors: bool,
     k: usize,
 ) -> (Vec<String>, Vec<f32>, Option<Vec<Vec<f32>>>) {
@@ -206,12 +234,7 @@ fn merge_results(
                     result_vectors
                         .as_mut()
                         .expect("Include vectors is true, result_vectors should be Some")
-                        .push(
-                            brute_force_result_vectors.as_ref().expect(
-                                "Include vectors is true, brute_force_result_vectors should be Some",
-                            )[brute_force_index]
-                                .to_vec(),
-                        );
+                        .push(brute_force_result_vectors[brute_force_index].to_vec());
                 }
                 brute_force_index += 1;
             }
@@ -238,12 +261,7 @@ fn merge_results(
                 result_vectors
                     .as_mut()
                     .expect("Include vectors is true, result_vectors should be Some")
-                    .push(
-                        brute_force_result_vectors.as_ref().expect(
-                            "Include vectors is true, brute_force_result_vectors should be Some",
-                        )[brute_force_index]
-                            .to_vec(),
-                    );
+                    .push(brute_force_result_vectors[brute_force_index].to_vec());
             }
             brute_force_index += 1;
         }

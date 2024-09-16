@@ -542,7 +542,7 @@ def integration() -> Generator[System, None, None]:
     system.stop()
 
 
-def sqlite() -> Generator[System, None, None]:
+def sqlite_fixture() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using in-memory Sqlite"""
     settings = Settings(
         chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -559,7 +559,12 @@ def sqlite() -> Generator[System, None, None]:
     system.stop()
 
 
-def sqlite_persistent() -> Generator[System, None, None]:
+@pytest.fixture
+def sqlite() -> Generator[System, None, None]:
+    yield from sqlite_fixture()
+
+
+def sqlite_persistent_fixture() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -590,14 +595,34 @@ def sqlite_persistent() -> Generator[System, None, None]:
             raise e
 
 
+@pytest.fixture
+def sqlite_persistent() -> Generator[System, None, None]:
+    yield from sqlite_persistent_fixture()
+
+
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi, async_fastapi, fastapi_persistent, sqlite, sqlite_persistent]
+    fixtures = [
+        fastapi,
+        async_fastapi,
+        fastapi_persistent,
+        sqlite_fixture,
+        sqlite_persistent_fixture,
+    ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
         fixtures = [integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
+    return fixtures
+
+
+def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+    fixtures = [
+        fixture
+        for fixture in system_fixtures()
+        if fixture != sqlite_fixture and fixture != sqlite_persistent_fixture
+    ]
     return fixtures
 
 
@@ -642,6 +667,13 @@ def system_wrong_auth(
 
 @pytest.fixture(scope="module", params=system_fixtures_authn_rbac_authz())
 def system_authn_rbac_authz(
+    request: pytest.FixtureRequest,
+) -> Generator[ServerAPI, None, None]:
+    yield from request.param()
+
+
+@pytest.fixture(scope="module", params=system_http_server_fixtures())
+def system_http_server(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
     yield from request.param()
@@ -759,6 +791,23 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
 
 
 @pytest.fixture(scope="function")
+def http_client(system_http_server: System) -> Generator[ClientAPI, None, None]:
+    system_http_server.reset_state()
+
+    if (
+        system_http_server.settings.chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        client = cast(Any, AsyncClientCreatorSync.from_system_async(system_http_server))
+        yield client
+        client.clear_system_cache()
+    else:
+        client = ClientCreator.from_system(system_http_server)
+        yield client
+        client.clear_system_cache()
+
+
+@pytest.fixture(scope="function")
 def client_ssl(system_ssl: System) -> Generator[ClientAPI, None, None]:
     system_ssl.reset_state()
     client = ClientCreator.from_system(system_ssl)
@@ -850,3 +899,8 @@ def produce_fns(
 
 def pytest_configure(config):  # type: ignore
     embeddings_queue._called_from_test = True
+
+
+def is_client_in_process(client: ClientAPI) -> bool:
+    """Returns True if the client is in-process (a SQLite client), False if it's out-of-process (a HTTP client)."""
+    return client.get_settings().chroma_server_http_port is None

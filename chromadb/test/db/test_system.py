@@ -6,6 +6,7 @@ from typing import Generator, List, Callable, Dict, Union
 
 from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
+from chromadb.errors import NotFoundError
 from chromadb.test.conftest import find_free_port
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
@@ -16,7 +17,7 @@ from chromadb.config import (
     Settings,
 )
 from chromadb.db.system import SysDB
-from chromadb.db.base import NotFoundError, UniqueConstraintError
+from chromadb.db.base import UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 from chromadb.api.configuration import CollectionConfigurationInternal
@@ -613,22 +614,15 @@ sample_segments = [
         id=uuid.UUID("00000000-d7d7-413b-92e1-731098a6e492"),
         type="test_type_a",
         scope=SegmentScope.VECTOR,
-        collection=sample_collections[0]["id"],
+        collection=sample_collections[0].id,
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
     ),
     Segment(
         id=uuid.UUID("11111111-d7d7-413b-92e1-731098a6e492"),
         type="test_type_b",
         scope=SegmentScope.VECTOR,
-        collection=sample_collections[1]["id"],
+        collection=sample_collections[1].id,
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
-    ),
-    Segment(
-        id=uuid.UUID("22222222-d7d7-413b-92e1-731098a6e492"),
-        type="test_type_b",
-        scope=SegmentScope.METADATA,
-        collection=None,
-        metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
     ),
 ]
 
@@ -648,7 +642,9 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
     for segment in sample_segments:
         sysdb.create_segment(segment)
 
-    results = sysdb.get_segments()
+    results: List[Segment] = []
+    for collection in sample_collections:
+        results.extend(sysdb.get_segments(collection=collection.id))
     results = sorted(results, key=lambda c: c["id"])
 
     assert results == sample_segments
@@ -659,44 +655,42 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
 
     # Find by id
     for segment in sample_segments:
-        result = sysdb.get_segments(id=segment["id"])
+        result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
         assert result == [segment]
 
     # Find by type
-    result = sysdb.get_segments(type="test_type_a")
+    result = sysdb.get_segments(type="test_type_a", collection=sample_collections[0].id)
     assert result == sample_segments[:1]
 
-    result = sysdb.get_segments(type="test_type_b")
+    result = sysdb.get_segments(type="test_type_b", collection=sample_collections[1].id)
     assert sorted(result, key=lambda c: c["id"]) == sample_segments[1:]
 
     # Find by collection ID
-    result = sysdb.get_segments(collection=sample_collections[0]["id"])
+    result = sysdb.get_segments(collection=sample_collections[0].id)
     assert result == sample_segments[:1]
 
     # Find by type and collection ID (positive case)
-    result = sysdb.get_segments(
-        type="test_type_a", collection=sample_collections[0]["id"]
-    )
+    result = sysdb.get_segments(type="test_type_a", collection=sample_collections[0].id)
     assert result == sample_segments[:1]
 
     # Find by type and collection ID (negative case)
-    result = sysdb.get_segments(
-        type="test_type_b", collection=sample_collections[0]["id"]
-    )
+    result = sysdb.get_segments(type="test_type_b", collection=sample_collections[0].id)
     assert result == []
 
     # Delete
     s1 = sample_segments[0]
-    sysdb.delete_segment(s1["id"])
+    sysdb.delete_segment(s1["collection"], s1["id"])
 
-    results = sysdb.get_segments()
+    results = []
+    for collection in sample_collections:
+        results.extend(sysdb.get_segments(collection=collection.id))
     assert s1 not in results
     assert len(results) == len(sample_segments) - 1
     assert sorted(results, key=lambda c: c["id"]) == sample_segments[1:]
 
     # Duplicate delete throws an exception
     with pytest.raises(NotFoundError):
-        sysdb.delete_segment(s1["id"])
+        sysdb.delete_segment(s1["collection"], s1["id"])
 
 
 def test_update_segment(sysdb: SysDB) -> None:
@@ -709,7 +703,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         id=uuid.uuid4(),
         type="test_type_a",
         scope=SegmentScope.VECTOR,
-        collection=sample_collections[0]["id"],
+        collection=sample_collections[0].id,
         metadata=metadata,
     )
 
@@ -727,53 +721,45 @@ def test_update_segment(sysdb: SysDB) -> None:
 
     # TODO: revisit update segment - push collection id
 
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
-    result = sysdb.get_segments(id=segment["id"])
-    result[0]["collection"] = segment["collection"]
-    assert result == [segment]
-
-    # Update collection to new value
-    segment["collection"] = sample_collections[1]["id"]
-    sysdb.update_segment(segment["id"], collection=segment["collection"])
-    result = sysdb.get_segments(id=segment["id"])
-    result[0]["collection"] = segment["collection"]
-    assert result == [segment]
-
-    # Update collection to None
-    segment["collection"] = None
-    sysdb.update_segment(segment["id"], collection=segment["collection"])
-    result = sysdb.get_segments(id=segment["id"])
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Add a new metadata key
     metadata["test_str2"] = "str2"
-    sysdb.update_segment(segment["id"], metadata={"test_str2": "str2"})
-    result = sysdb.get_segments(id=segment["id"])
+    sysdb.update_segment(
+        segment["collection"], segment["id"], metadata={"test_str2": "str2"}
+    )
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Update a metadata key
     metadata["test_str"] = "str3"
-    sysdb.update_segment(segment["id"], metadata={"test_str": "str3"})
-    result = sysdb.get_segments(id=segment["id"])
+    sysdb.update_segment(
+        segment["collection"], segment["id"], metadata={"test_str": "str3"}
+    )
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Delete a metadata key
     del metadata["test_str"]
-    sysdb.update_segment(segment["id"], metadata={"test_str": None})
-    result = sysdb.get_segments(id=segment["id"])
+    sysdb.update_segment(
+        segment["collection"], segment["id"], metadata={"test_str": None}
+    )
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 
     # Delete all metadata keys
     segment["metadata"] = None
-    sysdb.update_segment(segment["id"], metadata=None)
-    result = sysdb.get_segments(id=segment["id"])
+    sysdb.update_segment(segment["collection"], segment["id"], metadata=None)
+    result = sysdb.get_segments(id=segment["id"], collection=segment["collection"])
     result[0]["collection"] = segment["collection"]
     assert result == [segment]
 

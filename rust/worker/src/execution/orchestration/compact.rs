@@ -1,8 +1,5 @@
-use super::super::operator::{wrap, TaskMessage};
-use crate::blockstore::provider::BlockfileProvider;
+use super::super::operator::wrap;
 use crate::compactor::CompactionJob;
-use crate::errors::ChromaError;
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::flush_s3::FlushS3Input;
@@ -24,7 +21,6 @@ use crate::execution::operators::write_segments::WriteSegmentsOperator;
 use crate::execution::operators::write_segments::WriteSegmentsOperatorError;
 use crate::execution::operators::write_segments::WriteSegmentsOutput;
 use crate::execution::orchestration::common::terminate_with_error;
-use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
@@ -39,17 +35,20 @@ use crate::system::ComponentHandle;
 use crate::system::Handler;
 use crate::system::ReceiverForMessage;
 use crate::system::System;
-use crate::types::LogRecord;
-use crate::types::Segment;
-use crate::types::SegmentFlushInfo;
-use crate::types::SegmentType;
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::ChromaError;
+use chroma_error::ErrorCodes;
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_types::Chunk;
+use chroma_types::{LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
+use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -104,6 +103,8 @@ pub struct CompactOrchestrator {
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
     // Current max offset id.
     curr_max_offset_id: Arc<AtomicU32>,
+    max_compaction_size: usize,
+    max_partition_size: usize,
 }
 
 #[derive(Error, Debug)]
@@ -131,8 +132,8 @@ enum GetSegmentWritersError {
 }
 
 impl ChromaError for GetSegmentWritersError {
-    fn code(&self) -> crate::errors::ErrorCodes {
-        crate::errors::ErrorCodes::Internal
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
     }
 }
 
@@ -143,8 +144,8 @@ enum CompactionError {
 }
 
 impl ChromaError for CompactionError {
-    fn code(&self) -> crate::errors::ErrorCodes {
-        crate::errors::ErrorCodes::Internal
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
     }
 }
 
@@ -171,6 +172,8 @@ impl CompactOrchestrator {
         >,
         record_segment: Option<Segment>,
         curr_max_offset_id: Arc<AtomicU32>,
+        max_compaction_size: usize,
+        max_partition_size: usize,
     ) -> Self {
         CompactOrchestrator {
             id: Uuid::new_v4(),
@@ -188,12 +191,11 @@ impl CompactOrchestrator {
             result_channel,
             record_segment,
             curr_max_offset_id,
+            max_compaction_size,
+            max_partition_size,
         }
     }
 
-    // TODO: It is possible that the offset_id from the compaction job is wrong since the log service
-    // can have an outdated view of the offset. We should filter out entries from the log based on the start offset
-    // of the segment, and not fully respect the offset_id from the compaction job
     async fn pull_logs(
         &mut self,
         self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
@@ -221,11 +223,11 @@ impl CompactOrchestrator {
             // offset is the one after the last compaction offset
             self.compaction_job.offset,
             100,
-            None,
+            Some(self.max_compaction_size as i32),
             Some(end_timestamp),
         );
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching pull logs for compaction {:?}", e);
@@ -243,13 +245,12 @@ impl CompactOrchestrator {
         self_address: Box<dyn ReceiverForMessage<TaskResult<PartitionOutput, PartitionError>>>,
     ) {
         self.state = ExecutionState::Partition;
-        // TODO: make this configurable
-        let max_partition_size = 100;
         let operator = PartitionOperator::new();
+        tracing::info!("Sending N Records: {:?}", records.len());
         println!("Sending N Records: {:?}", records.len());
-        let input = PartitionInput::new(records, max_partition_size);
+        let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching partition for compaction {:?}", e);
@@ -358,7 +359,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, None).await {
+        match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching register for compaction {:?}", e);
@@ -388,7 +389,7 @@ impl CompactOrchestrator {
 
         let segments = self
             .sysdb
-            .get_segments(None, None, None, Some(self.collection_id))
+            .get_segments(None, None, None, self.collection_id)
             .await;
 
         tracing::info!("Retrived segments: {:?}", segments);
@@ -618,21 +619,6 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             }
         };
         if self.num_write_tasks == 0 {
-            // TODO: Ideally we shouldn't even have to make an explicit call to
-            // write_to_blockfiles since it is not the workflow for other segments
-            // and is exclusive to metadata segment. We should figure out a way
-            // to make this call a part of commit itself. It's not obvious directly
-            // how to do that since commit is per partition but write_to_blockfiles
-            // only need to be called once across all partitions combined.
-            let mut writer = output.metadata_segment_writer.clone();
-            match writer.write_to_blockfiles().await {
-                Ok(()) => (),
-                Err(e) => {
-                    tracing::error!("Error writing metadata segment out to blockfiles: {:?}", e);
-                    terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
-                    return;
-                }
-            }
             self.flush_s3(
                 output.record_segment_writer,
                 output.hnsw_segment_writer,

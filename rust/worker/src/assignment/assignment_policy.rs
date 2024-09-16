@@ -1,10 +1,10 @@
-use crate::{config::Configurable, errors::ChromaError};
-
 use super::{
     config::{AssignmentPolicyConfig, HasherType},
     rendezvous_hash::{assign, AssignmentError, Murmur3Hasher},
 };
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
 
 /*
 ===========================================

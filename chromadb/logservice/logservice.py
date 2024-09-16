@@ -1,5 +1,6 @@
 import sys
 
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 import grpc
 import time
 from chromadb.ingest import (
@@ -19,6 +20,7 @@ from chromadb.config import System
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    add_attributes_to_current_span,
     trace_method,
 )
 from overrides import override
@@ -35,6 +37,7 @@ class LogService(Producer, Consumer):
     """
 
     _log_service_stub: LogServiceStub
+    _request_timeout_seconds: int
     _channel: grpc.Channel
     _log_service_url: str
     _log_service_port: int
@@ -42,6 +45,9 @@ class LogService(Producer, Consumer):
     def __init__(self, system: System):
         self._log_service_url = system.settings.require("chroma_logservice_host")
         self._log_service_port = system.settings.require("chroma_logservice_port")
+        self._request_timeout_seconds = system.settings.require(
+            "chroma_logservice_request_timeout_seconds"
+        )
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         super().__init__(system)
 
@@ -49,9 +55,9 @@ class LogService(Producer, Consumer):
     @override
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
-            f"{self._log_service_url}:{self._log_service_port}"
+            f"{self._log_service_url}:{self._log_service_port}",
         )
-        interceptors = [OtelInterceptor()]
+        interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
         self._log_service_stub = LogServiceStub(self._channel)  # type: ignore
         super().start()
@@ -72,6 +78,11 @@ class LogService(Producer, Consumer):
     def delete_log(self, collection_id: UUID) -> None:
         raise NotImplementedError("Not implemented")
 
+    @trace_method("LogService.purge_log", OpenTelemetryGranularity.ALL)
+    @override
+    def purge_log(self, collection_id: UUID) -> None:
+        raise NotImplementedError("Not implemented")
+
     @trace_method("LogService.submit_embedding", OpenTelemetryGranularity.ALL)
     @override
     def submit_embedding(
@@ -80,7 +91,7 @@ class LogService(Producer, Consumer):
         if not self._running:
             raise RuntimeError("Component not running")
 
-        return self.submit_embeddings(collection_id, [embedding])[0]  # type: ignore
+        return self.submit_embeddings(collection_id, [embedding])[0]
 
     @trace_method("LogService.submit_embeddings", OpenTelemetryGranularity.ALL)
     @override
@@ -89,6 +100,12 @@ class LogService(Producer, Consumer):
     ) -> Sequence[SeqId]:
         logger.info(
             f"Submitting {len(embeddings)} embeddings to log for collection {collection_id}"
+        )
+
+        add_attributes_to_current_span(
+            {
+                "records_count": len(embeddings),
+            }
         )
 
         if not self._running:
@@ -140,11 +157,13 @@ class LogService(Producer, Consumer):
     @property
     @override
     def max_batch_size(self) -> int:
-        return 25000
+        return 100
 
     def push_logs(self, collection_id: UUID, records: Sequence[OperationRecord]) -> int:
         request = PushLogsRequest(collection_id=str(collection_id), records=records)
-        response = self._log_service_stub.PushLogs(request)
+        response = self._log_service_stub.PushLogs(
+            request, timeout=self._request_timeout_seconds
+        )
         return response.record_count  # type: ignore
 
     def pull_logs(
@@ -156,5 +175,7 @@ class LogService(Producer, Consumer):
             batch_size=batch_size,
             end_timestamp=time.time_ns(),
         )
-        response = self._log_service_stub.PullLogs(request)
+        response = self._log_service_stub.PullLogs(
+            request, timeout=self._request_timeout_seconds
+        )
         return response.records  # type: ignore

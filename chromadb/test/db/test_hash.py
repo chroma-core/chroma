@@ -96,6 +96,7 @@ def test_hashlib_alg(
 
     # replace the real migration application call with a mock we can check
     db.apply_migration = MagicMock()  # type: ignore [method-assign]
+    db.config = MagicMock()
 
     # we don't want `verify_migration_sequence` to actually run since a) we're not testing that functionality and
     # b) db may be cached between tests, and we're changing the algorithm, so it may fail.
