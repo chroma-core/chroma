@@ -4,7 +4,7 @@ mod config;
 mod execution;
 mod log;
 mod memberlist;
-mod segment;
+pub mod segment;
 mod server;
 mod sysdb;
 mod system;
