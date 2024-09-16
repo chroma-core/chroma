@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use chroma_benchmark_datasets::{datasets::scidocs::SciDocsDataset, types::BenchmarkDataset};
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
@@ -7,13 +7,15 @@ use chroma_cache::{
     config::{CacheConfig, UnboundedCacheConfig},
 };
 use chroma_storage::{local::LocalStorage, Storage};
-use chroma_types::{Chunk, LogRecord};
+use chroma_types::{
+    Chunk, DirectDocumentComparison, LogRecord, WhereDocument, WhereDocumentOperator,
+};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use futures::StreamExt;
 use uuid::Uuid;
 use worker::segment::{
     metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-    types::{LogMaterializer, SegmentWriter},
+    types::{LogMaterializer, SegmentFlusher, SegmentWriter},
 };
 
 async fn get_log_chunk() -> Chunk<LogRecord> {
@@ -35,13 +37,13 @@ async fn get_log_chunk() -> Chunk<LogRecord> {
         .collect::<Vec<_>>()
         .await;
 
-    Chunk::new(log_records[..1000].to_vec().into())
+    Chunk::new(log_records.into())
 }
 
-async fn get_reader(chunk: Chunk<LogRecord>) -> MetadataSegmentReader<'static> {
+async fn get_reader(storage: &Storage, chunk: Chunk<LogRecord>) -> MetadataSegmentReader<'static> {
     let materializer = LogMaterializer::new(None, chunk, None);
 
-    let metadata_segment = chroma_types::Segment {
+    let mut metadata_segment = chroma_types::Segment {
         id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
         r#type: chroma_types::SegmentType::BlockfileMetadata,
         scope: chroma_types::SegmentScope::METADATA,
@@ -52,15 +54,13 @@ async fn get_reader(chunk: Chunk<LogRecord>) -> MetadataSegmentReader<'static> {
 
     const BLOCK_SIZE: usize = 8 * 1024 * 1024; // 8MB
 
-    let tmp_dir = tempfile::tempdir().unwrap();
-    let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
     let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
     let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
     let arrow_blockfile_provider =
-        ArrowBlockfileProvider::new(storage, BLOCK_SIZE, block_cache, sparse_index_cache);
+        ArrowBlockfileProvider::new(storage.clone(), BLOCK_SIZE, block_cache, sparse_index_cache);
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
 
-    let metadata_writer =
+    let mut metadata_writer =
         MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
             .await
             .expect("Error creating segment writer");
@@ -69,6 +69,9 @@ async fn get_reader(chunk: Chunk<LogRecord>) -> MetadataSegmentReader<'static> {
         .apply_materialized_log_chunk(materializer.materialize().await.unwrap())
         .await
         .unwrap();
+    metadata_writer.write_to_blockfiles().await.unwrap();
+    let flusher = metadata_writer.commit().unwrap();
+    metadata_segment.file_path = flusher.flush().await.unwrap();
 
     MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
         .await
@@ -82,13 +85,40 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     let log_chunk = runner.block_on(get_log_chunk());
 
-    c.bench_function("fib 20", |b| {
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+
+    c.bench_function("compaction", |b| {
         b.to_async(&runner).iter_batched(
-            || log_chunk.clone(),
-            |chunk| async move {
-                let reader = get_reader(black_box(chunk)).await;
+            || (log_chunk.clone(), storage.clone()),
+            |(chunk, storage)| async move {
+                get_reader(&storage, black_box(chunk)).await;
             },
             // todo: correct size?
+            criterion::BatchSize::SmallInput,
+        )
+    });
+
+    let reader = Arc::new(runner.block_on(get_reader(&storage, log_chunk.clone())));
+
+    c.bench_function("querying", |b| {
+        b.to_async(&runner).iter_batched(
+            || reader.clone(),
+            |reader| async move {
+                let where_document =
+                    WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+                        document: "the hybrid".to_string(),
+                        operator: WhereDocumentOperator::Contains,
+                    });
+
+                let result = reader
+                    .query(None, Some(&where_document), None, 0, 0)
+                    .await
+                    .unwrap();
+
+                assert!(result.is_some(), "Query result is None");
+                assert!(result.unwrap().len() > 0, "Query result is empty");
+            },
             criterion::BatchSize::SmallInput,
         )
     });
