@@ -322,9 +322,6 @@ def ann_accuracy(
 
 
 def _query_results_are_correct_shape(query_results: types.QueryResult, n_results: int) -> bool:
-    if query_results["distances"] is None or query_results["embeddings"] is None or query_results["documents"] or query_results["metadatas"] is None:
-        return False
-
     for result_type in ["distances", "embeddings", "documents", "metadatas"]:
         if query_results[result_type] is None:
             return False
