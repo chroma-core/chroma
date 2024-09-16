@@ -227,9 +227,6 @@ def normalize_embeddings(
             OneOrMany[PyEmbedding],
         ]
     ) -> Embeddings:
-        # if isinstance(embeddings, np.ndarray):
-        #     return cast(Embeddings, [embedding for embedding in embeddings])
-        # else:
         return cast(Embeddings, [np.array(embedding) for embedding in embeddings])
 
 def validate_embedding_function(
