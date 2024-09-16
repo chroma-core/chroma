@@ -184,7 +184,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
         let take_count = input
             .limit
             .map(|l| l as usize)
-            .unwrap_or(merged_offset_ids.len());
+            .unwrap_or(merged_offset_ids.len() - skip_count);
 
         // Hydrate data
         let truncated_offset_ids = merged_offset_ids[skip_count..(skip_count + take_count)].iter();
