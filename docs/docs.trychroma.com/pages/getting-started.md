@@ -2,10 +2,6 @@
 title: "🔑 Getting Started"
 ---
 
-
-
-
-
 {% tabs group="code-lang" hideContent=true %}
 
 {% tab label="Python" %}
@@ -32,19 +28,25 @@ pip install chromadb # [!code $]
 
 {% codetabs customHeader="sh" %}
 {% codetab label="yarn" %}
+
 ```bash {% codetab=true %}
 yarn install chromadb chromadb-default-embed # [!code $]
 ```
+
 {% /codetab %}
 {% codetab label="npm" %}
+
 ```bash {% codetab=true %}
 npm install --save chromadb chromadb-default-embed # [!code $]
 ```
+
 {% /codetab %}
 {% codetab label="pnpm" %}
+
 ```bash {% codetab=true %}
-pnpm install chromadb chromadb-default-embed # [!code $]
+pnpm add chromadb chromadb-default-embed # [!code $]
 ```
+
 {% /codetab %}
 {% /codetabs %}
 
@@ -74,15 +76,19 @@ Run the Chroma backend:
 
 {% codetabs customHeader="sh" %}
 {% codetab label="CLI" %}
+
 ```bash {% codetab=true %}
-chroma run --path /getting-started # [!code $]
+chroma run --path ./getting-started # [!code $]
 ```
+
 {% /codetab %}
 {% codetab label="Docker" %}
+
 ```bash {% codetab=true %}
 docker pull chromadb/chroma # [!code $]
 docker run -p 8000:8000 chromadb/chroma # [!code $]
 ```
+
 {% /codetab %}
 {% /codetabs %}
 
@@ -90,16 +96,20 @@ Then create a client which connects to it:
 
 {% codetabs customHeader="js" %}
 {% codetab label="ESM" %}
+
 ```js {% codetab=true %}
-import { ChromaClient } from 'chromadb'
+import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 ```
+
 {% /codetab %}
 {% codetab label="CJS" %}
+
 ```js {% codetab=true %}
 const { ChromaClient } = require("chromadb");
 const client = new ChromaClient();
 ```
+
 {% /codetab %}
 {% /codetabs %}
 
@@ -121,10 +131,9 @@ collection = chroma_client.create_collection(name="my_collection")
 {% /tab %}
 {% tab label="Javascript" %}
 
-
 ```js
 const collection = await client.createCollection({
-    name: "my_collection",
+  name: "my_collection",
 });
 ```
 
@@ -154,11 +163,11 @@ collection.add(
 
 ```js
 await collection.add({
-    documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges"
-    ],
-    ids: ["id1", "id2"],
+  documents: [
+    "This is a document about pineapple",
+    "This is a document about oranges",
+  ],
+  ids: ["id1", "id2"],
 });
 ```
 
@@ -186,11 +195,11 @@ print(results)
 
 ```js
 const results = await collection.query({
-    queryTexts: ["This is a query document about hawaii"], // Chroma will embed this for you
-    nResults: 2, // how many results to return
+  queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
+  nResults: 2, // how many results to return
 });
 
-console.log(results)
+console.log(results);
 ```
 
 {% /tab %}
@@ -201,7 +210,10 @@ console.log(results)
 
 From the above query - you can see that our query about `hawaii` is the semantically most similar to the document about `pineapple`. This, intuitively, makes sense!
 
-```js
+{% tabs group="code-lang" hideTabs=true %}
+{% tab label="Python" %}
+
+```python
 {
   'documents': [[
       'This is a document about pineapple',
@@ -215,6 +227,28 @@ From the above query - you can see that our query about `hawaii` is the semantic
   'embeddings': None,
 }
 ```
+
+{% /tab %}
+{% tab label="Javascript" %}
+
+```js
+{
+  'documents': [[
+      'This is a document about pineapple',
+      'This is a document about oranges'
+  ]],
+  'ids': [['id1', 'id2']],
+  'distances': [[1.0404009819030762, 1.243080496788025]],
+  'uris': null,
+  'data': null,
+  'metadatas': [[null, null]],
+  'embeddings': null,
+}
+```
+
+{% /tab %}
+
+{% /tabs %}
 
 ### 7. Try it out yourself
 
@@ -251,29 +285,29 @@ print(results)
 {% tab label="Javascript" %}
 
 ```js
-import { ChromaClient } from 'chromadb'
+import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 
 // switch `createCollection` to `getOrCreateCollection` to avoid creating a new collection every time
 const collection = await client.getOrCreateCollection({
-    name: "my_collection",
+  name: "my_collection",
 });
 
-// switch `add` to `upsert` to avoid adding the same documents every time
+// switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
 await collection.upsert({
-    documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges"
-    ],
-    ids: ["id1", "id2"],
+  documents: [
+    "This is a document about pineapple",
+    "This is a document about oranges",
+  ],
+  ids: ["id1", "id2"],
 });
 
 const results = await collection.query({
-    queryTexts: ["This is a query document about florida"], // Chroma will embed this for you
-    nResults: 2, // how many results to return
+  queryTexts: "This is a query document about florida", // Chroma will embed this for you
+  nResults: 2, // how many results to return
 });
 
-console.log(results)
+console.log(results);
 ```
 
 {% /tab %}
@@ -283,6 +317,7 @@ console.log(results)
 ## 📚 Next steps
 
 <!-- - Check out [💡 Examples](/examples) of what you can build with Chroma -->
+
 - Read the [🧪 Usage Guide](/guides) to learn more about the API
 - Learn how to [☁️ Deploy Chroma](/deployment) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help

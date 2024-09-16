@@ -1,5 +1,22 @@
-use arrow::array::Int32Array;
+use super::record_segment::ApplyMaterializedLogError;
+use super::types::{MaterializedLogRecord, SegmentWriter};
+use super::SegmentFlusher;
 use async_trait::async_trait;
+use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::fulltext::tokenizer::TantivyChromaTokenizer;
+use chroma_index::fulltext::types::{
+    FullTextIndexError, FullTextIndexFlusher, FullTextIndexReader, FullTextIndexWriter,
+};
+use chroma_index::metadata::types::{
+    MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
+};
+use chroma_index::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
+use chroma_types::{
+    BooleanOperator, Chunk, MaterializedLogOperation, MetadataValue, Segment, Where,
+    WhereClauseComparator, WhereDocument, WhereDocumentOperator,
+};
+use chroma_types::{SegmentType, WhereComparison};
 use core::panic;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -10,28 +27,6 @@ use std::u32;
 use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
 use uuid::Uuid;
-
-use super::record_segment::ApplyMaterializedLogError;
-use super::types::{MaterializedLogRecord, SegmentWriter};
-use super::SegmentFlusher;
-use crate::blockstore::key::KeyWrapper;
-use crate::blockstore::provider::{BlockfileProvider, CreateError, OpenError};
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::index::fulltext::tokenizer::TantivyChromaTokenizer;
-use crate::index::fulltext::types::{
-    process_where_document_clause_with_callback, FullTextIndexError, FullTextIndexFlusher,
-    FullTextIndexReader, FullTextIndexWriter,
-};
-use crate::index::metadata::types::{
-    process_where_clause_with_callback, MetadataIndexError, MetadataIndexFlusher,
-    MetadataIndexReader, MetadataIndexWriter,
-};
-use crate::types::{
-    BooleanOperator, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
-    WhereClauseComparator, WhereDocument, WhereDocumentOperator,
-};
-use crate::types::{SegmentType, WhereComparison};
-use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 
 const FULL_TEXT_PLS: &str = "full_text_pls";
 const FULL_TEXT_FREQS: &str = "full_text_freqs";
@@ -77,8 +72,6 @@ pub enum MetadataSegmentError {
     UuidParseError(String),
     #[error("No writer found")]
     NoWriter,
-    #[error("Could not write to fulltext index blockfiles {0}")]
-    FullTextIndexWriteError(Box<dyn ChromaError>),
     #[error("Path vector exists but is empty?")]
     EmptyPathVector,
     #[error("Failed to write to blockfile")]
@@ -87,14 +80,25 @@ pub enum MetadataSegmentError {
     LimitOffsetNotSupported,
     #[error("Could not query metadata index {0}")]
     MetadataIndexQueryError(#[from] MetadataIndexError),
-    #[error("Attempted to delete a document that does not exist")]
-    DocumentDoesNotExist,
 }
 
 impl ChromaError for MetadataSegmentError {
     fn code(&self) -> ErrorCodes {
-        // TODO
-        ErrorCodes::Internal
+        match self {
+            MetadataSegmentError::InvalidSegmentType => ErrorCodes::Internal,
+            MetadataSegmentError::FullTextIndexWriterError(e) => e.code(),
+            MetadataSegmentError::BlockfileError(e) => e.code(),
+            MetadataSegmentError::BlockfileOpenError(e) => e.code(),
+            MetadataSegmentError::FullTextIndexFilesIntegrityError => ErrorCodes::Internal,
+            MetadataSegmentError::IncorrectNumberOfFiles => ErrorCodes::Internal,
+            MetadataSegmentError::MissingFile(_) => ErrorCodes::Internal,
+            MetadataSegmentError::UuidParseError(_) => ErrorCodes::Internal,
+            MetadataSegmentError::NoWriter => ErrorCodes::Internal,
+            MetadataSegmentError::EmptyPathVector => ErrorCodes::Internal,
+            MetadataSegmentError::BlockfileWriteError => ErrorCodes::Internal,
+            MetadataSegmentError::LimitOffsetNotSupported => ErrorCodes::Internal,
+            MetadataSegmentError::MetadataIndexQueryError(_) => ErrorCodes::Internal,
+        }
     }
 }
 
@@ -129,21 +133,20 @@ impl<'me> MetadataSegmentWriter<'me> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_writer =
-                        match blockfile_provider.fork::<u32, &Int32Array>(&pls_uuid).await {
-                            Ok(writer) => writer,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                        };
-                    let pls_reader =
-                        match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(reader) => reader,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                        };
+                    let pls_writer = match blockfile_provider.fork::<u32, Vec<u32>>(&pls_uuid).await
+                    {
+                        Ok(writer) => writer,
+                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                    };
+                    let pls_reader = match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
+                        Ok(reader) => reader,
+                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                    };
                     (pls_writer, Some(pls_reader))
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider.create::<u32, &Int32Array>() {
+            None => match blockfile_provider.create::<u32, Vec<u32>>() {
                 Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
@@ -180,9 +183,9 @@ impl<'me> MetadataSegmentWriter<'me> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(
                     NgramTokenizer::new(3, 3, false).unwrap(),
-                )));
+                ));
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,
@@ -193,9 +196,9 @@ impl<'me> MetadataSegmentWriter<'me> {
             _ => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
 
-        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(3, 3, false).unwrap(),
-        )));
+        ));
         let full_text_index_writer = FullTextIndexWriter::new(
             full_text_index_reader,
             pls_writer,
@@ -216,7 +219,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let string_metadata_writer = match blockfile_provider
-                            .fork::<&str, &RoaringBitmap>(&string_metadata_uuid)
+                            .fork::<&str, RoaringBitmap>(&string_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -233,7 +236,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<&str, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<&str, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -254,7 +257,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let bool_metadata_writer = match blockfile_provider
-                            .fork::<bool, &RoaringBitmap>(&bool_metadata_uuid)
+                            .fork::<bool, RoaringBitmap>(&bool_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -271,7 +274,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<bool, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<bool, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -292,7 +295,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let f32_metadata_writer = match blockfile_provider
-                            .fork::<f32, &RoaringBitmap>(&f32_metadata_uuid)
+                            .fork::<f32, RoaringBitmap>(&f32_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -309,7 +312,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<f32, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<f32, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -330,7 +333,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             }
                         };
                         let u32_metadata_writer = match blockfile_provider
-                            .fork::<u32, &RoaringBitmap>(&u32_metadata_uuid)
+                            .fork::<u32, RoaringBitmap>(&u32_metadata_uuid)
                             .await
                         {
                             Ok(writer) => writer,
@@ -347,7 +350,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<u32, &RoaringBitmap>() {
+                None => match blockfile_provider.create::<u32, RoaringBitmap>() {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -573,7 +576,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
     async fn apply_materialized_log_chunk(
         &self,
-        records: crate::execution::data::data_chunk::Chunk<MaterializedLogRecord<'log_records>>,
+        records: Chunk<MaterializedLogRecord<'log_records>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         for record in records.iter() {
             let segment_offset_id = record.0.offset_id;
@@ -598,7 +601,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
-                                    .add_document(document, segment_offset_id as i32)
+                                    .add_document(document, segment_offset_id)
                                     .await;
                             }
                             None => panic!(
@@ -716,7 +719,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     }
                                     // Previous version of record does not contain document string.
                                     None => match writer
-                                        .add_document(doc, segment_offset_id as i32)
+                                        .add_document(doc, segment_offset_id)
                                         .await
                                     {
                                         Ok(_) => {}
@@ -804,7 +807,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         Some(document) => match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
-                                    .add_document(document, segment_offset_id as i32)
+                                    .add_document(document, segment_offset_id)
                                     .await;
                             }
                             None => panic!(
@@ -988,11 +991,10 @@ impl MetadataSegmentReader<'_> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_reader =
-                        match blockfile_provider.open::<u32, Int32Array>(&pls_uuid).await {
-                            Ok(reader) => Some(reader),
-                            Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                        };
+                    let pls_reader = match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
+                        Ok(reader) => Some(reader),
+                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
+                    };
                     pls_reader
                 }
                 None => None,
@@ -1023,9 +1025,9 @@ impl MetadataSegmentReader<'_> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(Box::new(
+                let tokenizer = Box::new(TantivyChromaTokenizer::new(
                     NgramTokenizer::new(3, 3, false).unwrap(),
-                )));
+                ));
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,
@@ -1856,56 +1858,58 @@ impl MetadataSegmentReader<'_> {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, str::FromStr};
-
-    use uuid::Uuid;
-
-    use crate::{
-        blockstore::{
-            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
-            provider::BlockfileProvider,
+    use crate::segment::{
+        metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+        record_segment::{
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
-        chroma_proto::r#where,
-        execution::data::data_chunk::Chunk,
-        segment::{
-            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-            record_segment::{
-                RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
-            },
-            LogMaterializer, SegmentFlusher, SegmentWriter,
-        },
-        storage::{local::LocalStorage, Storage},
-        types::{
-            DirectComparison, DirectDocumentComparison, LogRecord, MetadataValue, Operation,
-            OperationRecord, UpdateMetadataValue, Where, WhereComparison, WhereDocument,
-        },
+        LogMaterializer, SegmentFlusher, SegmentWriter,
     };
+    use chroma_blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
+    use chroma_cache::{
+        cache::Cache,
+        config::{CacheConfig, UnboundedCacheConfig},
+    };
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{
+        Chunk, DirectComparison, DirectDocumentComparison, LogRecord, MetadataValue, Operation,
+        OperationRecord, UpdateMetadataValue, Where, WhereComparison, WhereDocument,
+    };
+    use std::{collections::HashMap, str::FromStr};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn empty_blocks() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -2170,27 +2174,31 @@ mod test {
     async fn metadata_update_same_key_different_type() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -2371,7 +2379,7 @@ mod test {
             key: String::from("hello"),
             comparison: WhereComparison::SingleDoubleComparison(
                 1.0,
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -2385,7 +2393,7 @@ mod test {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("new world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -2421,27 +2429,31 @@ mod test {
     async fn metadata_deletes() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -2595,7 +2607,7 @@ mod test {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -2608,7 +2620,7 @@ mod test {
             key: String::from("bye"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -2641,27 +2653,31 @@ mod test {
     async fn document_updates() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -2803,7 +2819,7 @@ mod test {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("hello"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -2815,7 +2831,7 @@ mod test {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("bye"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)

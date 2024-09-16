@@ -183,7 +183,7 @@ func validateDatabase(suite *CollectionServiceTestSuite, collectionId string, co
 	suite.Equal(collection.Version, collection.Version)
 
 	getSegmentReq := coordinatorpb.GetSegmentsRequest{
-		Collection: &collectionId,
+		Collection: collectionId,
 	}
 	segments, err := suite.s.GetSegments(context.Background(), &getSegmentReq)
 	suite.NoError(err)
@@ -201,7 +201,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 
 	// flush collection compaction
 	getSegmentReq := coordinatorpb.GetSegmentsRequest{
-		Collection: &collectionID,
+		Collection: collectionID,
 	}
 	segments, err := suite.s.GetSegments(context.Background(), &getSegmentReq)
 	suite.NoError(err)

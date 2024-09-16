@@ -122,10 +122,6 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
-        except Exception:
-            raise ValueError(
-                f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
-            )
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking

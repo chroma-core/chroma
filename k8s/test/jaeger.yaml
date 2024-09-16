@@ -14,19 +14,21 @@ spec:
         app: jaeger
     spec:
       containers:
-      - name: jaeger
-        image: jaegertracing/all-in-one:1.56
-        env:
-        - name: COLLECTOR_OTLP_ENABLED
-          value: "true"
-        ports:
-        - containerPort: 16686
-          name: ui-port
-        - containerPort: 4317
-          name: grpc-port
-        - containerPort: 4318
-          name: http-port
-
+        - name: jaeger
+          image: jaegertracing/all-in-one:1.56
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          ports:
+            - containerPort: 16686
+              name: ui-port
+            - containerPort: 4317
+              name: grpc-port
+            - containerPort: 4318
+              name: http-port
+          resources:
+            limits:
+              memory: "2Gi"
 
 ---
 apiVersion: v1

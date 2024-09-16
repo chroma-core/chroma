@@ -109,7 +109,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       if (_a.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`",
+          "Please install the openai package to use the OpenAIEmbeddingFunction, e.g. `npm install openai`",
         );
       }
       throw _a; // Re-throw other errors
@@ -147,10 +147,11 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       const { default: openai } = await import("openai");
       // @ts-ignore
       const { VERSION } = await import("openai/version");
+      // @ts-ignore
       return { openai, version: VERSION };
     } catch (e) {
       throw new Error(
-        "Please install openai as a dependency with, e.g. `yarn add openai`",
+        "Please install the openai package to use the OpenAIEmbeddingFunction, e.g. `npm install openai`",
       );
     }
   }

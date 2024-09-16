@@ -1,23 +1,15 @@
 use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
-use crate::chroma_proto;
-use crate::chroma_proto::sys_db_client;
-use crate::chroma_proto::sys_db_client::SysDbClient;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
 use crate::tracing::util::client_interceptor;
-use crate::types::Collection;
-use crate::types::CollectionConversionError;
-use crate::types::FlushCompactionResponse;
-use crate::types::FlushCompactionResponseConversionError;
-use crate::types::Segment;
-use crate::types::SegmentConversionError;
-use crate::types::SegmentFlushInfo;
-use crate::types::SegmentFlushInfoConversionError;
-use crate::types::SegmentScope;
-use crate::types::Tenant;
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::chroma_proto::sys_db_client::SysDbClient;
+use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError};
+use chroma_types::{
+    Collection, CollectionConversionError, FlushCompactionResponse,
+    FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
@@ -64,7 +56,7 @@ impl SysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -261,7 +253,7 @@ impl GrpcSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let res = self
             .client
@@ -278,11 +270,7 @@ impl GrpcSysDb {
                 } else {
                     None
                 },
-                collection: if collection.is_some() {
-                    Some(collection.unwrap().to_string())
-                } else {
-                    None
-                },
+                collection: collection.to_string(),
             })
             .await;
         match res {

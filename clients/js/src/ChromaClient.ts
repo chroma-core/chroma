@@ -1,9 +1,12 @@
-import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess } from "./utils";
+import { AdminClient } from "./AdminClient";
+import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
+import { chromaFetch } from "./ChromaFetch";
 import { Collection } from "./Collection";
-import {
+import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
+import { Configuration, ApiApi as DefaultApi } from "./generated";
+import type {
   ChromaClientParams,
-  CollectionType,
+  CollectionParams,
   ConfigOptions,
   CreateCollectionParams,
   DeleteCollectionParams,
@@ -11,11 +14,7 @@ import {
   GetOrCreateCollectionParams,
   ListCollectionsParams,
 } from "./types";
-import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
-import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
-import { AdminClient } from "./AdminClient";
-import { chromaFetch } from "./ChromaFetch";
-import { ChromaConnectionError, ChromaServerError } from "./Errors";
+import { validateTenantDatabase, wrapCollection } from "./utils";
 
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
@@ -24,11 +23,27 @@ export class ChromaClient {
   /**
    * @ignore
    */
-  private api: DefaultApi & ConfigOptions;
-  private tenant: string = DEFAULT_TENANT;
-  private database: string = DEFAULT_DATABASE;
-  private _adminClient?: AdminClient;
+  public api: DefaultApi & ConfigOptions;
+  /**
+   * @ignore
+   */
+  private tenant: string;
+  /**
+   * @ignore
+   */
+  private database: string;
+  /**
+   * @ignore
+   */
+  private _adminClient: AdminClient;
+  /**
+   * @ignore
+   */
   private authProvider: ClientAuthProvider | undefined;
+  /**
+   * @ignore
+   */
+  private _initPromise: Promise<void> | undefined;
 
   /**
    * Creates a new ChromaClient instance.
@@ -44,13 +59,12 @@ export class ChromaClient {
    * ```
    */
   constructor({
-    path,
+    path = "http://localhost:8000",
     fetchOptions,
     auth,
     tenant = DEFAULT_TENANT,
     database = DEFAULT_DATABASE,
   }: ChromaClientParams = {}) {
-    if (path === undefined) path = "http://localhost:8000";
     this.tenant = tenant;
     this.database = database;
     this.authProvider = undefined;
@@ -71,17 +85,25 @@ export class ChromaClient {
     }
 
     this._adminClient = new AdminClient({
-      path: path,
-      fetchOptions: fetchOptions,
-      auth: auth,
-      tenant: tenant,
-      database: database,
+      path,
+      fetchOptions,
+      auth,
+      tenant,
+      database,
     });
+  }
 
-    // TODO: Validate tenant and database on client creation
-    // this got tricky because:
-    // - the constructor is sync but the generated api is async
-    // - we need to inject auth information so a simple rewrite/fetch does not work
+  /** @ignore */
+  init(): Promise<void> {
+    if (!this._initPromise) {
+      this._initPromise = validateTenantDatabase(
+        this._adminClient,
+        this.tenant,
+        this.database,
+      );
+    }
+
+    return this._initPromise;
   }
 
   /**
@@ -96,7 +118,8 @@ export class ChromaClient {
    * await client.reset();
    * ```
    */
-  public async reset(): Promise<boolean> {
+  async reset(): Promise<boolean> {
+    await this.init();
     return await this.api.reset(this.api.options);
   }
 
@@ -110,9 +133,8 @@ export class ChromaClient {
    * const version = await client.version();
    * ```
    */
-  public async version(): Promise<string> {
-    const response = await this.api.version(this.api.options);
-    return await handleSuccess(response);
+  async version(): Promise<string> {
+    return await this.api.version(this.api.options);
   }
 
   /**
@@ -125,10 +147,9 @@ export class ChromaClient {
    * const heartbeat = await client.heartbeat();
    * ```
    */
-  public async heartbeat(): Promise<number> {
+  async heartbeat(): Promise<number> {
     const response = await this.api.heartbeat(this.api.options);
-    let ret = await handleSuccess(response);
-    return ret["nanosecond heartbeat"];
+    return response["nanosecond heartbeat"];
   }
 
   /**
@@ -153,41 +174,30 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async createCollection({
+  async createCollection({
     name,
     metadata,
-    embeddingFunction,
+    embeddingFunction = new DefaultEmbeddingFunction(),
   }: CreateCollectionParams): Promise<Collection> {
-    if (embeddingFunction === undefined) {
-      embeddingFunction = new DefaultEmbeddingFunction();
-    }
+    await this.init();
+    const newCollection = (await this.api.createCollection(
+      this.tenant,
+      this.database,
+      {
+        name,
+        // @ts-ignore: we need to generate the client libraries again
+        configuration: null, //TODO: Configuration type in JavaScript
+        metadata,
+      },
+      this.api.options,
+    )) as CollectionParams;
 
-    const newCollection = await this.api
-      .createCollection(
-        this.tenant,
-        this.database,
-        {
-          name,
-          configuration: null, //TODO: Configuration type in JavaScript
-          metadata,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    if (newCollection.error) {
-      throw newCollection.error instanceof Error
-        ? newCollection.error
-        : new Error(newCollection.error);
-    }
-
-    return new Collection(
-      name,
-      newCollection.id,
-      this.api,
-      metadata,
+    return wrapCollection(this, {
+      name: newCollection.name,
+      id: newCollection.id,
+      metadata: newCollection.metadata,
       embeddingFunction,
-    );
+    });
   }
 
   /**
@@ -211,36 +221,31 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async getOrCreateCollection({
+  async getOrCreateCollection({
     name,
     metadata,
-    embeddingFunction,
+    embeddingFunction = new DefaultEmbeddingFunction(),
   }: GetOrCreateCollectionParams): Promise<Collection> {
-    if (embeddingFunction === undefined) {
-      embeddingFunction = new DefaultEmbeddingFunction();
-    }
+    await this.init();
+    const newCollection = (await this.api.createCollection(
+      this.tenant,
+      this.database,
+      {
+        name,
+        // @ts-ignore: we need to generate the client libraries again
+        configuration: null, //TODO: Configuration type in JavaScript
+        metadata,
+        get_or_create: true,
+      },
+      this.api.options,
+    )) as CollectionParams;
 
-    const newCollection = await this.api
-      .createCollection(
-        this.tenant,
-        this.database,
-        {
-          name,
-          metadata,
-          configuration: null,
-          get_or_create: true,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    return new Collection(
-      name,
-      newCollection.id,
-      this.api,
-      newCollection.metadata,
+    return wrapCollection(this, {
+      name: newCollection.name,
+      id: newCollection.id,
+      metadata: newCollection.metadata,
       embeddingFunction,
-    );
+    });
   }
 
   /**
@@ -259,18 +264,17 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async listCollections({
-    limit,
-    offset,
-  }: ListCollectionsParams = {}): Promise<CollectionType[]> {
-    const response = await this.api.listCollections(
+  async listCollections({ limit, offset }: ListCollectionsParams = {}): Promise<
+    CollectionParams[]
+  > {
+    await this.init();
+    return (await this.api.listCollections(
       limit,
       offset,
       this.tenant,
       this.database,
       this.api.options,
-    );
-    return handleSuccess(response);
+    )) as CollectionParams[];
   }
 
   /**
@@ -284,13 +288,14 @@ export class ChromaClient {
    * const collections = await client.countCollections();
    * ```
    */
-  public async countCollections(): Promise<number> {
-    const response = await this.api.countCollections(
+  async countCollections(): Promise<number> {
+    await this.init();
+
+    return (await this.api.countCollections(
       this.tenant,
       this.database,
       this.api.options,
-    );
-    return handleSuccess(response);
+    )) as number;
   }
 
   /**
@@ -308,21 +313,25 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async getCollection({
+  async getCollection({
     name,
     embeddingFunction,
   }: GetCollectionParams): Promise<Collection> {
-    const response = await this.api
-      .getCollection(name, this.tenant, this.database, this.api.options)
-      .then(handleSuccess);
+    await this.init();
 
-    return new Collection(
-      response.name,
-      response.id,
-      this.api,
-      response.metadata,
+    const response = (await this.api.getCollection(
+      name,
+      this.tenant,
+      this.database,
+      this.api.options,
+    )) as CollectionParams;
+
+    return wrapCollection(this, {
+      name: response.name,
+      id: response.id,
+      metadata: response.metadata,
       embeddingFunction,
-    );
+    });
   }
 
   /**
@@ -339,11 +348,14 @@ export class ChromaClient {
    * });
    * ```
    */
-  public async deleteCollection({
-    name,
-  }: DeleteCollectionParams): Promise<void> {
-    return await this.api
-      .deleteCollection(name, this.tenant, this.database, this.api.options)
-      .then(handleSuccess);
+  async deleteCollection({ name }: DeleteCollectionParams): Promise<void> {
+    await this.init();
+
+    await this.api.deleteCollection(
+      name,
+      this.tenant,
+      this.database,
+      this.api.options,
+    );
   }
 }

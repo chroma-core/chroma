@@ -26,6 +26,12 @@ class StaticParameterError(Exception):
     pass
 
 
+class InvalidConfigurationError(ValueError):
+    """Represents an error that occurs when a configuration is invalid."""
+
+    pass
+
+
 ParameterValue = Union[str, int, float, bool, "ConfigurationInternal"]
 
 
@@ -110,8 +116,8 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
                 if not isinstance(parameter.value, type(definition.default_value)):
                     raise ValueError(f"Invalid parameter value: {parameter.value}")
 
-                validator = definition.validator
-                if not validator(parameter.value):
+                parameter_validator = definition.validator
+                if not parameter_validator(parameter.value):
                     raise ValueError(f"Invalid parameter value: {parameter.value}")
                 self.parameter_map[parameter.name] = parameter
         # Apply the defaults for any missing parameters
@@ -121,6 +127,8 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
                     name=name, value=definition.default_value
                 )
 
+        self.configuration_validator()
+
     def __repr__(self) -> str:
         return f"Configuration({self.parameter_map.values()})"
 
@@ -128,6 +136,14 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
         if not isinstance(__value, ConfigurationInternal):
             return NotImplemented
         return self.parameter_map == __value.parameter_map
+
+    @abstractmethod
+    def configuration_validator(self) -> None:
+        """Perform custom validation when parameters are dependent on each other.
+
+        Raises an InvalidConfigurationError if the configuration is invalid.
+        """
+        pass
 
     def get_parameters(self) -> List[ConfigurationParameter]:
         """Returns the parameters of the configuration."""
@@ -247,15 +263,29 @@ class HNSWConfigurationInternal(ConfigurationInternal):
             name="batch_size",
             validator=lambda value: isinstance(value, int) and value >= 1,
             is_static=True,
-            default_value=1000,
+            default_value=100,
         ),
         "sync_threshold": ConfigurationDefinition(
             name="sync_threshold",
             validator=lambda value: isinstance(value, int) and value >= 1,
             is_static=True,
-            default_value=100,
+            default_value=1000,
         ),
     }
+
+    @override
+    def configuration_validator(self) -> None:
+        batch_size = self.parameter_map.get("batch_size")
+        sync_threshold = self.parameter_map.get("sync_threshold")
+
+        if (
+            batch_size
+            and sync_threshold
+            and cast(int, batch_size.value) > cast(int, sync_threshold.value)
+        ):
+            raise InvalidConfigurationError(
+                "batch_size must be less than or equal to sync_threshold"
+            )
 
     @classmethod
     def from_legacy_params(cls, params: Dict[str, Any]) -> Self:
@@ -302,8 +332,8 @@ class HNSWConfigurationInterface(HNSWConfigurationInternal):
         num_threads: int = cpu_count(),
         M: int = 16,
         resize_factor: float = 1.2,
-        batch_size: int = 1000,
-        sync_threshold: int = 100,
+        batch_size: int = 100,
+        sync_threshold: int = 1000,
     ):
         parameters = [
             ConfigurationParameter(name="space", value=space),
@@ -336,6 +366,10 @@ class CollectionConfigurationInternal(ConfigurationInternal):
         ),
     }
 
+    @override
+    def configuration_validator(self) -> None:
+        pass
+
 
 # This is the user-facing interface for HNSW index configuration parameters.
 # Internally, we pass around HNSWConfigurationInternal objects, which perform
@@ -359,3 +393,18 @@ class CollectionConfigurationInterface(CollectionConfigurationInternal):
 
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'.
 CollectionConfiguration = CollectionConfigurationInterface
+
+
+class EmbeddingsQueueConfigurationInternal(ConfigurationInternal):
+    definitions = {
+        "automatically_purge": ConfigurationDefinition(
+            name="automatically_purge",
+            validator=lambda value: isinstance(value, bool),
+            is_static=False,
+            default_value=True,
+        ),
+    }
+
+    @override
+    def configuration_validator(self) -> None:
+        pass

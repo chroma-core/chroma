@@ -137,8 +137,6 @@ def test_insert_and_count(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     max_id = produce_fns(
         producer=producer,
@@ -183,8 +181,6 @@ def test_get_vectors(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -230,8 +226,6 @@ def test_ann_query(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -299,8 +293,6 @@ def test_delete(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -444,8 +436,6 @@ def test_update(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -483,8 +473,6 @@ def test_upsert(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -522,8 +510,6 @@ def test_delete_without_add(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -554,8 +540,6 @@ def test_delete_with_local_segment_storage(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -634,8 +618,6 @@ def test_reset_state_ignored_for_allow_reset_false(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()

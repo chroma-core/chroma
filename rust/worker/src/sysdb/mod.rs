@@ -3,8 +3,8 @@ pub(crate) mod sysdb;
 pub(crate) mod test_sysdb;
 
 use self::config::SysDbConfig;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
 
 pub(crate) async fn from_config(
     config: &SysDbConfig,

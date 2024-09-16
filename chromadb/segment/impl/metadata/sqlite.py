@@ -46,7 +46,7 @@ class SqliteMetadataSegment(MetadataReader):
     _id: UUID
     _opentelemetry_client: OpenTelemetryClient
     _collection_id: Optional[UUID]
-    _subscription: Optional[UUID]
+    _subscription: Optional[UUID] = None
 
     def __init__(self, system: System, segment: Segment):
         self._db = system.instance(SqliteDB)
@@ -89,7 +89,7 @@ class SqliteMetadataSegment(MetadataReader):
             if result is None:
                 return self._consumer.min_seqid()
             else:
-                return _decode_seq_id(result[0])
+                return self._db.decode_seq_id(result[0])
 
     @trace_method("SqliteMetadataSegment.count", OpenTelemetryGranularity.ALL)
     @override
@@ -117,6 +117,7 @@ class SqliteMetadataSegment(MetadataReader):
         ids: Optional[Sequence[str]] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        include_metadata: bool = True,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
         embeddings_t, metadata_t, fulltext_t = Tables(
@@ -129,6 +130,22 @@ class SqliteMetadataSegment(MetadataReader):
         if limit < 0:
             raise ValueError("Limit cannot be negative")
 
+        select_clause = [
+            embeddings_t.id,
+            embeddings_t.embedding_id,
+            embeddings_t.seq_id,
+        ]
+        if include_metadata:
+            select_clause.extend(
+                [
+                    metadata_t.key,
+                    metadata_t.string_value,
+                    metadata_t.int_value,
+                    metadata_t.float_value,
+                    metadata_t.bool_value,
+                ]
+            )
+
         q = (
             (
                 self._db.querybuilder()
@@ -136,16 +153,7 @@ class SqliteMetadataSegment(MetadataReader):
                 .left_join(metadata_t)
                 .on(embeddings_t.id == metadata_t.id)
             )
-            .select(
-                embeddings_t.id,
-                embeddings_t.embedding_id,
-                embeddings_t.seq_id,
-                metadata_t.key,
-                metadata_t.string_value,
-                metadata_t.int_value,
-                metadata_t.float_value,
-                metadata_t.bool_value,
-            )
+            .select(*select_clause)
             .orderby(embeddings_t.embedding_id)
         )
 
@@ -213,10 +221,10 @@ class SqliteMetadataSegment(MetadataReader):
 
         with self._db.tx() as cur:
             # Execute the query with the limit and offset already applied
-            return list(self._records(cur, q))
+            return list(self._records(cur, q, include_metadata))
 
     def _records(
-        self, cur: Cursor, q: QueryBuilder
+        self, cur: Cursor, q: QueryBuilder, include_metadata: bool
     ) -> Generator[MetadataEmbeddingRecord, None, None]:
         """Given a cursor and a QueryBuilder, yield a generator of records. Assumes
         cursor returns rows in ID order."""
@@ -228,13 +236,18 @@ class SqliteMetadataSegment(MetadataReader):
         group_iterator = groupby(cur_iterator, lambda r: int(r[0]))
 
         for _, group in group_iterator:
-            yield self._record(list(group))
+            yield self._record(list(group), include_metadata)
 
     @trace_method("SqliteMetadataSegment._record", OpenTelemetryGranularity.ALL)
-    def _record(self, rows: Sequence[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
+    def _record(
+        self, rows: Sequence[Tuple[Any, ...]], include_metadata: bool
+    ) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
         MetadataEmbeddingRecord"""
         _, embedding_id, seq_id = rows[0][:3]
+        if not include_metadata:
+            return MetadataEmbeddingRecord(id=embedding_id, metadata=None)
+
         metadata = {}
         for row in rows:
             key, string_value, int_value, float_value, bool_value = row[3:]
@@ -269,7 +282,7 @@ class SqliteMetadataSegment(MetadataReader):
         ).insert(
             ParameterValue(self._db.uuid_to_db(self._id)),
             ParameterValue(record["record"]["id"]),
-            ParameterValue(_encode_seq_id(record["log_offset"])),
+            ParameterValue(self._db.encode_seq_id(record["log_offset"])),
         )
         sql, params = get_sql(q)
         sql = sql + "RETURNING id"
@@ -460,7 +473,7 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .update(t)
-            .set(t.seq_id, ParameterValue(_encode_seq_id(record["log_offset"])))
+            .set(t.seq_id, ParameterValue(self._db.encode_seq_id(record["log_offset"])))
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
             .where(t.embedding_id == ParameterValue(record["record"]["id"]))
         )
@@ -482,18 +495,6 @@ class SqliteMetadataSegment(MetadataReader):
         records are append-only (that is, that seq-ids should increase monotonically)"""
         with self._db.tx() as cur:
             for record in records:
-                q = (
-                    self._db.querybuilder()
-                    .into(Table("max_seq_id"))
-                    .columns("segment_id", "seq_id")
-                    .insert(
-                        ParameterValue(self._db.uuid_to_db(self._id)),
-                        ParameterValue(_encode_seq_id(record["log_offset"])),
-                    )
-                )
-                sql, params = get_sql(q)
-                sql = sql.replace("INSERT", "INSERT OR REPLACE")
-                cur.execute(sql, params)
                 if record["record"]["operation"] == Operation.ADD:
                     self._insert_record(cur, record, False)
                 elif record["record"]["operation"] == Operation.UPSERT:
@@ -502,6 +503,19 @@ class SqliteMetadataSegment(MetadataReader):
                     self._delete_record(cur, record)
                 elif record["record"]["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
+
+            q = (
+                self._db.querybuilder()
+                .into(Table("max_seq_id"))
+                .columns("segment_id", "seq_id")
+                .insert(
+                    ParameterValue(self._db.uuid_to_db(self._id)),
+                    ParameterValue(self._db.encode_seq_id(record["log_offset"])),
+                )
+            )
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            cur.execute(sql, params)
 
     @trace_method(
         "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL
@@ -646,26 +660,6 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(*get_sql(q_fts))
             cur.execute(*get_sql(q0))
             cur.execute(*get_sql(q))
-
-
-def _encode_seq_id(seq_id: SeqId) -> bytes:
-    """Encode a SeqID into a byte array"""
-    if seq_id.bit_length() <= 64:
-        return int.to_bytes(seq_id, 8, "big")
-    elif seq_id.bit_length() <= 192:
-        return int.to_bytes(seq_id, 24, "big")
-    else:
-        raise ValueError(f"Unsupported SeqID: {seq_id}")
-
-
-def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
-    """Decode a byte array into a SeqID"""
-    if len(seq_id_bytes) == 8:
-        return int.from_bytes(seq_id_bytes, "big")
-    elif len(seq_id_bytes) == 24:
-        return int.from_bytes(seq_id_bytes, "big")
-    else:
-        raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
 
 
 def _where_clause(

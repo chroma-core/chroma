@@ -1,8 +1,7 @@
 export { ChromaClient } from "./ChromaClient";
 export { AdminClient } from "./AdminClient";
 export { CloudClient } from "./CloudClient";
-export { Collection } from "./Collection";
-export { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
+export type { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 export { OpenAIEmbeddingFunction } from "./embeddings/OpenAIEmbeddingFunction";
 export { CohereEmbeddingFunction } from "./embeddings/CohereEmbeddingFunction";
 export { TransformersEmbeddingFunction } from "./embeddings/TransformersEmbeddingFunction";
@@ -12,7 +11,7 @@ export { JinaEmbeddingFunction } from "./embeddings/JinaEmbeddingFunction";
 export { GoogleGenerativeAiEmbeddingFunction } from "./embeddings/GoogleGeminiEmbeddingFunction";
 export { OllamaEmbeddingFunction } from "./embeddings/OllamaEmbeddingFunction";
 
-export {
+export type {
   IncludeEnum,
   GetParams,
   CollectionType,
@@ -35,11 +34,12 @@ export {
   GetOrCreateCollectionParams,
   GetCollectionParams,
   DeleteCollectionParams,
-  AddParams,
-  UpsertParams,
-  UpdateParams,
+  AddRecordsParams,
+  UpsertRecordsParams,
+  UpdateRecordsParams,
   ModifyCollectionParams,
-  QueryParams,
+  QueryRecordsParams,
   PeekParams,
   DeleteParams,
+  CollectionParams,
 } from "./types";

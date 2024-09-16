@@ -1,30 +1,30 @@
-use crate::blockstore::provider::BlockfileProvider;
-use crate::chroma_proto::{
-    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
-};
-use crate::chroma_proto::{
-    GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
-};
-use crate::config::{Configurable, QueryServiceConfig};
-use crate::errors::ChromaError;
+use crate::config::QueryServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
     MetadataQueryOrchestrator,
 };
-use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{ComponentHandle, System};
 use crate::tracing::util::wrap_span_with_parent_context;
-use crate::types::MetadataValue;
-use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_types::chroma_proto::{
+    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+};
+use chroma_types::chroma_proto::{
+    GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
+};
+use chroma_types::{MetadataValue, ScalarEncoding};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::hash::Hash;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{trace, trace_span, Instrument};
+use tracing::{trace_span, Instrument};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -60,7 +60,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
                 return Err(err);
             }
         };
-        let storage = match crate::storage::from_config(&config.storage).await {
+        let storage = match chroma_storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
                 tracing::error!("Failed to create storage component: {:?}", err);
@@ -73,16 +73,15 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             storage.clone(),
         ))
         .await?;
-
-        // TODO: inject hnsw index provider somehow
-        // TODO: real path
-        let path = PathBuf::from("~/tmp");
+        let hnsw_index_provider =
+            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
+                .await?;
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
             sysdb,
             log,
-            hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
+            hnsw_index_provider,
             blockfile_provider,
             port: config.my_port,
         })
@@ -141,6 +140,13 @@ impl WorkerServer {
             }
         };
 
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
         let mut proto_results_for_all = Vec::new();
 
         let mut query_vectors = Vec::new();
@@ -171,6 +177,7 @@ impl WorkerServer {
                     request.allowed_ids,
                     request.include_embeddings,
                     segment_uuid,
+                    collection_uuid,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.hnsw_index_provider.clone(),
@@ -243,6 +250,13 @@ impl WorkerServer {
             }
         };
 
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
             None => {
@@ -261,6 +275,7 @@ impl WorkerServer {
             system.clone(),
             request.ids,
             segment_uuid,
+            collection_uuid,
             self.log.clone(),
             self.sysdb.clone(),
             dispatcher,
@@ -311,6 +326,13 @@ impl WorkerServer {
             Err(_) => {
                 tracing::error!("Invalid Segment UUID");
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
+            }
+        };
+
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
             }
         };
 
@@ -369,6 +391,7 @@ impl WorkerServer {
         let orchestrator = MetadataQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
+            &collection_uuid,
             query_ids,
             self.log.clone(),
             self.sysdb.clone(),
@@ -376,6 +399,7 @@ impl WorkerServer {
             self.blockfile_provider.clone(),
             where_clause,
             where_document_clause,
+            request.include_metadata,
         );
 
         let result = orchestrator.run().await;
@@ -392,29 +416,36 @@ impl WorkerServer {
 
         let mut output = Vec::new();
         let (ids, metadatas, documents) = result;
-        for ((id, metadata), document) in ids
-            .into_iter()
-            .zip(metadatas.into_iter())
-            .zip(documents.into_iter())
-        {
-            // The transport layer assumes the document exists in the metadata
-            // with the special key "chroma:document"
-            let mut output_metadata = match metadata {
-                Some(metadata) => metadata,
-                None => HashMap::new(),
-            };
-            match document {
-                Some(document) => {
-                    output_metadata
-                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
+        if request.include_metadata {
+            for ((id, metadata), document) in ids
+                .into_iter()
+                .zip(metadatas.into_iter())
+                .zip(documents.into_iter())
+            {
+                // The transport layer assumes the document exists in the metadata
+                // with the special key "chroma:document"
+                let mut output_metadata = match metadata {
+                    Some(metadata) => metadata,
+                    None => HashMap::new(),
+                };
+                match document {
+                    Some(document) => {
+                        output_metadata
+                            .insert("chroma:document".to_string(), MetadataValue::Str(document));
+                    }
+                    None => {}
                 }
-                None => {}
+                let record = chroma_proto::MetadataEmbeddingRecord {
+                    id,
+                    metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
+                };
+                output.push(record);
             }
-            let record = chroma_proto::MetadataEmbeddingRecord {
-                id,
-                metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-            };
-            output.push(record);
+        } else {
+            for id in ids {
+                let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
+                output.push(record);
+            }
         }
 
         // This is an implementation stub
@@ -476,6 +507,13 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
             }
         };
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
         println!("Querying count for segment {}", segment_uuid);
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
@@ -494,6 +532,7 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         let orchestrator = CountQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
+            &collection_uuid,
             self.log.clone(),
             self.sysdb.clone(),
             dispatcher.clone(),
@@ -563,14 +602,14 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use crate::execution::dispatcher;
     use crate::log::log::InMemoryLog;
-    use crate::storage::local::LocalStorage;
-    use crate::storage::Storage;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
+    use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
     use chroma_proto::debug_client::DebugClient;
+    use chroma_storage::{local::LocalStorage, Storage};
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -579,7 +618,9 @@ mod tests {
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let hnsw_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
         let port = random_port::PortPicker::new().pick().unwrap();
         let mut server = WorkerServer {
             dispatcher: None,
@@ -589,8 +630,14 @@ mod tests {
             hnsw_index_provider: HnswIndexProvider::new(
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
+                hnsw_index_cache,
             ),
-            blockfile_provider: BlockfileProvider::new_arrow(storage, TEST_MAX_BLOCK_SIZE_BYTES),
+            blockfile_provider: BlockfileProvider::new_arrow(
+                storage,
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            ),
             port,
         };
 

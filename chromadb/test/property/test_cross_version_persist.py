@@ -12,7 +12,14 @@ import pytest
 import json
 from urllib import request
 from chromadb import config
+from chromadb.api.configuration import (
+    ConfigurationParameter,
+    EmbeddingsQueueConfigurationInternal,
+)
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from chromadb.db.impl.sqlite import SqliteDB
+from chromadb.ingest.impl.utils import trigger_vector_segments_max_seq_id_migration
+from chromadb.segment import SegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
@@ -272,7 +279,15 @@ def persist_generated_data_with_old_version(
 
 # Since we can't pickle the embedding function, we always generate record sets with embeddings
 collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
-    strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
+    strategies.collections(
+        with_hnsw_params=True,
+        has_embeddings=True,
+        # By default, these are set to 2000, which makes it unlikely that index mutations will ever be fully flushed
+        max_hnsw_sync_threshold=10,
+        max_hnsw_batch_size=10,
+        with_persistent_hnsw_params=st.booleans(),
+    ),
+    key="coll",
 )
 
 
@@ -336,11 +351,39 @@ def test_cycle_versions(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
     )
+
+    # Automatic pruning should be disabled since embeddings_queue is non-empty
+    embeddings_queue = system.instance(SqliteDB)
+    assert embeddings_queue.config.get_parameter("automatically_purge").value is False
+
+    # Update to True so log_size_below_max() invariant will pass
+    embeddings_queue.set_config(
+        EmbeddingsQueueConfigurationInternal(
+            [ConfigurationParameter("automatically_purge", True)]
+        )
+    )
+
+    # Should be able to clean log immediately after updating
+
+    # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
+    # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
+    # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
+    trigger_vector_segments_max_seq_id_migration(
+        embeddings_queue, system.instance(SegmentManager)
+    )
+
+    embeddings_queue.purge_log(coll.id)
+    invariants.log_size_below_max(system, [coll], True)
+
+    # Should be able to add embeddings
+    coll.add(**embeddings_strategy)  # type: ignore
+
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
+    invariants.log_size_below_max(system, [coll], True)
 
     # Shutdown system
     system.stop()

@@ -387,10 +387,6 @@ class Client(SharedSystemClient, ClientAPI):
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
-        except Exception:
-            raise ValueError(
-                f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
-            )
 
     # endregion
 

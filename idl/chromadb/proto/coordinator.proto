@@ -54,6 +54,7 @@ message CreateSegmentResponse {
 
 message DeleteSegmentRequest {
   string id = 1;
+  string collection = 2;
 }
 
 message DeleteSegmentResponse {
@@ -64,7 +65,7 @@ message GetSegmentsRequest {
   optional string id = 1;
   optional string type = 2;
   optional SegmentScope scope = 3;
-  optional string collection = 5; // Collection ID
+  string collection = 4; // Collection ID
 }
 
 message GetSegmentsResponse {
@@ -75,10 +76,7 @@ message GetSegmentsResponse {
 
 message UpdateSegmentRequest {
   string id = 1;
-  oneof collection_update {
-    string collection = 4;
-    bool reset_collection = 5;
-  }
+  string collection = 4;
   oneof metadata_update {
     UpdateMetadata metadata = 6;
     bool reset_metadata = 7;

@@ -1,13 +1,11 @@
-use crate::chroma_proto;
-use crate::chroma_proto::log_service_client::LogServiceClient;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
 use crate::log::config::LogConfig;
 use crate::tracing::util::client_interceptor;
-use crate::types::LogRecord;
-use crate::types::RecordConversionError;
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::chroma_proto;
+use chroma_types::chroma_proto::log_service_client::LogServiceClient;
+use chroma_types::{LogRecord, RecordConversionError};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -138,8 +136,7 @@ impl Configurable<LogConfig> for GrpcLog {
             LogConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;
-                // TODO: switch to logging when logging is implemented
-                println!("Connecting to log service at {}:{}", host, port);
+                tracing::info!("Connecting to log service at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
                 let endpoint_res = match Endpoint::from_shared(connection_string) {
                     Ok(endpoint) => endpoint,
@@ -209,8 +206,7 @@ impl GrpcLog {
                 Ok(result)
             }
             Err(e) => {
-                // TODO: switch to logging when logging is implemented
-                println!("Failed to pull logs: {}", e);
+                tracing::error!("Failed to pull logs: {}", e);
                 Err(PullLogsError::FailedToPullLogs(e))
             }
         }
@@ -244,8 +240,7 @@ impl GrpcLog {
                 Ok(result)
             }
             Err(e) => {
-                // TODO: switch to logging when logging is implemented
-                println!("Failed to get collections: {}", e);
+                tracing::error!("Failed to get collections: {}", e);
                 Err(GetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(e))
             }
         }

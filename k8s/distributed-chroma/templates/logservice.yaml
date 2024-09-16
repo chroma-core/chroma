@@ -4,7 +4,7 @@ metadata:
   name: logservice
   namespace: {{ .Values.namespace }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.logService.replicaCount }}
   selector:
     matchLabels:
       app: logservice
@@ -35,6 +35,10 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
+      {{if .Values.logService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.logService.nodeSelector | nindent 8 }}
+      {{ end }}
 ---
 apiVersion: v1
 kind: Service

@@ -1,9 +1,9 @@
 use crate::{
-    errors::{ChromaError, ErrorCodes},
     sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb},
     system::{Component, ComponentContext},
-    types::{Collection, Segment, SegmentType},
 };
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Collection, Segment, SegmentType};
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub(super) enum GetHnswSegmentByIdError {
     #[error("Hnsw segment with id: {0} not found")]
     HnswSegmentNotFound(Uuid),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
 }
 
@@ -28,9 +28,10 @@ impl ChromaError for GetHnswSegmentByIdError {
 pub(super) async fn get_hnsw_segment_by_id(
     mut sysdb: Box<SysDb>,
     hnsw_segment_id: &Uuid,
+    collection_id: &Uuid,
 ) -> Result<Segment, Box<GetHnswSegmentByIdError>> {
     let segments = sysdb
-        .get_segments(Some(*hnsw_segment_id), None, None, None)
+        .get_segments(Some(*hnsw_segment_id), None, None, *collection_id)
         .await;
     let segment = match segments {
         Ok(segments) => {
@@ -100,7 +101,7 @@ pub(super) async fn get_collection_by_id(
 pub(super) enum GetRecordSegmentByCollectionIdError {
     #[error("Record segment for collection with id: {0} not found")]
     RecordSegmentNotFound(Uuid),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
 }
 
@@ -122,7 +123,7 @@ pub(super) async fn get_record_segment_by_collection_id(
             None,
             Some(SegmentType::BlockfileRecord.into()),
             None,
-            Some(*collection_id),
+            *collection_id,
         )
         .await;
 

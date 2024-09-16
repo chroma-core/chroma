@@ -115,8 +115,7 @@ where
                         match res {
                             Ok(_) => {}
                             Err(e) => {
-                                println!("Failed to send message: {:?}", e);
-                                // TODO: switch to logging
+                                tracing::error!("Failed to send stream message: {:?}", e);
                                 // Terminate the stream
                                 break;
                             }

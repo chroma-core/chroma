@@ -4,10 +4,6 @@ use super::common::{
     get_collection_by_id, get_hnsw_segment_by_id, get_record_segment_by_collection_id,
     terminate_with_error,
 };
-use crate::blockstore::provider::BlockfileProvider;
-use crate::distance::DistanceFunction;
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::brute_force_knn::{
@@ -18,24 +14,33 @@ use crate::execution::operators::hnsw_knn::{
     HnswKnnOperator, HnswKnnOperatorInput, HnswKnnOperatorOutput,
 };
 use crate::execution::operators::merge_knn_results::{
-    MergeKnnResultsOperator, MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput,
+    MergeKnnBruteForceResultInput, MergeKnnResultsOperator, MergeKnnResultsOperatorInput,
+    MergeKnnResultsOperatorOutput,
 };
 use crate::execution::operators::normalize_vectors::normalize;
 use crate::execution::operators::pull_log::PullLogsOutput;
-use crate::index::hnsw_provider::HnswIndexProvider;
-use crate::index::IndexConfig;
+use crate::execution::operators::record_segment_prefetch::{
+    Keys, OffsetIdToDataKeys, OffsetIdToUserIdKeys, RecordSegmentPrefetchIoInput,
+    RecordSegmentPrefetchIoOperator, RecordSegmentPrefetchIoOperatorError,
+    RecordSegmentPrefetchIoOutput,
+};
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
     DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, ComponentHandle, System};
-use crate::types::{Collection, LogRecord, Segment, VectorQueryResult};
 use crate::{
     log::log::Log,
     system::{Component, Handler, ReceiverForMessage},
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::DistanceFunction;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::IndexConfig;
+use chroma_types::{Chunk, Collection, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -73,16 +78,14 @@ enum ExecutionState {
 enum HnswSegmentQueryError {
     #[error(transparent)]
     HnswSegmentQueryError(#[from] super::common::GetHnswSegmentByIdError),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Collection: {0} not found")]
     CollectionNotFound(Uuid),
-    #[error("Get collection error")]
+    #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Record segment not found for collection: {0}")]
     RecordSegmentNotFound(Uuid),
-    #[error("HNSW segment has no collection")]
-    HnswSegmentHasNoCollection,
     #[error("Collection has no dimension set")]
     CollectionHasNoDimension,
 }
@@ -95,7 +98,6 @@ impl ChromaError for HnswSegmentQueryError {
             HnswSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
             HnswSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
-            HnswSegmentQueryError::HnswSegmentHasNoCollection => ErrorCodes::InvalidArgument,
             HnswSegmentQueryError::CollectionHasNoDimension => ErrorCodes::InvalidArgument,
         }
     }
@@ -112,6 +114,7 @@ pub(crate) struct HnswQueryOrchestrator {
     allowed_ids: Arc<[String]>,
     include_embeddings: bool,
     hnsw_segment_id: Uuid,
+    collection_id: Uuid,
     // State fetched or created for query execution
     hnsw_segment: Option<Segment>,
     record_segment: Option<Segment>,
@@ -120,9 +123,7 @@ pub(crate) struct HnswQueryOrchestrator {
     // query_vectors index to the result
     hnsw_result_offset_ids: HashMap<usize, Vec<usize>>,
     hnsw_result_distances: HashMap<usize, Vec<f32>>,
-    brute_force_result_user_ids: HashMap<usize, Vec<String>>,
-    brute_force_result_distances: HashMap<usize, Vec<f32>>,
-    brute_force_result_embeddings: HashMap<usize, Vec<Vec<f32>>>,
+    brute_force_results: HashMap<usize, BruteForceKnnOperatorOutput>,
     // Task id to query_vectors index
     hnsw_task_id_to_query_index: HashMap<Uuid, usize>,
     brute_force_task_id_to_query_index: HashMap<Uuid, usize>,
@@ -152,6 +153,7 @@ impl HnswQueryOrchestrator {
         allowed_ids: Vec<String>,
         include_embeddings: bool,
         segment_id: Uuid,
+        collection_id: Uuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         hnsw_index_provider: HnswIndexProvider,
@@ -183,15 +185,14 @@ impl HnswQueryOrchestrator {
             allowed_ids: allowed_ids.into(),
             include_embeddings,
             hnsw_segment_id: segment_id,
+            collection_id,
             hnsw_segment: None,
             record_segment: None,
             collection: None,
             index_config: None,
             hnsw_result_offset_ids: HashMap::new(),
             hnsw_result_distances: HashMap::new(),
-            brute_force_result_user_ids: HashMap::new(),
-            brute_force_result_distances: HashMap::new(),
-            brute_force_result_embeddings: HashMap::new(),
+            brute_force_results: HashMap::new(),
             hnsw_task_id_to_query_index: HashMap::new(),
             brute_force_task_id_to_query_index: HashMap::new(),
             merge_task_id_to_query_index: HashMap::new(),
@@ -241,6 +242,7 @@ impl HnswQueryOrchestrator {
             Ok(_) => (),
             Err(e) => {
                 // TODO: log an error and reply to caller
+                tracing::error!("Error sending PullLogs task: {:?}", e);
             }
         }
     }
@@ -283,7 +285,7 @@ impl HnswQueryOrchestrator {
                 Ok(_) => (),
                 Err(e) => {
                     // Log an error
-                    println!("Error sending Brute Force KNN task: {:?}", e);
+                    tracing::error!("Error sending Brute Force KNN task: {:?}", e);
                 }
             }
         }
@@ -334,7 +336,6 @@ impl HnswQueryOrchestrator {
                 }
             }
         };
-        println!("Created HNSW Segment Reader: {:?}", hnsw_segment_reader);
 
         let record_segment = self
             .record_segment
@@ -359,7 +360,7 @@ impl HnswQueryOrchestrator {
                 Ok(_) => (),
                 Err(e) => {
                     // Log an error
-                    println!("Error sending HNSW KNN task: {:?}", e);
+                    tracing::error!("Error sending HNSW KNN task: {:?}", e);
                 }
             }
         }
@@ -372,22 +373,85 @@ impl HnswQueryOrchestrator {
         }
     }
 
+    async fn prefetch_record_data(&mut self, ctx: &ComponentContext<Self>, offset_ids: Vec<u32>) {
+        let record_segment = self
+            .record_segment
+            .as_ref()
+            .expect("Invariant violation. Record Segment is not set");
+        // TODO: Divide this into multiple tasks based on some criteria.
+        let offsetid_to_data_keys =
+            Keys::OffsetIdToDataKeys(OffsetIdToDataKeys { keys: offset_ids });
+        let prefetch_input = RecordSegmentPrefetchIoInput {
+            keys: offsetid_to_data_keys,
+            segment: record_segment.clone(),
+            provider: self.blockfile_provider.clone(),
+        };
+        let operator = RecordSegmentPrefetchIoOperator::new();
+        let prefetch_task = wrap(operator, prefetch_input, ctx.receiver());
+        match self
+            .dispatcher
+            .send(prefetch_task, Some(Span::current()))
+            .await
+        {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error
+                tracing::error!("Error sending record segment Prefetch data task: {:?}", e);
+            }
+        }
+    }
+
+    async fn prefetch_user_ids(&mut self, ctx: &ComponentContext<Self>, offset_ids: Vec<u32>) {
+        let record_segment = self
+            .record_segment
+            .as_ref()
+            .expect("Invariant violation. Record Segment is not set");
+        // TODO: Divide this into multiple tasks based on some criteria.
+        let offsetid_to_userid_keys =
+            Keys::OffsetIdToUserIdKeys(OffsetIdToUserIdKeys { keys: offset_ids });
+        let prefetch_input = RecordSegmentPrefetchIoInput {
+            keys: offsetid_to_userid_keys,
+            segment: record_segment.clone(),
+            provider: self.blockfile_provider.clone(),
+        };
+        let operator = RecordSegmentPrefetchIoOperator::new();
+        let prefetch_task = wrap(operator, prefetch_input, ctx.receiver());
+        match self
+            .dispatcher
+            .send(prefetch_task, Some(Span::current()))
+            .await
+        {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error
+                tracing::error!("Error sending Prefetch data task: {:?}", e);
+            }
+        }
+    }
+
     async fn merge_results_for_index(
         &mut self,
         ctx: &ComponentContext<Self>,
         query_vector_index: usize,
     ) {
-        let record_segment = self
-            .record_segment
-            .as_ref()
-            .expect("Invariant violation. Record Segment is not set");
-
         let hnsw_result_offset_ids = self
             .hnsw_result_offset_ids
             .remove(&query_vector_index)
             .expect(
                 "Invariant violation. HNSW result offset ids are not set for query vector index",
             );
+
+        // Eagerly dispatch prefetch tasks.
+        let offset_ids_to_prefetch: Vec<u32> =
+            hnsw_result_offset_ids.iter().map(|x| *x as u32).collect();
+        self.prefetch_record_data(ctx, offset_ids_to_prefetch.clone())
+            .await;
+        self.prefetch_user_ids(ctx, offset_ids_to_prefetch).await;
+
+        let record_segment = self
+            .record_segment
+            .as_ref()
+            .expect("Invariant violation. Record Segment is not set");
 
         let hnsw_result_distances = self
             .hnsw_result_distances
@@ -396,15 +460,11 @@ impl HnswQueryOrchestrator {
                 "Invariant violation. HNSW result distances are not set for query vector index",
             );
 
-        let brute_force_result_user_ids = self.brute_force_result_user_ids.remove(&query_vector_index).expect("Invariant violation. Brute force result user ids are not set for query vector index");
-        let brute_force_result_distances = self.brute_force_result_distances.remove(&query_vector_index).expect("Invariant violation. Brute force result distances are not set for query vector index");
-        let brute_force_result_embeddings = self
-            .brute_force_result_embeddings
-            .remove(&query_vector_index);
+        let brute_force_result = self.brute_force_results.remove(&query_vector_index);
 
         tracing::info!(
             "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids",
-            brute_force_result_user_ids.len(),
+            brute_force_result.as_ref().map_or(0, |x| x.user_ids.len()),
             hnsw_result_offset_ids.len()
         );
 
@@ -412,9 +472,11 @@ impl HnswQueryOrchestrator {
         let input = MergeKnnResultsOperatorInput::new(
             hnsw_result_offset_ids,
             hnsw_result_distances,
-            brute_force_result_user_ids,
-            brute_force_result_distances,
-            brute_force_result_embeddings,
+            brute_force_result.map(|r| MergeKnnBruteForceResultInput {
+                user_ids: r.user_ids,
+                distances: r.distances,
+                vectors: r.embeddings,
+            }),
             self.include_embeddings,
             self.k as usize,
             record_segment.clone(),
@@ -428,7 +490,7 @@ impl HnswQueryOrchestrator {
             Ok(_) => (),
             Err(e) => {
                 // Log an error
-                println!("Error sending Merge KNN task: {:?}", e);
+                tracing::error!("Error sending Merge KNN task: {:?}", e);
             }
         }
     }
@@ -483,26 +545,21 @@ impl Component for HnswQueryOrchestrator {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         // Populate the orchestrator with the initial state - The HNSW Segment, The Record Segment and the Collection
-        let hnsw_segment =
-            match get_hnsw_segment_by_id(self.sysdb.clone(), &self.hnsw_segment_id).await {
-                Ok(segment) => segment,
-                Err(e) => {
-                    terminate_with_error(self.result_channel.take(), e, ctx);
-                    return;
-                }
-            };
-
-        let collection_id = match &hnsw_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(HnswSegmentQueryError::HnswSegmentHasNoCollection),
-                    ctx,
-                );
+        let hnsw_segment = match get_hnsw_segment_by_id(
+            self.sysdb.clone(),
+            &self.hnsw_segment_id,
+            &self.collection_id,
+        )
+        .await
+        {
+            Ok(segment) => segment,
+            Err(e) => {
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
+
+        let collection_id = &hnsw_segment.collection;
 
         let collection = match get_collection_by_id(self.sysdb.clone(), collection_id).await {
             Ok(collection) => collection,
@@ -582,7 +639,13 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
         match message {
             Ok(pull_logs_output) => {
                 let logs = pull_logs_output.logs();
-                self.brute_force_query(logs.clone(), ctx.receiver()).await;
+                if logs.len() > 0 {
+                    self.brute_force_query(logs.clone(), ctx.receiver()).await;
+                } else {
+                    // Skip running the brute force query if there are no logs
+                    self.merge_dependency_count -= self.query_vectors.len() as u32;
+                }
+
                 self.hnsw_segment_query(logs, ctx).await;
             }
             Err(e) => {
@@ -612,22 +675,11 @@ impl Handler<TaskResult<BruteForceKnnOperatorOutput, BruteForceKnnOperatorError>
 
         match message {
             Ok(output) => {
-                let mut user_ids = output.user_ids;
-                let mut embeddings = None;
-                if self.include_embeddings {
-                    embeddings = Some(output.embeddings);
-                }
-                self.brute_force_result_user_ids
-                    .insert(query_index, user_ids);
-                self.brute_force_result_distances
-                    .insert(query_index, output.distances);
-                if let Some(embeddings) = embeddings {
-                    self.brute_force_result_embeddings
-                        .insert(query_index, embeddings);
-                }
+                self.brute_force_results.insert(query_index, output);
             }
             Err(e) => {
-                // TODO: handle this error, technically never happens
+                terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
+                return;
             }
         }
 
@@ -663,6 +715,7 @@ impl Handler<TaskResult<HnswKnnOperatorOutput, Box<dyn ChromaError>>> for HnswQu
             }
             Err(e) => {
                 terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
+                return;
             }
         }
 
@@ -767,5 +820,20 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
                 }
             }
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<RecordSegmentPrefetchIoOutput, RecordSegmentPrefetchIoOperatorError>>
+    for HnswQueryOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _message: TaskResult<RecordSegmentPrefetchIoOutput, RecordSegmentPrefetchIoOperatorError>,
+        _ctx: &ComponentContext<Self>,
+    ) {
+        // Nothing to do.
     }
 }

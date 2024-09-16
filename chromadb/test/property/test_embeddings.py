@@ -1,5 +1,6 @@
 import hypothesis.stateful
 import hypothesis.strategies
+from overrides import overrides
 import pytest
 import logging
 import hypothesis
@@ -8,6 +9,7 @@ from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import ID, Embeddings, Include, IDs, validate_embeddings
+from chromadb.config import System
 import chromadb.errors as errors
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
@@ -26,7 +28,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import is_client_in_process, reset, NOT_CLUSTER_ONLY
 import numpy as np
 import uuid
 from chromadb.test.utils.wait_for_version_increase import (
@@ -49,11 +51,11 @@ def print_traces() -> None:
         print(f"{key}: {value}")
 
 
-dtype_shared_st: st.SearchStrategy[  # type: ignore[type-arg]
+dtype_shared_st: st.SearchStrategy[
     Union[np.float16, np.float32, np.float64]
 ] = st.shared(st.sampled_from(strategies.float_types), key="dtype")
 
-dimension_shared_st: st.SearchStrategy[int] = st.shared(  # type: ignore[type-arg]
+dimension_shared_st: st.SearchStrategy[int] = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"
 )
 
@@ -72,7 +74,8 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 
 class EmbeddingStateMachineBase(RuleBasedStateMachine):
     collection: Collection
-    embedding_ids: Bundle[ID] = Bundle("embedding_ids")  # type: ignore[type-arg]
+    embedding_ids: Bundle[ID] = Bundle("embedding_ids")
+    has_collection_mutated = False
 
     def __init__(self, client: ClientAPI):
         super().__init__()
@@ -95,11 +98,15 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             ids=[], metadatas=[], documents=[], embeddings=[]
         )
 
+    @overrides
+    def teardown(self) -> None:
+        self.client.delete_collection(self.collection.name)
+
     @rule(
         target=embedding_ids,
         record_set=strategies.recordsets(collection_st),
     )
-    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:  # type: ignore[type-arg]
+    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         trace("add_embeddings")
         self.on_state_change(EmbeddingStateMachineStates.add_embeddings)
 
@@ -208,6 +215,16 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         invariants.metadatas_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
         invariants.documents_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
 
+    @precondition(
+        lambda self: is_client_in_process(self.client)
+    )  # (Can't check the log size on HTTP clients)
+    @invariant()
+    def log_size_below_max(self) -> None:
+        system: System = self.client._system  # type: ignore
+        invariants.log_size_below_max(
+            system, [self.collection], self.has_collection_mutated
+        )
+
     def _upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
@@ -292,11 +309,12 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             del self.record_set_state["documents"][i]
 
     def on_state_change(self, new_state: str) -> None:
-        pass
+        if new_state != EmbeddingStateMachineStates.initialize:
+            self.has_collection_mutated = True
 
 
 class EmbeddingStateMachine(EmbeddingStateMachineBase):
-    embedding_ids: Bundle[ID] = Bundle("embedding_ids")  # type: ignore[type-arg]
+    embedding_ids: Bundle[ID] = Bundle("embedding_ids")
 
     def __init__(self, client: ClientAPI):
         super().__init__(client)
@@ -304,7 +322,12 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
         super().initialize(collection)
-        print("[test_embeddings] Reset")
+        print(
+            "[test_embeddings][initialize] Initialize collection id ",
+            self.collection._model["id"],
+            " hypothesis generated collection id ",
+            collection.id,
+        )
         self.log_operation_count = 0
         self.unique_ids_in_log: Set[ID] = set()
         self.collection_version = self.collection.get_model()["version"]
@@ -317,10 +340,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
     @rule()
     def wait_for_compaction(self) -> None:
         current_version = get_collection_version(self.client, self.collection.name)
-        assert current_version >= self.collection_version
+        assert current_version >= self.collection_version  # type: ignore[operator]
         # This means that there was a compaction from the last time this was
         # invoked. Ok to start all over again.
-        if current_version > self.collection_version:
+        if current_version > self.collection_version:  # type: ignore[operator]
             print(
                 "[test_embeddings][wait_for_compaction] collection version has changed, so reset to 0"
             )
@@ -329,7 +352,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
             self.log_operation_count = 0
             self.unique_ids_in_log = set()
         else:
-            print("[test_embeddings][wait_for_compaction] wait for version to increase")
+            print(
+                "[test_embeddings][wait_for_compaction] wait for version to increase from current version ",
+                current_version,
+            )
             new_version = wait_for_version_increase(
                 self.client, self.collection.name, current_version, additional_time=240
             )
@@ -342,7 +368,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         target=embedding_ids,
         record_set=strategies.recordsets(collection_st),
     )
-    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:  # type: ignore[type-arg]
+    def add_embeddings(self, record_set: strategies.RecordSet) -> MultipleResults[ID]:
         res = super().add_embeddings(record_set)
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
             record_set
@@ -357,7 +383,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
         for id in normalized_record_set["ids"]:
             if id not in self.unique_ids_in_log:
                 self.unique_ids_in_log.add(id)
-        return res
+        return res  # type: ignore[return-value]
 
     @rule(ids=st.lists(consumes(embedding_ids), min_size=1))
     def delete_by_ids(self, ids: IDs) -> None:
@@ -448,7 +474,7 @@ def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
     state.count()
     state.fields_match()
     state.no_duplicates()
-    v1, v2, v3, v4, v5, v6 = state.add_embeddings(
+    v1, v2, v3, v4, v5, v6 = state.add_embeddings(  # type: ignore[misc]
         record_set={
             "ids": ["0", "1", "2", "3", "4", "5"],
             "embeddings": [
@@ -474,7 +500,7 @@ def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
     state.count()
     state.fields_match()
     state.no_duplicates()
-    state.teardown()  # type: ignore[no-untyped-call]
+    state.teardown()
 
 
 def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
@@ -501,7 +527,7 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
     state.count()
     state.fields_match()
     state.no_duplicates()
-    v1, v2, v3, v4, v5 = state.add_embeddings(
+    v1, v2, v3, v4, v5 = state.add_embeddings(  # type: ignore[misc]
         record_set={
             "ids": ["0", "1", "2", "3", "4"],
             "embeddings": [
@@ -528,7 +554,7 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
         }
     )
     state.ann_accuracy()
-    state.teardown()  # type: ignore[no-untyped-call]
+    state.teardown()
 
 
 def test_add_delete_add(client: ClientAPI) -> None:

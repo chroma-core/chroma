@@ -1,10 +1,7 @@
-use crate::types::Collection;
-use crate::types::FlushCompactionResponse;
-use crate::types::Segment;
-use crate::types::SegmentFlushInfo;
-use crate::types::SegmentScope;
-use crate::types::SegmentType;
-use crate::types::Tenant;
+use chroma_types::{
+    Collection, FlushCompactionResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType,
+    Tenant,
+};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,7 +83,7 @@ impl TestSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> bool {
         if id.is_some() && id.unwrap() != segment.id {
             return false;
@@ -97,9 +94,7 @@ impl TestSysDb {
         if scope.is_some() && scope.unwrap() != segment.scope {
             return false;
         }
-        if collection.is_some()
-            && (segment.collection.is_none() || collection.unwrap() != segment.collection.unwrap())
-        {
+        if collection != segment.collection {
             return false;
         }
         true
@@ -136,7 +131,7 @@ impl TestSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let inner = self.inner.lock();
         let mut segments = Vec::new();
@@ -160,7 +155,6 @@ impl TestSysDb {
             let last_compaction_time = match inner.tenant_last_compaction_time.get(&tenant_id) {
                 Some(last_compaction_time) => *last_compaction_time,
                 None => {
-                    // TODO: Log an error
                     return Err(GetLastCompactionTimeError::TenantNotFound);
                 }
             };

@@ -1,5 +1,5 @@
 ---
-title: Python Collection
+title: Collection
 ---
 
 # Collection Objects
@@ -8,7 +8,7 @@ title: Python Collection
 class Collection(BaseModel)
 ```
 
-### count
+# count
 
 ```python
 def count() -> int
@@ -20,7 +20,7 @@ The total number of embeddings added to the database
 
 - `int` - The total number of embeddings added to the database
 
-### add
+# add
 
 ```python
 def add(ids: OneOrMany[ID],
@@ -51,7 +51,7 @@ Add embeddings to the data store.
 - `ValueError` - If you don't provide an embedding function and don't provide embeddings
 - `DuplicateIDError` - If you provide an id that already exists
 
-### get
+# get
 
 ```python
 def get(ids: Optional[OneOrMany[ID]] = None,
@@ -79,7 +79,7 @@ all embeddings up to limit starting at offset.
 
 - `GetResult` - A GetResult object containing the results.
 
-### peek
+# peek
 
 ```python
 def peek(limit: int = 10) -> GetResult
@@ -96,7 +96,7 @@ Get the first few results in the database up to limit
 
 - `GetResult` - A GetResult object containing the results.
 
-### query
+# query
 
 ```python
 def query(
@@ -131,7 +131,7 @@ Get the n_results nearest neighbor embeddings for provided query_embeddings or q
 - `ValueError` - If you don't provide either query_embeddings or query_texts
 - `ValueError` - If you provide both query_embeddings and query_texts
 
-### modify
+# modify
 
 ```python
 def modify(name: Optional[str] = None,
@@ -150,7 +150,7 @@ Modify the collection name or metadata
 
   None
 
-### update
+# update
 
 ```python
 def update(ids: OneOrMany[ID],
@@ -173,7 +173,7 @@ Update the embeddings, metadatas or documents for provided ids.
 
   None
 
-### upsert
+# upsert
 
 ```python
 def upsert(ids: OneOrMany[ID],
@@ -196,7 +196,7 @@ Update the embeddings, metadatas or documents for provided ids, or create them i
 
   None
 
-### delete
+# delete
 
 ```python
 def delete(ids: Optional[IDs] = None,

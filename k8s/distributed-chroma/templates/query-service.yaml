@@ -79,6 +79,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+      {{if .Values.queryService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.queryService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.queryService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.queryService.nodeSelector | nindent 8 }}
+      {{ end }}
       updateStrategy:
         type: RollingUpdate
         rollingUpdate:

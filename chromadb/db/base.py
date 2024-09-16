@@ -1,4 +1,4 @@
-from typing import Any, Optional, Sequence, Tuple, Type
+from typing import Any, Optional, Sequence, Tuple, Type, Union
 from types import TracebackType
 from typing_extensions import Protocol, Self, Literal
 from abc import ABC, abstractmethod
@@ -10,11 +10,7 @@ from chromadb.config import System, Component
 from uuid import UUID
 from itertools import islice, count
 
-
-class NotFoundError(Exception):
-    """Raised when a delete or update operation affects no rows"""
-
-    pass
+from chromadb.types import SeqId
 
 
 class UniqueConstraintError(Exception):
@@ -116,6 +112,29 @@ class SqlDB(Component):
     def param(self, idx: int) -> pypika.Parameter:
         """Return a PyPika Parameter object for the given index"""
         return pypika.Parameter(self.parameter_format().format(idx))
+
+    @staticmethod
+    def decode_seq_id(seq_id_bytes: Union[bytes, int]) -> SeqId:
+        """Decode a byte array into a SeqID"""
+        if isinstance(seq_id_bytes, int):
+            return seq_id_bytes
+
+        if len(seq_id_bytes) == 8:
+            return int.from_bytes(seq_id_bytes, "big")
+        elif len(seq_id_bytes) == 24:
+            return int.from_bytes(seq_id_bytes, "big")
+        else:
+            raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
+
+    @staticmethod
+    def encode_seq_id(seq_id: SeqId) -> bytes:
+        """Encode a SeqID into a byte array"""
+        if seq_id.bit_length() <= 64:
+            return int.to_bytes(seq_id, 8, "big")
+        elif seq_id.bit_length() <= 192:
+            return int.to_bytes(seq_id, 24, "big")
+        else:
+            raise ValueError(f"Unsupported SeqID: {seq_id}")
 
 
 _context = local()

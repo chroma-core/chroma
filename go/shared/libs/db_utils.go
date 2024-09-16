@@ -2,6 +2,7 @@ package libs
 
 import (
 	"context"
+
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

@@ -3,7 +3,7 @@
 // The go implementation is located go/internal/utils/rendezvous_hash.go
 // The python implementation is located chromadb/utils/rendezvous_hash.py
 
-use crate::errors::{ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes};
 use std::io::Cursor;
 use thiserror::Error;
 
@@ -69,7 +69,7 @@ pub(crate) fn assign<H: Hasher>(
         let score = hasher.hash(member.as_ref(), key);
         let score = match score {
             Ok(score) => score,
-            Err(err) => return Err(AssignmentError::HashError),
+            Err(_err) => return Err(AssignmentError::HashError),
         };
         if score > max_score {
             max_score = score;

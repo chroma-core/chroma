@@ -23,7 +23,7 @@ type ICoordinator interface {
 	UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection) (*model.Collection, error)
 	CreateSegment(ctx context.Context, createSegment *model.CreateSegment) error
 	GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error)
-	DeleteSegment(ctx context.Context, segmentID types.UniqueID) error
+	DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error
 	UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment) (*model.Segment, error)
 	CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase) (*model.Database, error)
 	GetDatabase(ctx context.Context, getDatabase *model.GetDatabase) (*model.Database, error)
@@ -106,8 +106,8 @@ func (s *Coordinator) GetSegments(ctx context.Context, segmentID types.UniqueID,
 	return s.catalog.GetSegments(ctx, segmentID, segmentType, scope, collectionID)
 }
 
-func (s *Coordinator) DeleteSegment(ctx context.Context, segmentID types.UniqueID) error {
-	return s.catalog.DeleteSegment(ctx, segmentID)
+func (s *Coordinator) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
+	return s.catalog.DeleteSegment(ctx, segmentID, collectionID)
 }
 
 func (s *Coordinator) UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment) (*model.Segment, error) {

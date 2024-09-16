@@ -1,22 +1,22 @@
-import {
-  GetResponse,
-  QueryResponse,
-  AddResponse,
-  CollectionMetadata,
-  ConfigOptions,
-  GetParams,
-  AddParams,
-  UpsertParams,
-  ModifyCollectionParams,
-  UpdateParams,
-  QueryParams,
-  PeekParams,
-  DeleteParams,
-} from "./types";
+import { ChromaClient } from "./ChromaClient";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
-import { ApiApi as DefaultApi } from "./generated";
-import { handleSuccess } from "./utils";
-import { toArray, toArrayOfArrays } from "./utils";
+import {
+  CollectionMetadata,
+  AddRecordsParams,
+  UpsertRecordsParams,
+  BaseGetParams,
+  GetResponse,
+  UpdateRecordsParams,
+  QueryRecordsParams,
+  MultiQueryResponse,
+  PeekParams,
+  MultiGetResponse,
+  DeleteParams,
+  Embeddings,
+  CollectionParams,
+} from "./types";
+import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
+import { Api as GeneratedApi } from "./generated";
 
 export class Collection {
   public name: string;
@@ -25,11 +25,11 @@ export class Collection {
   /**
    * @ignore
    */
-  private api: DefaultApi & ConfigOptions;
+  private client: ChromaClient;
   /**
    * @ignore
    */
-  public embeddingFunction: IEmbeddingFunction | undefined;
+  public embeddingFunction: IEmbeddingFunction;
 
   /**
    * @ignore
@@ -37,112 +37,15 @@ export class Collection {
   constructor(
     name: string,
     id: string,
-    api: DefaultApi,
+    client: ChromaClient,
+    embeddingFunction: IEmbeddingFunction,
     metadata?: CollectionMetadata,
-    embeddingFunction?: IEmbeddingFunction,
   ) {
     this.name = name;
     this.id = id;
     this.metadata = metadata;
-    this.api = api;
-    if (embeddingFunction !== undefined)
-      this.embeddingFunction = embeddingFunction;
-  }
-
-  /**
-   * @ignore
-   */
-  private setName(name: string): void {
-    this.name = name;
-  }
-  /**
-   * @ignore
-   */
-  private setMetadata(metadata: CollectionMetadata | undefined): void {
-    this.metadata = metadata;
-  }
-
-  /**
-   * @ignore
-   */
-  private async validate(
-    require_embeddings_or_documents: boolean, // set to false in the case of Update
-    ids: string | string[],
-    embeddings: number[] | number[][] | undefined,
-    metadatas?: object | object[],
-    documents?: string | string[],
-  ) {
-    if (require_embeddings_or_documents) {
-      if (embeddings === undefined && documents === undefined) {
-        throw new Error("embeddings and documents cannot both be undefined");
-      }
-    }
-
-    if (embeddings === undefined && documents !== undefined) {
-      const documentsArray = toArray(documents);
-      if (this.embeddingFunction !== undefined) {
-        embeddings = await this.embeddingFunction.generate(documentsArray);
-      } else {
-        throw new Error(
-          "embeddingFunction is undefined. Please configure an embedding function",
-        );
-      }
-    }
-    if (embeddings === undefined)
-      throw new Error("embeddings is undefined but shouldnt be");
-
-    const idsArray = toArray(ids);
-    const embeddingsArray: number[][] = toArrayOfArrays(embeddings);
-
-    let metadatasArray: object[] | undefined;
-    if (metadatas === undefined) {
-      metadatasArray = undefined;
-    } else {
-      metadatasArray = toArray(metadatas);
-    }
-
-    let documentsArray: (string | undefined)[] | undefined;
-    if (documents === undefined) {
-      documentsArray = undefined;
-    } else {
-      documentsArray = toArray(documents);
-    }
-
-    // validate all ids are strings
-    for (let i = 0; i < idsArray.length; i += 1) {
-      if (typeof idsArray[i] !== "string") {
-        throw new Error(
-          `Expected ids to be strings, found ${typeof idsArray[
-            i
-          ]} at index ${i}`,
-        );
-      }
-    }
-
-    if (
-      (embeddingsArray !== undefined &&
-        idsArray.length !== embeddingsArray.length) ||
-      (metadatasArray !== undefined &&
-        idsArray.length !== metadatasArray.length) ||
-      (documentsArray !== undefined &&
-        idsArray.length !== documentsArray.length)
-    ) {
-      throw new Error(
-        "ids, embeddings, metadatas, and documents must all be the same length",
-      );
-    }
-
-    const uniqueIds = new Set(idsArray);
-    if (uniqueIds.size !== idsArray.length) {
-      const duplicateIds = idsArray.filter(
-        (item, index) => idsArray.indexOf(item) !== index,
-      );
-      throw new Error(
-        `Expected IDs to be unique, found duplicates for: ${duplicateIds}`,
-      );
-    }
-
-    return [idsArray, embeddingsArray, metadatasArray, documentsArray];
+    this.client = client;
+    this.embeddingFunction = embeddingFunction;
   }
 
   /**
@@ -164,32 +67,18 @@ export class Collection {
    * });
    * ```
    */
-  public async add({
-    ids,
-    embeddings,
-    metadatas,
-    documents,
-  }: AddParams): Promise<AddResponse> {
-    const [idsArray, embeddingsArray, metadatasArray, documentsArray] =
-      await this.validate(true, ids, embeddings, metadatas, documents);
+  async add(params: AddRecordsParams): Promise<void> {
+    await this.client.init();
 
-    const response = await this.api
-      .add(
-        this.id,
-        {
-          // @ts-ignore
-          ids: idsArray,
-          embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
-          // @ts-ignore
-          documents: documentsArray,
-          // @ts-ignore
-          metadatas: metadatasArray,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    return response;
+    await this.client.api.add(
+      this.id,
+      // TODO: For some reason the auto generated code requires metadata to be defined here.
+      (await prepareRecordRequest(
+        params,
+        this.embeddingFunction,
+      )) as GeneratedApi.AddEmbedding,
+      this.client.api.options,
+    );
   }
 
   /**
@@ -199,7 +88,7 @@ export class Collection {
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
-   * @returns {Promise<boolean>} - The response from the API. True if successful.
+   * @returns {Promise<void>}
    *
    * @example
    * ```typescript
@@ -211,82 +100,35 @@ export class Collection {
    * });
    * ```
    */
-  public async upsert({
-    ids,
-    embeddings,
-    metadatas,
-    documents,
-  }: UpsertParams): Promise<boolean> {
-    const [idsArray, embeddingsArray, metadatasArray, documentsArray] =
-      await this.validate(true, ids, embeddings, metadatas, documents);
+  async upsert(params: UpsertRecordsParams): Promise<void> {
+    await this.client.init();
 
-    const response = await this.api
-      .upsert(
-        this.id,
-        {
-          //@ts-ignore
-          ids: idsArray,
-          embeddings: embeddingsArray as number[][], // We know this is defined because of the validate function
-          //@ts-ignore
-          documents: documentsArray,
-          //@ts-ignore
-          metadatas: metadatasArray,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    return response;
+    await this.client.api.upsert(
+      this.id,
+      // TODO: For some reason the auto generated code requires metadata to be defined here.
+      (await prepareRecordRequest(
+        params,
+        this.embeddingFunction,
+      )) as GeneratedApi.AddEmbedding,
+      this.client.api.options,
+    );
   }
 
   /**
    * Count the number of items in the collection
-   * @returns {Promise<number>} - The response from the API.
+   * @returns {Promise<number>} - The number of items in the collection.
    *
    * @example
    * ```typescript
-   * const response = await collection.count();
+   * const count = await collection.count();
    * ```
    */
-  public async count(): Promise<number> {
-    const response = await this.api.count(this.id, this.api.options);
-    return handleSuccess(response);
-  }
-
-  /**
-   * Modify the collection name or metadata
-   * @param {Object} params - The parameters for the query.
-   * @param {string} [params.name] - Optional new name for the collection.
-   * @param {CollectionMetadata} [params.metadata] - Optional new metadata for the collection.
-   * @returns {Promise<void>} - The response from the API.
-   *
-   * @example
-   * ```typescript
-   * const response = await collection.modify({
-   *   name: "new name",
-   *   metadata: { "key": "value" },
-   * });
-   * ```
-   */
-  public async modify({
-    name,
-    metadata,
-  }: ModifyCollectionParams = {}): Promise<void> {
-    const response = await this.api
-      .updateCollection(
-        this.id,
-        {
-          new_name: name,
-          new_metadata: metadata,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    this.setName(name || this.name);
-    this.setMetadata(metadata || this.metadata);
-
-    return response;
+  async count(): Promise<number> {
+    await this.client.init();
+    return (await this.client.api.count(
+      this.id,
+      this.client.api.options,
+    )) as number;
   }
 
   /**
@@ -312,42 +154,42 @@ export class Collection {
    * });
    * ```
    */
-  public async get({
+  async get({
     ids,
     where,
     limit,
     offset,
     include,
     whereDocument,
-  }: GetParams = {}): Promise<GetResponse> {
-    let idsArray: string[] | undefined;
-    if (ids !== undefined) idsArray = toArray(ids);
+  }: BaseGetParams = {}): Promise<GetResponse> {
+    await this.client.init();
 
-    return await this.api
-      .aGet(
-        this.id,
-        {
-          ids: idsArray,
-          where,
-          limit,
-          offset,
-          //@ts-ignore
-          include,
-          where_document: whereDocument,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
+    const idsArray = ids ? toArray(ids) : undefined;
+
+    const resp = (await this.client.api.aGet(
+      this.id,
+      {
+        ids: idsArray,
+        where,
+        limit,
+        offset,
+        include,
+        where_document: whereDocument,
+      },
+      this.client.api.options,
+    )) as MultiGetResponse;
+
+    return resp;
   }
 
   /**
-   * Update the embeddings, documents, and/or metadatas of existing items
+   * Update items in the collection
    * @param {Object} params - The parameters for the query.
-   * @param {ID | IDs} [params.ids] - The IDs of the items to update.
-   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings to update.
-   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadatas to update.
-   * @param {Document | Documents} [params.documents] - Optional documents to update.
-   * @returns {Promise<boolean>} - The API Response. True if successful. Else, error.
+   * @param {ID | IDs} [params.ids] - IDs of the items to add.
+   * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
+   * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
+   * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
+   * @returns {Promise<void>}
    *
    * @example
    * ```typescript
@@ -355,53 +197,18 @@ export class Collection {
    *   ids: ["id1", "id2"],
    *   embeddings: [[1, 2, 3], [4, 5, 6]],
    *   metadatas: [{ "key": "value" }, { "key": "value" }],
-   *   documents: ["new document 1", "new document 2"],
+   *   documents: ["document1", "document2"],
    * });
    * ```
    */
-  public async update({
-    ids,
-    embeddings,
-    metadatas,
-    documents,
-  }: UpdateParams): Promise<boolean> {
-    if (
-      embeddings === undefined &&
-      documents === undefined &&
-      metadatas === undefined
-    ) {
-      throw new Error(
-        "embeddings, documents, and metadatas cannot all be undefined",
-      );
-    } else if (embeddings === undefined && documents !== undefined) {
-      const documentsArray = toArray(documents);
-      if (this.embeddingFunction !== undefined) {
-        embeddings = await this.embeddingFunction.generate(documentsArray);
-      } else {
-        throw new Error(
-          "embeddingFunction is undefined. Please configure an embedding function",
-        );
-      }
-    }
+  async update(params: UpdateRecordsParams): Promise<void> {
+    await this.client.init();
 
-    // backend expects None if metadatas is undefined
-    if (metadatas !== undefined) metadatas = toArray(metadatas);
-    if (documents !== undefined) documents = toArray(documents);
-
-    var resp = await this.api
-      .update(
-        this.id,
-        {
-          ids: toArray(ids),
-          embeddings: embeddings ? toArrayOfArrays(embeddings) : undefined,
-          documents: documents,
-          metadatas: metadatas,
-        },
-        this.api.options,
-      )
-      .then(handleSuccess);
-
-    return resp;
+    await this.client.api.update(
+      this.id,
+      await prepareRecordRequest(params, this.embeddingFunction, true),
+      this.client.api.options,
+    );
   }
 
   /**
@@ -437,49 +244,84 @@ export class Collection {
    * ```
    *
    */
-  public async query({
-    queryEmbeddings,
-    nResults,
+  async query({
+    nResults = 10,
     where,
-    queryTexts,
     whereDocument,
     include,
-  }: QueryParams): Promise<QueryResponse> {
-    if (nResults === undefined) nResults = 10;
-    if (queryEmbeddings === undefined && queryTexts === undefined) {
+    queryTexts,
+    queryEmbeddings,
+  }: QueryRecordsParams): Promise<MultiQueryResponse> {
+    if ((queryTexts && queryEmbeddings) || (!queryTexts && !queryEmbeddings)) {
       throw new Error(
-        "queryEmbeddings and queryTexts cannot both be undefined",
+        "You must supply exactly one of queryTexts or queryEmbeddings.",
       );
-    } else if (queryEmbeddings === undefined && queryTexts !== undefined) {
-      const queryTextsArray = toArray(queryTexts);
-      if (this.embeddingFunction !== undefined) {
-        queryEmbeddings =
-          await this.embeddingFunction.generate(queryTextsArray);
-      } else {
-        throw new Error(
-          "embeddingFunction is undefined. Please configure an embedding function",
-        );
-      }
     }
-    if (queryEmbeddings === undefined)
-      throw new Error("embeddings is undefined but shouldnt be");
 
-    const query_embeddingsArray = toArrayOfArrays(queryEmbeddings);
+    await this.client.init();
 
-    return await this.api
-      .getNearestNeighbors(
+    const arrayQueryEmbeddings: Embeddings =
+      queryTexts !== undefined
+        ? await this.embeddingFunction.generate(toArray(queryTexts))
+        : toArrayOfArrays<number>(queryEmbeddings);
+
+    return (await this.client.api.getNearestNeighbors(
+      this.id,
+      {
+        query_embeddings: arrayQueryEmbeddings,
+        where,
+        n_results: nResults,
+        where_document: whereDocument,
+        include,
+      },
+      this.client.api.options,
+    )) as MultiQueryResponse;
+  }
+
+  /**
+   * Modify the collection name or metadata
+   * @param {Object} params - The parameters for the query.
+   * @param {string} [params.name] - Optional new name for the collection.
+   * @param {CollectionMetadata} [params.metadata] - Optional new metadata for the collection.
+   * @returns {Promise<void>} - The response from the API.
+   *
+   * @example
+   * ```typescript
+   * const response = await client.updateCollection({
+   *   name: "new name",
+   *   metadata: { "key": "value" },
+   * });
+   * ```
+   */
+  async modify({
+    name,
+    metadata,
+  }: {
+    name?: string;
+    metadata?: CollectionMetadata;
+  }): Promise<CollectionParams> {
+    await this.client.init();
+    return this.client.api
+      .updateCollection(
         this.id,
         {
-          query_embeddings: query_embeddingsArray,
-          where,
-          n_results: nResults,
-          where_document: whereDocument,
-          //@ts-ignore
-          include: include,
+          new_name: name,
+          new_metadata: metadata,
         },
-        this.api.options,
+        this.client.api.options,
       )
-      .then(handleSuccess);
+      .then(() => {
+        if (name !== undefined) {
+          this.name = name;
+        }
+        if (metadata !== undefined) {
+          this.metadata = metadata;
+        }
+        return {
+          name: this.name,
+          metadata: this.metadata,
+        } as CollectionParams;
+      });
   }
 
   /**
@@ -496,16 +338,15 @@ export class Collection {
    * });
    * ```
    */
-  public async peek({ limit }: PeekParams = {}): Promise<GetResponse> {
-    if (limit === undefined) limit = 10;
-    const response = await this.api.aGet(
+  async peek({ limit = 10 }: PeekParams = {}): Promise<MultiGetResponse> {
+    await this.client.init();
+    return (await this.client.api.aGet(
       this.id,
       {
-        limit: limit,
+        limit,
       },
-      this.api.options,
-    );
-    return handleSuccess(response);
+      this.client.api.options,
+    )) as MultiGetResponse;
   }
 
   /**
@@ -526,19 +367,16 @@ export class Collection {
    * });
    * ```
    */
-  public async delete({
-    ids,
-    where,
-    whereDocument,
-  }: DeleteParams = {}): Promise<string[]> {
+  async delete({ ids, where, whereDocument }: DeleteParams = {}): Promise<
+    string[]
+  > {
+    await this.client.init();
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
-    return await this.api
-      .aDelete(
-        this.id,
-        { ids: idsArray, where: where, where_document: whereDocument },
-        this.api.options,
-      )
-      .then(handleSuccess);
+    return (await this.client.api.aDelete(
+      this.id,
+      { ids: idsArray, where: where, where_document: whereDocument },
+      this.client.api.options,
+    )) as string[];
   }
 }

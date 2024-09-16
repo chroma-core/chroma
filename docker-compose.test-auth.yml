@@ -1,5 +1,3 @@
-version: '3.9'
-
 networks:
   test_net:
     driver: bridge

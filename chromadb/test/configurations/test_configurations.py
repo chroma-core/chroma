@@ -1,9 +1,12 @@
+from overrides import overrides
 import pytest
 from chromadb.api.configuration import (
     ConfigurationInternal,
     ConfigurationDefinition,
+    InvalidConfigurationError,
     StaticParameterError,
     ConfigurationParameter,
+    HNSWConfiguration,
 )
 
 
@@ -22,6 +25,10 @@ class TestConfiguration(ConfigurationInternal):
             default_value=0,
         ),
     }
+
+    @overrides
+    def configuration_validator(self) -> None:
+        pass
 
 
 def test_default_values() -> None:
@@ -76,3 +83,28 @@ def test_validation() -> None:
     ]
     with pytest.raises(ValueError):
         TestConfiguration(parameters=invalid_parameter_names)
+
+
+def test_configuration_validation() -> None:
+    class FooConfiguration(ConfigurationInternal):
+        definitions = {
+            "foo": ConfigurationDefinition(
+                name="foo",
+                validator=lambda value: isinstance(value, str),
+                is_static=False,
+                default_value="default",
+            ),
+        }
+
+        @overrides
+        def configuration_validator(self) -> None:
+            if self.parameter_map.get("foo") != "bar":
+                raise InvalidConfigurationError("foo must be 'bar'")
+
+    with pytest.raises(ValueError, match="foo must be 'bar'"):
+        FooConfiguration(parameters=[ConfigurationParameter(name="foo", value="baz")])
+
+
+def test_hnsw_validation() -> None:
+    with pytest.raises(ValueError, match="must be less than or equal"):
+        HNSWConfiguration(batch_size=500, sync_threshold=100)

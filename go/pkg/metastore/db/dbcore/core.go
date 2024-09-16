@@ -3,14 +3,15 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strconv"
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go"
 	postgres2 "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"reflect"
-	"strconv"
-	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/metastore/db/dbmodel"
@@ -19,6 +20,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"gorm.io/plugin/opentelemetry/tracing"
 )
 
 var (
@@ -52,6 +54,11 @@ func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 			zap.String("host", cfg.Address),
 			zap.String("database", cfg.DBName),
 			zap.Error(err))
+		return nil, err
+	}
+
+	if err := db.Use(tracing.NewPlugin()); err != nil {
+		log.Error("fail to use tracing plugin", zap.Error(err))
 		return nil, err
 	}
 

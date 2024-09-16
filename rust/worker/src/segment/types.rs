@@ -1,10 +1,10 @@
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::Chunk;
-use crate::types::{
-    DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue,
-    MetadataValueConversionError, Operation, OperationRecord, UpdateMetadata, UpdateMetadataValue,
-};
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{
+    Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
+    MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, OperationRecord,
+    UpdateMetadata, UpdateMetadataValue,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -846,28 +846,6 @@ impl<'me> LogMaterializer<'me> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct DataRecord<'a> {
-    pub(crate) id: &'a str,
-    pub(crate) embedding: &'a [f32],
-    pub(crate) metadata: Option<Metadata>,
-    pub(crate) document: Option<&'a str>,
-}
-
-impl DataRecord<'_> {
-    pub(crate) fn get_size(&self) -> usize {
-        let id_size = self.id.len();
-        let embedding_size = self.embedding.len() * std::mem::size_of::<f32>();
-        // TODO: use serialized_metadata size to calculate the size
-        let metadata_size = 0;
-        let document_size = match self.document {
-            Some(document) => document.len(),
-            None => 0,
-        };
-        id_size + embedding_size + metadata_size + document_size
-    }
-}
-
 pub(crate) trait SegmentWriter<'a> {
     async fn apply_materialized_log_chunk(
         &self,
@@ -884,20 +862,21 @@ pub(crate) trait SegmentFlusher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        blockstore::{
-            arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
-            provider::BlockfileProvider,
-        },
-        segment::{
-            metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-            record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
-        },
-        storage::{local::LocalStorage, Storage},
-        types::{
-            DirectComparison, DirectDocumentComparison, MetadataValue, Operation, OperationRecord,
-            UpdateMetadataValue, Where, WhereComparison, WhereDocument,
-        },
+    use crate::segment::{
+        metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
+        record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+    };
+    use chroma_blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
+    use chroma_cache::{
+        cache::Cache,
+        config::{CacheConfig, UnboundedCacheConfig},
+    };
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{
+        DirectComparison, DirectDocumentComparison, Where, WhereComparison, WhereDocument,
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -906,27 +885,31 @@ mod tests {
     async fn test_materializer_add_delete_upsert() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -1129,7 +1112,7 @@ mod tests {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("new_world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1143,7 +1126,7 @@ mod tests {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1156,7 +1139,7 @@ mod tests {
             key: String::from("bye"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1168,7 +1151,7 @@ mod tests {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1180,7 +1163,7 @@ mod tests {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1194,27 +1177,31 @@ mod tests {
     async fn test_materializer_add_upsert() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -1408,7 +1395,7 @@ mod tests {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("new_world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1422,7 +1409,7 @@ mod tests {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1435,7 +1422,7 @@ mod tests {
             key: String::from("bye"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1448,7 +1435,7 @@ mod tests {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc1"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1460,7 +1447,7 @@ mod tests {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1474,27 +1461,31 @@ mod tests {
     async fn test_materializer_add_delete_upsert_update() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
-        let mut metadata_segment = crate::types::Segment {
+        let mut metadata_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileMetadata,
-            scope: crate::types::SegmentScope::METADATA,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
@@ -1708,7 +1699,7 @@ mod tests {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("new_world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1722,7 +1713,7 @@ mod tests {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1735,7 +1726,7 @@ mod tests {
             key: String::from("bye"),
             comparison: WhereComparison::SingleStringComparison(
                 String::from("world"),
-                crate::types::WhereClauseComparator::Equal,
+                chroma_types::WhereClauseComparator::Equal,
             ),
         });
         let res = metadata_segment_reader
@@ -1747,7 +1738,7 @@ mod tests {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1759,7 +1750,7 @@ mod tests {
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc1"),
-                operator: crate::types::WhereDocumentOperator::Contains,
+                operator: chroma_types::WhereDocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1773,17 +1764,22 @@ mod tests {
     async fn test_materializer_basic() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let arrow_blockfile_provider =
-            ArrowBlockfileProvider::new(storage, TEST_MAX_BLOCK_SIZE_BYTES);
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let mut record_segment = crate::types::Segment {
+        let mut record_segment = chroma_types::Segment {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            r#type: crate::types::SegmentType::BlockfileRecord,
-            scope: crate::types::SegmentScope::RECORD,
-            collection: Some(
-                Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
-            ),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };

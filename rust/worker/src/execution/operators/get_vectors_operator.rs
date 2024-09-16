@@ -1,14 +1,14 @@
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::{ChromaError, ErrorCodes},
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     segment::{
-        record_segment::{self, RecordSegmentReader, RecordSegmentReaderCreationError},
+        record_segment::{self, RecordSegmentReader},
         LogMaterializer, LogMaterializerError,
     },
-    types::{LogRecord, MaterializedLogOperation, Operation, Segment},
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
