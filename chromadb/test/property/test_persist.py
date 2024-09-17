@@ -308,30 +308,45 @@ def test_persist_embeddings_state(
         lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
     )  # type: ignore
 
-def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
+
+def test_delete_less_than_k(
+    caplog: pytest.LogCaptureFixture, settings: Settings
+) -> None:
     client = chromadb.Client(settings)
     state = PersistEmbeddingsStateMachine(settings=settings, client=client)
-    state.initialize(collection=strategies.Collection(name='A00', metadata={'hnsw:construction_ef': 128, 'hnsw:search_ef': 128, 'hnsw:M': 128, 'hnsw:sync_threshold': 3, 'hnsw:batch_size': 3}, embedding_function=strategies.hashing_embedding_function(dim=1, dtype=np.float16), id=UUID('2d3eddc7-2314-45f4-a951-47a9a8e099d2'), dimension=2, dtype=np.float16, known_metadata_keys={}, known_document_keywords=[], has_documents=False, has_embeddings=True))
+    state.initialize(
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+                "hnsw:sync_threshold": 3,
+                "hnsw:batch_size": 3,
+            },
+            embedding_function=None,
+            id=UUID("2d3eddc7-2314-45f4-a951-47a9a8e099d2"),
+            dimension=2,
+            dtype=np.float16,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
     state.ann_accuracy()
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    (embedding_ids_0,) = state.add_embeddings(record_set={'ids': ['0'],
-    'embeddings': [[0.09765625, 0.430419921875]],
-    'metadatas': [None],
-    'documents': None})
+    (embedding_ids_0,) = state.add_embeddings(record_set={"ids": ["0"], "embeddings": [[0.09765625, 0.430419921875]], "metadatas": [None], "documents": None})  # type: ignore
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 1, accuracy threshold 1e-06
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    embedding_ids_1, embedding_ids_2 = state.add_embeddings(record_set={'ids': ['1', '2'],
-    'embeddings': [[0.20556640625, 0.08978271484375],
-    [-0.1527099609375, 0.291748046875]],
-    'metadatas': [None, None],
-    'documents': None})
+    embedding_ids_1, embedding_ids_2 = state.add_embeddings(record_set={"ids": ["1", "2"], "embeddings": [[0.20556640625, 0.08978271484375], [-0.1527099609375, 0.291748046875]], "metadatas": [None, None], "documents": None})  # type: ignore
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 3, accuracy threshold 1e-06
     state.count()
@@ -341,6 +356,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
     state.delete_by_ids(ids=[embedding_ids_2])
     state.ann_accuracy()
     state.teardown()
+
 
 # Ideally this scenario would be exercised by Hypothesis, but most runs don't seem to trigger this particular state.
 def test_delete_add_after_persist(settings: Settings) -> None:
