@@ -3,9 +3,16 @@ use async_tempfile::TempFile;
 use std::{future::Future, path::PathBuf};
 use tokio::io::AsyncWrite;
 
-async fn get_dataset_cache_path(dataset_name: &str) -> Result<PathBuf, std::io::Error> {
-    let base_dir = dirs::cache_dir().expect("Failed to get cache directory");
-    let dataset_dir = base_dir.join("chroma-test-datasets").join(dataset_name);
+async fn get_dataset_cache_path(
+    dataset_name: &str,
+    cache_dir: Option<PathBuf>,
+) -> Result<PathBuf, std::io::Error> {
+    let base_dir = cache_dir.unwrap_or(
+        dirs::cache_dir()
+            .expect("Failed to get cache directory")
+            .join("chroma-test-datasets"),
+    );
+    let dataset_dir = base_dir.join(dataset_name);
 
     tokio::fs::create_dir_all(&dataset_dir).await?;
 
@@ -16,13 +23,14 @@ async fn get_dataset_cache_path(dataset_name: &str) -> Result<PathBuf, std::io::
 pub(crate) async fn get_or_populate_cached_dataset<F, Fut>(
     dataset_name: &str,
     file_name: &str,
+    cache_dir: Option<PathBuf>,
     populate: F,
 ) -> Result<PathBuf>
 where
     F: FnOnce(Box<dyn AsyncWrite + Unpin + Send>) -> Fut,
     Fut: Future<Output = Result<()>>,
 {
-    let dataset_dir = get_dataset_cache_path(dataset_name).await?;
+    let dataset_dir = get_dataset_cache_path(dataset_name, cache_dir).await?;
     let file_path = dataset_dir.join(file_name);
 
     if !file_path.exists() {

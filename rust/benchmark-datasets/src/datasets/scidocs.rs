@@ -26,36 +26,37 @@ pub struct SciDocsDataset {
 
 impl BenchmarkDataset for SciDocsDataset {
     async fn init() -> Result<Self> {
-        let file_path = get_or_populate_cached_dataset("scidocs", "corpus.jsonl", |mut writer| {
-            async move {
-                let client = reqwest::Client::new();
-                let response = client
+        let file_path =
+            get_or_populate_cached_dataset("scidocs", "corpus.jsonl", None, |mut writer| {
+                async move {
+                    let client = reqwest::Client::new();
+                    let response = client
                     .get(
                         "https://huggingface.co/datasets/BeIR/scidocs/resolve/main/corpus.jsonl.gz",
                     )
                     .send()
                     .await?;
 
-                if !response.status().is_success() {
-                    return Err(anyhow!(
-                        "Failed to download SciDocs dataset, got status code {}",
-                        response.status()
-                    ));
+                    if !response.status().is_success() {
+                        return Err(anyhow!(
+                            "Failed to download SciDocs dataset, got status code {}",
+                            response.status()
+                        ));
+                    }
+
+                    let byte_stream = response.bytes_stream();
+                    let stream_reader = StreamReader::new(
+                        byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+                    );
+
+                    let mut decoder = GzipDecoder::new(stream_reader);
+                    tokio::io::copy(&mut decoder, &mut writer).await?;
+
+                    Ok(())
                 }
-
-                let byte_stream = response.bytes_stream();
-                let stream_reader = StreamReader::new(
-                    byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-                );
-
-                let mut decoder = GzipDecoder::new(stream_reader);
-                tokio::io::copy(&mut decoder, &mut writer).await?;
-
-                Ok(())
-            }
-            .boxed()
-        })
-        .await?;
+                .boxed()
+            })
+            .await?;
 
         Ok(SciDocsDataset { file_path })
     }
@@ -81,5 +82,9 @@ impl BenchmarkDataset for SciDocsDataset {
             }
             Err(e) => Err(e.into()),
         }))
+    }
+
+    fn get_name(&self) -> &'static str {
+        "scidocs"
     }
 }

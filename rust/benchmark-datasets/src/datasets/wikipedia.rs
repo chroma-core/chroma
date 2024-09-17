@@ -28,7 +28,7 @@ pub struct WikipediaDataset {
 impl BenchmarkDataset for WikipediaDataset {
     async fn init() -> Result<Self> {
         let file_path =
-            get_or_populate_cached_dataset("wikipedia", "articles.jsonl", |mut writer| {
+            get_or_populate_cached_dataset("wikipedia", "articles.jsonl", None, |mut writer| {
                 async move {
                     let client = reqwest::Client::new();
                     let response = client
@@ -83,5 +83,9 @@ impl BenchmarkDataset for WikipediaDataset {
             }
             Err(e) => Err(e.into()),
         }))
+    }
+
+    fn get_name(&self) -> &'static str {
+        "wikipedia"
     }
 }
