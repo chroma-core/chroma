@@ -205,7 +205,7 @@ fn merge_results(
     let mut brute_force_index = 0;
 
     // TODO: This doesn't have to clone the user IDs, but it's easier for now
-    while (result_user_ids.len() <= k)
+    while (result_user_ids.len() < k)
         && (hnsw_index < hnsw_result_user_ids.len()
             || brute_force_index < brute_force_result_user_ids.len())
     {
