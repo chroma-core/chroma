@@ -259,7 +259,7 @@ def ann_accuracy(
         include=["embeddings", "documents", "metadatas", "distances"],  # type: ignore[list-item]
     )
 
-    assert _query_results_are_correct_shape(query_results, n_results)
+    _query_results_are_correct_shape(query_results, n_results)
 
     # Assert fields are not None for type checking
     assert query_results["ids"] is not None
@@ -328,14 +328,12 @@ def ann_accuracy(
 
 def _query_results_are_correct_shape(
     query_results: types.QueryResult, n_results: int
-) -> bool:
+) -> None:
     for result_type in ["distances", "embeddings", "documents", "metadatas"]:
-        if query_results[result_type] is None:  # type: ignore[literal-required]
-            return False
-        if any([len(result) != n_results for result in query_results[result_type]]):  # type: ignore[literal-required]
-            return False
-
-    return True
+        assert query_results[result_type] is not None  # type: ignore[literal-required]
+        assert all(
+            len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
+        )
 
 
 def _total_embedding_queue_log_size(sqlite: SqliteDB) -> int:
