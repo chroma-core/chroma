@@ -5,6 +5,7 @@ from chromadb.api.configuration import (
     EmbeddingsQueueConfigurationInternal,
 )
 from chromadb.db.base import SqlDB, ParameterValue, get_sql
+from chromadb.errors import BatchSizeExceededError
 from chromadb.ingest import (
     Producer,
     Consumer,
@@ -191,12 +192,12 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             return []
 
         if len(embeddings) > self.max_batch_size:
-            raise ValueError(
+            raise BatchSizeExceededError(
                 f"""
-                    Cannot submit more than {self.max_batch_size:,} embeddings at once.
-                    Please submit your embeddings in batches of size
-                    {self.max_batch_size:,} or less.
-                    """
+                Cannot submit more than {self.max_batch_size:,} embeddings at once.
+                Please submit your embeddings in batches of size
+                {self.max_batch_size:,} or less.
+                """
             )
 
         # This creates the persisted configuration if it doesn't exist.
