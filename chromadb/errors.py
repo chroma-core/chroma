@@ -103,6 +103,17 @@ class NotFoundError(ChromaError):
         return "NotFoundError"
 
 
+class BatchSizeExceededError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 413
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "BatchSizeExceededError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
@@ -112,4 +123,5 @@ error_types: Dict[str, Type[ChromaError]] = {
     "InvalidHTTPVersion": InvalidHTTPVersion,
     "AuthorizationError": AuthorizationError,
     "NotFoundError": NotFoundError,
+    "BatchSizeExceededError": BatchSizeExceededError,
 }
