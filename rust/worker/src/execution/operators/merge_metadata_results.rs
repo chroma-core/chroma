@@ -12,7 +12,7 @@ use chroma_index::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disju
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
 };
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
@@ -158,7 +158,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
         // Merge the offset ids, assuming the user_offset_ids and filtered_offset_ids are ordered.
         let merged_oids_holder: Vec<u32>;
-        let mut merged_offset_ids = match (&input.filtered_offset_ids, &input.user_offset_ids) {
+        let merged_offset_ids = match (&input.filtered_offset_ids, &input.user_offset_ids) {
             (Some(fids), Some(uids)) => {
                 merged_oids_holder = merge_sorted_vecs_conjunction(fids, uids);
                 &merged_oids_holder
@@ -194,7 +194,6 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
 
         // Hydrate data
         let truncated_offset_id_order: HashMap<u32, usize> = merged_offset_ids
-            .clone()
             .enumerate()
             .map(|(i, offset_id)| (*offset_id, i))
             .collect();
