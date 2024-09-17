@@ -445,25 +445,25 @@ def test_modify_warn_on_DF_change(client, caplog):
 def test_metadata_cru(client):
     client.reset()
     metadata_a = {"a": 1, "b": 2}
-    # Test create metatdata
+    # Test create metadata
     collection = client.create_collection("testspace", metadata=metadata_a)
     assert collection.metadata is not None
     assert collection.metadata["a"] == 1
     assert collection.metadata["b"] == 2
 
-    # Test get metatdata
+    # Test get metadata
     collection = client.get_collection("testspace")
     assert collection.metadata is not None
     assert collection.metadata["a"] == 1
     assert collection.metadata["b"] == 2
 
-    # Test modify metatdata
+    # Test modify metadata
     collection.modify(metadata={"a": 2, "c": 3})
     assert collection.metadata["a"] == 2
     assert collection.metadata["c"] == 3
     assert "b" not in collection.metadata
 
-    # Test get after modify metatdata
+    # Test get after modify metadata
     collection = client.get_collection("testspace")
     assert collection.metadata is not None
     assert collection.metadata["a"] == 2

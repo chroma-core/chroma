@@ -216,16 +216,10 @@ class SqlSysDB(SqlDB, SysDB):
         existing = self.get_collections(name=name, tenant=tenant, database=database)
         if existing:
             if get_or_create:
-                # We ignore configuration on the get path - configuration is immutable
                 collection = existing[0]
-                if metadata is not None and collection["metadata"] != metadata:
-                    self.update_collection(
-                        collection.id,
-                        metadata=metadata,
-                    )
                 return (
                     self.get_collections(
-                        id=collection["id"], tenant=tenant, database=database
+                        id=collection.id, tenant=tenant, database=database
                     )[0],
                     False,
                 )
