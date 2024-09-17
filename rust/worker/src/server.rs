@@ -20,9 +20,7 @@ use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
 use chroma_types::{MetadataValue, ScalarEncoding};
-use kube::core::request;
 use std::collections::HashMap;
-use std::hash::Hash;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
