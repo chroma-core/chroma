@@ -4,9 +4,7 @@ from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from time import sleep
-
 import psutil
-
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
 from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
 from typing_extensions import Literal
@@ -261,10 +259,14 @@ def ann_accuracy(
         include=["embeddings", "documents", "metadatas", "distances"],  # type: ignore[list-item]
     )
 
+    _query_results_are_correct_shape(query_results, n_results)
+
+    # Assert fields are not None for type checking
+    assert query_results["ids"] is not None
     assert query_results["distances"] is not None
+    assert query_results["embeddings"] is not None
     assert query_results["documents"] is not None
     assert query_results["metadatas"] is not None
-    assert query_results["embeddings"] is not None
 
     # Dict of ids to indices
     id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
@@ -322,6 +324,16 @@ def ann_accuracy(
     # Ensure that the query results are sorted by distance
     for distance_result in query_results["distances"]:
         assert np.allclose(np.sort(distance_result), distance_result)
+
+
+def _query_results_are_correct_shape(
+    query_results: types.QueryResult, n_results: int
+) -> None:
+    for result_type in ["distances", "embeddings", "documents", "metadatas"]:
+        assert query_results[result_type] is not None  # type: ignore[literal-required]
+        assert all(
+            len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
+        )
 
 
 def _total_embedding_queue_log_size(sqlite: SqliteDB) -> int:

@@ -413,6 +413,8 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         # Overquery by updated and deleted elements layered on the index because they may
         # hide the real nearest neighbors in the hnsw index
         hnsw_k = k + self._curr_batch.update_count + self._curr_batch.delete_count
+        # self._id_to_label contains the ids of the elements in the hnsw index
+        # so its length is the number of elements in the hnsw index
         if hnsw_k > len(self._id_to_label):
             hnsw_k = len(self._id_to_label)
         hnsw_query = VectorQuery(
@@ -472,7 +474,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     if remaining > 0 and hnsw_pointer < len(curr_hnsw_result):
                         for i in range(
                             hnsw_pointer,
-                            min(len(curr_hnsw_result), hnsw_pointer + remaining + 1),
+                            min(len(curr_hnsw_result), hnsw_pointer + remaining),
                         ):
                             id = curr_hnsw_result[i]["id"]
                             if not self._brute_force_index.has_id(id):
