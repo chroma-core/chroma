@@ -71,6 +71,13 @@ export class InvalidCollectionError extends Error {
   }
 }
 
+export class ChromaUniqueError extends Error {
+  name = "ChromaUniqueError";
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+  }
+}
+
 export function createErrorByType(type: string, message: string) {
   switch (type) {
     case "InvalidCollection":
