@@ -18,7 +18,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         self._model_name = model_name
 
     def __call__(self, input: Documents) -> Embeddings:
-        # Call Cohere Embedding API for each document. 
+        # Call Cohere Embedding API for each document.
         embeddings = self._client.embed(
             texts=input, model=self._model_name, input_type="search_document"
         ).embeddings
