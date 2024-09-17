@@ -31,7 +31,7 @@ pip install chromadb # [!code $]
 
 ```bash {% codetab=true %}
 yarn add chromadb chromadb-default-embed # [!code $]
-``` 
+```
 
 {% /codetab %}
 {% codetab label="npm" %}
