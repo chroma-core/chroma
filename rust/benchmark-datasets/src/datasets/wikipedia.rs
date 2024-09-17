@@ -9,8 +9,8 @@ use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 
 use crate::{
-    types::{BenchmarkDataset, BenchmarkDatasetDocument},
-    util::get_or_populate_cached_dataset,
+    types::{Document, DocumentDataset},
+    util::get_or_populate_cached_dataset_file,
 };
 
 #[derive(Deserialize, Debug)]
@@ -25,10 +25,13 @@ pub struct WikipediaDataset {
     file_path: PathBuf,
 }
 
-impl BenchmarkDataset for WikipediaDataset {
+impl DocumentDataset for WikipediaDataset {
     async fn init() -> Result<Self> {
-        let file_path =
-            get_or_populate_cached_dataset("wikipedia", "articles.jsonl", None, |mut writer| {
+        let file_path = get_or_populate_cached_dataset_file(
+            "wikipedia",
+            "articles.jsonl",
+            None,
+            |mut writer| {
                 async move {
                     let client = reqwest::Client::new();
                     let response = client
@@ -56,15 +59,16 @@ impl BenchmarkDataset for WikipediaDataset {
                     Ok(())
                 }
                 .boxed()
-            })
-            .await?;
+            },
+        )
+        .await?;
 
         Ok(WikipediaDataset { file_path })
     }
 
     async fn create_documents_stream(
         &self,
-    ) -> Result<impl futures::Stream<Item = Result<BenchmarkDatasetDocument>>> {
+    ) -> Result<impl futures::Stream<Item = Result<Document>>> {
         let file = File::open(self.file_path.clone()).await?;
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
@@ -76,7 +80,7 @@ impl BenchmarkDataset for WikipediaDataset {
                 metadata.insert("url".to_string(), parsed.url);
                 metadata.insert("title".to_string(), parsed.title);
 
-                Ok(BenchmarkDatasetDocument {
+                Ok(Document {
                     content: parsed.body,
                     metadata,
                 })

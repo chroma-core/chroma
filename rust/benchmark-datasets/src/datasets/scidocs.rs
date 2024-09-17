@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    types::{BenchmarkDataset, BenchmarkDatasetDocument},
-    util::get_or_populate_cached_dataset,
+    types::{Document, DocumentDataset},
+    util::get_or_populate_cached_dataset_file,
 };
 use anyhow::{anyhow, Result};
 use async_compression::tokio::bufread::GzipDecoder;
@@ -24,10 +24,10 @@ pub struct SciDocsDataset {
     file_path: PathBuf,
 }
 
-impl BenchmarkDataset for SciDocsDataset {
+impl DocumentDataset for SciDocsDataset {
     async fn init() -> Result<Self> {
         let file_path =
-            get_or_populate_cached_dataset("scidocs", "corpus.jsonl", None, |mut writer| {
+            get_or_populate_cached_dataset_file("scidocs", "corpus.jsonl", None, |mut writer| {
                 async move {
                     let client = reqwest::Client::new();
                     let response = client
@@ -61,9 +61,7 @@ impl BenchmarkDataset for SciDocsDataset {
         Ok(SciDocsDataset { file_path })
     }
 
-    async fn create_documents_stream(
-        &self,
-    ) -> Result<impl Stream<Item = Result<BenchmarkDatasetDocument>>> {
+    async fn create_documents_stream(&self) -> Result<impl Stream<Item = Result<Document>>> {
         let file = File::open(self.file_path.clone()).await?;
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
@@ -75,7 +73,7 @@ impl BenchmarkDataset for SciDocsDataset {
                 metadata.insert("id".to_string(), parsed._id);
                 metadata.insert("title".to_string(), parsed.title);
 
-                Ok(BenchmarkDatasetDocument {
+                Ok(Document {
                     content: parsed.text,
                     metadata,
                 })

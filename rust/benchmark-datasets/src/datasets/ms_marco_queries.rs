@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    types::{BenchmarkDataset, BenchmarkDatasetDocument, QueryDataset},
-    util::get_or_populate_cached_dataset,
+    types::{Document, DocumentDataset, QueryDataset},
+    util::get_or_populate_cached_dataset_file,
 };
 use anyhow::{anyhow, Result};
 use futures::FutureExt;
@@ -15,9 +15,9 @@ pub struct MicrosoftMarcoQueriesDataset {
     file_path: PathBuf,
 }
 
-impl BenchmarkDataset for MicrosoftMarcoQueriesDataset {
+impl DocumentDataset for MicrosoftMarcoQueriesDataset {
     async fn init() -> Result<Self> {
-        let file_path = get_or_populate_cached_dataset("microsoft_marco_queries", "queries.tsv", None, |mut writer| {
+        let file_path = get_or_populate_cached_dataset_file("microsoft_marco_queries", "queries.tsv", None, |mut writer| {
             async move {
                 let client = reqwest::Client::new();
                 let response = client
@@ -49,9 +49,7 @@ impl BenchmarkDataset for MicrosoftMarcoQueriesDataset {
         Ok(MicrosoftMarcoQueriesDataset { file_path })
     }
 
-    async fn create_documents_stream(
-        &self,
-    ) -> Result<impl Stream<Item = Result<BenchmarkDatasetDocument>>> {
+    async fn create_documents_stream(&self) -> Result<impl Stream<Item = Result<Document>>> {
         let file = File::open(self.file_path.clone()).await?;
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
@@ -70,7 +68,7 @@ impl BenchmarkDataset for MicrosoftMarcoQueriesDataset {
                         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
                         .collect::<String>();
 
-                    Ok(BenchmarkDatasetDocument { content, metadata })
+                    Ok(Document { content, metadata })
                 }
                 Err(e) => Err(e.into()),
             })
