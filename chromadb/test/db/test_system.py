@@ -6,7 +6,7 @@ from typing import Generator, List, Callable, Dict, Union
 
 from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
-from chromadb.errors import NotFoundError
+from chromadb.errors import NotFoundError, UniqueConstraintError
 from chromadb.test.conftest import find_free_port
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
@@ -17,7 +17,6 @@ from chromadb.config import (
     Settings,
 )
 from chromadb.db.system import SysDB
-from chromadb.db.base import UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
 from chromadb.api.configuration import CollectionConfigurationInternal

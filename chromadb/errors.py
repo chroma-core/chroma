@@ -103,6 +103,17 @@ class NotFoundError(ChromaError):
         return "NotFoundError"
 
 
+class UniqueConstraintError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 409
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "UniqueConstraintError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
