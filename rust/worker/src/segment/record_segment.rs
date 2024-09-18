@@ -807,19 +807,17 @@ impl RecordSegmentReader<'_> {
         Ok(data)
     }
 
-    /// Returns all ids in the record segment sorted.
-    pub(crate) async fn get_all_user_ids(&self) -> Result<Vec<&str>, Box<dyn ChromaError>> {
-        let mut ids = Vec::new();
-        let max_size = self.user_id_to_id.count().await?;
-        for i in 0..max_size {
-            let res = self.user_id_to_id.get_at_index(i).await;
-            match res {
-                Ok((_, user_id, _)) => {
-                    ids.push(user_id);
-                }
+    /// Returns all offset_ids in the record segment sorted.
+    pub(crate) async fn get_all_offset_ids(&self) -> Result<Vec<u32>, Box<dyn ChromaError>> {
+        let offset_id_count = self.count().await?;
+        let mut colllected_offset_ids = Vec::with_capacity(offset_id_count);
+        for i in 0..offset_id_count {
+            let record = self.id_to_user_id.get_at_index(i).await;
+            match record {
+                Ok((_, offset_id, _)) => colllected_offset_ids.push(offset_id),
                 Err(e) => {
                     tracing::error!(
-                        "[GetAllData] Error getting user id for index {:?}: {:?}",
+                        "[GetAllData] Error getting offset id for index {}: {}",
                         i,
                         e
                     );
@@ -827,7 +825,7 @@ impl RecordSegmentReader<'_> {
                 }
             }
         }
-        Ok(ids)
+        Ok(colllected_offset_ids)
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {

@@ -60,6 +60,8 @@ pub(crate) struct MetadataQueryOrchestrator {
     // Query params
     where_clause: Option<Where>,
     where_document_clause: Option<WhereDocument>,
+    offset: Option<u32>,
+    limit: Option<u32>,
     include_metadata: bool,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<MetadataQueryOrchestratorResult>>,
@@ -108,6 +110,8 @@ impl MetadataQueryOrchestrator {
         blockfile_provider: BlockfileProvider,
         where_clause: Option<Where>,
         where_document_clause: Option<WhereDocument>,
+        offset: Option<u32>,
+        limit: Option<u32>,
         include_metadata: bool,
     ) -> Self {
         Self {
@@ -126,6 +130,8 @@ impl MetadataQueryOrchestrator {
             blockfile_provider,
             where_clause,
             where_document_clause,
+            offset,
+            limit,
             include_metadata,
             result_channel: None,
         }
@@ -438,6 +444,8 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
                 .expect("Invariant violation. Record segment is not set.")
                 .clone(),
             self.blockfile_provider.clone(),
+            self.offset,
+            self.limit,
             self.include_metadata,
         );
 

@@ -21,7 +21,6 @@ use chroma_types::chroma_proto::{
 };
 use chroma_types::{MetadataValue, ScalarEncoding};
 use std::collections::HashMap;
-use std::hash::Hash;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -352,12 +351,6 @@ impl WorkerServer {
             }
         };
 
-        // For now we don't support limit/offset/where/where document
-        if request.limit.is_some() || request.offset.is_some() {
-            tracing::error!("Limit and offset not supported");
-            return Err(Status::unimplemented("Limit and offset not supported"));
-        }
-
         // If no ids are provided, pass None to the orchestrator
         let query_ids = match request.ids.len() {
             0 => None,
@@ -399,6 +392,8 @@ impl WorkerServer {
             self.blockfile_provider.clone(),
             where_clause,
             where_document_clause,
+            request.offset,
+            request.limit,
             request.include_metadata,
         );
 

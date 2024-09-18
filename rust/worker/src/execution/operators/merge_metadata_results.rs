@@ -8,11 +8,11 @@ use crate::{
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::utils::merge_sorted_vecs_conjunction;
+use chroma_index::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, Metadata, MetadataValueConversionError, Segment,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
@@ -35,6 +35,8 @@ pub struct MergeMetadataResultsOperatorInput {
     filtered_offset_ids: Option<Vec<u32>>,
     record_segment_definition: Segment,
     blockfile_provider: BlockfileProvider,
+    offset: Option<u32>,
+    limit: Option<u32>,
     include_metadata: bool,
 }
 
@@ -45,6 +47,8 @@ impl MergeMetadataResultsOperatorInput {
         filtered_offset_ids: Option<Vec<u32>>,
         record_segment_definition: Segment,
         blockfile_provider: BlockfileProvider,
+        offset: Option<u32>,
+        limit: Option<u32>,
         include_metadata: bool,
     ) -> Self {
         Self {
@@ -52,7 +56,9 @@ impl MergeMetadataResultsOperatorInput {
             user_offset_ids,
             filtered_offset_ids,
             record_segment_definition,
-            blockfile_provider: blockfile_provider,
+            blockfile_provider,
+            offset,
+            limit,
             include_metadata,
         }
     }
@@ -107,289 +113,144 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             input.record_segment_definition.id.to_string()
         );
 
-        let merged_offset_ids: Option<HashSet<u32>> = match &input.user_offset_ids {
-            Some(user_ids) => {
-                match &input.filtered_offset_ids {
-                    // Intersect with ids filtered from the where clause.
-                    Some(filtered_ids) => {
-                        let merged_vecs = merge_sorted_vecs_conjunction(user_ids, filtered_ids);
-                        Some(HashSet::from_iter(merged_vecs.iter().cloned()))
-                    }
-                    // This means that there was no where clause.
-                    None => Some(HashSet::from_iter(user_ids.iter().cloned())),
-                }
-            }
-            None => {
-                match &input.filtered_offset_ids {
-                    Some(filtered_ids) => Some(HashSet::from_iter(filtered_ids.iter().cloned())),
-                    // This means that user supplied neither so we return everything.
-                    None => None,
-                }
-            }
-        };
-
-        // Materialize logs.
-        let record_segment_reader: Option<RecordSegmentReader>;
-        match RecordSegmentReader::from_segment(
+        // Initialize record segment reader
+        let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
         )
         .await
         {
-            Ok(reader) => {
-                record_segment_reader = Some(reader);
+            Ok(reader) => Ok(Some(reader)),
+            // Uninitialized segment is fine and means that the record
+            // segment is not yet initialized in storage.
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
             }
             Err(e) => {
-                match *e {
-                    // Uninitialized segment is fine and means that the record
-                    // segment is not yet initialized in storage.
-                    RecordSegmentReaderCreationError::UninitializedSegment => {
-                        record_segment_reader = None;
-                    }
-                    RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
-                        tracing::error!("Error creating record segment reader {}", e);
-                        return Err(
-                            MergeMetadataResultsOperatorError::RecordSegmentCreationError(
-                                RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                            ),
-                        );
-                    }
-                    RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                        tracing::error!("Error creating record segment reader {}", e);
-                        return Err(
-                            MergeMetadataResultsOperatorError::RecordSegmentCreationError(
-                                RecordSegmentReaderCreationError::InvalidNumberOfFiles,
-                            ),
-                        );
-                    }
-                };
+                tracing::error!("Error creating record segment reader {}", e);
+                Err(MergeMetadataResultsOperatorError::RecordSegmentCreationError(*e))
             }
-        };
+        }?;
 
-        // Step 1: Materialize the logs.
-        let materializer =
-            LogMaterializer::new(record_segment_reader, input.filtered_log.clone(), None);
-        let mat_records = match materializer
+        // Materialize the logs.
+        let materializer = LogMaterializer::new(
+            record_segment_reader.clone(),
+            input.filtered_log.clone(),
+            None,
+        );
+        let mat_records = materializer
             .materialize()
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
-        {
-            Ok(records) => records,
-            Err(e) => {
-                return Err(MergeMetadataResultsOperatorError::LogMaterializationError(
-                    e,
-                ));
-            }
-        };
+            .map_err(|e| {
+                tracing::error!("Error materializing log: {}", e);
+                MergeMetadataResultsOperatorError::LogMaterializationError(e)
+            })?;
 
-        // Step 2: Hydrate data.
-        let mut ids: Vec<String> = Vec::new();
+        let deleted_offset_ids: HashSet<u32> =
+            HashSet::from_iter(mat_records.iter().filter_map(|(log, _)| {
+                matches!(
+                    log.final_operation,
+                    MaterializedLogOperation::DeleteExisting
+                )
+                .then_some(log.offset_id)
+            }));
+
+        // Merge the offset ids, assuming the user_offset_ids and filtered_offset_ids are ordered.
+        // This should be a sorted list of unique offset ids.
+        // We are treating the sorted vecs as sets.
+        let merged_oids_holder: Vec<u32>;
+        let merged_offset_ids = match (&input.filtered_offset_ids, &input.user_offset_ids) {
+            (Some(fids), Some(uids)) => {
+                // We take the set intersect of offset ids of those passing the filter and those correspond to user specified ids.
+                merged_oids_holder = merge_sorted_vecs_conjunction(fids, uids);
+                &merged_oids_holder
+            }
+            (Some(oids), None) | (None, Some(oids)) => oids,
+            _ => {
+                // If both filter and user offset ids are None, it suggests user did not specify any filter. We should return all available documents.
+                // Offset ids from the materialized records should be unique, so we only need to sort them.
+                let mut live_log_offset_ids = mat_records
+                    .iter()
+                    .map(|(log, _)| log.offset_id)
+                    .collect::<Vec<_>>();
+                live_log_offset_ids.sort();
+                merged_oids_holder = match &record_segment_reader {
+                    Some(reader) => {
+                        // TODO: We may not need to have the entire offset ids, given limit and offset.
+                        let compact_offset_ids =
+                            reader.get_all_offset_ids().await.map_err(|e| {
+                                tracing::error!("Error reading record segment: {}", e);
+                                MergeMetadataResultsOperatorError::RecordSegmentReadError
+                            })?;
+                        // We take the set union of offset ids from the log and from the record segment.
+                        merge_sorted_vecs_disjunction(&live_log_offset_ids, &compact_offset_ids)
+                    }
+                    None => live_log_offset_ids,
+                };
+                &merged_oids_holder
+            }
+        }
+        .iter()
+        .filter(|oid| !deleted_offset_ids.contains(oid))
+        // Truncate the offset ids using offset and limit.
+        // The .skip(...) and .take(...) will return an empty iterator if the offset and limit is out of bound.
+        .skip(input.offset.unwrap_or(u32::MIN) as usize)
+        .take(input.limit.unwrap_or(u32::MAX) as usize);
+
+        // Hydrate data
+        // This should be a mapping from offset id to the index of the document in the final result.
+        let truncated_offset_id_order: HashMap<u32, usize> = merged_offset_ids
+            .enumerate()
+            .map(|(i, offset_id)| (*offset_id, i))
+            .collect();
+        let mut ids: Vec<String> = vec![String::new(); truncated_offset_id_order.len()];
         let mut metadata = Vec::new();
         let mut documents = Vec::new();
-        let mut visited_ids: HashSet<u32> = HashSet::new();
-        match merged_offset_ids {
-            Some(merged_ids) => {
-                // Hydrate from the logs first.
-                for (log, _) in mat_records.iter() {
-                    if merged_ids.contains(&log.offset_id) {
-                        // It's important to account for the records that are
-                        // deleted also here so that we can subsequently ignore
-                        // them when reading the record segment.
-                        visited_ids.insert(log.offset_id);
-                        if log.final_operation != MaterializedLogOperation::DeleteExisting {
-                            // Ids get pushed irrespective of whether metadata is included or not.
-                            ids.push(log.merged_user_id());
+        let mut logged_offset_ids: HashSet<u32> = HashSet::new();
+        if input.include_metadata {
+            metadata = vec![None; truncated_offset_id_order.len()];
+            documents = vec![None; truncated_offset_id_order.len()];
+        }
 
-                            if input.include_metadata {
-                                documents.push(log.merged_document());
-                                let final_metadata = log.merged_metadata();
-                                if !final_metadata.is_empty() {
-                                    metadata.push(Some(final_metadata));
-                                } else {
-                                    metadata.push(None);
-                                }
-                            }
-                        }
-                    }
-                }
-                // Hydrate remaining from record segment.
-                let record_segment_reader = match RecordSegmentReader::from_segment(
-                    &input.record_segment_definition,
-                    &input.blockfile_provider,
-                )
-                .await
-                {
-                    Ok(reader) => reader,
-                    Err(e) => {
-                        match *e {
-                            RecordSegmentReaderCreationError::UninitializedSegment => {
-                                // This means no compaction has occured, so we can just return whats on the log.
-                                return Ok(MergeMetadataResultsOperatorOutput {
-                                    ids,
-                                    metadata,
-                                    documents,
-                                });
-                            }
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                error!("Error creating Record Segment: {:?}", e);
-                                return Err(
-                                    MergeMetadataResultsOperatorError::RecordSegmentCreationError(
-                                        *e,
-                                    ),
-                                );
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                error!("Error creating Record Segment: {:?}", e);
-                                return Err(
-                                    MergeMetadataResultsOperatorError::RecordSegmentCreationError(
-                                        *e,
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                };
-                for merged_id in merged_ids {
-                    // Skip already taken from log.
-                    if visited_ids.contains(&merged_id) {
-                        continue;
-                    }
-
-                    let user_id = match record_segment_reader
-                        .get_user_id_for_offset_id(merged_id)
-                        .await
-                    {
-                        Ok(user_id) => user_id,
-                        Err(e) => {
-                            println!("Error reading Record Segment: {:?}", e);
-                            return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                        }
-                    };
-                    ids.push(user_id.to_string());
-
-                    if input.include_metadata {
-                        let record = match record_segment_reader
-                            .get_data_for_offset_id(merged_id)
-                            .await
-                        {
-                            Ok(record) => record,
-                            Err(e) => {
-                                tracing::error!("Error reading Record Segment: {:?}", e);
-                                return Err(
-                                    MergeMetadataResultsOperatorError::RecordSegmentReadError,
-                                );
-                            }
-                        };
-                        metadata.push(record.metadata.clone());
-                        match record.document {
-                            Some(document) => documents.push(Some(document.to_string())),
-                            None => documents.push(None),
-                        }
-                    }
+        // Hydrate the data from the materialized logs first.
+        for (log, _) in mat_records.iter() {
+            if let Some(&index) = truncated_offset_id_order.get(&log.offset_id) {
+                // Record the offset ids in the final results that we should ignore in the record segemt.
+                logged_offset_ids.insert(log.offset_id);
+                ids[index] = log.merged_user_id();
+                if input.include_metadata {
+                    let final_metadata = log.merged_metadata();
+                    metadata[index] = (!final_metadata.is_empty()).then_some(final_metadata);
+                    documents[index] = log.merged_document();
                 }
             }
-            // Full scan over the log record and segment.
-            None => {
-                // ids_in_log is used to ignore processing the records
-                // present in log when reading from the segment.
-                let mut ids_in_log = HashSet::new();
-                // First: full scan over the log record.
-                for (log, _) in mat_records.iter() {
-                    // It's important to insert even the deleted records here
-                    // so that they can be ignored when reading from the segment.
-                    ids_in_log.insert(log.merged_user_id());
-                    if log.final_operation != MaterializedLogOperation::DeleteExisting {
-                        ids.push(log.merged_user_id());
+        }
 
-                        if input.include_metadata {
-                            documents.push(log.merged_document());
-                            let final_metadata = log.merged_metadata();
-                            if !final_metadata.is_empty() {
-                                metadata.push(Some(final_metadata));
-                            } else {
-                                metadata.push(None);
-                            }
-                        }
-                    }
-                }
-                // Second: Hydrate remaining records from record segment.
-                let record_segment_reader = match RecordSegmentReader::from_segment(
-                    &input.record_segment_definition,
-                    &input.blockfile_provider,
-                )
-                .await
-                {
-                    Ok(reader) => reader,
-                    Err(e) => {
-                        match *e {
-                            RecordSegmentReaderCreationError::UninitializedSegment => {
-                                // This means no compaction has occured, so we can just return whats on the log.
-                                return Ok(MergeMetadataResultsOperatorOutput {
-                                    ids,
-                                    metadata,
-                                    documents,
-                                });
-                            }
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                error!("Error creating Record Segment: {:?}", e);
-                                return Err(
-                                    MergeMetadataResultsOperatorError::RecordSegmentCreationError(
-                                        *e,
-                                    ),
-                                );
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                error!("Error creating Record Segment: {:?}", e);
-                                return Err(
-                                    MergeMetadataResultsOperatorError::RecordSegmentCreationError(
-                                        *e,
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                };
+        // Hydrate the remaining data from the record segment.
+        if let Some(reader) = record_segment_reader {
+            for (&offset_id, &index) in truncated_offset_id_order
+                .iter()
+                .filter(|(o, _)| !logged_offset_ids.contains(o))
+            {
+                let user_id = reader
+                    .get_user_id_for_offset_id(offset_id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error reading record segment: {}", e);
+                        MergeMetadataResultsOperatorError::RecordSegmentReadError
+                    })?;
+                ids[index] = user_id.to_string();
                 if input.include_metadata {
-                    let data = match record_segment_reader.get_all_data().await {
-                        Ok(data) => data,
-                        Err(e) => {
-                            tracing::error!(
-                                "[Mergemetadata]: Error reading Record Segment: {:?}",
-                                e
-                            );
-                            return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                        }
-                    };
-                    for record in data.iter() {
-                        // Ignore records processed from the log.
-                        if ids_in_log.contains(record.id) {
-                            continue;
-                        }
-                        ids.push(record.id.to_string());
-                        metadata.push(record.metadata.clone());
-                        match record.document {
-                            Some(document) => documents.push(Some(document.to_string())),
-                            None => documents.push(None),
-                        }
-                    }
-                } else {
-                    let user_ids = match record_segment_reader.get_all_user_ids().await {
-                        Ok(ids) => ids,
-                        Err(e) => {
-                            tracing::error!(
-                                "[Mergemetadata]: Error reading Record Segment: {:?}",
-                                e
-                            );
-                            return Err(MergeMetadataResultsOperatorError::RecordSegmentReadError);
-                        }
-                    };
-                    for id in user_ids {
-                        // Ignore records processed from the log.
-                        if ids_in_log.contains(id) {
-                            continue;
-                        }
-                        ids.push(id.to_string());
-                    }
+                    let record = reader
+                        .get_data_for_offset_id(offset_id)
+                        .await
+                        .map_err(|e| {
+                            tracing::error!("Error reading Record Segment: {}", e);
+                            MergeMetadataResultsOperatorError::RecordSegmentReadError
+                        })?;
+                    metadata[index] = record.metadata;
+                    documents[index] = record.document.map(str::to_string);
                 }
             }
         }
@@ -600,6 +461,8 @@ mod test {
             Some(vec![1, 2, 3]),
             record_segment,
             blockfile_provider,
+            None,
+            None,
             true,
         );
         let output = op.run(&input).await.expect("Error running operator");
@@ -894,6 +757,8 @@ mod test {
             None,
             record_segment,
             blockfile_provider,
+            None,
+            None,
             true,
         );
         let output = op.run(&input).await.expect("Error running operator");
@@ -1065,6 +930,256 @@ mod test {
                 .as_ref()
                 .expect("Expected not none"),
             &String::from("This is a document about dogs.")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_merge_and_hydrate_offset_limit() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let mut record_segment = chroma_types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = chroma_types::Segment {
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer =
+                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let mut metadata_writer =
+                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
+                    .await
+                    .expect("Error creating segment writer");
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: Some(vec![1.0, -1.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: Some(String::from("This is a document about cats.")),
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: Some(vec![2.0, -2.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: Some(String::from("This is a document about dogs.")),
+                        operation: Operation::Add,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
+                        }
+                        _ => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
+            let materializer = LogMaterializer::new(record_segment_reader, data, None);
+            let mat_records = materializer
+                .materialize()
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(mat_records.clone())
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            segment_writer
+                .apply_materialized_log_chunk(mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            metadata_writer
+                .write_to_blockfiles()
+                .await
+                .expect("Metadata writer: write to blockfile failed");
+            let record_flusher = segment_writer
+                .commit()
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let data = vec![
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![3.0, -3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about birds.")),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 5,
+                record: OperationRecord {
+                    id: "embedding_id_4".to_string(),
+                    embedding: Some(vec![4.0, -4.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about spiders.")),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 6,
+                record: OperationRecord {
+                    id: "embedding_id_5".to_string(),
+                    embedding: Some(vec![5.0, -5.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about plants.")),
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let op = MergeMetadataResultsOperator::new();
+        let input = MergeMetadataResultsOperatorInput::new(
+            data.clone(),
+            Some(vec![1, 2, 3, 5]),
+            Some(vec![1, 2, 4, 5]),
+            record_segment.clone(),
+            blockfile_provider.clone(),
+            None,
+            None,
+            true,
+        );
+        let output = op.run(&input).await.expect("Error running operator");
+        assert_eq!(2, output.ids.len());
+        assert_eq!(
+            output.ids.get(0).expect("There should be two ids"),
+            &String::from("embedding_id_2")
+        );
+        assert_eq!(
+            output.ids.get(1).expect("There should be two ids"),
+            &String::from("embedding_id_5")
+        );
+
+        let input = MergeMetadataResultsOperatorInput::new(
+            data.clone(),
+            Some(vec![]),
+            None,
+            record_segment.clone(),
+            blockfile_provider.clone(),
+            None,
+            None,
+            true,
+        );
+        let output = op.run(&input).await.expect("Error running operator");
+        assert_eq!(0, output.ids.len());
+
+        let input = MergeMetadataResultsOperatorInput::new(
+            data.clone(),
+            None,
+            None,
+            record_segment.clone(),
+            blockfile_provider.clone(),
+            None,
+            None,
+            true,
+        );
+        let output = op.run(&input).await.expect("Error running operator");
+        assert_eq!(4, output.ids.len());
+
+        let input = MergeMetadataResultsOperatorInput::new(
+            data.clone(),
+            None,
+            None,
+            record_segment.clone(),
+            blockfile_provider.clone(),
+            Some(1),
+            Some(2),
+            true,
+        );
+        let output = op.run(&input).await.expect("Error running operator");
+        assert_eq!(2, output.ids.len());
+        assert_eq!(
+            output.ids.get(0).expect("There should be two ids"),
+            &String::from("embedding_id_3")
+        );
+        assert_eq!(
+            output.ids.get(1).expect("There should be two ids"),
+            &String::from("embedding_id_4")
+        );
+
+        let input = MergeMetadataResultsOperatorInput::new(
+            data.clone(),
+            Some(vec![1, 2, 4, 5]),
+            Some(vec![1, 2, 3, 5]),
+            record_segment.clone(),
+            blockfile_provider.clone(),
+            None,
+            Some(1),
+            true,
+        );
+        let output = op.run(&input).await.expect("Error running operator");
+        assert_eq!(1, output.ids.len());
+        assert_eq!(
+            output.ids.get(0).expect("There should be one id"),
+            &String::from("embedding_id_2")
         );
     }
 }
