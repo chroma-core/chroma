@@ -76,10 +76,11 @@ impl RecordDataset for MicrosoftMarcoQueriesDataset {
                         .chars()
                         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
                         .collect::<String>()
-                        .trim()
                         .split_whitespace()
                         .flat_map(|word| [word, " "])
-                        .collect::<String>();
+                        .collect::<String>()
+                        .trim()
+                        .to_string();
 
                     Ok(Record {
                         document: content,
