@@ -917,7 +917,7 @@ def _records(
         if documents:
             document = documents[i]
             if metadata:
-                metadata = {**metadata, "chroma:document": document}    
+                metadata = {**metadata, "chroma:document": document}
             else:
                 metadata = {"chroma:document": document}
 
