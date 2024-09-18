@@ -157,15 +157,19 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             }));
 
         // Merge the offset ids, assuming the user_offset_ids and filtered_offset_ids are ordered.
+        // This should be a sorted list of unique offset ids.
+        // We are treating the sorted vecs as sets.
         let merged_oids_holder: Vec<u32>;
         let merged_offset_ids = match (&input.filtered_offset_ids, &input.user_offset_ids) {
             (Some(fids), Some(uids)) => {
+                // We take the set intersect of offset ids of those passing the filter and those correspond to user specified ids.
                 merged_oids_holder = merge_sorted_vecs_conjunction(fids, uids);
                 &merged_oids_holder
             }
             (Some(oids), None) | (None, Some(oids)) => oids,
-            // If both filter and user offset ids are None, it suggests user did not specify any filter. We fetch all offset ids using the record segment reader
             _ => {
+                // If both filter and user offset ids are None, it suggests user did not specify any filter. We should return all available documents.
+                // Offset ids from the materialized records should be unique, so we only need to sort them.
                 let mut live_log_offset_ids = mat_records
                     .iter()
                     .map(|(log, _)| log.offset_id)
@@ -179,6 +183,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                                 tracing::error!("Error reading record segment: {}", e);
                                 MergeMetadataResultsOperatorError::RecordSegmentReadError
                             })?;
+                        // We take the set union of offset ids from the log and from the record segment.
                         merge_sorted_vecs_disjunction(&live_log_offset_ids, &compact_offset_ids)
                     }
                     None => live_log_offset_ids,
@@ -188,11 +193,13 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
         }
         .iter()
         .filter(|oid| !deleted_offset_ids.contains(oid))
-        // Truncate the offset ids using offset and limit
+        // Truncate the offset ids using offset and limit.
+        // The .skip(...) and .take(...) will return an empty iterator if the offset and limit is out of bound.
         .skip(input.offset.unwrap_or(u32::MIN) as usize)
         .take(input.limit.unwrap_or(u32::MAX) as usize);
 
         // Hydrate data
+        // This should be a mapping from offset id to the index of the document in the final result.
         let truncated_offset_id_order: HashMap<u32, usize> = merged_offset_ids
             .enumerate()
             .map(|(i, offset_id)| (*offset_id, i))
@@ -206,9 +213,10 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             documents = vec![None; truncated_offset_id_order.len()];
         }
 
-        // Hydrate the data from the materialized logs first
+        // Hydrate the data from the materialized logs first.
         for (log, _) in mat_records.iter() {
             if let Some(&index) = truncated_offset_id_order.get(&log.offset_id) {
+                // Record the offset ids in the final results that we should ignore in the record segemt.
                 logged_offset_ids.insert(log.offset_id);
                 ids[index] = log.merged_user_id();
                 if input.include_metadata {
@@ -219,7 +227,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             }
         }
 
-        // Hydrate the remaining data from the record segment
+        // Hydrate the remaining data from the record segment.
         if let Some(reader) = record_segment_reader {
             for (&offset_id, &index) in truncated_offset_id_order
                 .iter()
