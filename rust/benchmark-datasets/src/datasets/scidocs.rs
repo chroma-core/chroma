@@ -6,10 +6,10 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use async_compression::tokio::bufread::GzipDecoder;
-use futures::{FutureExt, StreamExt, TryStreamExt};
+use futures::{FutureExt, TryStreamExt};
 use serde::Deserialize;
 use tokio::{fs::File, io::AsyncBufReadExt};
-use tokio_stream::{wrappers::LinesStream, Stream};
+use tokio_stream::{wrappers::LinesStream, Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
 #[derive(Deserialize, Debug)]
@@ -29,6 +29,7 @@ pub struct SciDocsDataset {
 
 impl RecordDataset for SciDocsDataset {
     const NAME: &'static str = "scidocs";
+    const DISPLAY_NAME: &'static str = "SciDocs";
 
     async fn init() -> Result<Self> {
         let file_path =
@@ -71,19 +72,24 @@ impl RecordDataset for SciDocsDataset {
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
 
-        Ok(lines.map(|line| match line {
-            Ok(line) => {
-                let parsed = serde_json::from_str::<SciDocsCorpusLine>(&line)?;
-                let mut metadata = HashMap::new();
-                metadata.insert("id".to_string(), parsed._id);
-                metadata.insert("title".to_string(), parsed.title);
+        Ok(lines
+            .map(|line| match line {
+                Ok(line) => {
+                    let parsed = serde_json::from_str::<SciDocsCorpusLine>(&line)?;
+                    let mut metadata = HashMap::new();
+                    metadata.insert("id".to_string(), parsed._id);
+                    metadata.insert("title".to_string(), parsed.title);
 
-                Ok(Record {
-                    document: parsed.text,
-                    metadata,
-                })
-            }
-            Err(e) => Err(e.into()),
-        }))
+                    Ok(Record {
+                        document: parsed.text,
+                        metadata,
+                    })
+                }
+                Err(e) => Err(e.into()),
+            })
+            .filter(|record| match record {
+                Ok(record) => record.document.is_ascii(),
+                Err(_) => true,
+            }))
     }
 }

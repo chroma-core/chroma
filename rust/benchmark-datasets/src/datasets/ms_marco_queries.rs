@@ -5,6 +5,7 @@ use crate::{
     util::get_or_populate_cached_dataset_file,
 };
 use anyhow::{anyhow, Result};
+use bloom::{BloomFilter, ASMS};
 use futures::FutureExt;
 use tokio::{fs::File, io::AsyncBufReadExt};
 use tokio_stream::{wrappers::LinesStream, Stream, StreamExt};
@@ -20,6 +21,7 @@ pub struct MicrosoftMarcoQueriesDataset {
 
 impl RecordDataset for MicrosoftMarcoQueriesDataset {
     const NAME: &'static str = "microsoft_marco_queries";
+    const DISPLAY_NAME: &'static str = "Microsoft MARCO Queries";
 
     async fn init() -> Result<Self> {
         let file_path = get_or_populate_cached_dataset_file("microsoft_marco_queries", "queries.tsv", None, |mut writer| {
@@ -59,6 +61,8 @@ impl RecordDataset for MicrosoftMarcoQueriesDataset {
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
 
+        let mut unique_content_filter = BloomFilter::with_rate(0.01, 10_000_000);
+
         Ok(lines
             .map(|line| match line {
                 Ok(line) => {
@@ -71,6 +75,10 @@ impl RecordDataset for MicrosoftMarcoQueriesDataset {
                     let content = content
                         .chars()
                         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+                        .collect::<String>()
+                        .trim()
+                        .split_whitespace()
+                        .flat_map(|word| [word, " "])
                         .collect::<String>();
 
                     Ok(Record {
@@ -80,8 +88,18 @@ impl RecordDataset for MicrosoftMarcoQueriesDataset {
                 }
                 Err(e) => Err(e.into()),
             })
-            .filter(|record| match record.as_ref() {
+            .filter(move |record| match record.as_ref() {
                 Ok(record) => {
+                    if record.document.len() < 3 {
+                        return false;
+                    }
+
+                    if unique_content_filter.contains(&record.document) {
+                        return false;
+                    }
+
+                    unique_content_filter.insert(&record.document);
+
                     let language_codes = record.metadata.get("language_codes").unwrap();
                     language_codes.contains("en-US") && record.document.is_ascii()
                 }
