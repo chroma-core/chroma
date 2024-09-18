@@ -296,8 +296,6 @@ def ann_accuracy(
                 else:
                     continue
             else:
-                if not correct_distance:
-                    breakpoint()
                 assert correct_distance
 
             assert np.allclose(embeddings[index], query_results["embeddings"][i][j])
