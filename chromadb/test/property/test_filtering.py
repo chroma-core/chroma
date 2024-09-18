@@ -251,11 +251,6 @@ def test_filterable_metadata_get_limit_offset(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    # The distributed system does not support limit/offset yet
-    # so we skip this test for now if the system is distributed
-    if not NOT_CLUSTER_ONLY:
-        pytest.skip("Distributed system does not support limit/offset yet")
-
     reset(client)
     coll = client.create_collection(
         name=collection.name,
@@ -280,7 +275,15 @@ def test_filterable_metadata_get_limit_offset(
         filter["offset"] = offset
         result_ids = coll.get(**filter)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
-        assert sorted(result_ids) == sorted(expected_ids)[offset : offset + limit]
+        offset_id_order = {
+            id: index for index, id in enumerate(coll.get(ids=expected_ids)["ids"])
+        }
+        assert (
+            result_ids
+            == sorted(expected_ids, key=lambda id: offset_id_order[id])[
+                offset : offset + limit
+            ]
+        )
 
 
 @settings(
