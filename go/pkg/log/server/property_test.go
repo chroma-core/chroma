@@ -219,10 +219,13 @@ func (suite *LogServerTestSuite) modelPushLogs(ctx context.Context, t *rapid.T, 
 }
 
 func (suite *LogServerTestSuite) modelPullLogs(ctx context.Context, t *rapid.T, c types.UniqueID) ([]ModelLogRecord, uint64, uint32) {
-	startOffset := rapid.Uint64Range(suite.model.CollectionCompactionOffset[c], suite.model.CollectionEnumerationOffset[c]).Draw(t, "start_offset")
-	// If start offset is 0, we need to set it to 1 as the offset is 1 based
-	if startOffset == 0 {
-		startOffset = 1
+	var startOffset uint64
+	if suite.model.CollectionCompactionOffset[c] == suite.model.CollectionEnumerationOffset[c] {
+		startOffset = suite.model.CollectionCompactionOffset[c] + 1
+		batchSize := rapid.Uint32Range(1, 20).Draw(t, "batch_size")
+		return []ModelLogRecord{}, startOffset, batchSize
+	} else {
+		startOffset = rapid.Uint64Range(suite.model.CollectionCompactionOffset[c]+1, suite.model.CollectionEnumerationOffset[c]).Draw(t, "start_offset")
 	}
 	batchSize := rapid.Uint32Range(1, 20).Draw(t, "batch_size")
 
