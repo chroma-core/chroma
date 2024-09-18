@@ -168,19 +168,32 @@ func compareModelLogRecordToLogRecord(t *rapid.T, modelLogRecord ModelLogRecord,
 // is the same in both the model and the SUT
 func (suite *LogServerTestSuite) invariantLogsAreTheSame(ctx context.Context, t *rapid.T) {
 	for id, model_log := range suite.model.CollectionData {
-		pulled_log, err := suite.lr.PullRecords(ctx, id.String(), 0, len(model_log), time.Now().UnixNano())
+		compaction_offset := suite.model.CollectionCompactionOffset[id] + 1
+		pulled_log, err := suite.lr.PullRecords(ctx, id.String(), int64(compaction_offset), len(model_log), time.Now().UnixNano())
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Filter model_log to only include logs after the compaction offset.
+		expected_count := 0
+		for _, log := range model_log {
+			if log.offset >= compaction_offset {
+				expected_count++
+			}
+		}
 		// Length of log should be the same
-		if len(model_log) != len(pulled_log) {
+		if expected_count != len(pulled_log) {
 			t.Fatalf("expected log length %d, got %d", len(model_log), len(pulled_log))
 		}
 
 		// Each record should be the same
-		for i, modelLogRecord := range model_log {
+		i := 0
+		for _, modelLogRecord := range model_log {
+			if modelLogRecord.offset < compaction_offset {
+				continue
+			}
 			// Compare the record
 			compareModelLogRecordToRecordLog(t, modelLogRecord, pulled_log[i])
+			i++
 		}
 	}
 }
@@ -461,12 +474,9 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 				// Verify that all record logs are purged
 				for id, offset := range suite.model.CollectionCompactionOffset {
 					if offset != 0 {
-						var records []log.RecordLog
-						records, err = suite.lr.PullRecords(ctx, id.String(), 0, 1, time.Now().UnixNano())
-						suite.NoError(err)
-						if len(records) > 0 {
-							suite.Equal(int64(offset)+1, records[0].Offset, "expected offset %d, got %d for collection id %s", int64(offset)+1, records[0].Offset, id)
-						}
+						_, err = suite.lr.PullRecords(ctx, id.String(), int64(offset-1), 1, time.Now().UnixNano())
+						// Expect err here.
+						suite.Error(err)
 					}
 				}
 			},

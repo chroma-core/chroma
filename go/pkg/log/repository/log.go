@@ -90,8 +90,18 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	})
 	// Relies on the fact that the records are ordered by offset.
 	if len(records) > 0 && records[0].Offset != offset {
-		trace_log.Error("Error in pulling records from record_log table. Some entries have been purged.", zap.String("collectionId", collectionId))
+		trace_log.Error("Error in pulling records from record_log table. Some entries have been purged.", zap.String("collectionId", collectionId), zap.Int("requestedOffset", int(offset)), zap.Int("actualOffset", int(records[0].Offset)))
 		records, err = nil, errors.New("some entries have been purged")
+	}
+	// This means that the log is empty i.e. compaction_offset = enumeration_offset
+	// AND also all records have been purged. In this case, if the requested offset
+	// is less than the compacted offset (or enumeration offset), we should return an error.
+	if len(records) == 0 {
+		var compacted_offset, offset_err = r.GetLastCompactedOffsetForCollection(ctx, collectionId)
+		if offset_err == nil && offset <= compacted_offset {
+			trace_log.Error("Error in pulling records from record_log table. Some entries have been purged.", zap.String("collectionId", collectionId), zap.Int("requestedOffset", int(offset)), zap.Int("actualOffset", int(compacted_offset)))
+			records, err = nil, errors.New("some entries have been purged")
+		}
 	}
 	if err != nil {
 		trace_log.Error("Error in pulling records from record_log table", zap.Error(err), zap.String("collectionId", collectionId))
@@ -133,6 +143,14 @@ func (r *LogRepository) GetTotalUncompactedRecordsCount(ctx context.Context) (to
 	totalUncompactedDepth, err = r.queries.GetTotalUncompactedRecordsCount(ctx)
 	if err != nil {
 		trace_log.Error("Error in getting total uncompacted records count from collection table", zap.Error(err))
+	}
+	return
+}
+
+func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context, collectionId string) (compacted_offset int64, err error) {
+	compacted_offset, err = r.queries.GetLastCompactedOffset(ctx, collectionId)
+	if err != nil {
+		trace_log.Error("Error in getting last compacted offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
 	}
 	return
 }
