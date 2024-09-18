@@ -168,15 +168,15 @@ func compareModelLogRecordToLogRecord(t *rapid.T, modelLogRecord ModelLogRecord,
 // is the same in both the model and the SUT
 func (suite *LogServerTestSuite) invariantLogsAreTheSame(ctx context.Context, t *rapid.T) {
 	for id, model_log := range suite.model.CollectionData {
-		compaction_offset := suite.model.CollectionCompactionOffset[id] + 1
-		pulled_log, err := suite.lr.PullRecords(ctx, id.String(), int64(compaction_offset), len(model_log), time.Now().UnixNano())
+		next_offset := suite.model.CollectionCompactionOffset[id] + 1
+		pulled_log, err := suite.lr.PullRecords(ctx, id.String(), int64(next_offset), len(model_log), time.Now().UnixNano())
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Filter model_log to only include logs after the compaction offset.
 		expected_count := 0
 		for _, log := range model_log {
-			if log.offset >= compaction_offset {
+			if log.offset >= next_offset {
 				expected_count++
 			}
 		}
@@ -188,7 +188,7 @@ func (suite *LogServerTestSuite) invariantLogsAreTheSame(ctx context.Context, t 
 		// Each record should be the same
 		i := 0
 		for _, modelLogRecord := range model_log {
-			if modelLogRecord.offset < compaction_offset {
+			if modelLogRecord.offset < next_offset {
 				continue
 			}
 			// Compare the record

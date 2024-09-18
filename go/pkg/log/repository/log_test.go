@@ -58,7 +58,7 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	err = suite.lr.GarbageCollection(ctx)
 	assert.NoError(suite.t, err, "Failed to run garbage collection")
 
-	records, err := suite.lr.PullRecords(ctx, collectionID1.String(), 0, 1, time.Now().UnixNano())
+	records, err := suite.lr.PullRecords(ctx, collectionID1.String(), 1, 1, time.Now().UnixNano())
 	assert.NoError(suite.t, err, "Failed to pull records")
 	assert.Equal(suite.t, 1, len(records), "Failed to run garbage collection")
 	assert.Equal(suite.t, []byte{1, 2, 3}, records[0].Record, "Failed to run garbage collection")
@@ -72,7 +72,7 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	count, err = suite.lr.InsertRecords(ctx, collectionID2.String(), [][]byte{{4, 5, 6}})
 	assert.NoError(suite.t, err, "Failed to insert records")
 	assert.Equal(suite.t, int64(1), count, "Failed to insert records")
-	records, err = suite.lr.PullRecords(ctx, collectionID2.String(), 0, 1, time.Now().UnixNano())
+	records, err = suite.lr.PullRecords(ctx, collectionID2.String(), 1, 1, time.Now().UnixNano())
 	assert.NoError(suite.t, err, "Failed to pull records")
 	assert.Equal(suite.t, 1, len(records), "Failed to run garbage collection")
 	assert.Equal(suite.t, []byte{4, 5, 6}, records[0].Record, "Failed to run garbage collection")
