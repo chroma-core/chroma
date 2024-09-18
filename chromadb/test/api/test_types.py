@@ -24,7 +24,7 @@ def test_embedding_function_results_format_when_response_is_valid() -> None:
             return valid_embeddings
 
     ef = TestEmbeddingFunction()
-    
+
     embeddings = ef(random_documents())
     for i, e in enumerate(embeddings):
         assert e.tolist() == valid_embeddings[i].tolist()
