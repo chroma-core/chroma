@@ -799,13 +799,7 @@ def test_autocasting_validate_embeddings_for_compatible_types(
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
-            isinstance(value, np.ndarray)
-            and all(
-                [
-                    isinstance(vec, (np.integer, np.floating)) and not isinstance(vec, bool)
-                    for vec in value
-                ]
-            )
+            isinstance(value, np.ndarray) and (value.dtype == np.float32 or value.dtype == np.float64 or value.dtype == np.int32 or value.dtype == np.int64)
             for value in validated_embeddings
         ]
     )
@@ -819,13 +813,7 @@ def test_autocasting_validate_embeddings_with_ndarray(
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
-            isinstance(value, np.ndarray)
-            and all(
-                [
-                    isinstance(vec, (np.integer, np.floating)) and not isinstance(vec, bool)
-                    for vec in value
-                ]
-            )
+            isinstance(value, np.ndarray) and (value.dtype == np.float32 or value.dtype == np.float64 or value.dtype == np.int32 or value.dtype == np.int64)
             for value in validated_embeddings
         ]
     )
