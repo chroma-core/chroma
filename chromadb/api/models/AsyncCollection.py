@@ -138,7 +138,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             GetResult: A GetResult object containing the results.
         """
-        return await self._client._peek(self.id, limit)
+        return self._transform_peek_response(await self._client._peek(self.id, limit))
 
     async def query(
         self,
