@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Sequence
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import MetadataReader
 from chromadb.config import System
+from chromadb.errors import OutOfBoundError
 from chromadb.types import Segment
 from overrides import override
 from chromadb.telemetry.opentelemetry import (
@@ -81,6 +82,12 @@ class GrpcMetadataSegment(MetadataReader):
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
 
+        if limit is not None and limit < 0:
+            raise OutOfBoundError(f"Limit cannot be negative: {limit}")
+
+        if offset is not None and offset < 0:
+            raise OutOfBoundError(f"Offset cannot be negative: {offset}")
+
         request: pb.QueryMetadataRequest = pb.QueryMetadataRequest(
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
@@ -92,16 +99,11 @@ class GrpcMetadataSegment(MetadataReader):
                 if where_document is not None and len(where_document) > 0
                 else None
             ),
-            ids=ids,
+            ids=pb.UserIds(ids=ids) if ids is not None else None,
             limit=limit,
             offset=offset,
             include_metadata=include_metadata,
         )
-        limit = limit or 2**63 - 1
-        offset = offset or 0
-
-        if limit and limit < 0:
-            raise ValueError("Limit cannot be negative")
 
         response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
             request, timeout=self._request_timeout_seconds

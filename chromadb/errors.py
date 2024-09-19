@@ -81,6 +81,13 @@ class InvalidHTTPVersion(ChromaError):
         return "InvalidHTTPVersion"
 
 
+class OutOfBoundError(ChromaError):
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "OutOfBound"
+
+
 class AuthorizationError(ChromaError):
     @overrides
     def code(self) -> int:

@@ -352,10 +352,7 @@ impl WorkerServer {
         };
 
         // If no ids are provided, pass None to the orchestrator
-        let query_ids = match request.ids.len() {
-            0 => None,
-            _ => Some(request.ids),
-        };
+        let query_ids = request.ids.map(|uids| uids.ids);
 
         let where_clause = match request.r#where {
             Some(where_clause) => match where_clause.try_into() {
