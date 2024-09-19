@@ -26,7 +26,6 @@ mod dataset_utilities;
 use dataset_utilities::{get_document_dataset, get_document_query_dataset_pair};
 
 async fn get_log_chunk<T: DocumentDataset>(corpus: &T) -> Chunk<LogRecord> {
-    // todo: Result?
     let log_records = corpus
         .create_log_stream(|_| async { vec![0.0, 0.0, 0.0] })
         .await
