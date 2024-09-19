@@ -136,6 +136,8 @@ fn bench_querying(c: &mut Criterion) {
     let mut querying_group = c.benchmark_group("querying");
     querying_group.throughput(Throughput::Elements(1));
 
+    let mut query_iter = query_subset.queries.iter().cycle();
+
     let segment_reader = runner.block_on(async {
         let metadata_segment = compact_log_to_storage(&blockfile_provider, log_chunk.clone())
             .await
@@ -146,8 +148,6 @@ fn bench_querying(c: &mut Criterion) {
                 .unwrap(),
         )
     });
-
-    let mut query_iter = query_subset.queries.iter().cycle();
 
     querying_group.bench_function(format!("scidocs ({} records)", log_chunk.len()), |b| {
         b.to_async(&runner).iter_batched(
