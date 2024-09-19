@@ -72,10 +72,8 @@ proptest-state-machine = { workspace = true }
 criterion = { workspace = true }
 chroma-benchmark-datasets = { workspace = true }
 indicatif = "0.17.8"
+anyhow = "1.0.89"
 
 [[bench]]
 name = "fts_index"
 harness = false
-
-[profile.bench]
-debug = true

@@ -1,8 +1,9 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
+use anyhow::Result;
 use chroma_benchmark_datasets::{
     datasets::{ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset},
-    types::{DocumentDataset, FrozenQuerySubset, QueryDataset},
+    types::DocumentDataset,
 };
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::{
@@ -13,14 +14,16 @@ use chroma_storage::{local::LocalStorage, Storage};
 use chroma_types::{
     Chunk, DirectDocumentComparison, LogRecord, WhereDocument, WhereDocumentOperator,
 };
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use futures::{StreamExt, TryFutureExt};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use futures::StreamExt;
 use uuid::Uuid;
 use worker::segment::{
     metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
     types::{LogMaterializer, SegmentFlusher, SegmentWriter},
 };
+
+mod dataset_utilities;
+use dataset_utilities::{get_document_dataset, get_document_query_dataset_pair};
 
 async fn get_log_chunk<T: DocumentDataset>(corpus: &T) -> Chunk<LogRecord> {
     // todo: Result?
@@ -40,7 +43,10 @@ async fn get_log_chunk<T: DocumentDataset>(corpus: &T) -> Chunk<LogRecord> {
     Chunk::new(log_records.into())
 }
 
-async fn get_reader(storage: &Storage, chunk: Chunk<LogRecord>) -> MetadataSegmentReader<'static> {
+async fn compact_log_to_storage(
+    blockfile_provider: &BlockfileProvider,
+    chunk: Chunk<LogRecord>,
+) -> Result<chroma_types::Segment> {
     let materializer = LogMaterializer::new(None, chunk, None);
 
     let mut metadata_segment = chroma_types::Segment {
@@ -51,14 +57,6 @@ async fn get_reader(storage: &Storage, chunk: Chunk<LogRecord>) -> MetadataSegme
         metadata: None,
         file_path: HashMap::new(),
     };
-
-    const BLOCK_SIZE: usize = 8 * 1024 * 1024; // 8MB
-
-    let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-    let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-    let arrow_blockfile_provider =
-        ArrowBlockfileProvider::new(storage.clone(), BLOCK_SIZE, block_cache, sparse_index_cache);
-    let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
 
     let mut metadata_writer =
         MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
@@ -73,117 +71,88 @@ async fn get_reader(storage: &Storage, chunk: Chunk<LogRecord>) -> MetadataSegme
     let flusher = metadata_writer.commit().unwrap();
     metadata_segment.file_path = flusher.flush().await.unwrap();
 
-    MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
-        .await
-        .expect("Metadata segment reader construction failed")
+    Ok(metadata_segment)
 }
 
-async fn get_datasets<DocumentCorpus: DocumentDataset, QueryCorpus: QueryDataset>(
-) -> (DocumentCorpus, FrozenQuerySubset) {
-    let progress = MultiProgress::new();
+const BLOCK_SIZE: usize = 8 * 1024 * 1024; // 8MB
 
-    let style = ProgressStyle::default_spinner()
-        .template("  {spinner:.green} {msg}")
-        .unwrap();
-
-    let finish_style = ProgressStyle::default_spinner()
-        .template("  {prefix:.green} {msg}")
-        .unwrap();
-
-    let parent_task_style = ProgressStyle::default_spinner()
-        .template("📁 initializing datasets...")
-        .unwrap();
-    let parent_task = ProgressBar::new_spinner().with_style(parent_task_style);
-    // parent_task.tick();
-
-    let document_corpus_spinner = ProgressBar::new_spinner()
-        .with_message(DocumentCorpus::get_display_name())
-        .with_style(style.clone());
-    let query_corpus_spinner = ProgressBar::new_spinner()
-        .with_message(QueryCorpus::get_display_name())
-        .with_style(style.clone());
-
-    let parent_task = progress.add(parent_task);
-    let document_corpus_spinner = progress.add(document_corpus_spinner);
-    let query_corpus_spinner = progress.add(query_corpus_spinner);
-
-    parent_task.enable_steady_tick(Duration::from_millis(50));
-    document_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
-    query_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
-
-    let document_corpus_init = DocumentCorpus::init().and_then(|r| async {
-        document_corpus_spinner.set_style(finish_style.clone());
-        document_corpus_spinner.set_prefix("✔︎");
-        document_corpus_spinner.finish_and_clear();
-        Ok(r)
-    });
-    let query_corpus_init = QueryCorpus::init().and_then(|r| async {
-        query_corpus_spinner.set_style(finish_style.clone());
-        query_corpus_spinner.set_prefix("✔");
-        query_corpus_spinner.finish_and_clear();
-        Ok(r)
-    });
-
-    let (document_corpus, query_corpus) = futures::join!(document_corpus_init, query_corpus_init);
-    let document_corpus = document_corpus.expect("Failed to initialize document corpus");
-    let query_corpus = query_corpus.expect("Failed to initialize query corpus");
-
-    let query_spinner = ProgressBar::new_spinner()
-        .with_message("creating query subset...")
-        .with_style(style.clone());
-
-    let query_spinner = progress.add(query_spinner);
-    query_spinner.enable_steady_tick(Duration::from_millis(50));
-
-    let subset = query_corpus
-        .get_or_create_frozen_query_subset(&document_corpus, 2, 10_000, None)
-        .and_then(|r| async {
-            query_spinner.set_style(finish_style.clone());
-            query_spinner.set_prefix("✔");
-            query_spinner.finish_and_clear();
-            Ok(r)
-        })
-        .await
-        .expect("Failed to create query subset");
-
-    progress.clear().unwrap();
-
-    (document_corpus, subset)
+fn create_blockfile_provider(storage_dir: &str) -> BlockfileProvider {
+    let storage = Storage::Local(LocalStorage::new(storage_dir));
+    let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+    let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+    let arrow_blockfile_provider =
+        ArrowBlockfileProvider::new(storage.clone(), BLOCK_SIZE, block_cache, sparse_index_cache);
+    BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
 }
 
-pub fn criterion_benchmark(c: &mut Criterion) {
+pub fn bench_compaction(c: &mut Criterion) {
     let runner = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("Failed to create runtime");
 
-    let (document_corpus, query_subset) =
-        runner.block_on(get_datasets::<SciDocsDataset, MicrosoftMarcoQueriesDataset>());
+    let document_corpus = runner.block_on(get_document_dataset::<SciDocsDataset>());
+    let log_chunk = runner.block_on(get_log_chunk(&document_corpus));
 
+    let log_chunk_content_size = log_chunk
+        .clone()
+        .iter()
+        .map(|(r, _)| r.record.document.as_ref().unwrap().len())
+        .sum::<usize>();
+
+    let mut compaction_group = c.benchmark_group("compaction");
+    compaction_group.throughput(Throughput::Bytes(log_chunk_content_size as u64));
+
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let blockfile_provider = create_blockfile_provider(tmp_dir.path().to_str().unwrap());
+
+    compaction_group.bench_function(format!("scidocs ({} records)", log_chunk.len()), |b| {
+        b.to_async(&runner).iter_batched(
+            || (log_chunk.clone(), blockfile_provider.clone()),
+            |(chunk, blockfile_provider)| async move {
+                compact_log_to_storage(&blockfile_provider, black_box(chunk))
+                    .await
+                    .unwrap();
+            },
+            criterion::BatchSize::LargeInput,
+        )
+    });
+}
+
+fn bench_querying(c: &mut Criterion) {
+    let runner = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create runtime");
+
+    let (document_corpus, query_subset) = runner.block_on(get_document_query_dataset_pair::<
+        SciDocsDataset,
+        MicrosoftMarcoQueriesDataset,
+    >(2, 10_000));
     let log_chunk = runner.block_on(get_log_chunk(&document_corpus));
 
     let tmp_dir = tempfile::tempdir().unwrap();
-    let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+    let blockfile_provider = create_blockfile_provider(tmp_dir.path().to_str().unwrap());
 
-    c.bench_function("compaction", |b| {
-        b.to_async(&runner).iter_batched(
-            || (log_chunk.clone(), storage.clone()),
-            |(chunk, storage)| async move {
-                get_reader(&storage, black_box(chunk)).await;
-            },
-            // todo: correct size?
-            criterion::BatchSize::SmallInput,
+    let mut querying_group = c.benchmark_group("querying");
+    querying_group.throughput(Throughput::Elements(1));
+
+    let segment_reader = runner.block_on(async {
+        let metadata_segment = compact_log_to_storage(&blockfile_provider, log_chunk.clone())
+            .await
+            .unwrap();
+        Arc::new(
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .unwrap(),
         )
     });
 
-    // todo: progress bar for compaction
-    let reader = Arc::new(runner.block_on(get_reader(&storage, log_chunk.clone())));
-
     let mut query_iter = query_subset.queries.iter().cycle();
 
-    c.bench_function("querying", |b| {
+    querying_group.bench_function(format!("scidocs ({} records)", log_chunk.len()), |b| {
         b.to_async(&runner).iter_batched(
-            || (reader.clone(), query_iter.next().unwrap().clone()),
+            || (segment_reader.clone(), query_iter.next().unwrap().clone()),
             |(reader, query)| async move {
                 let where_document =
                     WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
@@ -204,5 +173,5 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group!(benches, bench_compaction, bench_querying);
 criterion_main!(benches);
