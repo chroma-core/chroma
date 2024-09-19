@@ -15,6 +15,27 @@ def async_to_sync(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
     """
 
     def sync_wrapper(*args, **kwargs):  # type: ignore
+        loop = None
+        def new_event_loop():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is None or loop.is_closed():
+            new_event_loop()
+
+        try:
+            if loop.is_running():
+                return func(*args, **kwargs)
+        except RuntimeError:
+            new_event_loop()
+
+        result = loop.run_until_complete(func(*args, **kwargs))
+
         def convert_result(result: Any) -> Any:
             if isinstance(result, list):
                 return [convert_result(r) for r in result]
@@ -26,12 +47,8 @@ def async_to_sync(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
                 return async_to_sync(result)
 
             return result
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(func(*args, **kwargs))
-            return convert_result(result)
-        finally:
-            loop.close()
+
+        return convert_result(result)
 
     return sync_wrapper
 
