@@ -19,7 +19,8 @@ jobs:
       - name: Build
         run: cargo build --verbose
       - name: Test
-        run: cargo nextest run
+        # --all-targets tests benchmarks
+        run: cargo nextest run --all-targets
   test-integration:
     strategy:
       matrix:
