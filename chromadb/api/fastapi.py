@@ -12,6 +12,8 @@ from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
 
+from chromadb.utils.embeddings import convert_np_embeddings_to_list
+
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -418,7 +420,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
+        batch = (ids, convert_np_embeddings_to_list(embeddings), metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
@@ -438,7 +440,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
+        batch = (ids, convert_np_embeddings_to_list(embeddings) if embeddings is not None else None, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/update")
         return True
@@ -458,7 +460,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
+        batch = (ids, convert_np_embeddings_to_list(embeddings), metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/upsert")
         return True

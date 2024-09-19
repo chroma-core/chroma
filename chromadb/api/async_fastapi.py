@@ -17,6 +17,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
+from chromadb.utils.embeddings import convert_np_embeddings_to_list
 
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 
@@ -449,7 +450,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
+        batch = (ids, convert_np_embeddings_to_list(embeddings), metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
@@ -465,7 +466,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
+        batch = (ids, convert_np_embeddings_to_list(embeddings) if embeddings is not None else None, metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(
@@ -485,7 +486,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, [embedding.tolist() for embedding in embeddings] if embeddings is not None else None, metadatas, documents, uris)
+        batch = (ids, convert_np_embeddings_to_list(embeddings), metadatas, documents, uris)
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
