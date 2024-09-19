@@ -441,12 +441,14 @@ impl HnswQueryOrchestrator {
                 "Invariant violation. HNSW result offset ids are not set for query vector index",
             );
 
-        // Eagerly dispatch prefetch tasks.
-        let offset_ids_to_prefetch: Vec<u32> =
-            hnsw_result_offset_ids.iter().map(|x| *x as u32).collect();
-        self.prefetch_record_data(ctx, offset_ids_to_prefetch.clone())
-            .await;
-        self.prefetch_user_ids(ctx, offset_ids_to_prefetch).await;
+        if hnsw_result_offset_ids.len() > 0 {
+            // Eagerly dispatch prefetch tasks.
+            let offset_ids_to_prefetch: Vec<u32> =
+                hnsw_result_offset_ids.iter().map(|x| *x as u32).collect();
+            self.prefetch_record_data(ctx, offset_ids_to_prefetch.clone())
+                .await;
+            self.prefetch_user_ids(ctx, offset_ids_to_prefetch).await;
+        }
 
         let record_segment = self
             .record_segment
