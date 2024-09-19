@@ -2,7 +2,7 @@ use crate::{
     execution::operator::{Operator, OperatorType},
     segment::record_segment::RecordSegmentReader,
 };
-use chroma_blockstore::provider::BlockfileProvider;
+use chroma_blockstore::{key, provider::BlockfileProvider};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Segment;
 use thiserror::Error;
@@ -81,26 +81,67 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
         &self,
         input: &RecordSegmentPrefetchIoInput,
     ) -> Result<RecordSegmentPrefetchIoOutput, Self::Error> {
-        // Construct record segment reader.
-        let record_segment_reader =
-            match RecordSegmentReader::from_segment(&input.segment, &input.provider).await {
-                Ok(reader) => reader,
-                Err(_) => {
-                    return Err(
-                        RecordSegmentPrefetchIoOperatorError::RecordSegmentReaderCreationError,
-                    );
-                }
-            };
         match &input.keys {
             Keys::OffsetIdToDataKeys(keys) => {
+                if keys.keys.is_empty() {
+                    return Ok(RecordSegmentPrefetchIoOutput {});
+                }
+                // Construct record segment reader.
+                let record_segment_reader = match RecordSegmentReader::from_segment(
+                    &input.segment,
+                    &input.provider,
+                )
+                .await
+                {
+                    Ok(reader) => reader,
+                    Err(_) => {
+                        return Err(
+                            RecordSegmentPrefetchIoOperatorError::RecordSegmentReaderCreationError,
+                        );
+                    }
+                };
                 record_segment_reader.prefetch_id_to_data(&keys.keys).await;
             }
             Keys::OffsetIdToUserIdKeys(keys) => {
+                if keys.keys.is_empty() {
+                    return Ok(RecordSegmentPrefetchIoOutput {});
+                }
+                // Construct record segment reader.
+                let record_segment_reader = match RecordSegmentReader::from_segment(
+                    &input.segment,
+                    &input.provider,
+                )
+                .await
+                {
+                    Ok(reader) => reader,
+                    Err(_) => {
+                        return Err(
+                            RecordSegmentPrefetchIoOperatorError::RecordSegmentReaderCreationError,
+                        );
+                    }
+                };
                 record_segment_reader
                     .prefetch_id_to_user_id(&keys.keys)
                     .await;
             }
             Keys::UserIdToOffsetIdKeys(keys) => {
+                if keys.keys.is_empty() {
+                    return Ok(RecordSegmentPrefetchIoOutput {});
+                }
+                // Construct record segment reader.
+                let record_segment_reader = match RecordSegmentReader::from_segment(
+                    &input.segment,
+                    &input.provider,
+                )
+                .await
+                {
+                    Ok(reader) => reader,
+                    Err(_) => {
+                        return Err(
+                            RecordSegmentPrefetchIoOperatorError::RecordSegmentReaderCreationError,
+                        );
+                    }
+                };
                 record_segment_reader
                     .prefetch_user_id_to_id(keys.keys.iter().map(|x| x.as_str()).collect())
                     .await;
