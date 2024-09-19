@@ -35,6 +35,7 @@ where
     Fut: Future<Output = Result<()>>,
 {
     let dataset_dir = get_dataset_cache_path(dataset_name, cache_dir).await?;
+    println!("dataset_dir: {:?}", dataset_dir);
     let file_path = dataset_dir.join(file_name);
 
     if !file_path.exists() {
