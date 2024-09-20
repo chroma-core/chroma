@@ -214,6 +214,7 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
         database=collection.database,
         tenant=collection.tenant,
         version=collection.version,
+        log_position=collection.log_position,
     )
 
 
