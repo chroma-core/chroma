@@ -48,7 +48,7 @@ from chromadb.telemetry.product.events import (
 )
 
 import chromadb.types as t
-from typing import Optional, Sequence, Generator, List, cast, Set, Dict
+from typing import Optional, Sequence, Generator, List, cast, Set
 from overrides import override
 from uuid import UUID, uuid4
 import time
@@ -90,7 +90,6 @@ class SegmentAPI(ServerAPI):
     _opentelemetry_client: OpenTelemetryClient
     _tenant_id: str
     _topic_ns: str
-    _collection_cache: Dict[UUID, t.Collection]
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -101,7 +100,6 @@ class SegmentAPI(ServerAPI):
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
-        self._collection_cache = {}
 
     @override
     def heartbeat(self) -> int:
@@ -291,7 +289,8 @@ class SegmentAPI(ServerAPI):
         if new_metadata:
             validate_update_metadata(new_metadata)
 
-        self._validate_collection(id)
+        # Ensure the collection exists
+        _ = self._get_collection(id)
 
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
@@ -320,8 +319,6 @@ class SegmentAPI(ServerAPI):
             )
             for s in self._manager.delete_segments(existing[0].id):
                 self._sysdb.delete_segment(existing[0].id, s)
-            if existing and existing[0].id in self._collection_cache:
-                del self._collection_cache[existing[0].id]
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -468,7 +465,6 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        self._validate_collection(collection_id)
         coll = self._get_collection(collection_id)
         request_version_context = t.RequestVersionContext(
             collection_version=coll.version,
@@ -638,10 +634,14 @@ class SegmentAPI(ServerAPI):
     @override
     def _count(self, collection_id: UUID) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
-        self._validate_collection(collection_id)
+        coll = self._get_collection(collection_id)
+        request_version_context = t.RequestVersionContext(
+            collection_version=coll.version,
+            log_position=coll.log_position,
+        )
 
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
-        return metadata_segment.count()
+        return metadata_segment.count(request_version_context)
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
     @rate_limit(subject="collection_id", resource=Resource.QUERY_PER_MINUTE)
@@ -803,7 +803,7 @@ class SegmentAPI(ServerAPI):
 
     @override
     def reset_state(self) -> None:
-        self._collection_cache = {}
+        pass
 
     @override
     def reset(self) -> bool:
@@ -847,7 +847,6 @@ class SegmentAPI(ServerAPI):
             if update:
                 id = collection.id
                 self._sysdb.update_collection(id=id, dimension=dim)
-                self._collection_cache[id]["dimension"] = dim
         elif collection["dimension"] != dim:
             raise InvalidDimensionException(
                 f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
@@ -857,18 +856,12 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._get_collection", OpenTelemetryGranularity.ALL)
     def _get_collection(self, collection_id: UUID) -> t.Collection:
-        """Read-through cache for collection data"""
-        if collection_id not in self._collection_cache:
-            collections = self._sysdb.get_collections(id=collection_id)
-            if not collections:
-                raise InvalidCollectionException(
-                    f"Collection {collection_id} does not exist."
-                )
-            self._collection_cache[collection_id] = collections[0]
-        return self._collection_cache[collection_id]
-
-    def _validate_collection(self, collection_id: UUID) -> None:
-        self._get_collection(collection_id)
+        collections = self._sysdb.get_collections(id=collection_id)
+        if not collections or len(collections) == 0:
+            raise InvalidCollectionException(
+                f"Collection {collection_id} does not exist."
+            )
+        return collections[0]
 
 
 def _records(
