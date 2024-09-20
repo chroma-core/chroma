@@ -69,8 +69,6 @@ class Collection(
     # The version is only used in the distributed version of chroma
     # in single-node chroma, this field is always 0
     version: int
-    # The log position of the collection
-    log_position: int
 
     def __init__(
         self,
@@ -82,7 +80,6 @@ class Collection(
         tenant: str,
         database: str,
         version: int = 0,
-        log_position: int = 0,
     ):
         super().__init__(
             id=id,
@@ -93,7 +90,6 @@ class Collection(
             tenant=tenant,
             database=database,
             version=version,
-            log_position=log_position,
         )
 
     # TODO: This throws away type information.

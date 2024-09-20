@@ -21,8 +21,6 @@ pub enum ErrorCodes {
     AlreadyExists = 6,
     // PERMISSION_DENIED indicates the caller does not have permission to execute the specified operation.
     PermissionDenied = 7,
-    // UNAUTHENTICATED indicates the request does not have valid authentication credentials for the operation.
-    UNAUTHENTICATED = 16,
     // RESOURCE_EXHAUSTED indicates some resource has been exhausted, perhaps a per-user quota, or perhaps the entire file system is out of space.
     ResourceExhausted = 8,
     // FAILED_PRECONDITION indicates operation was rejected because the system is not in a state required for the operation's execution.
@@ -39,7 +37,9 @@ pub enum ErrorCodes {
     Unavailable = 14,
     // DATA_LOSS indicates unrecoverable data loss or corruption.
     DataLoss = 15,
-    // VERSION_MISMATCH indicates a version mismatch.
+    // UNAUTHENTICATED indicates the request does not have valid authentication credentials for the operation.
+    UNAUTHENTICATED = 16,
+    // VERSION_MISMATCH indicates a version mismatch. This is not from the gRPC spec and is specific to Chroma.
     VersionMismatch = 17,
 }
 

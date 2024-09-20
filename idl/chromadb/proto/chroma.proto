@@ -119,7 +119,7 @@ message QueryMetadataRequest {
     optional int32 offset = 6;
     string collection_id = 7;
     bool include_metadata = 8;
-    optional RequestMetadata request_metadata = 9;
+    RequestMetadata request_metadata = 9;
 }
 
 message QueryMetadataResponse {
