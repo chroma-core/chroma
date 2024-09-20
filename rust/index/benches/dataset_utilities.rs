@@ -4,7 +4,7 @@ use chroma_benchmark_datasets::types::{FrozenQuerySubset, QueryDataset, RecordDa
 use futures::TryFutureExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-pub async fn get_document_dataset<DocumentCorpus: RecordDataset>() -> DocumentCorpus {
+pub async fn get_record_dataset<RecordCorpus: RecordDataset>() -> RecordCorpus {
     let style = ProgressStyle::default_spinner()
         .template("{spinner:.green} {msg}")
         .unwrap();
@@ -13,31 +13,31 @@ pub async fn get_document_dataset<DocumentCorpus: RecordDataset>() -> DocumentCo
         .template("{prefix:.green} {msg}")
         .unwrap();
 
-    let document_corpus_spinner = ProgressBar::new_spinner()
-        .with_message(DocumentCorpus::DISPLAY_NAME)
+    let record_corpus_spinner = ProgressBar::new_spinner()
+        .with_message(RecordCorpus::DISPLAY_NAME)
         .with_style(style.clone());
-    document_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
+    record_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
 
-    let document_corpus = DocumentCorpus::init()
+    let record_corpus = RecordCorpus::init()
         .and_then(|r| async {
-            document_corpus_spinner.set_style(finish_style.clone());
-            document_corpus_spinner.set_prefix("✔︎");
-            document_corpus_spinner.finish_and_clear();
+            record_corpus_spinner.set_style(finish_style.clone());
+            record_corpus_spinner.set_prefix("✔︎");
+            record_corpus_spinner.finish_and_clear();
             Ok(r)
         })
         .await
-        .expect("Failed to initialize document corpus");
+        .expect("Failed to initialize record corpus");
 
-    document_corpus
+    record_corpus
 }
 
-pub async fn get_document_query_dataset_pair<
-    DocumentCorpus: RecordDataset,
+pub async fn get_record_query_dataset_pair<
+    RecordCorpus: RecordDataset,
     QueryCorpus: QueryDataset,
 >(
     min_results_per_query: usize,
     max_num_of_queries: usize,
-) -> (DocumentCorpus, FrozenQuerySubset) {
+) -> (RecordCorpus, FrozenQuerySubset) {
     let progress = MultiProgress::new();
 
     let style = ProgressStyle::default_spinner()
@@ -53,25 +53,25 @@ pub async fn get_document_query_dataset_pair<
         .unwrap();
     let parent_task = ProgressBar::new_spinner().with_style(parent_task_style);
 
-    let document_corpus_spinner = ProgressBar::new_spinner()
-        .with_message(DocumentCorpus::DISPLAY_NAME)
+    let record_corpus_spinner = ProgressBar::new_spinner()
+        .with_message(RecordCorpus::DISPLAY_NAME)
         .with_style(style.clone());
     let query_corpus_spinner = ProgressBar::new_spinner()
         .with_message(QueryCorpus::DISPLAY_NAME)
         .with_style(style.clone());
 
     let parent_task = progress.add(parent_task);
-    let document_corpus_spinner = progress.add(document_corpus_spinner);
+    let record_corpus_spinner = progress.add(record_corpus_spinner);
     let query_corpus_spinner = progress.add(query_corpus_spinner);
 
     parent_task.enable_steady_tick(Duration::from_millis(50));
-    document_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
+    record_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
     query_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
 
-    let document_corpus_init = DocumentCorpus::init().and_then(|r| async {
-        document_corpus_spinner.set_style(finish_style.clone());
-        document_corpus_spinner.set_prefix("✔︎");
-        document_corpus_spinner.finish_and_clear();
+    let record_corpus_init = RecordCorpus::init().and_then(|r| async {
+        record_corpus_spinner.set_style(finish_style.clone());
+        record_corpus_spinner.set_prefix("✔︎");
+        record_corpus_spinner.finish_and_clear();
         Ok(r)
     });
     let query_corpus_init = QueryCorpus::init().and_then(|r| async {
@@ -81,8 +81,8 @@ pub async fn get_document_query_dataset_pair<
         Ok(r)
     });
 
-    let (document_corpus, query_corpus) = futures::join!(document_corpus_init, query_corpus_init);
-    let document_corpus = document_corpus.expect("Failed to initialize document corpus");
+    let (record_corpus, query_corpus) = futures::join!(record_corpus_init, query_corpus_init);
+    let record_corpus = record_corpus.expect("Failed to initialize record corpus");
     let query_corpus = query_corpus.expect("Failed to initialize query corpus");
 
     let query_spinner = ProgressBar::new_spinner()
@@ -94,7 +94,7 @@ pub async fn get_document_query_dataset_pair<
 
     let subset = query_corpus
         .get_or_create_frozen_query_subset(
-            &document_corpus,
+            &record_corpus,
             min_results_per_query,
             max_num_of_queries,
             None,
@@ -110,5 +110,5 @@ pub async fn get_document_query_dataset_pair<
 
     progress.clear().unwrap();
 
-    (document_corpus, subset)
+    (record_corpus, subset)
 }
