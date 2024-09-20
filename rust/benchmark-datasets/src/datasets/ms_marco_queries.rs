@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    types::{Document, DocumentDataset, QueryDataset},
+    types::{QueryDataset, Record, RecordDataset},
     util::get_or_populate_cached_dataset_file,
 };
 use anyhow::{anyhow, Result};
@@ -10,12 +10,17 @@ use tokio::{fs::File, io::AsyncBufReadExt};
 use tokio_stream::{wrappers::LinesStream, Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
-/// Dataset from https://github.com/microsoft/MS-MARCO-Web-Search
+/// Dataset from https://github.com/microsoft/MS-MARCO-Web-Search.
+/// Metadata:
+/// - id: The query ID.
+/// - language_codes: The language codes of the query (e.g. en-US).
 pub struct MicrosoftMarcoQueriesDataset {
     file_path: PathBuf,
 }
 
-impl DocumentDataset for MicrosoftMarcoQueriesDataset {
+impl RecordDataset for MicrosoftMarcoQueriesDataset {
+    const NAME: &'static str = "microsoft_marco_queries";
+
     async fn init() -> Result<Self> {
         let file_path = get_or_populate_cached_dataset_file("microsoft_marco_queries", "queries.tsv", None, |mut writer| {
             async move {
@@ -49,7 +54,7 @@ impl DocumentDataset for MicrosoftMarcoQueriesDataset {
         Ok(MicrosoftMarcoQueriesDataset { file_path })
     }
 
-    async fn create_documents_stream(&self) -> Result<impl Stream<Item = Result<Document>>> {
+    async fn create_records_stream(&self) -> Result<impl Stream<Item = Result<Record>>> {
         let file = File::open(self.file_path.clone()).await?;
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
@@ -68,21 +73,20 @@ impl DocumentDataset for MicrosoftMarcoQueriesDataset {
                         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
                         .collect::<String>();
 
-                    Ok(Document { content, metadata })
+                    Ok(Record {
+                        document: content,
+                        metadata,
+                    })
                 }
                 Err(e) => Err(e.into()),
             })
-            .filter(|doc| match doc.as_ref() {
-                Ok(doc) => {
-                    let language_codes = doc.metadata.get("language_codes").unwrap();
-                    language_codes.contains("en-US") && doc.content.is_ascii()
+            .filter(|record| match record.as_ref() {
+                Ok(record) => {
+                    let language_codes = record.metadata.get("language_codes").unwrap();
+                    language_codes.contains("en-US") && record.document.is_ascii()
                 }
                 Err(_) => false,
             }))
-    }
-
-    fn get_name(&self) -> &'static str {
-        "microsoft_marco_queries"
     }
 }
 

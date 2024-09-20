@@ -9,7 +9,7 @@ use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 
 use crate::{
-    types::{Document, DocumentDataset},
+    types::{Record, RecordDataset},
     util::get_or_populate_cached_dataset_file,
 };
 
@@ -21,11 +21,16 @@ struct WikipediaArticlesLine {
 }
 
 /// This is the same dataset that tantivy uses in its examples.
+/// Metadata:
+/// - url: The URL of the article.
+/// - title: The title of the article.
 pub struct WikipediaDataset {
     file_path: PathBuf,
 }
 
-impl DocumentDataset for WikipediaDataset {
+impl RecordDataset for WikipediaDataset {
+    const NAME: &'static str = "wikipedia";
+
     async fn init() -> Result<Self> {
         let file_path = get_or_populate_cached_dataset_file(
             "wikipedia",
@@ -66,9 +71,7 @@ impl DocumentDataset for WikipediaDataset {
         Ok(WikipediaDataset { file_path })
     }
 
-    async fn create_documents_stream(
-        &self,
-    ) -> Result<impl futures::Stream<Item = Result<Document>>> {
+    async fn create_records_stream(&self) -> Result<impl futures::Stream<Item = Result<Record>>> {
         let file = File::open(self.file_path.clone()).await?;
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
@@ -80,16 +83,12 @@ impl DocumentDataset for WikipediaDataset {
                 metadata.insert("url".to_string(), parsed.url);
                 metadata.insert("title".to_string(), parsed.title);
 
-                Ok(Document {
-                    content: parsed.body,
+                Ok(Record {
+                    document: parsed.body,
                     metadata,
                 })
             }
             Err(e) => Err(e.into()),
         }))
-    }
-
-    fn get_name(&self) -> &'static str {
-        "wikipedia"
     }
 }
