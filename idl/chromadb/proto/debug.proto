@@ -3,7 +3,6 @@ syntax = "proto3";
 package chroma;
 
 import "google/protobuf/empty.proto";
-option go_package = "github.com/chroma-core/chroma/go/pkg/proto/debugpb";
 
 message GetInfoResponse {
   string version = 1;
