@@ -2,7 +2,7 @@ use anyhow::Result;
 use chroma_types::{LogRecord, OperationRecord, UpdateMetadataValue};
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, future::Future, path::PathBuf};
+use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc};
 use tantivy::{
     collector::TopDocs,
     doc,
@@ -80,6 +80,21 @@ where
     }
 }
 
+impl<T: RecordDataset> RecordDataset for Arc<T> {
+    const NAME: &'static str = T::NAME;
+    const DISPLAY_NAME: &'static str = T::DISPLAY_NAME;
+
+    fn init() -> impl Future<Output = Result<Self>> + Send {
+        async move { Ok(Arc::new(T::init().await?)) }
+    }
+
+    fn create_records_stream(
+        &self,
+    ) -> impl Future<Output = Result<impl Stream<Item = Result<Record>>>> + Send {
+        self.as_ref().create_records_stream()
+    }
+}
+
 /// Represents a "known good" subset of queries from a query dataset that have at least `min_results_per_query` results in a corpus dataset.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FrozenQuerySubset {
@@ -143,13 +158,13 @@ where
         async move {
             let file_name = format!(
                 "frozen_query_subset_{}_{}_{}.bin",
-                CorpusDataset::NAME,
+                Self::NAME,
                 min_results_per_query,
                 max_num_of_queries
             );
 
             let file = get_or_populate_cached_dataset_file(
-                Self::NAME,
+                CorpusDataset::NAME,
                 &file_name,
                 Some(cache_dir.unwrap_or(get_dir_for_persistent_dataset_files())),
                 |mut file| async move {

@@ -69,11 +69,3 @@ tempfile = { workspace = true }
 shuttle = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
-criterion = { workspace = true }
-chroma-benchmark-datasets = { workspace = true }
-indicatif = "0.17.8"
-anyhow = "1.0.89"
-
-[[bench]]
-name = "fulltext_index"
-harness = false

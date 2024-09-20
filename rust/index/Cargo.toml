@@ -31,6 +31,15 @@ chroma-distance = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 rayon = { workspace = true }
+criterion = { workspace = true }
+chroma-benchmark-datasets = { workspace = true }
+indicatif = "0.17.8"
+anyhow = "1.0.89"
+
 
 [build-dependencies]
 cc = "1.0"
+
+[[bench]]
+name = "full_text"
+harness = false

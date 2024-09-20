@@ -125,7 +125,7 @@ impl ChromaError for LogMaterializerError {
 }
 
 #[derive(Debug, Clone)]
-pub struct MaterializedLogRecord<'referred_data> {
+pub(crate) struct MaterializedLogRecord<'referred_data> {
     // This is the data record read from the record segment for this id.
     // None if the record exists only in the log.
     pub(crate) data_record: Option<DataRecord<'referred_data>>,
@@ -459,9 +459,9 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
     }
 }
 
-pub struct LogMaterializer<'me> {
+pub(crate) struct LogMaterializer<'me> {
     // Is None when record segment is uninitialized.
-    pub record_segment_reader: Option<RecordSegmentReader<'me>>,
+    pub(crate) record_segment_reader: Option<RecordSegmentReader<'me>>,
     pub(crate) logs: Chunk<LogRecord>,
     // Is None for readers. In that case, the materializer reads
     // the current maximum from the record segment and uses that
@@ -471,7 +471,7 @@ pub struct LogMaterializer<'me> {
 }
 
 impl<'me> LogMaterializer<'me> {
-    pub fn new(
+    pub(crate) fn new(
         record_segment_reader: Option<RecordSegmentReader<'me>>,
         logs: Chunk<LogRecord>,
         curr_offset_id: Option<Arc<AtomicU32>>,
@@ -482,7 +482,7 @@ impl<'me> LogMaterializer<'me> {
             curr_offset_id,
         }
     }
-    pub async fn materialize(
+    pub(crate) async fn materialize(
         &'me self,
     ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
         // Trace the total_len since len() iterates over the entire chunk
@@ -846,7 +846,7 @@ impl<'me> LogMaterializer<'me> {
     }
 }
 
-pub trait SegmentWriter<'a> {
+pub(crate) trait SegmentWriter<'a> {
     async fn apply_materialized_log_chunk(
         &self,
         records: Chunk<MaterializedLogRecord<'a>>,
@@ -855,7 +855,7 @@ pub trait SegmentWriter<'a> {
 }
 
 #[async_trait]
-pub trait SegmentFlusher {
+pub(crate) trait SegmentFlusher {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>>;
 }
 

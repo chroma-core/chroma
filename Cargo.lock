@@ -1214,9 +1214,11 @@ version = "0.1.0"
 name = "chroma-index"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arrow",
  "async-trait",
  "cc",
+ "chroma-benchmark-datasets",
  "chroma-blockstore",
  "chroma-cache",
  "chroma-config",
@@ -1224,7 +1226,9 @@ dependencies = [
  "chroma-error",
  "chroma-storage",
  "chroma-types",
+ "criterion",
  "futures",
+ "indicatif",
  "parking_lot",
  "rand",
  "rayon",
@@ -6039,10 +6043,8 @@ dependencies = [
 name = "worker"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "arrow",
  "async-trait",
- "chroma-benchmark-datasets",
  "chroma-blockstore",
  "chroma-cache",
  "chroma-config",
@@ -6051,11 +6053,9 @@ dependencies = [
  "chroma-index",
  "chroma-storage",
  "chroma-types",
- "criterion",
  "figment",
  "flatbuffers",
  "futures",
- "indicatif",
  "k8s-openapi",
  "kube",
  "murmur3",
