@@ -296,7 +296,7 @@ message GetVectorsRequest {
     repeated string ids = 1;
     string segment_id = 2;
     string collection_id = 3;
-    optional RequestMetadata query_metadata = 4;
+    RequestMetadata query_metadata = 4;
 }
 
 message GetVectorsResponse {
@@ -315,7 +315,7 @@ message QueryVectorsRequest {
     bool include_embeddings = 4;
     string segment_id = 5;
     string collection_id = 6;
-    optional RequestMetadata request_metadata = 7;
+    RequestMetadata request_metadata = 7;
     // TODO: options as in types.py, its currently unused so can add later
 }
 

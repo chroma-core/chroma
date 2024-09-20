@@ -80,6 +80,7 @@ class Collection(
         tenant: str,
         database: str,
         version: int = 0,
+        log_position: int = 0,
     ):
         super().__init__(
             id=id,
@@ -90,6 +91,7 @@ class Collection(
             tenant=tenant,
             database=database,
             version=version,
+            log_position=log_position,
         )
 
     # TODO: This throws away type information.
