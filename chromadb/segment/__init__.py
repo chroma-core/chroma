@@ -4,6 +4,7 @@ from chromadb.types import (
     Collection,
     MetadataEmbeddingRecord,
     Operation,
+    RequestVersionContext,
     VectorEmbeddingRecord,
     Where,
     WhereDocument,
@@ -64,6 +65,7 @@ class MetadataReader(SegmentImplementation):
     @abstractmethod
     def get_metadata(
         self,
+        request_version_context: RequestVersionContext,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         ids: Optional[Sequence[str]] = None,
@@ -80,7 +82,9 @@ class VectorReader(SegmentImplementation):
 
     @abstractmethod
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self,
+        request_version_context: RequestVersionContext,
+        ids: Optional[Sequence[str]] = None,
     ) -> Sequence[VectorEmbeddingRecord]:
         """Get embeddings from the segment. If no IDs are provided, all embeddings are
         returned."""
