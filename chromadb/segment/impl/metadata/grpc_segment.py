@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Sequence
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import MetadataReader
 from chromadb.config import System
-from chromadb.errors import OutOfBoundError
+from chromadb.errors import InvalidArgumentError
 from chromadb.types import Segment
 from overrides import override
 from chromadb.telemetry.opentelemetry import (
@@ -83,10 +83,10 @@ class GrpcMetadataSegment(MetadataReader):
         """Query for embedding metadata."""
 
         if limit is not None and limit < 0:
-            raise OutOfBoundError(f"Limit cannot be negative: {limit}")
+            raise InvalidArgumentError(f"Limit cannot be negative: {limit}")
 
         if offset is not None and offset < 0:
-            raise OutOfBoundError(f"Offset cannot be negative: {offset}")
+            raise InvalidArgumentError(f"Offset cannot be negative: {offset}")
 
         request: pb.QueryMetadataRequest = pb.QueryMetadataRequest(
             segment_id=self._segment["id"].hex,

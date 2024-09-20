@@ -67,6 +67,17 @@ class DuplicateIDError(ChromaError):
         return "DuplicateID"
 
 
+class InvalidArgumentError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 400
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "InvalidArgument"
+
+
 class InvalidUUIDError(ChromaError):
     @classmethod
     @overrides
@@ -79,13 +90,6 @@ class InvalidHTTPVersion(ChromaError):
     @overrides
     def name(cls) -> str:
         return "InvalidHTTPVersion"
-
-
-class OutOfBoundError(ChromaError):
-    @classmethod
-    @overrides
-    def name(cls) -> str:
-        return "OutOfBound"
 
 
 class AuthorizationError(ChromaError):
