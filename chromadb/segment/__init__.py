@@ -34,7 +34,7 @@ class SegmentImplementation(Component):
         pass
 
     @abstractmethod
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         """Get the number of embeddings in this segment"""
         pass
 

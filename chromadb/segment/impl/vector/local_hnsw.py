@@ -13,6 +13,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.types import (
     LogRecord,
+    RequestVersionContext,
     VectorEmbeddingRecord,
     VectorQuery,
     VectorQueryResult,
@@ -103,7 +104,9 @@ class LocalHnswSegment(VectorReader):
     @trace_method("LocalHnswSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self,
+        request_version_context: RequestVersionContext,
+        ids: Optional[Sequence[str]] = None,
     ) -> Sequence[VectorEmbeddingRecord]:
         if ids is None:
             labels = list(self._label_to_id.keys())
@@ -188,7 +191,7 @@ class LocalHnswSegment(VectorReader):
         return self._max_seq_id
 
     @override
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         return len(self._id_to_label)
 
     @trace_method("LocalHnswSegment._init_index", OpenTelemetryGranularity.ALL)

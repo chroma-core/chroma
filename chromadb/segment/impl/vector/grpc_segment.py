@@ -16,6 +16,7 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Metadata,
+    RequestVersionContext,
     ScalarEncoding,
     Segment,
     VectorEmbeddingRecord,
@@ -55,7 +56,9 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
     @trace_method("GrpcVectorSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self,
+        request_version_context: RequestVersionContext,
+        ids: Optional[Sequence[str]] = None,
     ) -> Sequence[VectorEmbeddingRecord]:
         request = GetVectorsRequest(
             ids=ids,
@@ -99,7 +102,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         return results
 
     @override
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         raise NotImplementedError()
 
     @override
