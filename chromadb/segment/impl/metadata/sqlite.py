@@ -2,7 +2,7 @@ from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict,
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
-from chromadb.types import Segment, InclusionExclusionOperator
+from chromadb.types import RequestVersionContext, Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
 from overrides import override
 from chromadb.db.base import (
@@ -112,6 +112,7 @@ class SqliteMetadataSegment(MetadataReader):
     @override
     def get_metadata(
         self,
+        request_version_context: RequestVersionContext,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         ids: Optional[Sequence[str]] = None,

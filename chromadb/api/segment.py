@@ -469,6 +469,11 @@ class SegmentAPI(ServerAPI):
         )
 
         self._validate_collection(collection_id)
+        coll = self._get_collection(collection_id)
+        request_version_context = t.RequestVersionContext(
+            collection_version=coll.version,
+            log_position=coll.log_position,
+        )
 
         where = validate_where(where) if where is not None and len(where) > 0 else None
         where_document = (
@@ -492,6 +497,7 @@ class SegmentAPI(ServerAPI):
             ids=ids,
             limit=limit,
             offset=offset,
+            request_version_context=request_version_context,
         )
 
         if len(records) == 0:
@@ -510,7 +516,9 @@ class SegmentAPI(ServerAPI):
         if "embeddings" in include:
             vector_ids = [r["id"] for r in records]
             vector_segment = self._manager.get_segment(collection_id, VectorReader)
-            vectors = vector_segment.get_vectors(ids=vector_ids)
+            vectors = vector_segment.get_vectors(
+                ids=vector_ids, request_version_context=request_version_context
+            )
 
         # TODO: Fix type so we don't need to ignore
         # It is possible to have a set of records, some with metadata and some without
@@ -592,12 +600,19 @@ class SegmentAPI(ServerAPI):
             )
 
         coll = self._get_collection(collection_id)
+        request_version_context = t.RequestVersionContext(
+            collection_version=coll.version,
+            log_position=coll.log_position,
+        )
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
         if (where or where_document) or not ids:
             metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_segment.get_metadata(
-                where=where, where_document=where_document, ids=ids
+                where=where,
+                where_document=where_document,
+                ids=ids,
+                request_version_context=request_version_context,
             )
             ids_to_delete = [r["id"] for r in records]
         else:
@@ -673,13 +688,20 @@ class SegmentAPI(ServerAPI):
         allowed_ids = None
 
         coll = self._get_collection(collection_id)
+        request_version_context = t.RequestVersionContext(
+            collection_version=coll.version,
+            log_position=coll.log_position,
+        )
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
 
         if where or where_document:
             metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
             records = metadata_reader.get_metadata(
-                where=where, where_document=where_document, include_metadata=False
+                where=where,
+                where_document=where_document,
+                include_metadata=False,
+                request_version_context=request_version_context,
             )
             allowed_ids = [r["id"] for r in records]
 
@@ -712,6 +734,7 @@ class SegmentAPI(ServerAPI):
                 allowed_ids=allowed_ids,
                 include_embeddings="embeddings" in include,
                 options=None,
+                request_version_context=request_version_context,
             )
 
             vector_reader = self._manager.get_segment(collection_id, VectorReader)
@@ -732,7 +755,9 @@ class SegmentAPI(ServerAPI):
                     collection_id, MetadataReader
                 )
                 records = metadata_reader.get_metadata(
-                    ids=list(all_ids), include_metadata=True
+                    ids=list(all_ids),
+                    include_metadata=True,
+                    request_version_context=request_version_context,
                 )
                 metadata_by_id = {r["id"]: r["metadata"] for r in records}
                 for id_list in ids:
