@@ -114,7 +114,7 @@ message QueryMetadataRequest {
     string segment_id = 1;
     Where where = 2;
     WhereDocument where_document = 3;
-    repeated string ids = 4;
+    optional UserIds ids = 4;
     optional uint32 limit = 5;
     optional uint32 offset = 6;
     string collection_id = 7;
@@ -128,6 +128,11 @@ message QueryMetadataResponse {
 message MetadataEmbeddingRecord {
     string id = 1;
     UpdateMetadata metadata = 2;
+}
+
+// A `UserIds` should contain the set of user provided ids allowed in the result.
+message UserIds {
+    repeated string ids = 1;
 }
 
 // A `WhereDocument` clause for filtering metadata. A `WhereDocument` clause is a tree of

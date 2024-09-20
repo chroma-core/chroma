@@ -223,12 +223,12 @@ class QueryMetadataRequest(_message.Message):
     segment_id: str
     where: Where
     where_document: WhereDocument
-    ids: _containers.RepeatedScalarFieldContainer[str]
+    ids: UserIds
     limit: int
     offset: int
     collection_id: str
     include_metadata: bool
-    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Iterable[str]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ..., include_metadata: bool = ...) -> None: ...
+    def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Union[UserIds, _Mapping]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ..., include_metadata: bool = ...) -> None: ...
 
 class QueryMetadataResponse(_message.Message):
     __slots__ = ("records",)
@@ -243,6 +243,12 @@ class MetadataEmbeddingRecord(_message.Message):
     id: str
     metadata: UpdateMetadata
     def __init__(self, id: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ...) -> None: ...
+
+class UserIds(_message.Message):
+    __slots__ = ("ids",)
+    IDS_FIELD_NUMBER: _ClassVar[int]
+    ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class WhereDocument(_message.Message):
     __slots__ = ("direct", "children")
