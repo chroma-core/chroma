@@ -36,7 +36,7 @@ const F32_METADATA: &str = "f32_metadata";
 const U32_METADATA: &str = "u32_metadata";
 
 #[derive(Clone)]
-pub struct MetadataSegmentWriter<'me> {
+pub(crate) struct MetadataSegmentWriter<'me> {
     pub(crate) full_text_index_writer: Option<FullTextIndexWriter<'me>>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
@@ -103,7 +103,7 @@ impl ChromaError for MetadataSegmentError {
 }
 
 impl<'me> MetadataSegmentWriter<'me> {
-    pub async fn from_segment(
+    pub(crate) async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<MetadataSegmentWriter<'me>, MetadataSegmentError> {
@@ -952,7 +952,7 @@ impl SegmentFlusher for MetadataSegmentFlusher {
     }
 }
 
-pub struct MetadataSegmentReader<'me> {
+pub(crate) struct MetadataSegmentReader<'me> {
     pub(crate) full_text_index_reader: Option<FullTextIndexReader<'me>>,
     pub(crate) string_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub(crate) bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
@@ -961,7 +961,7 @@ pub struct MetadataSegmentReader<'me> {
 }
 
 impl MetadataSegmentReader<'_> {
-    pub async fn from_segment(
+    pub(crate) async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, MetadataSegmentError> {

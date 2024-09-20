@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use chroma_benchmark_datasets::types::{DocumentDataset, FrozenQuerySubset, QueryDataset};
+use chroma_benchmark_datasets::types::{FrozenQuerySubset, QueryDataset, RecordDataset};
 use futures::TryFutureExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-pub async fn get_document_dataset<DocumentCorpus: DocumentDataset>() -> DocumentCorpus {
+pub async fn get_document_dataset<DocumentCorpus: RecordDataset>() -> DocumentCorpus {
     let style = ProgressStyle::default_spinner()
         .template("{spinner:.green} {msg}")
         .unwrap();
@@ -14,7 +14,7 @@ pub async fn get_document_dataset<DocumentCorpus: DocumentDataset>() -> Document
         .unwrap();
 
     let document_corpus_spinner = ProgressBar::new_spinner()
-        .with_message(DocumentCorpus::get_display_name())
+        .with_message(DocumentCorpus::DISPLAY_NAME)
         .with_style(style.clone());
     document_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
 
@@ -32,7 +32,7 @@ pub async fn get_document_dataset<DocumentCorpus: DocumentDataset>() -> Document
 }
 
 pub async fn get_document_query_dataset_pair<
-    DocumentCorpus: DocumentDataset,
+    DocumentCorpus: RecordDataset,
     QueryCorpus: QueryDataset,
 >(
     min_results_per_query: usize,
@@ -54,10 +54,10 @@ pub async fn get_document_query_dataset_pair<
     let parent_task = ProgressBar::new_spinner().with_style(parent_task_style);
 
     let document_corpus_spinner = ProgressBar::new_spinner()
-        .with_message(DocumentCorpus::get_display_name())
+        .with_message(DocumentCorpus::DISPLAY_NAME)
         .with_style(style.clone());
     let query_corpus_spinner = ProgressBar::new_spinner()
-        .with_message(QueryCorpus::get_display_name())
+        .with_message(QueryCorpus::DISPLAY_NAME)
         .with_style(style.clone());
 
     let parent_task = progress.add(parent_task);
