@@ -69,6 +69,8 @@ class Collection(
     # The version is only used in the distributed version of chroma
     # in single-node chroma, this field is always 0
     version: int
+    # The log position of the collection
+    log_position: int
 
     def __init__(
         self,
