@@ -56,6 +56,7 @@ describe("collection operations", () => {
       "name": "test",
       "tenant": "default_tenant",
       "version": 0,
+      "log_position": 0,
     }
   `);
 
@@ -94,6 +95,7 @@ describe("collection operations", () => {
       "name": "test2",
       "tenant": "default_tenant",
       "version": 0,
+      "log_position": 0,
     }
   `);
   });
