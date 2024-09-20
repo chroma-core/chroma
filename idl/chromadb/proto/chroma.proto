@@ -93,6 +93,11 @@ message OperationRecord {
     Operation operation = 4;
 }
 
+message RequestVersionContext {
+    uint32 collection_version = 1;
+    uint64 log_position = 2;
+}
+
 /* Metadata Reader Interface */
 
 service MetadataReader {
