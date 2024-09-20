@@ -6053,6 +6053,7 @@ dependencies = [
  "chroma-index",
  "chroma-storage",
  "chroma-types",
+ "criterion",
  "figment",
  "flatbuffers",
  "futures",

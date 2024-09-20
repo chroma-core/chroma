@@ -20,11 +20,10 @@ use futures::{StreamExt, TryStreamExt};
 use tantivy::tokenizer::NgramTokenizer;
 
 mod dataset_utilities;
-use dataset_utilities::{get_document_dataset, get_document_query_dataset_pair};
+use dataset_utilities::{get_record_dataset, get_record_query_dataset_pair};
 
-async fn compact_log_to_storage<'a, T>(
+async fn compact_log_and_get_reader<'a, T>(
     blockfile_provider: &BlockfileProvider,
-    // chunk: Chunk<LogRecord>,
     corpus: &T,
 ) -> Result<FullTextIndexReader<'a>>
 where
@@ -100,9 +99,9 @@ pub fn bench_compaction(c: &mut Criterion) {
         .build()
         .expect("Failed to create runtime");
 
-    let (document_corpus, corpus_content_size) = runner
+    let (record_corpus, corpus_content_size) = runner
         .block_on(async {
-            let corpus = get_document_dataset::<SciDocsDataset>().await;
+            let corpus = get_record_dataset::<SciDocsDataset>().await;
             let stream = corpus.create_records_stream().await?;
 
             let corpus_content_size = stream
@@ -114,7 +113,7 @@ pub fn bench_compaction(c: &mut Criterion) {
 
             Ok::<(SciDocsDataset, usize), anyhow::Error>((corpus, corpus_content_size))
         })
-        .unwrap(); // todo ?
+        .unwrap();
 
     let mut compaction_group = c.benchmark_group("compaction");
     compaction_group.throughput(Throughput::Bytes(corpus_content_size as u64));
@@ -122,13 +121,13 @@ pub fn bench_compaction(c: &mut Criterion) {
     let tmp_dir = tempfile::tempdir().unwrap();
     let blockfile_provider = create_blockfile_provider(tmp_dir.path().to_str().unwrap());
 
-    let document_corpus = Arc::new(document_corpus);
+    let record_corpus = Arc::new(record_corpus);
 
     compaction_group.bench_function("scidocs", |b| {
         b.to_async(&runner).iter_batched(
-            || (document_corpus.clone(), blockfile_provider.clone()),
-            |(document_corpus, blockfile_provider)| async move {
-                compact_log_to_storage(&blockfile_provider, black_box(&document_corpus))
+            || (record_corpus.clone(), blockfile_provider.clone()),
+            |(record_corpus, blockfile_provider)| async move {
+                compact_log_and_get_reader(&blockfile_provider, black_box(&record_corpus))
                     .await
                     .unwrap();
             },
@@ -143,7 +142,7 @@ fn bench_querying(c: &mut Criterion) {
         .build()
         .expect("Failed to create runtime");
 
-    let (document_corpus, query_subset) = runner.block_on(get_document_query_dataset_pair::<
+    let (record_corpus, query_subset) = runner.block_on(get_record_query_dataset_pair::<
         SciDocsDataset,
         MicrosoftMarcoQueriesDataset,
     >(2, 10_000));
@@ -157,7 +156,7 @@ fn bench_querying(c: &mut Criterion) {
     let mut query_iter = query_subset.queries.iter().cycle();
 
     let index_reader = runner.block_on(async {
-        compact_log_to_storage(&blockfile_provider, &document_corpus)
+        compact_log_and_get_reader(&blockfile_provider, &record_corpus)
             .await
             .unwrap()
     });
@@ -178,5 +177,5 @@ fn bench_querying(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_querying);
+criterion_group!(benches, bench_querying, bench_compaction);
 criterion_main!(benches);

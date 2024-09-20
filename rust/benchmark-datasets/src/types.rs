@@ -34,50 +34,6 @@ where
     fn create_records_stream(
         &self,
     ) -> impl Future<Output = Result<impl Stream<Item = Result<Record>>>> + Send;
-    fn create_log_stream<F, Fut>(
-        &self,
-        compute_embedding: F,
-    ) -> impl Future<Output = Result<impl Stream<Item = Result<LogRecord>>>>
-    where
-        F: Fn(&Record) -> Fut + Clone,
-        Fut: Future<Output = Vec<f32>>,
-    {
-        async {
-            let doc_stream = self.create_records_stream().await?;
-
-            Ok(
-                futures::StreamExt::enumerate(doc_stream).then(move |(i, doc)| {
-                    let compute_embedding = compute_embedding.clone();
-
-                    async move {
-                        match doc {
-                            Ok(record) => {
-                                let embedding = compute_embedding(&record).await;
-
-                                let mut metadata = HashMap::new();
-                                for (key, value) in record.metadata {
-                                    metadata.insert(key, UpdateMetadataValue::Str(value));
-                                }
-
-                                Ok(LogRecord {
-                                    log_offset: i as i64,
-                                    record: OperationRecord {
-                                        id: i.to_string(),
-                                        embedding: Some(embedding),
-                                        encoding: Some(chroma_types::ScalarEncoding::FLOAT32),
-                                        metadata: Some(metadata),
-                                        document: Some(record.document),
-                                        operation: chroma_types::Operation::Add,
-                                    },
-                                })
-                            }
-                            Err(e) => Err(e),
-                        }
-                    }
-                }),
-            )
-        }
-    }
 }
 
 impl<T: RecordDataset> RecordDataset for Arc<T> {
