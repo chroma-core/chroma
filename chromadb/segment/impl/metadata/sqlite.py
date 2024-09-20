@@ -93,7 +93,7 @@ class SqliteMetadataSegment(MetadataReader):
 
     @trace_method("SqliteMetadataSegment.count", OpenTelemetryGranularity.ALL)
     @override
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         embeddings_t = Table("embeddings")
         q = (
             self._db.querybuilder()

@@ -22,6 +22,7 @@ from chromadb.types import (
     LogRecord,
     Metadata,
     Operation,
+    RequestVersionContext,
     Segment,
     SeqId,
     Vector,
@@ -207,7 +208,15 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 self._get_storage_folder(),
                 is_persistent_index=True,
                 max_elements=int(
-                    max(self.count() * self._params.resize_factor, DEFAULT_CAPACITY)
+                    max(
+                        self.count(
+                            request_version_context=RequestVersionContext(
+                                collection_version=0, log_position=0
+                            )
+                        )
+                        * self._params.resize_factor,
+                        DEFAULT_CAPACITY,
+                    )
                 ),
             )
         else:
@@ -341,7 +350,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     self._brute_force_index.clear()
 
     @override
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         return (
             len(self._id_to_label)
             + self._curr_batch.add_count
@@ -353,7 +362,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     )
     @override
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self,
+        request_version_context: RequestVersionContext,
+        ids: Optional[Sequence[str]] = None,
     ) -> Sequence[VectorEmbeddingRecord]:
         """Get the embeddings from the HNSW index and layered brute force
         batch index."""
@@ -404,11 +415,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             return [[] for _ in range(len(query["vectors"]))]
 
         k = query["k"]
-        if k > self.count():
+        if k > self.count(query["request_version_context"]):
+            count = self.count(query["request_version_context"])
             logger.warning(
-                f"Number of requested results {k} is greater than number of elements in index {self.count()}, updating n_results = {self.count()}"
+                f"Number of requested results {k} is greater than number of elements in index {count}, updating n_results = {count}"
             )
-            k = self.count()
+            k = count
 
         # Overquery by updated and deleted elements layered on the index because they may
         # hide the real nearest neighbors in the hnsw index
@@ -423,6 +435,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             allowed_ids=query["allowed_ids"],
             include_embeddings=query["include_embeddings"],
             options=query["options"],
+            request_version_context=query["request_version_context"],
         )
 
         # For each query vector, we want to take the top k results from the
