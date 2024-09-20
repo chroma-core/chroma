@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
-    types::{Document, DocumentDataset},
+    types::{Record, RecordDataset},
     util::get_or_populate_cached_dataset_file,
 };
 use anyhow::{anyhow, Result};
@@ -19,12 +19,17 @@ struct SciDocsCorpusLine {
     text: String,
 }
 
-/// Dataset from https://huggingface.co/datasets/BeIR/scidocs
+/// Dataset from https://huggingface.co/datasets/BeIR/scidocs.
+/// Metadata:
+/// - id: The record ID.
+/// - title: The title of the record.
 pub struct SciDocsDataset {
     file_path: PathBuf,
 }
 
-impl DocumentDataset for SciDocsDataset {
+impl RecordDataset for SciDocsDataset {
+    const NAME: &'static str = "scidocs";
+
     async fn init() -> Result<Self> {
         let file_path =
             get_or_populate_cached_dataset_file("scidocs", "corpus.jsonl", None, |mut writer| {
@@ -61,7 +66,7 @@ impl DocumentDataset for SciDocsDataset {
         Ok(SciDocsDataset { file_path })
     }
 
-    async fn create_documents_stream(&self) -> Result<impl Stream<Item = Result<Document>>> {
+    async fn create_records_stream(&self) -> Result<impl Stream<Item = Result<Record>>> {
         let file = File::open(self.file_path.clone()).await?;
         let buffered_reader = tokio::io::BufReader::new(file);
         let lines = LinesStream::new(buffered_reader.lines());
@@ -73,16 +78,12 @@ impl DocumentDataset for SciDocsDataset {
                 metadata.insert("id".to_string(), parsed._id);
                 metadata.insert("title".to_string(), parsed.title);
 
-                Ok(Document {
-                    content: parsed.text,
+                Ok(Record {
+                    document: parsed.text,
                     metadata,
                 })
             }
             Err(e) => Err(e.into()),
         }))
-    }
-
-    fn get_name(&self) -> &'static str {
-        "scidocs"
     }
 }
