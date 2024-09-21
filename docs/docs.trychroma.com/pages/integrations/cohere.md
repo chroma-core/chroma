@@ -19,7 +19,6 @@ This embedding function relies on the `cohere` python package, which you can ins
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 cohere_ef  = embedding_functions.CohereEmbeddingFunction(api_key="YOUR_API_KEY",  model_name="large")
-collection = chroma_client.create_collection(name="memory", embedding_function=cohere_ef)
 cohere_ef(["document1","document2"])
 ```
 
