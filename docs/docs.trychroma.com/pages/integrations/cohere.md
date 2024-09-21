@@ -61,7 +61,7 @@ multilingual_texts  = [ 'Hello from Cohere!', 'مرحبًا من كوهير!',
         'Ciao da Cohere!', '您好，来自 Cohere！',
         'कोहिअर से नमस्ते!'  ]
 
-cohere_ef(texts=multilingual_texts)
+cohere_ef(multilingual_texts)
 
 ```
 
