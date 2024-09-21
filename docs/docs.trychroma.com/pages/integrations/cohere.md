@@ -17,17 +17,10 @@ Chroma also provides a convenient wrapper around Cohere's embedding API. This em
 This embedding function relies on the `cohere` python package, which you can install with `pip install cohere`.
 
 ```python
-import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 cohere_ef  = embedding_functions.CohereEmbeddingFunction(api_key="YOUR_API_KEY",  model_name="large")
 collection = chroma_client.create_collection(name="memory", embedding_function=cohere_ef)
-collection.add(
-    documents=[
-        "document1",
-        "document2"
-    ],
-    ids=["id1", "id2"],
-)
+cohere_ef(["document1","document2"])
 ```
 
 {% /tab %}
