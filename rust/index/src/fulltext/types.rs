@@ -419,10 +419,7 @@ impl<'me> FullTextIndexReader<'me> {
                     .posting_lists_blockfile_reader
                     .get_by_prefix(token.text.as_str())
                     .await?;
-                if positional_posting_list.is_empty() {
-                    return Err(FullTextIndexError::EmptyValueInPositionalPostingList);
-                }
-                Ok(positional_posting_list)
+                Ok::<_, FullTextIndexError>(positional_posting_list)
             })
             .collect::<Vec<_>>()
             .await
