@@ -75,6 +75,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
+tag_regex = '^(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
+git_describe_command = 'git describe --tags --long --match "[0-9]*.[0-9]*.[0-9]*"'
 
 [tool.setuptools]
 packages = ["chromadb"]
