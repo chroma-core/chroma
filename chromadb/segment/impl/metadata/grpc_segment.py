@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Sequence
+from chromadb.proto.convert import to_proto_request_version_context
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import MetadataReader
 from chromadb.config import System
@@ -52,9 +53,12 @@ class GrpcMetadataSegment(MetadataReader):
         request: pb.CountRecordsRequest = pb.CountRecordsRequest(
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            version_context=to_proto_request_version_context(request_version_context),
         )
         response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
-            request, timeout=self._request_timeout_seconds
+            request,
+            timeout=self._request_timeout_seconds,
+            version_context=to_proto_request_version_context(request_version_context),
         )
         return response.count
 
@@ -107,7 +111,9 @@ class GrpcMetadataSegment(MetadataReader):
         )
 
         response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
-            request, timeout=self._request_timeout_seconds
+            request,
+            timeout=self._request_timeout_seconds,
+            version_context=to_proto_request_version_context(request_version_context),
         )
         results: List[MetadataEmbeddingRecord] = []
         for record in response.records:
