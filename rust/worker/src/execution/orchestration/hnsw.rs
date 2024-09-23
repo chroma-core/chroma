@@ -88,6 +88,8 @@ enum HnswSegmentQueryError {
     RecordSegmentNotFound(Uuid),
     #[error("Collection has no dimension set")]
     CollectionHasNoDimension,
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
 impl ChromaError for HnswSegmentQueryError {
@@ -99,6 +101,7 @@ impl ChromaError for HnswSegmentQueryError {
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
             HnswSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::CollectionHasNoDimension => ErrorCodes::InvalidArgument,
+            HnswSegmentQueryError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
         }
     }
 }
@@ -143,6 +146,9 @@ pub(crate) struct HnswQueryOrchestrator {
     result_channel: Option<
         tokio::sync::oneshot::Sender<Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>>>,
     >,
+    // Request version context
+    collection_version: u32,
+    log_position: u64,
 }
 
 impl HnswQueryOrchestrator {
@@ -159,6 +165,8 @@ impl HnswQueryOrchestrator {
         hnsw_index_provider: HnswIndexProvider,
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
+        collection_version: u32,
+        log_position: u64,
     ) -> Self {
         // Set the merge dependency count to the number of query vectors * 2
         // N for the HNSW query and N for the Brute force query
@@ -203,6 +211,8 @@ impl HnswQueryOrchestrator {
             hnsw_index_provider,
             blockfile_provider,
             result_channel: None,
+            collection_version,
+            log_position,
         }
     }
 
@@ -230,7 +240,9 @@ impl HnswQueryOrchestrator {
         let input = PullLogsInput::new(
             collection.id,
             // The collection log position is inclusive, and we want to start from the next log
-            collection.log_position + 1,
+            // Note that we query using the incoming log position this is critical for correctness
+            // TODO: We should make all the log service code use u64 instead of i64
+            (self.log_position as i64) + 1,
             100,
             None,
             Some(end_timestamp),

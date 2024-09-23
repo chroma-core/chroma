@@ -182,6 +182,8 @@ impl WorkerServer {
                     self.hnsw_index_provider.clone(),
                     self.blockfile_provider.clone(),
                     dispatcher,
+                    request.version_context,
+                    request.version_context.log_position,
                 );
                 orchestrator.run().await
             }
