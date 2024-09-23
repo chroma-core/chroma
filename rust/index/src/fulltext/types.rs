@@ -434,13 +434,13 @@ impl<'me> FullTextIndexReader<'me> {
         let mut results = Vec::new();
 
         loop {
-            // Get current doc_ids from each posting list.
+            // Get current doc_ids from each posting list (aka for each token).
             let current_doc_ids: Vec<Option<u32>> = posting_lists
                 .iter()
                 .enumerate()
-                .map(|(i, plist)| {
-                    if pointers[i] < plist.len() {
-                        Some(plist[pointers[i]].1)
+                .map(|(i, posting_list)| {
+                    if pointers[i] < posting_list.len() {
+                        Some(posting_list[pointers[i]].1)
                     } else {
                         None
                     }
@@ -457,24 +457,30 @@ impl<'me> FullTextIndexReader<'me> {
             let max_doc_id = current_doc_ids.iter().filter_map(|&id| id).max().unwrap();
 
             if min_doc_id == max_doc_id {
-                // All doc_ids match, check positional alignment.
-                let mut positions_per_list = Vec::with_capacity(num_tokens);
-                for (i, plist) in posting_lists.iter().enumerate() {
-                    let (_, _, positions) = plist[pointers[i]];
-                    positions_per_list.push(positions);
+                // All tokens appear in the same document, so check positional alignment.
+                let mut positions_per_posting_list = Vec::with_capacity(num_tokens);
+                for (i, posting_list) in posting_lists.iter().enumerate() {
+                    let (_, _, positions) = posting_list[pointers[i]];
+                    positions_per_posting_list.push(positions);
                 }
 
                 // Adjust positions and check for sequential alignment.
-                let mut adjusted_positions = positions_per_list[0]
+                // Imagine you're searching for "brown fox" over the document "the quick brown fox".
+                // The positions for "brown" are {2} and for "fox" are {3}. The adjusted positions after subtracting the token's position in the query are {2} for "brown" and 3 - 1 = {2} for "fox".
+                // The intersection of these two sets is non-empty, so we know that the two tokens are adjacent.
+
+                // Seed with the positions of the first token.
+                let mut adjusted_positions = positions_per_posting_list[0]
                     .iter()
                     .map(|&p| p)
                     .collect::<HashSet<_>>();
 
                 for i in 1..num_tokens {
                     let offset = i as u32;
-                    let positions_set = positions_per_list[i]
+                    let positions_set = positions_per_posting_list[i]
                         .iter()
-                        .map(|&p| p - offset)
+                        // (We can discard any positions that the token appears at before the current offset)
+                        .filter_map(|&p| p.checked_sub(offset))
                         .collect::<HashSet<_>>();
                     adjusted_positions = &adjusted_positions & &positions_set;
 
@@ -483,6 +489,7 @@ impl<'me> FullTextIndexReader<'me> {
                     }
                 }
 
+                // All tokens are sequential
                 if !adjusted_positions.is_empty() {
                     results.push(min_doc_id as i32);
                 }
