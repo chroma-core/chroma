@@ -3,7 +3,7 @@ from chromadb.proto.convert import to_proto_request_version_context
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import MetadataReader
 from chromadb.config import System
-from chromadb.errors import InvalidArgumentError
+from chromadb.errors import InvalidArgumentError, VersionMismatchError
 from chromadb.types import Segment, RequestVersionContext
 from overrides import override
 from chromadb.telemetry.opentelemetry import (
@@ -55,10 +55,18 @@ class GrpcMetadataSegment(MetadataReader):
             collection_id=self._segment["collection"].hex,
             version_context=to_proto_request_version_context(request_version_context),
         )
-        response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
-            request,
-            timeout=self._request_timeout_seconds,
-        )
+
+        try:
+            response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
+                request,
+                timeout=self._request_timeout_seconds,
+            )
+        except grpc.RpcError as rpc_error:
+            message = rpc_error.details()
+            if message.contains("Collection version mismatch"):
+                raise VersionMismatchError()
+            raise rpc_error
+
         return response.count
 
     @override
@@ -110,10 +118,19 @@ class GrpcMetadataSegment(MetadataReader):
             version_context=to_proto_request_version_context(request_version_context),
         )
 
-        response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
-            request,
-            timeout=self._request_timeout_seconds,
-        )
+        try:
+            response: pb.QueryMetadataResponse = (
+                self._metadata_reader_stub.QueryMetadata(
+                    request,
+                    timeout=self._request_timeout_seconds,
+                )
+            )
+        except grpc.RpcError as rpc_error:
+            message = rpc_error.details()
+            if message.contains("Collection version mismatch"):
+                raise VersionMismatchError()
+            raise rpc_error
+
         results: List[MetadataEmbeddingRecord] = []
         for record in response.records:
             result = self._from_proto(record)
