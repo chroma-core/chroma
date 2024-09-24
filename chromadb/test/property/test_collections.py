@@ -129,7 +129,6 @@ class CollectionStateMachine(RuleBasedStateMachine):
         # Case 0
         # new_metadata is none, coll is an existing collection
         # get_or_create should return the existing collection with existing metadata
-        # Essentially - an update with none is a no-op
 
         # Case 1
         # new_metadata is none, coll is a new collection
@@ -137,15 +136,11 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         # Case 2
         # new_metadata is not none, coll is an existing collection
-        # get_or_create should return the existing collection with updated metadata
+        # get_or_create should return the existing collection with the original metadata
 
         # Case 3
         # new_metadata is not none, coll is a new collection
-        # get_or_create should create a new collection with the new metadata, ignoring
-        # the metdata of in the input coll.
-
-        # The fact that we ignore the metadata of the generated collections is a
-        # bit weird, but it is the easiest way to excercise all cases
+        # get_or_create should create a new collection with the new metadata
 
         if new_metadata is not None and len(new_metadata) == 0:
             with pytest.raises(Exception):
@@ -160,12 +155,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         if coll.name not in self.model:
             # Handles case 1 and 3
             coll.metadata = new_metadata
-        else:
-            # Handles case 0 and 2
-            coll.metadata = (
-                self.model[coll.name] if new_metadata is None else new_metadata
-            )
-        self.set_model(coll.name, coll.metadata)  # type: ignore[arg-type]
+            self.set_model(coll.name, coll.metadata)  # type: ignore[arg-type]
 
         # Update API
         c = self.client.get_or_create_collection(

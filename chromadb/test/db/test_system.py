@@ -297,11 +297,12 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
             metadata=collection["metadata"],
         )
 
-    # get_or_create = True overwrites metadata
+    # get_or_create = True does not overwrite metadata
     overlayed_metadata: Dict[str, Union[str, int, float]] = {
         "test_new_str": "new_str",
         "test_int": 1,
     }
+
     result, created = sysdb.create_collection(
         name=sample_collections[2].name,
         id=sample_collections[2].id,
@@ -310,9 +311,10 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         metadata=overlayed_metadata,
     )
 
-    assert result["metadata"] == overlayed_metadata
+    assert result["metadata"] != overlayed_metadata
+    assert result["metadata"] == sample_collections[2]["metadata"]
 
-    # get_or_create = False with None metadata does not overwrite metadata
+    # get_or_create = True with None metadata does not overwrite metadata
     result, created = sysdb.create_collection(
         name=sample_collections[2].name,
         id=sample_collections[2].id,
@@ -320,7 +322,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         get_or_create=True,
         metadata=None,
     )
-    assert result["metadata"] == overlayed_metadata
+    assert result["metadata"] == sample_collections[2]["metadata"]
 
 
 def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:

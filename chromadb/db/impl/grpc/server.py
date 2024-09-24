@@ -290,10 +290,6 @@ class GrpcMockSysDB(SysDBServicer, Component):
         if len(matches) > 0:
             if request.get_or_create:
                 existing_collection = matches[0]
-                if request.HasField("metadata"):
-                    existing_collection["metadata"] = from_proto_metadata(
-                        request.metadata
-                    )
                 return CreateCollectionResponse(
                     status=proto.Status(code=200),
                     collection=to_proto_collection(existing_collection),
