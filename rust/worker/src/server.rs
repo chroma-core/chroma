@@ -19,7 +19,8 @@ use chroma_types::chroma_proto::{
 use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
-use chroma_types::{MetadataValue, ScalarEncoding};
+use chroma_types::{MetadataValue, ScalarEncoding, Where};
+use std::collections::HashMap;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -246,7 +247,7 @@ impl WorkerServer {
             results: proto_results_for_all,
         };
 
-        Ok(Response::new(resp))
+        return Ok(Response::new(resp));
     }
 
     async fn get_vectors_instrumented(
@@ -394,9 +395,7 @@ impl WorkerServer {
                 Ok(where_clause) => Some(where_clause),
                 Err(_) => {
                     tracing::error!("Error converting where clause");
-                    return Err(Status::internal(
-                        "Error converting where clause".to_string(),
-                    ));
+                    return Err(Status::internal(format!("Error converting where clause",)));
                 }
             },
             None => None,
@@ -407,12 +406,18 @@ impl WorkerServer {
                 Ok(where_document_clause) => Some(where_document_clause),
                 Err(_) => {
                     tracing::error!("Error converting where document clause");
-                    return Err(Status::internal(
-                        "Error converting where document clause".to_string(),
-                    ));
+                    return Err(Status::internal(format!(
+                        "Error converting where document clause",
+                    )));
                 }
             },
             None => None,
+        };
+
+        let clause = match (where_clause, where_document_clause) {
+            (Some(wc), Some(wdc)) => Some(Where::conjunction(vec![wc, wdc])),
+            (Some(c), None) | (None, Some(c)) => Some(c),
+            _ => None,
         };
 
         let orchestrator = MetadataQueryOrchestrator::new(
@@ -424,8 +429,7 @@ impl WorkerServer {
             self.sysdb.clone(),
             dispatcher.clone(),
             self.blockfile_provider.clone(),
-            where_clause,
-            where_document_clause,
+            clause,
             request.offset,
             request.limit,
             request.include_metadata,
@@ -455,10 +459,16 @@ impl WorkerServer {
             {
                 // The transport layer assumes the document exists in the metadata
                 // with the special key "chroma:document"
-                let mut output_metadata = metadata.unwrap_or_default();
-                if let Some(document) = document {
-                    output_metadata
-                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
+                let mut output_metadata = match metadata {
+                    Some(metadata) => metadata,
+                    None => HashMap::new(),
+                };
+                match document {
+                    Some(document) => {
+                        output_metadata
+                            .insert("chroma:document".to_string(), MetadataValue::Str(document));
+                    }
+                    None => {}
                 }
                 let record = chroma_proto::MetadataEmbeddingRecord {
                     id,

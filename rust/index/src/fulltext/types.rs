@@ -1,13 +1,8 @@
 use crate::fulltext::tokenizer::ChromaTokenizer;
-use crate::metadata::types::MetadataIndexError;
-use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{BooleanOperator, WhereDocument, WhereDocumentOperator};
-use futures::StreamExt;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use roaring::RoaringBitmap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tantivy::tokenizer::Token;
 use thiserror::Error;
@@ -31,7 +26,7 @@ impl ChromaError for FullTextIndexError {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UncommittedPostings {
     // token -> {doc -> [start positions]}
     positional_postings: HashMap<String, HashMap<u32, Vec<u32>>>,
@@ -41,7 +36,10 @@ pub struct UncommittedPostings {
 
 impl UncommittedPostings {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            positional_postings: HashMap::new(),
+            deleted_token_doc_pairs: HashSet::new(),
+        }
     }
 }
 
@@ -100,8 +98,13 @@ impl<'me> FullTextIndexWriter<'me> {
                     // Readers are uninitialized until the first compaction finishes
                     // so there is a case when this is none hence not an error.
                     None => 0,
-                    Some(reader) => (reader.get_frequencies_for_token(token.text.as_str()).await)
-                        .unwrap_or_default(),
+                    Some(reader) => {
+                        match reader.get_frequencies_for_token(token.text.as_str()).await {
+                            Ok(frequency) => frequency,
+                            // New token so start with frequency of 0.
+                            Err(_) => 0,
+                        }
+                    }
                 };
                 uncommitted_frequencies
                     .insert(token.text.clone(), (frequency as i32, frequency as i32));
@@ -121,9 +124,11 @@ impl<'me> FullTextIndexWriter<'me> {
                 // Readers are uninitialized until the first compaction finishes
                 // so there is a case when this is none hence not an error.
                 None => vec![],
-                Some(reader) => {
-                    (reader.get_all_results_for_token(&token.text).await).unwrap_or_default()
-                }
+                Some(reader) => match reader.get_all_results_for_token(&token.text).await {
+                    Ok(results) => results,
+                    // New token so start with empty postings list.
+                    Err(_) => vec![],
+                },
             };
             let mut doc_and_positions = HashMap::new();
             for result in results {
@@ -157,7 +162,7 @@ impl<'me> FullTextIndexWriter<'me> {
             // will have created it if this token is new to the system.
             uncommitted_frequencies
                 .entry(token.text.clone())
-                .and_modify(|e| e.0 += 1);
+                .and_modify(|e| (*e).0 += 1);
 
             // For a new token, the uncommitted list will not contain any entry so insert
             // an empty builder in that case.
@@ -171,13 +176,15 @@ impl<'me> FullTextIndexWriter<'me> {
             // check full string match.
             //
             // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
-            match builder.entry(offset_id) {
-                Entry::Vacant(v) => {
-                    v.insert(vec![token.offset_from as u32]);
-                }
-                Entry::Occupied(mut o) => {
-                    o.get_mut().push(token.offset_from as u32);
-                }
+            if !builder.contains_key(&offset_id) {
+                // Casting to i32 is safe since we limit the size of the document.
+                builder.insert(offset_id, vec![token.offset_from as u32]);
+            } else {
+                // unwrap() is safe since we already verified that the key exists.
+                builder
+                    .get_mut(&offset_id)
+                    .unwrap()
+                    .push(token.offset_from as u32);
             }
         }
         Ok(())
@@ -199,7 +206,7 @@ impl<'me> FullTextIndexWriter<'me> {
         for token in tokens {
             match uncommitted_frequencies.get_mut(token.text.as_str()) {
                 Some(frequency) => {
-                    frequency.0 -= 1;
+                    (*frequency).0 -= 1;
                 }
                 None => {
                     // Invariant violation -- we just populated this.
@@ -207,25 +214,28 @@ impl<'me> FullTextIndexWriter<'me> {
                     return Err(FullTextIndexError::InvariantViolation);
                 }
             }
-            if let Some(builder) = uncommitted_postings
+            match uncommitted_postings
                 .positional_postings
                 .get_mut(token.text.as_str())
             {
-                builder.remove(&offset_id);
-                if builder.is_empty() {
+                Some(builder) => {
+                    builder.remove(&offset_id);
+                    if builder.is_empty() {
+                        uncommitted_postings
+                            .positional_postings
+                            .remove(token.text.as_str());
+                    }
+                    // Track all the deleted (token, doc) pairs. This is needed
+                    // to remove the old postings list for this pair from storage.
                     uncommitted_postings
-                        .positional_postings
-                        .remove(token.text.as_str());
+                        .deleted_token_doc_pairs
+                        .insert((token.text.clone(), offset_id as i32));
                 }
-                // Track all the deleted (token, doc) pairs. This is needed
-                // to remove the old postings list for this pair from storage.
-                uncommitted_postings
-                    .deleted_token_doc_pairs
-                    .insert((token.text.clone(), offset_id as i32));
+                // This is fine since we delete all the positions of a token
+                // of a document at once so the next time we encounter this token
+                // (at a different position) the map could be empty.
+                None => {}
             }
-            // This is fine since we delete all the positions of a token
-            // of a document at once so the next time we encounter this token
-            // (at a different position) the map could be empty.
         }
         Ok(())
     }
@@ -263,7 +273,7 @@ impl<'me> FullTextIndexWriter<'me> {
             for (doc_id, positions) in value.drain() {
                 // Don't add if postings list is empty for this (token, doc) combo.
                 // This can happen with deletes.
-                if !positions.is_empty() {
+                if positions.len() > 0 {
                     match self
                         .posting_lists_blockfile_writer
                         .set(key.as_str(), doc_id, positions)
@@ -390,110 +400,101 @@ impl<'me> FullTextIndexReader<'me> {
         self.tokenizer.encode(document)
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<i32>, FullTextIndexError> {
+    pub async fn search(&self, query: &str) -> Result<RoaringBitmap, FullTextIndexError> {
         let binding = self.encode_tokens(query);
         let tokens = binding.get_tokens();
 
-        if tokens.is_empty() {
-            return Ok(vec![]);
+        // Get query tokens sorted by frequency.
+        let mut token_frequencies: Vec<(String, u32)> = vec![];
+        for token in tokens {
+            // TODO better error matching (NotFoundError should return Ok(vec![])) but some others should error.
+            let res = self
+                .frequencies_blockfile_reader
+                .get_by_prefix(token.text.as_str())
+                .await?;
+            if res.len() == 0 {
+                return Ok(RoaringBitmap::new());
+            }
+            if res.len() > 1 {
+                panic!("Invariant violation. Multiple frequency values found for a token.");
+            }
+            let res = res[0];
+            if res.1 <= 0 {
+                panic!("Invariant violation. Zero frequency token found.");
+            }
+            // Throw away the "value" since we store frequencies in the keys.
+            token_frequencies.push((token.text.to_string(), res.1));
         }
 
-        // Retrieve posting lists for each token.
-        let posting_lists = futures::stream::iter(tokens)
-            .then(|token| async {
-                let positional_posting_list = self
-                    .posting_lists_blockfile_reader
-                    .get_by_prefix(token.text.as_str())
-                    .await?;
-                Ok::<_, FullTextIndexError>(positional_posting_list)
-            })
-            .collect::<Vec<_>>()
+        if token_frequencies.len() == 0 {
+            return Ok(RoaringBitmap::new());
+        }
+        // TODO sort by frequency. This adds an additional layer of complexity
+        // with repeat characters where we need to keep track of which positions
+        // for the character have been seen/used in the matching algorithm. By
+        // leaving them ordered per the query, we can stick to the more straightforward
+        // but less efficient matching algorithm.
+        // token_frequencies.sort_by(|a, b| a.1.cmp(&b.1));
+
+        // Populate initial candidates with the least-frequent token's posting list.
+        // doc ID -> possible starting locations for the query.
+        let mut candidates: HashMap<u32, Vec<u32>> = HashMap::new();
+        let first_token = token_frequencies[0].0.as_str();
+        let first_token_positional_posting_list = self
+            .posting_lists_blockfile_reader
+            .get_by_prefix(first_token)
             .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
+            .unwrap();
+        for (_, doc_id, positions) in first_token_positional_posting_list.iter() {
+            candidates.insert(*doc_id, positions.to_vec());
+        }
 
-        let num_tokens = posting_lists.len();
-        let mut pointers = vec![0; num_tokens];
-        let mut results = Vec::new();
-
-        loop {
-            // Get current doc_ids from each posting list (aka for each token).
-            let current_doc_ids: Vec<Option<u32>> = posting_lists
-                .iter()
-                .enumerate()
-                .map(|(i, posting_list)| {
-                    if pointers[i] < posting_list.len() {
-                        Some(posting_list[pointers[i]].1)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // If any list is exhausted, we're done.
-            if current_doc_ids.contains(&None) {
-                break;
-            }
-
-            // Check if all doc_ids are the same.
-            let min_doc_id = current_doc_ids.iter().filter_map(|&id| id).min().unwrap();
-            let max_doc_id = current_doc_ids.iter().filter_map(|&id| id).max().unwrap();
-
-            if min_doc_id == max_doc_id {
-                // All tokens appear in the same document, so check positional alignment.
-                let mut positions_per_posting_list = Vec::with_capacity(num_tokens);
-                for (i, posting_list) in posting_lists.iter().enumerate() {
-                    let (_, _, positions) = posting_list[pointers[i]];
-                    positions_per_posting_list.push(positions);
-                }
-
-                // Adjust positions and check for sequential alignment.
-                // Imagine you're searching for "brown fox" over the document "the quick brown fox".
-                // The positions for "brown" are {2} and for "fox" are {3}. The adjusted positions after subtracting the token's position in the query are {2} for "brown" and 3 - 1 = {2} for "fox".
-                // The intersection of these two sets is non-empty, so we know that the two tokens are adjacent.
-
-                // Seed with the positions of the first token.
-                let mut adjusted_positions = positions_per_posting_list[0]
-                    .iter()
-                    .copied()
-                    .collect::<HashSet<_>>();
-
-                for (offset, positions_set) in positions_per_posting_list.iter().enumerate().skip(1)
-                {
-                    let positions_set = positions_set
-                        .iter()
-                        // (We can discard any positions that the token appears at before the current offset)
-                        .filter_map(|&p| p.checked_sub(offset as u32))
-                        .collect::<HashSet<_>>();
-                    adjusted_positions = &adjusted_positions & &positions_set;
-
-                    if adjusted_positions.is_empty() {
-                        break;
-                    }
-                }
-
-                // All tokens are sequential
-                if !adjusted_positions.is_empty() {
-                    results.push(min_doc_id as i32);
-                }
-
-                // Advance all pointers.
-                for pointer in pointers.iter_mut() {
-                    *pointer += 1;
-                }
-            } else {
-                // Advance pointers of lists with the minimum doc_id.
-                for i in 0..num_tokens {
-                    if let Some(doc_id) = current_doc_ids[i] {
-                        if doc_id == min_doc_id {
-                            pointers[i] += 1;
+        // Iterate through the rest of the tokens, intersecting the posting lists with the candidates.
+        let mut token_offset = 0;
+        for (token, _) in token_frequencies[1..].iter() {
+            token_offset += 1;
+            let positional_posting_list = self
+                .posting_lists_blockfile_reader
+                .get_by_prefix(token.as_str())
+                .await
+                .unwrap();
+            // TODO once we sort by frequency, we need to find the token position
+            // here, taking into account which positions for repeats of the same
+            // token have already been used up.
+            // let token_offset = tokens
+            //     .iter()
+            //     .find(|t| t.text == *token)
+            //     .unwrap()
+            //     .offset_from as i32;
+            let mut new_candidates: HashMap<u32, Vec<u32>> = HashMap::new();
+            for (doc_id, positions) in candidates.iter() {
+                let mut new_positions = vec![];
+                for position in positions {
+                    if let Some(positions) =
+                        // Find the positional posting list with second item = to doc_id
+                        positional_posting_list
+                            .iter()
+                            .find(|x| x.1 == *doc_id)
+                            .map(|x| &x.2)
+                    {
+                        for pos in positions.iter() {
+                            if *pos == position + token_offset {
+                                new_positions.push(*position);
+                            }
                         }
                     }
                 }
+                if !new_positions.is_empty() {
+                    new_candidates.insert((*doc_id) as u32, new_positions);
+                }
             }
+            if new_candidates.is_empty() {
+                return Ok(RoaringBitmap::new());
+            }
+            candidates = new_candidates;
         }
 
-        Ok(results)
+        return Ok(candidates.into_keys().collect());
     }
 
     // We use this to implement deletes in the Writer. A delete() is implemented
@@ -521,7 +522,7 @@ impl<'me> FullTextIndexReader<'me> {
             .frequencies_blockfile_reader
             .get_by_prefix(token)
             .await?;
-        if res.is_empty() {
+        if res.len() == 0 {
             return Ok(0);
         }
         if res.len() > 1 {
@@ -529,54 +530,6 @@ impl<'me> FullTextIndexReader<'me> {
         }
         Ok(res[0].1)
     }
-}
-
-pub fn process_where_document_clause_with_callback<
-    F: Fn(&str, WhereDocumentOperator) -> Vec<i32>,
->(
-    where_document_clause: &WhereDocument,
-    callback: &F,
-) -> Result<Vec<usize>, MetadataIndexError> {
-    let mut results = vec![];
-    match where_document_clause {
-        WhereDocument::DirectWhereDocumentComparison(direct_document_comparison) => {
-            match &direct_document_comparison.operator {
-                WhereDocumentOperator::Contains => {
-                    let result = callback(
-                        &direct_document_comparison.document,
-                        WhereDocumentOperator::Contains,
-                    );
-                    results = result.iter().map(|x| *x as usize).collect();
-                }
-                WhereDocumentOperator::NotContains => {
-                    todo!();
-                }
-            }
-        }
-        WhereDocument::WhereDocumentChildren(where_document_children) => {
-            let mut first_iteration = true;
-            for child in where_document_children.children.iter() {
-                let child_results: Vec<usize> =
-                    process_where_document_clause_with_callback(child, callback)
-                        .unwrap_or_default();
-                if first_iteration {
-                    results = child_results;
-                    first_iteration = false;
-                } else {
-                    match where_document_children.operator {
-                        BooleanOperator::And => {
-                            results = merge_sorted_vecs_conjunction(&results, &child_results);
-                        }
-                        BooleanOperator::Or => {
-                            results = merge_sorted_vecs_disjunction(&results, &child_results);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    results.sort();
-    Ok(results)
 }
 
 #[cfg(test)]
@@ -656,13 +609,13 @@ mod tests {
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
 
         let res = index_reader.search("world").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
 
         let res = index_reader.search("hello world").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
     }
 
     #[tokio::test]
@@ -729,7 +682,7 @@ mod tests {
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("aaaa").await.unwrap();
-        assert_eq!(res, vec![2]);
+        assert_eq!(res, RoaringBitmap::from([2]));
     }
 
     #[tokio::test]
@@ -831,12 +784,11 @@ mod tests {
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
-        let mut res = index_reader.search("hello").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1, 2]);
+        let res = index_reader.search("hello").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1, 2]));
 
         let res = index_reader.search("hello world").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
     }
 
     #[tokio::test]
@@ -869,12 +821,11 @@ mod tests {
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
-        let mut res = index_reader.search("hello").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1, 2]);
+        let res = index_reader.search("hello").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1, 2]));
 
         let res = index_reader.search("world").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
     }
 
     #[tokio::test]
@@ -909,21 +860,17 @@ mod tests {
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
-        let mut res = index_reader.search("hello").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1, 2, 4]);
+        let res = index_reader.search("hello").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1, 2, 4]));
 
-        let mut res = index_reader.search("world").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1, 3, 4]);
+        let res = index_reader.search("world").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1, 3, 4]));
 
-        let mut res = index_reader.search("hello world").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1]);
+        let res = index_reader.search("hello world").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1]));
 
-        let mut res = index_reader.search("world hello").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![4]);
+        let res = index_reader.search("world hello").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([4]));
     }
 
     #[tokio::test]
@@ -962,17 +909,14 @@ mod tests {
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
-        let mut res = index_reader.search("aaa").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1, 2, 4, 5]);
+        let res = index_reader.search("aaa").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1, 2, 4, 5]));
 
-        let mut res = index_reader.search("bbb").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![3, 4, 5]);
+        let res = index_reader.search("bbb").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([3, 4, 5]));
 
-        let mut res = index_reader.search("aaabbb").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![4, 5]);
+        let res = index_reader.search("aaabbb").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([4, 5]));
     }
 
     #[tokio::test]
@@ -1010,14 +954,13 @@ mod tests {
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("!!!!!").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
 
-        let mut res = index_reader.search("!!!").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1, 2]);
+        let res = index_reader.search("!!!").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1, 2]));
 
         let res = index_reader.search(".!.").await.unwrap();
-        assert_eq!(res, vec![3]);
+        assert_eq!(res, RoaringBitmap::from([3]));
     }
 
     #[tokio::test]
@@ -1143,12 +1086,11 @@ mod tests {
         let index_reader =
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
-        let mut res = index_reader.search("hello").await.unwrap();
-        res.sort();
-        assert_eq!(res, vec![1, 2, 3]);
+        let res = index_reader.search("hello").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1, 2, 3]));
 
         let res = index_reader.search("world").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
     }
 
     #[tokio::test]
@@ -1186,6 +1128,6 @@ mod tests {
             FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
 
         let res = index_reader.search("world").await.unwrap();
-        assert_eq!(res, vec![1]);
+        assert_eq!(res, RoaringBitmap::from([1]));
     }
 }

@@ -1,3 +1,6 @@
+use crate::execution::operators::metadata_filtering::RoaringMetadataFilter;
+
+use super::super::execution::operators::metadata_filtering::MetadataProvider;
 use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
@@ -11,18 +14,16 @@ use chroma_index::fulltext::types::{
 use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
-use chroma_index::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
-use chroma_types::{
-    BooleanOperator, Chunk, MaterializedLogOperation, MetadataValue, Segment, Where,
-    WhereClauseComparator, WhereDocument, WhereDocumentOperator,
-};
-use chroma_types::{SegmentType, WhereComparison};
+use chroma_index::utils::merge_sorted_vecs_conjunction;
+use chroma_types::{Chunk, MaterializedLogOperation, MetadataValue, Segment, Where};
+use chroma_types::{SegmentType, SignedRoaringBitmap};
 use core::panic;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
+use std::u32;
 use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
 use uuid::Uuid;
@@ -46,9 +47,7 @@ pub(crate) struct MetadataSegmentWriter<'me> {
 
 impl Debug for MetadataSegmentWriter<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MetadataSegmentWriter")
-            .field("id", &self.id)
-            .finish()
+        write!(f, "MetadataSegmentWriter")
     }
 }
 
@@ -126,7 +125,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             ));
         }
         let (pls_writer, pls_reader) = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => match pls_path.first() {
+            Some(pls_path) => match pls_path.get(0) {
                 Some(pls_uuid) => {
                     let pls_uuid = match Uuid::parse_str(pls_uuid) {
                         Ok(uuid) => uuid,
@@ -153,7 +152,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             },
         };
         let (freqs_writer, freqs_reader) = match segment.file_path.get(FULL_TEXT_FREQS) {
-            Some(freqs_path) => match freqs_path.first() {
+            Some(freqs_path) => match freqs_path.get(0) {
                 Some(freqs_uuid) => {
                     let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
                         Ok(uuid) => uuid,
@@ -209,7 +208,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (string_metadata_writer, string_metadata_index_reader) =
             match segment.file_path.get(STRING_METADATA) {
-                Some(string_metadata_path) => match string_metadata_path.first() {
+                Some(string_metadata_path) => match string_metadata_path.get(0) {
                     Some(string_metadata_uuid) => {
                         let string_metadata_uuid = match Uuid::parse_str(string_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -247,7 +246,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (bool_metadata_writer, bool_metadata_index_reader) =
             match segment.file_path.get(BOOL_METADATA) {
-                Some(bool_metadata_path) => match bool_metadata_path.first() {
+                Some(bool_metadata_path) => match bool_metadata_path.get(0) {
                     Some(bool_metadata_uuid) => {
                         let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -285,7 +284,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (f32_metadata_writer, f32_metadata_index_reader) =
             match segment.file_path.get(F32_METADATA) {
-                Some(f32_metadata_path) => match f32_metadata_path.first() {
+                Some(f32_metadata_path) => match f32_metadata_path.get(0) {
                     Some(f32_metadata_uuid) => {
                         let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -323,7 +322,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (u32_metadata_writer, u32_metadata_index_reader) =
             match segment.file_path.get(U32_METADATA) {
-                Some(u32_metadata_path) => match u32_metadata_path.first() {
+                Some(u32_metadata_path) => match u32_metadata_path.get(0) {
                     Some(u32_metadata_uuid) => {
                         let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -442,7 +441,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into str metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -456,7 +455,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -470,7 +469,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -484,7 +483,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into bool metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -508,7 +507,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from str metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -522,7 +521,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -536,7 +535,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -550,7 +549,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from bool metadata index writer {:?}", e);
-                                Err(e)
+                                return Err(e);
                             }
                         }
                     }
@@ -590,8 +589,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             for (key, value) in metadata.iter() {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
-                                    Err(_) => {
-                                        return Err(ApplyMaterializedLogError::BlockfileSet);
+                                    Err(e) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
                                     }
                                 }
                             }
@@ -621,9 +620,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     match self.delete_metadata(key, value, segment_offset_id).await
                                     {
                                         Ok(()) => {}
-                                        Err(_) => {
+                                        Err(e) => {
                                             return Err(
-                                                ApplyMaterializedLogError::BlockfileDelete,
+                                                ApplyMaterializedLogError::BlockfileDeleteError,
                                             );
                                         }
                                     }
@@ -642,7 +641,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         Err(e) => {
                                             tracing::error!("Error deleting document {:?}", e);
                                             return Err(
-                                                ApplyMaterializedLogError::FTSDocumentDelete,
+                                                ApplyMaterializedLogError::FTSDocumentDeleteError,
                                             );
                                         }
                                     }
@@ -667,8 +666,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(_) => {
-                                return Err(ApplyMaterializedLogError::BlockfileUpdate);
+                            Err(e) => {
+                                return Err(ApplyMaterializedLogError::BlockfileUpdateError);
                             }
                         }
                     }
@@ -679,8 +678,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(_) => {
-                                return Err(ApplyMaterializedLogError::BlockfileSet);
+                            Err(e) => {
+                                return Err(ApplyMaterializedLogError::BlockfileSetError);
                             }
                         }
                     }
@@ -691,53 +690,57 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(_match ) => {
-                                return Err(ApplyMaterializedLogError::BlockfileDelete);
+                            Err(e) => {
+                                return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                             }
                         }
                     }
                     // Update the document if present.
-                    if let Some(doc) = record.0.final_document { match &self.full_text_index_writer {
-                        Some(writer) => match &record.0.data_record {
-                            Some(record) => match record.document {
-                                Some(old_doc) => {
-                                    match writer
-                                        .update_document(old_doc, doc, segment_offset_id)
+                    match record.0.final_document {
+                        Some(doc) => match &self.full_text_index_writer {
+                            Some(writer) => match &record.0.data_record {
+                                Some(record) => match record.document {
+                                    Some(old_doc) => {
+                                        match writer
+                                            .update_document(&old_doc, doc, segment_offset_id)
+                                            .await
+                                        {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "FTS Update document failed {:?}",
+                                                    e
+                                                );
+                                                return Err(
+                                                    ApplyMaterializedLogError::FTSDocumentUpdateError,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    // Previous version of record does not contain document string.
+                                    None => match writer
+                                        .add_document(doc, segment_offset_id)
                                         .await
                                     {
                                         Ok(_) => {}
                                         Err(e) => {
                                             tracing::error!(
-                                                "FTS Update document failed {:?}",
+                                                "Add document for an update failed {:?}",
                                                 e
                                             );
                                             return Err(
-                                                ApplyMaterializedLogError::FTSDocumentUpdate,
+                                                ApplyMaterializedLogError::FTSDocumentAddError,
                                             );
                                         }
-                                    }
-                                }
-                                // Previous version of record does not contain document string.
-                                None => match writer
-                                    .add_document(doc, segment_offset_id)
-                                    .await
-                                {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "Add document for an update failed {:?}",
-                                            e
-                                        );
-                                        return Err(
-                                            ApplyMaterializedLogError::FTSDocumentAdd,
-                                        );
-                                    }
+                                    },
                                 },
+                                None => panic!("Invariant violation. Record should be set by materializer for an update")
                             },
-                            None => panic!("Invariant violation. Record should be set by materializer for an update")
+                            None => panic!("Invariant violation. FTS index writer should be set"),
                         },
-                        None => panic!("Invariant violation. FTS index writer should be set"),
-                    } }
+                        // Ok to not have any update for the document. Do not error.
+                        None => {}
+                    }
                 }
                 MaterializedLogOperation::OverwriteExisting => {
                     // Delete existing.
@@ -749,9 +752,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         match self.delete_metadata(key, value, segment_offset_id).await
                                         {
                                             Ok(()) => {}
-                                            Err(_) => {
+                                            Err(e) => {
                                                 return Err(
-                                                    ApplyMaterializedLogError::BlockfileDelete,
+                                                    ApplyMaterializedLogError::BlockfileDeleteError,
                                                 );
                                             }
                                         }
@@ -770,7 +773,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             Err(e) => {
                                                 tracing::error!("Error deleting document {:?}", e);
                                                 return Err(
-                                                    ApplyMaterializedLogError::FTSDocumentDelete,
+                                                    ApplyMaterializedLogError::FTSDocumentDeleteError,
                                                 );
                                             }
                                         }
@@ -792,8 +795,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             for (key, value) in metadata.iter() {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
-                                    Err(_) => {
-                                        return Err(ApplyMaterializedLogError::BlockfileSet);
+                                    Err(e) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
                                     }
                                 }
                             }
@@ -892,7 +895,7 @@ impl SegmentFlusher for MetadataSegmentFlusher {
 
         let mut flushed = HashMap::new();
 
-        match self.full_text_index_flusher.flush().await {
+        match self.full_text_index_flusher.flush().await.map_err(|e| e) {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -905,7 +908,12 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             vec![full_text_freqs_id.to_string()],
         );
 
-        match self.bool_metadata_index_flusher.flush().await {
+        match self
+            .bool_metadata_index_flusher
+            .flush()
+            .await
+            .map_err(|e| e)
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -914,19 +922,24 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             vec![bool_metadata_id.to_string()],
         );
 
-        match self.f32_metadata_index_flusher.flush().await {
+        match self.f32_metadata_index_flusher.flush().await.map_err(|e| e) {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
         flushed.insert(F32_METADATA.to_string(), vec![f32_metadata_id.to_string()]);
 
-        match self.u32_metadata_index_flusher.flush().await {
+        match self.u32_metadata_index_flusher.flush().await.map_err(|e| e) {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
         flushed.insert(U32_METADATA.to_string(), vec![u32_metadata_id.to_string()]);
 
-        match self.string_metadata_index_flusher.flush().await {
+        match self
+            .string_metadata_index_flusher
+            .flush()
+            .await
+            .map_err(|e| e)
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -970,7 +983,7 @@ impl MetadataSegmentReader<'_> {
             ));
         }
         let pls_reader = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => match pls_path.first() {
+            Some(pls_path) => match pls_path.get(0) {
                 Some(pls_uuid) => {
                     let pls_uuid = match Uuid::parse_str(pls_uuid) {
                         Ok(uuid) => uuid,
@@ -978,18 +991,18 @@ impl MetadataSegmentReader<'_> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-
-                    match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
+                    let pls_reader = match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    }
+                    };
+                    pls_reader
                 }
                 None => None,
             },
             None => None,
         };
         let freqs_reader = match segment.file_path.get(FULL_TEXT_FREQS) {
-            Some(freqs_path) => match freqs_path.first() {
+            Some(freqs_path) => match freqs_path.get(0) {
                 Some(freqs_uuid) => {
                     let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
                         Ok(uuid) => uuid,
@@ -999,11 +1012,12 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-
-                    match blockfile_provider.open::<u32, u32>(&freqs_uuid).await {
+                    let freqs_reader = match blockfile_provider.open::<u32, u32>(&freqs_uuid).await
+                    {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    }
+                    };
+                    freqs_reader
                 }
                 None => None,
             },
@@ -1026,7 +1040,7 @@ impl MetadataSegmentReader<'_> {
         };
 
         let string_metadata_reader = match segment.file_path.get(STRING_METADATA) {
-            Some(string_metadata_path) => match string_metadata_path.first() {
+            Some(string_metadata_path) => match string_metadata_path.get(0) {
                 Some(string_metadata_uuid) => {
                     let string_metadata_uuid = match Uuid::parse_str(string_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1036,24 +1050,26 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-
-                    match blockfile_provider
+                    let string_metadata_reader = match blockfile_provider
                         .open::<&str, RoaringBitmap>(&string_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    }
+                    };
+                    string_metadata_reader
                 }
                 None => None,
             },
             None => None,
         };
-        let string_metadata_index_reader =
-            string_metadata_reader.map(MetadataIndexReader::new_string);
+        let string_metadata_index_reader = match string_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_string(reader)),
+            None => None,
+        };
 
         let bool_metadata_reader = match segment.file_path.get(BOOL_METADATA) {
-            Some(bool_metadata_path) => match bool_metadata_path.first() {
+            Some(bool_metadata_path) => match bool_metadata_path.get(0) {
                 Some(bool_metadata_uuid) => {
                     let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1063,23 +1079,26 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-
-                    match blockfile_provider
+                    let bool_metadata_reader = match blockfile_provider
                         .open::<bool, RoaringBitmap>(&bool_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    }
+                    };
+                    bool_metadata_reader
                 }
                 None => None,
             },
             None => None,
         };
-        let bool_metadata_index_reader = bool_metadata_reader.map(MetadataIndexReader::new_bool);
+        let bool_metadata_index_reader = match bool_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_bool(reader)),
+            None => None,
+        };
 
         let u32_metadata_reader = match segment.file_path.get(U32_METADATA) {
-            Some(u32_metadata_path) => match u32_metadata_path.first() {
+            Some(u32_metadata_path) => match u32_metadata_path.get(0) {
                 Some(u32_metadata_uuid) => {
                     let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1089,23 +1108,26 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-
-                    match blockfile_provider
+                    let u32_metadata_reader = match blockfile_provider
                         .open::<u32, RoaringBitmap>(&u32_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    }
+                    };
+                    u32_metadata_reader
                 }
                 None => None,
             },
             None => None,
         };
-        let u32_metadata_index_reader = u32_metadata_reader.map(MetadataIndexReader::new_u32);
+        let u32_metadata_index_reader = match u32_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_u32(reader)),
+            None => None,
+        };
 
         let f32_metadata_reader = match segment.file_path.get(F32_METADATA) {
-            Some(f32_metadata_path) => match f32_metadata_path.first() {
+            Some(f32_metadata_path) => match f32_metadata_path.get(0) {
                 Some(f32_metadata_uuid) => {
                     let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1115,20 +1137,23 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-
-                    match blockfile_provider
+                    let f32_metadata_reader = match blockfile_provider
                         .open::<f32, RoaringBitmap>(&f32_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    }
+                    };
+                    f32_metadata_reader
                 }
                 None => None,
             },
             None => None,
         };
-        let f32_metadata_index_reader = f32_metadata_reader.map(MetadataIndexReader::new_f32);
+        let f32_metadata_index_reader = match f32_metadata_reader {
+            Some(reader) => Some(MetadataIndexReader::new_f32(reader)),
+            None => None,
+        };
 
         Ok(MetadataSegmentReader {
             full_text_index_reader,
@@ -1139,10 +1164,11 @@ impl MetadataSegmentReader<'_> {
         })
     }
 
+    // DEPRECATED: This exists only for the legacy testing. Please checkout `MetadataFilteringOperator` for the up to date implementation.
     pub async fn query(
         &self,
         where_clause: Option<&Where>,
-        where_document_clause: Option<&WhereDocument>,
+        where_document_clause: Option<&Where>,
         _allowed_ids: Option<&Vec<usize>>,
         limit: usize,
         offset: usize,
@@ -1153,22 +1179,24 @@ impl MetadataSegmentReader<'_> {
         // TODO we can do lots of clever query planning here. For now, just
         // run through the Where and WhereDocument clauses sequentially.
         let where_results = match where_clause {
-            Some(where_clause) => match self.process_where_clause(where_clause).await {
-                Ok(results) => {
-                    tracing::info!(
-                        "Filtered {} records from metadata segment based on where clause",
-                        results.len()
-                    );
-                    Some(results)
+            Some(where_clause) => {
+                match self.process_where_clause(where_clause).await.map_err(|e| e) {
+                    Ok(results) => {
+                        tracing::info!(
+                            "Filtered {} records from metadata segment based on where clause",
+                            results.len()
+                        );
+                        Some(results)
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Error fetching results from metadata segment based on where clause {:?}",
+                            e
+                        );
+                        return Err(MetadataSegmentError::MetadataIndexQueryError(e));
+                    }
                 }
-                Err(e) => {
-                    tracing::error!(
-                        "Error fetching results from metadata segment based on where clause {:?}",
-                        e
-                    );
-                    return Err(MetadataSegmentError::MetadataIndexQueryError(e));
-                }
-            },
+            }
             None => {
                 tracing::info!("No where clause to filter anything from metadata segment");
                 None
@@ -1186,10 +1214,7 @@ impl MetadataSegmentReader<'_> {
         };
         let where_document_results = match where_document_clause {
             Some(where_document_clause) => {
-                match self
-                    .process_where_document_clause(where_document_clause)
-                    .await
-                {
+                match self.process_where_clause(where_document_clause).await {
                     Ok(results) => {
                         tracing::info!(
                             "Filtered {} records from metadata segment based on where document",
@@ -1220,460 +1245,34 @@ impl MetadataSegmentReader<'_> {
             None => (),
         };
 
-        if where_results.is_none() && where_document_results.is_none() {
-            Ok(None)
-        } else if where_results.is_none() && where_document_results.is_some() {
-            return Ok(where_document_results);
-        } else if where_results.is_some() && where_document_results.is_none() {
-            return Ok(where_results);
-        } else {
-            return Ok(Some(merge_sorted_vecs_conjunction(
-                &where_results.expect("Checked just now that it is not none"),
-                &where_document_results.expect("Checked just now that it is not none"),
-            )));
-        }
+        Ok(match (where_results, where_document_results) {
+            (Some(where_ids), Some(where_doc_ids)) => {
+                Some(merge_sorted_vecs_conjunction(&where_ids, &where_doc_ids))
+            }
+            (Some(ids), None) | (None, Some(ids)) => Some(ids),
+            (None, None) => None,
+        })
     }
 
+    // DEPRECATED: This exists only for the legacy testing. Please checkout `MetadataFilteringOperator` for the up to date implementation.
     fn process_where_clause<'me>(
         &'me self,
         where_clause: &'me Where,
     ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
         async move {
-            let mut results = vec![];
-            match where_clause {
-                Where::DirectWhereComparison(direct_where_comparison) => {
-                    match &direct_where_comparison.comparison {
-                        WhereComparison::SingleStringComparison(operand, comparator) => {
-                            match comparator {
-                                WhereClauseComparator::Equal => {
-                                    let keywrapper = operand.as_str().into();
-                                    match &self.string_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .get(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::NotEqual => {
-                                    todo!();
-                                }
-                                // We don't allow these comparators for strings.
-                                WhereClauseComparator::LessThan => {
-                                    unimplemented!();
-                                }
-                                WhereClauseComparator::LessThanOrEqual => {
-                                    unimplemented!();
-                                }
-                                WhereClauseComparator::GreaterThan => {
-                                    unimplemented!();
-                                }
-                                WhereClauseComparator::GreaterThanOrEqual => {
-                                    unimplemented!();
-                                }
-                            }
-                        }
-                        WhereComparison::SingleBoolComparison(operand, comparator) => {
-                            match comparator {
-                                WhereClauseComparator::Equal => {
-                                    let keywrapper = (*operand).into();
-                                    match &self.bool_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .get(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::NotEqual => {
-                                    todo!();
-                                }
-                                // We don't allow these comparators for bools.
-                                WhereClauseComparator::LessThan => {
-                                    unimplemented!();
-                                }
-                                WhereClauseComparator::LessThanOrEqual => {
-                                    unimplemented!();
-                                }
-                                WhereClauseComparator::GreaterThan => {
-                                    unimplemented!();
-                                }
-                                WhereClauseComparator::GreaterThanOrEqual => {
-                                    unimplemented!();
-                                }
-                            }
-                        }
-                        WhereComparison::SingleIntComparison(operand, comparator) => {
-                            match comparator {
-                                WhereClauseComparator::Equal => {
-                                    let keywrapper = (*operand).into();
-                                    match &self.u32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .get(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::NotEqual => {
-                                    todo!();
-                                }
-                                WhereClauseComparator::LessThan => {
-                                    let keywrapper = (*operand).into();
-                                    match &self.u32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .lt(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::LessThanOrEqual => {
-                                    let keywrapper = (*operand).into();
-                                    match &self.u32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .lte(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::GreaterThan => {
-                                    let keywrapper = (*operand).into();
-                                    match &self.u32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .gt(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::GreaterThanOrEqual => {
-                                    let keywrapper = (*operand).into();
-                                    match &self.u32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .gte(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                            }
-                        }
-                        WhereComparison::SingleDoubleComparison(operand, comparator) => {
-                            match comparator {
-                                WhereClauseComparator::Equal => {
-                                    let keywrapper = (*operand as f32).into();
-                                    match &self.f32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .get(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::NotEqual => {
-                                    todo!();
-                                }
-                                WhereClauseComparator::LessThan => {
-                                    let keywrapper = (*operand as f32).into();
-                                    match &self.f32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .lt(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::LessThanOrEqual => {
-                                    let keywrapper = (*operand as f32).into();
-                                    match &self.f32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .lte(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::GreaterThan => {
-                                    let keywrapper = (*operand as f32).into();
-                                    match &self.f32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .gt(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                                WhereClauseComparator::GreaterThanOrEqual => {
-                                    let keywrapper = (*operand as f32).into();
-                                    match &self.f32_metadata_index_reader {
-                                        Some(reader) => {
-                                            let result = reader
-                                                .gte(&direct_where_comparison.key, &keywrapper)
-                                                .await;
-                                            match result {
-                                                Ok(r) => {
-                                                    results =
-                                                        r.iter().map(|x| x as usize).collect();
-                                                }
-                                                Err(e) => {
-                                                    return Err(e);
-                                                }
-                                            }
-                                        }
-                                        // This is expected. Before the first ever compaction
-                                        // the reader will be uninitialized, hence an empty vector
-                                        // here since nothing has been written to storage yet.
-                                        None => results = vec![],
-                                    }
-                                }
-                            }
-                        }
-                        WhereComparison::StringListComparison(_operand, _list_operator) => {
-                            todo!();
-                        }
-                        WhereComparison::IntListComparison(..) => {
-                            todo!();
-                        }
-                        WhereComparison::DoubleListComparison(..) => {
-                            todo!();
-                        }
-                        WhereComparison::BoolListComparison(..) => {
-                            todo!();
-                        }
-                    }
+            let provider = MetadataProvider::from_metadata_segment_reader(&self);
+            let result = where_clause
+                .eval(&provider)
+                .await
+                // It is not clear how to downcast the error back, but since it is only used in tests, any error should suffice.
+                .map_err(|_| MetadataIndexError::InvalidKeyType)?;
+            match result {
+                SignedRoaringBitmap::Include(rbm) => {
+                    Ok(rbm.into_iter().map(|u| u as usize).collect())
                 }
-                Where::WhereChildren(where_children) => {
-                    let mut first_iteration = true;
-                    for child in where_children.children.iter() {
-                        let child_results: Vec<usize> =
-                            (self.process_where_clause(child).await).unwrap_or_default();
-                        if first_iteration {
-                            results = child_results;
-                            first_iteration = false;
-                        } else {
-                            match where_children.operator {
-                                BooleanOperator::And => {
-                                    results =
-                                        merge_sorted_vecs_conjunction(&results, &child_results);
-                                }
-                                BooleanOperator::Or => {
-                                    results =
-                                        merge_sorted_vecs_disjunction(&results, &child_results);
-                                }
-                            }
-                        }
-                    }
-                }
+                // This should never be the case for existing tests, where negation (such as NotEqual or NotIn) are not involved.
+                SignedRoaringBitmap::Exclude(_) => Err(MetadataIndexError::InvalidKeyType),
             }
-            Ok(results)
-        }
-        .boxed()
-    }
-
-    fn process_where_document_clause<'me>(
-        &'me self,
-        where_document_clause: &'me WhereDocument,
-    ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
-        async move {
-            let mut results = vec![];
-            match where_document_clause {
-                WhereDocument::DirectWhereDocumentComparison(direct_document_comparison) => {
-                    match &direct_document_comparison.operator {
-                        WhereDocumentOperator::Contains => {
-                            match &self.full_text_index_reader {
-                                Some(reader) => {
-                                    let result =
-                                        reader.search(&direct_document_comparison.document).await;
-                                    match result {
-                                        Ok(r) => {
-                                            results = r.iter().map(|x| *x as usize).collect();
-                                        }
-                                        Err(e) => {
-                                            return Err(MetadataIndexError::FullTextError(e));
-                                        }
-                                    }
-                                }
-                                // This is expected. Before the first ever compaction
-                                // the reader will be uninitialized, hence an empty vector
-                                // here since nothing has been written to storage yet.
-                                None => results = vec![],
-                            }
-                        }
-                        WhereDocumentOperator::NotContains => {
-                            todo!();
-                        }
-                    }
-                }
-                WhereDocument::WhereDocumentChildren(where_document_children) => {
-                    let mut first_iteration = true;
-                    for child in where_document_children.children.iter() {
-                        let child_results: Vec<usize> =
-                            (self.process_where_document_clause(child).await).unwrap_or_default();
-                        if first_iteration {
-                            results = child_results;
-                            first_iteration = false;
-                        } else {
-                            match where_document_children.operator {
-                                BooleanOperator::And => {
-                                    results =
-                                        merge_sorted_vecs_conjunction(&results, &child_results);
-                                }
-                                BooleanOperator::Or => {
-                                    results =
-                                        merge_sorted_vecs_disjunction(&results, &child_results);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            results.sort();
-            Ok(results)
         }
         .boxed()
     }
@@ -1698,8 +1297,8 @@ mod test {
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, DirectComparison, DirectDocumentComparison, LogRecord, MetadataValue, Operation,
-        OperationRecord, UpdateMetadataValue, Where, WhereComparison, WhereDocument,
+        Chunk, DirectDocumentComparison, DirectWhereComparison, LogRecord, MetadataValue,
+        Operation, OperationRecord, PrimitiveOperator, UpdateMetadataValue, Where, WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -1779,24 +1378,27 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2061,24 +1663,27 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2192,11 +1797,11 @@ mod test {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleDoubleComparison(
-                1.0,
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Float(1.0),
             ),
         });
         let res = metadata_segment_reader
@@ -2205,12 +1810,12 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(2_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        assert_eq!(res.get(0), Some(&(2 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new world")),
             ),
         });
         let res = metadata_segment_reader
@@ -2219,7 +1824,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.get(0), Some(&(1 as usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2236,7 +1841,7 @@ mod test {
             String::from("hello"),
             MetadataValue::Str(String::from("new world")),
         );
-        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
         let mut id2_mt = HashMap::new();
         id2_mt.insert(String::from("hello"), MetadataValue::Float(1.0));
         assert_eq!(res.get(1).as_ref().unwrap().metadata, Some(id2_mt));
@@ -2304,24 +1909,27 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2417,11 +2025,11 @@ mod test {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -2430,11 +2038,11 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -2443,7 +2051,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.get(0), Some(&(1 as usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2460,7 +2068,7 @@ mod test {
             String::from("bye"),
             MetadataValue::Str(String::from("world")),
         );
-        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
     }
 
     #[tokio::test]
@@ -2516,24 +2124,27 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            panic!("Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2628,9 +2239,9 @@ mod test {
                 .await
                 .expect("Metadata segment reader construction failed");
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("hello"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -2640,9 +2251,9 @@ mod test {
         assert_eq!(res.len(), 0);
         // FTS for bye should return the lone document.
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("bye"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -2650,7 +2261,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.get(0), Some(&(1 as usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2663,7 +2274,7 @@ mod test {
         assert_eq!(res.len(), 1);
         res.sort_by(|x, y| x.id.cmp(y.id));
         assert_eq!(
-            res.first().as_ref().unwrap().document,
+            res.get(0).as_ref().unwrap().document,
             Some(String::from("bye").as_str())
         );
     }

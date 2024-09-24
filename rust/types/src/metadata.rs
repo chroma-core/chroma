@@ -1,9 +1,7 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use roaring::RoaringBitmap;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    ops::{BitAnd, BitOr},
 };
 use thiserror::Error;
 
@@ -57,7 +55,7 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
 
 impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
     fn from(value: UpdateMetadataValue) -> Self {
-        match value {
+        let proto_value = match value {
             UpdateMetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
             },
@@ -77,7 +75,8 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                 )),
             },
             UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
-        }
+        };
+        proto_value
     }
 }
 
@@ -111,8 +110,9 @@ pub enum MetadataValue {
 
 impl Eq for MetadataValue {}
 
-#[allow(clippy::derive_ord_xor_partial_ord)]
-impl Ord for MetadataValue {
+/// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
+/// We are not planning to support `f64::NaN`s anyway, so the `PartialOrd` and `Ord` should be identical
+impl Ord for &MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap_or(Ordering::Equal)
     }
@@ -200,7 +200,7 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
 
 impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
     fn from(value: MetadataValue) -> Self {
-        match value {
+        let proto_value = match value {
             MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
             },
@@ -219,10 +219,8 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
                     value,
                 )),
             },
-            MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
-            },
-        }
+        };
+        proto_value
     }
 }
 
@@ -303,7 +301,6 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     }
 }
 
-#[derive(Debug, Default)]
 pub struct MetadataDelta<'referred_data> {
     pub metadata_to_update: HashMap<
         &'referred_data str,
@@ -315,7 +312,11 @@ pub struct MetadataDelta<'referred_data> {
 
 impl<'referred_data> MetadataDelta<'referred_data> {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            metadata_to_update: HashMap::new(),
+            metadata_to_delete: HashMap::new(),
+            metadata_to_insert: HashMap::new(),
+        }
     }
 }
 
@@ -350,7 +351,7 @@ impl Where {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DirectWhereComparison {
     pub key: String,
-    pub comp: WhereComparison,
+    pub comparison: WhereComparison,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -381,18 +382,6 @@ pub enum MetadataSetValue {
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
-}
-
-impl MetadataSetValue {
-    pub fn into_vec(&self) -> Vec<MetadataValue> {
-        use MetadataSetValue::*;
-        match self {
-            Bool(vec) => vec.iter().map(|b| MetadataValue::Bool(*b)).collect(),
-            Int(vec) => vec.iter().map(|i| MetadataValue::Int(*i)).collect(),
-            Float(vec) => vec.iter().map(|f| MetadataValue::Float(*f)).collect(),
-            Str(vec) => vec.iter().map(|s| MetadataValue::Str(s.clone())).collect(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -434,7 +423,7 @@ impl TryFrom<chroma_proto::Where> for Where {
             Some(chroma_proto::r#where::Where::DirectComparison(proto_comparison)) => {
                 let comparison = DirectWhereComparison {
                     key: proto_comparison.key.clone(),
-                    comp: proto_comparison.try_into()?,
+                    comparison: proto_comparison.try_into()?,
                 };
                 Ok(Where::DirectWhereComparison(comparison))
             }
@@ -660,58 +649,6 @@ impl TryFrom<chroma_proto::WhereDocumentOperator> for DocumentOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum SignedRoaringBitmap {
-    Include(RoaringBitmap),
-    Exclude(RoaringBitmap),
-}
-
-impl SignedRoaringBitmap {
-    pub fn empty() -> Self {
-        Self::Include(RoaringBitmap::new())
-    }
-
-    pub fn full() -> Self {
-        Self::Exclude(RoaringBitmap::new())
-    }
-
-    pub fn flip(self) -> Self {
-        use SignedRoaringBitmap::*;
-        match self {
-            Include(rbm) => Exclude(rbm),
-            Exclude(rbm) => Include(rbm),
-        }
-    }
-}
-
-impl BitAnd for SignedRoaringBitmap {
-    type Output = Self;
-
-    fn bitand(self, rhs: Self) -> Self {
-        use SignedRoaringBitmap::*;
-        match (self, rhs) {
-            (Include(lhs), Include(rhs)) => Include(lhs & rhs),
-            (Include(lhs), Exclude(rhs)) => Include(lhs - rhs),
-            (Exclude(lhs), Include(rhs)) => Include(rhs - lhs),
-            (Exclude(lhs), Exclude(rhs)) => Exclude(lhs | rhs),
-        }
-    }
-}
-
-impl BitOr for SignedRoaringBitmap {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        use SignedRoaringBitmap::*;
-        match (self, rhs) {
-            (Include(lhs), Include(rhs)) => Include(lhs | rhs),
-            (Include(lhs), Exclude(rhs)) => Exclude(rhs - lhs),
-            (Exclude(lhs), Include(rhs)) => Exclude(lhs - rhs),
-            (Exclude(lhs), Exclude(rhs)) => Exclude(lhs & rhs),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -819,7 +756,7 @@ mod tests {
         match where_clause {
             Where::DirectWhereComparison(comparison) => {
                 assert_eq!(comparison.key, "foo");
-                match comparison.comp {
+                match comparison.comparison {
                     WhereComparison::Primitive(_, value) => {
                         assert_eq!(value, MetadataValue::Int(42));
                     }
@@ -867,7 +804,7 @@ mod tests {
                             )),
                         },
                     ],
-                    operator: chroma_proto::BooleanOperator::And.into(),
+                    operator: chroma_proto::BooleanOperator::And.try_into().unwrap(),
                 },
             )),
         };
@@ -887,7 +824,9 @@ mod tests {
             r#where_document: Some(chroma_proto::where_document::WhereDocument::Direct(
                 chroma_proto::DirectWhereDocument {
                     document: "foo".to_string(),
-                    operator: chroma_proto::WhereDocumentOperator::Contains.into(),
+                    operator: chroma_proto::WhereDocumentOperator::Contains
+                        .try_into()
+                        .unwrap(),
                 },
             )),
         };
@@ -913,7 +852,8 @@ mod tests {
                                     chroma_proto::DirectWhereDocument {
                                         document: "foo".to_string(),
                                         operator: chroma_proto::WhereDocumentOperator::Contains
-                                            .into(),
+                                            .try_into()
+                                            .unwrap(),
                                     },
                                 ),
                             ),
@@ -924,13 +864,14 @@ mod tests {
                                     chroma_proto::DirectWhereDocument {
                                         document: "bar".to_string(),
                                         operator: chroma_proto::WhereDocumentOperator::Contains
-                                            .into(),
+                                            .try_into()
+                                            .unwrap(),
                                     },
                                 ),
                             ),
                         },
                     ],
-                    operator: chroma_proto::BooleanOperator::And.into(),
+                    operator: chroma_proto::BooleanOperator::And.try_into().unwrap(),
                 },
             )),
         };
