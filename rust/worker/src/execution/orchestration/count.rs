@@ -150,8 +150,19 @@ impl CountQueryOrchestrator {
             }
         };
 
+        // If the collection version does not match the request version then we terminate with an error
+        if collection.version as u32 != self.collection_version {
+            terminate_with_error(
+                self.result_channel.take(),
+                Box::new(CountQueryOrchestratorError::CollectionVersionMismatch),
+                ctx,
+            );
+            return;
+        }
+
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
+        self.pull_logs(ctx).await;
     }
 
     // shared
@@ -319,7 +330,6 @@ impl Component for CountQueryOrchestrator {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         self.start(ctx).await;
-        self.pull_logs(ctx).await;
     }
 }
 

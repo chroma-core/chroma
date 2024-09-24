@@ -583,6 +583,16 @@ impl Component for HnswQueryOrchestrator {
             }
         };
 
+        // If the collection version does not match the request version then we terminate with an error
+        if collection.version as u32 != self.collection_version {
+            terminate_with_error(
+                self.result_channel.take(),
+                Box::new(HnswSegmentQueryError::CollectionVersionMismatch),
+                ctx,
+            );
+            return;
+        }
+
         // If segment is uninitialized and dimension is not set then we assume
         // that this is a query before any add so return empty response.
         if hnsw_segment.file_path.len() <= 0 && collection.dimension.is_none() {

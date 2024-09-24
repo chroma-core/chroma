@@ -252,6 +252,16 @@ impl Component for GetVectorsOrchestrator {
             }
         };
 
+        // If the collection version does not match the request version then we terminate with an error
+        if collection.version as u32 != self.collection_version {
+            terminate_with_error(
+                self.result_channel.take(),
+                Box::new(GetVectorsError::CollectionVersionMismatch),
+                ctx,
+            );
+            return;
+        }
+
         let record_segment =
             match get_record_segment_by_collection_id(self.sysdb.clone(), collection_id).await {
                 Ok(segment) => segment,
