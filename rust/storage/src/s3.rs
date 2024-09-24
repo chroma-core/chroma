@@ -16,10 +16,8 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
-use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
-use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::CompletedMultipartUpload;
@@ -88,12 +86,12 @@ impl S3Storage {
         upload_part_size_bytes: usize,
         download_part_size_bytes: usize,
     ) -> S3Storage {
-        return S3Storage {
+        S3Storage {
             bucket: bucket.to_string(),
             client,
             upload_part_size_bytes,
             download_part_size_bytes,
-        };
+        }
     }
 
     pub(super) async fn create_bucket(&self) -> Result<(), String> {
@@ -109,26 +107,26 @@ impl S3Storage {
         match res {
             Ok(_) => {
                 tracing::info!("created bucket {}", self.bucket);
-                return Ok(());
+                Ok(())
             }
             Err(e) => match e {
                 SdkError::ServiceError(err) => match err.into_err() {
                     CreateBucketError::BucketAlreadyExists(msg) => {
                         tracing::error!("bucket already exists: {}", msg);
-                        return Ok(());
+                        Ok(())
                     }
                     CreateBucketError::BucketAlreadyOwnedByYou(msg) => {
                         tracing::error!("bucket already owned by you: {}", msg);
-                        return Ok(());
+                        Ok(())
                     }
                     e => {
                         tracing::error!("Error creating bucket: {}", e.to_string());
-                        return Err::<(), String>(e.to_string());
+                        Err::<(), String>(e.to_string())
                     }
                 },
                 _ => {
                     tracing::error!("Error creating bucket: {}", e);
-                    return Err::<(), String>(e.to_string());
+                    Err::<(), String>(e.to_string())
                 }
             },
         }
@@ -148,7 +146,7 @@ impl S3Storage {
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
-                return Ok(Box::new(S3ByteStream::new(byte_stream)));
+                Ok(Box::new(S3ByteStream::new(byte_stream)))
             }
             Err(e) => {
                 tracing::error!("error: {}", e);
@@ -158,25 +156,24 @@ impl S3Storage {
                         match inner {
                             aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
                                  tracing::error!("no such key: {}", msg);
-                                return Err(S3GetError::NoSuchKey(msg.to_string()));
+                                Err(S3GetError::NoSuchKey(msg.to_string()))
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
                                  tracing::error!("invalid object state: {}", msg);
-                                return Err(S3GetError::S3GetError(msg.to_string()));
+                                Err(S3GetError::S3GetError(msg.to_string()))
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) =>  {
                                  tracing::error!("unhandled error");
-                                return Err(S3GetError::S3GetError("unhandled error".to_string()));
+                                Err(S3GetError::S3GetError("unhandled error".to_string()))
                             }
                             _ => {
                                  tracing::error!("error: {}", inner.to_string());
-                                return Err(S3GetError::S3GetError(inner.to_string()));
+                                Err(S3GetError::S3GetError(inner.to_string()))
                             }
-                        };
+                        }
                     }
-                    _ => {}
+                    _ => Err(S3GetError::S3GetError(e.to_string())),
                 }
-                return Err(S3GetError::S3GetError(e.to_string()));
             }
         }
     }
@@ -241,22 +238,20 @@ impl S3Storage {
                         let inner = err.into_err();
                         match inner {
                             aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
-                                return Err(S3GetError::NoSuchKey(msg.to_string()));
+                                Err(S3GetError::NoSuchKey(msg.to_string()))
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                return Err(S3GetError::S3GetError(msg.to_string()));
+                                Err(S3GetError::S3GetError(msg.to_string()))
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) => {
-                                return Err(S3GetError::S3GetError("unhandled error".to_string()));
+                                Err(S3GetError::S3GetError("unhandled error".to_string()))
                             }
                             _ => {
-                                return Err(S3GetError::S3GetError(inner.to_string()));
+                                Err(S3GetError::S3GetError(inner.to_string()))
                             }
-                        };
+                        }
                     }
-                    _ => {
-                        return Err(S3GetError::S3GetError(e.to_string()));
-                    }
+                    _ => Err(S3GetError::S3GetError(e.to_string())),
                 }
             }
         }
@@ -569,24 +564,19 @@ impl Configurable<StorageConfig> for S3Storage {
                     s3_config.download_part_size_bytes,
                 );
                 // for minio we create the bucket since it is only used for testing
-                match &s3_config.credentials {
-                    super::config::S3CredentialsConfig::Minio => {
-                        let res = storage.create_bucket().await;
-                        match res {
-                            Ok(_) => {}
-                            Err(e) => {
-                                return Err(Box::new(StorageConfigError::FailedToCreateBucket(e)));
-                            }
+
+                if let super::config::S3CredentialsConfig::Minio = &s3_config.credentials {
+                    let res = storage.create_bucket().await;
+                    match res {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(Box::new(StorageConfigError::FailedToCreateBucket(e)));
                         }
                     }
-                    _ => {}
                 }
-
-                return Ok(storage);
+                Ok(storage)
             }
-            _ => {
-                return Err(Box::new(StorageConfigError::InvalidStorageConfig));
-            }
+            _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
     }
 }
@@ -597,7 +587,7 @@ mod tests {
     use futures::StreamExt;
     use rand::{Rng, SeedableRng};
     use std::io::Write;
-    use tempfile::{tempdir, NamedTempFile};
+    use tempfile::NamedTempFile;
 
     fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
@@ -674,7 +664,7 @@ mod tests {
         }
 
         storage
-            .put_file("test", &temp_file.path().to_str().unwrap())
+            .put_file("test", temp_file.path().to_str().unwrap())
             .await
             .unwrap();
 
@@ -711,7 +701,7 @@ mod tests {
         .await;
         // At part size
         test_put_file(
-            test_upload_part_size_bytes as usize,
+            test_upload_part_size_bytes,
             test_upload_part_size_bytes,
             test_download_part_size_bytes,
         )

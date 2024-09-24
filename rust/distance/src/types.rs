@@ -359,9 +359,9 @@ impl TryFrom<&str> for DistanceFunction {
     }
 }
 
-impl Into<String> for DistanceFunction {
-    fn into(self) -> String {
-        match self {
+impl From<DistanceFunction> for String {
+    fn from(df: DistanceFunction) -> Self {
+        match df {
             DistanceFunction::Euclidean => "l2".to_string(),
             DistanceFunction::Cosine => "cosine".to_string(),
             DistanceFunction::InnerProduct => "ip".to_string(),

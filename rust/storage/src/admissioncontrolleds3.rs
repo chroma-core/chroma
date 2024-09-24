@@ -1,5 +1,5 @@
 use crate::{
-    config::{CountBasedPolicyConfig, RateLimitingConfig, StorageConfig},
+    config::{RateLimitingConfig, StorageConfig},
     s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
     stream::ByteStreamItem,
 };
@@ -21,6 +21,7 @@ use tracing::{Instrument, Span};
 #[derive(Clone)]
 pub struct AdmissionControlledS3Storage {
     storage: S3Storage,
+    #[allow(clippy::type_complexity)]
     outstanding_requests: Arc<
         Mutex<
             HashMap<
@@ -92,7 +93,7 @@ impl AdmissionControlledS3Storage {
             Ok(res) => Ok(res),
             Err(e) => {
                 tracing::error!("Error reading from storage: {}", e);
-                return Err(AdmissionControlledS3StorageError::S3GetError(e));
+                Err(AdmissionControlledS3StorageError::S3GetError(e))
             }
         }
     }
@@ -136,15 +137,15 @@ impl AdmissionControlledS3Storage {
                                 Ok(_) => Ok(()),
                                 Err(e) => {
                                     tracing::error!("Error reading from s3: {}", e);
-                                    return Err(AdmissionControlledS3StorageError::S3GetError(
+                                    Err(AdmissionControlledS3StorageError::S3GetError(
                                         S3GetError::ByteStreamError(e.to_string()),
-                                    ));
+                                    ))
                                 }
                             }
                         }
                         Err(e) => {
                             tracing::error!("Error reading from s3: {}", e);
-                            return Err(AdmissionControlledS3StorageError::S3GetError(e));
+                            Err(AdmissionControlledS3StorageError::S3GetError(e))
                         }
                     }
                 });
@@ -165,18 +166,16 @@ impl AdmissionControlledS3Storage {
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
         // Acquire permit.
-        let permit = rate_limiter.enter().await;
+        let _permit = rate_limiter.enter().await;
         let bytes_res = storage
             .get(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
             .await;
         match bytes_res {
-            Ok(bytes) => {
-                return Ok(bytes);
-            }
+            Ok(bytes) => Ok(bytes),
             Err(e) => {
                 tracing::error!("Error reading from s3: {}", e);
-                return Err(AdmissionControlledS3StorageError::S3GetError(e));
+                Err(AdmissionControlledS3StorageError::S3GetError(e))
             }
         }
         // Permit gets dropped here due to RAII.
@@ -192,7 +191,7 @@ impl AdmissionControlledS3Storage {
         let future_to_await;
         {
             let mut requests = self.outstanding_requests.lock();
-            let maybe_inflight = requests.get(&key).map(|fut| fut.clone());
+            let maybe_inflight = requests.get(&key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => fut,
                 None => {
@@ -227,7 +226,7 @@ impl AdmissionControlledS3Storage {
         let future_to_await;
         {
             let mut requests = self.outstanding_requests.lock();
-            let maybe_inflight = requests.get(&key).map(|fut| fut.clone());
+            let maybe_inflight = requests.get(&key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => fut,
                 None => {
@@ -283,39 +282,33 @@ impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
 // Prefer enum dispatch over dyn since there could
 // only be a handful of these policies.
 #[derive(Debug)]
-enum RateLimitPolicy {
+pub enum RateLimitPolicy {
     CountBasedPolicy(CountBasedPolicy),
 }
 
 impl RateLimitPolicy {
     async fn enter(&self) -> SemaphorePermit<'_> {
         match self {
-            RateLimitPolicy::CountBasedPolicy(policy) => {
-                return policy.acquire().await;
-            }
+            RateLimitPolicy::CountBasedPolicy(policy) => policy.acquire().await,
         }
     }
 }
 
 #[derive(Debug)]
-struct CountBasedPolicy {
-    max_allowed_outstanding: usize,
+pub struct CountBasedPolicy {
     remaining_tokens: Semaphore,
 }
 
 impl CountBasedPolicy {
     fn new(max_allowed_outstanding: usize) -> Self {
         Self {
-            max_allowed_outstanding,
             remaining_tokens: Semaphore::new(max_allowed_outstanding),
         }
     }
     async fn acquire(&self) -> SemaphorePermit<'_> {
         let token_res = self.remaining_tokens.acquire().await;
         match token_res {
-            Ok(token) => {
-                return token;
-            }
+            Ok(token) => token,
             Err(e) => panic!("AcquireToken Failed {}", e),
         }
     }
