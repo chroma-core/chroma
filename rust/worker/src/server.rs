@@ -205,10 +205,11 @@ impl WorkerServer {
         let result = match result {
             Ok(result) => result,
             Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                tracing::error!("Error running orchestrator: {}", e);
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
@@ -308,10 +309,11 @@ impl WorkerServer {
         let mut result = match result {
             Ok(result) => result,
             Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                tracing::error!("Error running orchestrator: {}", e);
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
@@ -435,10 +437,10 @@ impl WorkerServer {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!("Error running orchestrator: {}", e);
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 

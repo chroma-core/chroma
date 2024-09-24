@@ -54,3 +54,28 @@ impl ChromaError for Box<dyn ChromaError> {
         self.as_ref().code()
     }
 }
+
+impl From<ErrorCodes> for tonic::Code {
+    fn from(err: ErrorCodes) -> tonic::Code {
+        match err {
+            ErrorCodes::Success => tonic::Code::Ok,
+            ErrorCodes::Cancelled => tonic::Code::Cancelled,
+            ErrorCodes::Unknown => tonic::Code::Unknown,
+            ErrorCodes::InvalidArgument => tonic::Code::InvalidArgument,
+            ErrorCodes::DeadlineExceeded => tonic::Code::DeadlineExceeded,
+            ErrorCodes::NotFound => tonic::Code::NotFound,
+            ErrorCodes::AlreadyExists => tonic::Code::AlreadyExists,
+            ErrorCodes::PermissionDenied => tonic::Code::PermissionDenied,
+            ErrorCodes::ResourceExhausted => tonic::Code::ResourceExhausted,
+            ErrorCodes::FailedPrecondition => tonic::Code::FailedPrecondition,
+            ErrorCodes::Aborted => tonic::Code::Aborted,
+            ErrorCodes::OutOfRange => tonic::Code::OutOfRange,
+            ErrorCodes::Unimplemented => tonic::Code::Unimplemented,
+            ErrorCodes::Internal => tonic::Code::Internal,
+            ErrorCodes::Unavailable => tonic::Code::Unavailable,
+            ErrorCodes::DataLoss => tonic::Code::DataLoss,
+            ErrorCodes::Unauthenticated => tonic::Code::Unauthenticated,
+            ErrorCodes::VersionMismatch => tonic::Code::Internal,
+        }
+    }
+}
