@@ -262,29 +262,28 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &in_memory_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
-                        }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader. Blockfile open error.");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!(
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &in_memory_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!(
+                                    "Error creating record segment reader. Blockfile open error."
+                                );
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!(
                                 "Error creating record segment reader. Invalid number of files."
                             );
+                            }
                         }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()

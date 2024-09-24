@@ -2,7 +2,7 @@ use crate::{
     execution::operator::{Operator, OperatorType},
     segment::record_segment::RecordSegmentReader,
 };
-use chroma_blockstore::{key, provider::BlockfileProvider};
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Segment;
 use thiserror::Error;
@@ -27,9 +27,10 @@ pub(crate) struct OffsetIdToUserIdKeys {
 
 #[derive(Debug)]
 pub(crate) enum Keys {
-    OffsetIdToDataKeys(OffsetIdToDataKeys),
-    UserIdToOffsetIdKeys(UserIdToOffsetIdKeys),
-    OffsetIdToUserIdKeys(OffsetIdToUserIdKeys),
+    OffsetIdToData(OffsetIdToDataKeys),
+    #[allow(dead_code)]
+    UserIdToOffsetId(UserIdToOffsetIdKeys),
+    OffsetIdToUserId(OffsetIdToUserIdKeys),
 }
 
 #[derive(Debug)]
@@ -82,7 +83,7 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
         input: &RecordSegmentPrefetchIoInput,
     ) -> Result<RecordSegmentPrefetchIoOutput, Self::Error> {
         match &input.keys {
-            Keys::OffsetIdToDataKeys(keys) => {
+            Keys::OffsetIdToData(keys) => {
                 if keys.keys.is_empty() {
                     return Ok(RecordSegmentPrefetchIoOutput {});
                 }
@@ -102,7 +103,7 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
                 };
                 record_segment_reader.prefetch_id_to_data(&keys.keys).await;
             }
-            Keys::OffsetIdToUserIdKeys(keys) => {
+            Keys::OffsetIdToUserId(keys) => {
                 if keys.keys.is_empty() {
                     return Ok(RecordSegmentPrefetchIoOutput {});
                 }
@@ -124,7 +125,7 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
                     .prefetch_id_to_user_id(&keys.keys)
                     .await;
             }
-            Keys::UserIdToOffsetIdKeys(keys) => {
+            Keys::UserIdToOffsetId(keys) => {
                 if keys.keys.is_empty() {
                     return Ok(RecordSegmentPrefetchIoOutput {});
                 }

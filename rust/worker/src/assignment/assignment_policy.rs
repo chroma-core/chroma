@@ -37,12 +37,13 @@ pub(crate) struct RendezvousHashingAssignmentPolicy {
     members: Vec<String>,
 }
 
+#[cfg(test)]
 impl RendezvousHashingAssignmentPolicy {
     pub(crate) fn new() -> RendezvousHashingAssignmentPolicy {
-        return RendezvousHashingAssignmentPolicy {
+        RendezvousHashingAssignmentPolicy {
             hasher: Murmur3Hasher {},
             members: vec![],
-        };
+        }
     }
 }
 
@@ -51,14 +52,12 @@ impl Configurable<AssignmentPolicyConfig> for RendezvousHashingAssignmentPolicy 
     async fn try_from_config(
         config: &AssignmentPolicyConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let assignment_policy_config = match config {
-            AssignmentPolicyConfig::RendezvousHashing(config) => config,
-        };
+        let AssignmentPolicyConfig::RendezvousHashing(assignment_policy_config) = config;
         let hasher = match assignment_policy_config.hasher {
             HasherType::Murmur3 => Murmur3Hasher {},
         };
         return Ok(RendezvousHashingAssignmentPolicy {
-            hasher: hasher,
+            hasher,
             members: vec![],
         });
     }
@@ -73,7 +72,7 @@ impl AssignmentPolicy for RendezvousHashingAssignmentPolicy {
     fn get_members(&self) -> Vec<String> {
         // This is not designed to be used frequently for now, nor is the number of members
         // expected to be large, so we can just clone the members
-        return self.members.clone();
+        self.members.clone()
     }
 
     fn set_members(&mut self, members: Vec<String>) {

@@ -2,7 +2,6 @@ use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
-const ENV_PREFIX: &str = "CHROMA_";
 
 #[derive(Deserialize)]
 /// # Description
@@ -36,7 +35,7 @@ impl RootConfig {
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
     pub(crate) fn load() -> Self {
-        return Self::load_from_path(DEFAULT_CONFIG_PATH);
+        Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
 
     /// # Description
@@ -72,7 +71,7 @@ impl RootConfig {
         // ));
         let res = f.extract();
         match res {
-            Ok(config) => return config,
+            Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
     }
@@ -92,9 +91,12 @@ impl RootConfig {
 pub(crate) struct QueryServiceConfig {
     pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
+    #[allow(dead_code)]
     pub(crate) my_member_id: String,
     pub(crate) my_port: u16,
+    #[allow(dead_code)]
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    #[allow(dead_code)]
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
@@ -119,6 +121,7 @@ pub(crate) struct CompactionServiceConfig {
     pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
     pub(crate) my_member_id: String,
+    #[allow(dead_code)]
     pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
@@ -588,28 +591,28 @@ mod tests {
     #[serial]
     fn test_config_with_env_override() {
         Jail::expect_with(|jail| {
-            let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
-            let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
-            let _ = jail.set_env(
+            jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
+            jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID",
                 "compaction-service-0",
             );
-            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
-            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
-            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
-            let _ = jail.set_env(
+            jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
+            jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
+            jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__upload_part_size_bytes",
                 format!("{}", 1024 * 1024 * 8),
             );
-            let _ = jail.set_env(
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__download_part_size_bytes",
                 format!("{}", 1024 * 1024 * 8),
             );
-            let _ = jail.set_env(
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__CONNECT_TIMEOUT_MS",
                 5000,
             );
-            let _ = jail.set_env(
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__REQUEST_TIMEOUT_MS",
                 1000,
             );

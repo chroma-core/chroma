@@ -11,6 +11,7 @@ pub struct NormalizeVectorOperatorInput {
 }
 
 pub struct NormalizeVectorOperatorOutput {
+    #[allow(dead_code)]
     pub normalized_vectors: Vec<Vec<f32>>,
 }
 

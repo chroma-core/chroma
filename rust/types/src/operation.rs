@@ -53,7 +53,6 @@ impl TryFrom<chroma_proto::Operation> for Operation {
             chroma_proto::Operation::Upsert => Ok(Operation::Upsert),
             chroma_proto::Operation::Update => Ok(Operation::Update),
             chroma_proto::Operation::Delete => Ok(Operation::Delete),
-            _ => Err(OperationConversionError::InvalidOperation),
         }
     }
 }
@@ -69,7 +68,6 @@ impl TryFrom<i32> for Operation {
                 chroma_proto::Operation::Upsert => Ok(Operation::Upsert),
                 chroma_proto::Operation::Update => Ok(Operation::Update),
                 chroma_proto::Operation::Delete => Ok(Operation::Delete),
-                _ => Err(OperationConversionError::InvalidOperation),
             },
             Err(_) => Err(OperationConversionError::DecodeError(
                 ConversionError::DecodeError,

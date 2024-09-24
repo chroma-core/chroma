@@ -130,8 +130,8 @@ impl Block {
             // fewer branches and instructions than if/else or matching on
             // boolean.
             // This is x86 asm for u8: https://rust.godbolt.org/z/698eYffTx.
-            left = if predicate == true { mid + 1 } else { left };
-            right = if predicate == false { mid } else { right };
+            left = if predicate { mid + 1 } else { left };
+            right = if !predicate { mid } else { right };
 
             size = right - left;
         }
@@ -197,7 +197,7 @@ impl Block {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
-        return Some(res);
+        Some(res)
     }
 
     /// Get all the values for a given prefix in the block where the key is less than the given key
@@ -222,7 +222,7 @@ impl Block {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
-        return Some(res);
+        Some(res)
     }
 
     /// Get all the values for a given prefix in the block where the key is less than or equal to the given key
@@ -247,7 +247,7 @@ impl Block {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
-        return Some(res);
+        Some(res)
     }
 
     /// Get all the values for a given prefix in the block where the key is greater than or equal to the given key
@@ -272,7 +272,7 @@ impl Block {
                 res.push((curr_prefix, curr_key, V::get(self.data.column(2), i)));
             }
         }
-        return Some(res);
+        Some(res)
     }
 
     /// Get all the values for a given prefix in the block where the key is between the given keys
@@ -305,13 +305,14 @@ impl Block {
     */
 
     /// Returns the size of the block in bytes
+    #[allow(dead_code)]
     pub(crate) fn get_size(&self) -> usize {
         let mut total_size = 0;
         for column in self.data.columns() {
             let array_data = column.to_data();
             total_size += get_size_of_array_data(&array_data);
         }
-        return total_size;
+        total_size
     }
 
     /// Returns the number of items in the block
@@ -359,14 +360,10 @@ impl Block {
         };
         match writer.write(&self.data) {
             Ok(_) => match writer.finish() {
-                Ok(_) => return Ok(()),
-                Err(e) => {
-                    return Err(BlockSaveError::ArrowError(e));
-                }
+                Ok(_) => Ok(()),
+                Err(e) => Err(BlockSaveError::ArrowError(e)),
             },
-            Err(e) => {
-                return Err(BlockSaveError::ArrowError(e));
-            }
+            Err(e) => Err(BlockSaveError::ArrowError(e)),
         }
     }
 
@@ -400,7 +397,7 @@ impl Block {
 
     /// Load a block from bytes in Arrow IPC format with the given id
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        return Self::from_bytes_internal(bytes, id, false);
+        Self::from_bytes_internal(bytes, id, false)
     }
 
     /// Load a block from bytes in Arrow IPC format with the given id and validate the layout
@@ -408,12 +405,12 @@ impl Block {
     /// - This method should be used in tests to ensure that the layout of the IPC file is as expected
     /// - The validation is not performant and should not be used in production code
     pub fn from_bytes_with_validation(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        return Self::from_bytes_internal(bytes, id, true);
+        Self::from_bytes_internal(bytes, id, true)
     }
 
     fn from_bytes_internal(bytes: &[u8], id: Uuid, validate: bool) -> Result<Self, BlockLoadError> {
         let cursor = std::io::Cursor::new(bytes);
-        return Self::load_with_reader(cursor, id, validate);
+        Self::load_with_reader(cursor, id, validate)
     }
 
     /// Load a block from the given path with the given id and validate the layout
@@ -421,12 +418,12 @@ impl Block {
     /// - This method should be used in tests to ensure that the layout of the IPC file is as expected
     /// - The validation is not performant and should not be used in production code
     pub fn load_with_validation(path: &str, id: Uuid) -> Result<Self, BlockLoadError> {
-        return Self::load_internal(path, id, true);
+        Self::load_internal(path, id, true)
     }
 
     /// Load a block from the given path with the given id
     pub fn load(path: &str, id: Uuid) -> Result<Self, BlockLoadError> {
-        return Self::load_internal(path, id, false);
+        Self::load_internal(path, id, false)
     }
 
     fn load_internal(path: &str, id: Uuid, validate: bool) -> Result<Self, BlockLoadError> {
@@ -438,7 +435,7 @@ impl Block {
             }
         };
         let reader = std::io::BufReader::new(file);
-        return Self::load_with_reader(reader, id, validate);
+        Self::load_with_reader(reader, id, validate)
     }
 
     fn load_with_reader<R>(mut reader: R, id: Uuid, validate: bool) -> Result<Self, BlockLoadError>
@@ -446,21 +443,12 @@ impl Block {
         R: std::io::Read + std::io::Seek,
     {
         if validate {
-            let res = verify_buffers_layout(&mut reader);
-            match res {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(BlockLoadError::ArrowLayoutVerificationError(e));
-                }
-            }
+            verify_buffers_layout(&mut reader)
+                .map_err(BlockLoadError::ArrowLayoutVerificationError)?;
         }
 
-        let mut arrow_reader = match arrow::ipc::reader::FileReader::try_new(&mut reader, None) {
-            Ok(arrow_reader) => arrow_reader,
-            Err(e) => {
-                return Err(BlockLoadError::ArrowError(e));
-            }
-        };
+        let mut arrow_reader = arrow::ipc::reader::FileReader::try_new(&mut reader, None)
+            .map_err(BlockLoadError::ArrowError)?;
 
         let batch = match arrow_reader.next() {
             Some(Ok(batch)) => batch,
@@ -514,7 +502,7 @@ fn get_size_of_array_data(array_data: &ArrayData) -> usize {
         let size = bit_util::round_upto_multiple_of_64(buffer.len());
         total_size += size;
     }
-    return total_size;
+    total_size
 }
 
 /*
@@ -601,10 +589,8 @@ pub enum ArrowLayoutVerificationError {
 
 impl ChromaError for ArrowLayoutVerificationError {
     fn code(&self) -> ErrorCodes {
-        match self {
-            // All errors are internal for this error type
-            _ => ErrorCodes::Internal,
-        }
+        // All errors are internal for this error type
+        ErrorCodes::Internal
     }
 }
 
@@ -621,49 +607,26 @@ where
     // size calculation assumes that the buffers are 64 byte aligned
     // Space for ARROW_MAGIC (6 bytes) and length (4 bytes)
     let mut footer_buffer = [0; 10];
-    match reader.seek(SeekFrom::End(-10)) {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(ArrowLayoutVerificationError::IOError(e));
-        }
-    }
-
-    match reader.read_exact(&mut footer_buffer) {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(ArrowLayoutVerificationError::IOError(e));
-        }
-    }
+    reader
+        .seek(SeekFrom::End(-10))
+        .map_err(ArrowLayoutVerificationError::IOError)?;
+    reader
+        .read_exact(&mut footer_buffer)
+        .map_err(ArrowLayoutVerificationError::IOError)?;
 
     let footer_len = read_footer_length(footer_buffer);
-    let footer_len = match footer_len {
-        Ok(footer_len) => footer_len,
-        Err(e) => {
-            return Err(ArrowLayoutVerificationError::ArrowError(e));
-        }
-    };
+    let footer_len = footer_len.map_err(ArrowLayoutVerificationError::ArrowError)?;
 
     // read footer
     let mut footer_data = vec![0; footer_len];
-    match reader.seek(SeekFrom::End(-10 - footer_len as i64)) {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(ArrowLayoutVerificationError::IOError(e));
-        }
-    }
-    match reader.read_exact(&mut footer_data) {
-        Ok(_) => {}
-        Err(e) => {
-            return Err(ArrowLayoutVerificationError::IOError(e));
-        }
-    }
-
-    let footer = match root_as_footer(&footer_data) {
-        Ok(footer) => footer,
-        Err(e) => {
-            return Err(ArrowLayoutVerificationError::InvalidFlatbuffer(e));
-        }
-    };
+    reader
+        .seek(SeekFrom::End(-10 - footer_len as i64))
+        .map_err(ArrowLayoutVerificationError::IOError)?;
+    reader
+        .read_exact(&mut footer_data)
+        .map_err(ArrowLayoutVerificationError::IOError)?;
+    let footer =
+        root_as_footer(&footer_data).map_err(ArrowLayoutVerificationError::InvalidFlatbuffer)?;
 
     // Read the record batch
     let record_batch_definitions = match footer.recordBatches() {

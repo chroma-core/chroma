@@ -1,5 +1,7 @@
+#[cfg(test)]
 use rand::Rng;
 
+#[cfg(test)]
 pub(super) fn generate_random_data(n: usize, d: usize) -> Vec<f32> {
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
     let mut data = vec![0.0f32; n * d];
@@ -9,10 +11,10 @@ pub(super) fn generate_random_data(n: usize, d: usize) -> Vec<f32> {
             data[i * d + j] = rng.gen();
         }
     }
-    return data;
+    data
 }
 
-pub fn merge_sorted_vecs_disjunction<T: Ord + Clone>(a: &Vec<T>, b: &Vec<T>) -> Vec<T> {
+pub fn merge_sorted_vecs_disjunction<T: Ord + Clone>(a: &[T], b: &[T]) -> Vec<T> {
     let mut result = Vec::with_capacity(a.len() + b.len());
     let mut a_idx = 0;
     let mut b_idx = 0;
@@ -30,36 +32,44 @@ pub fn merge_sorted_vecs_disjunction<T: Ord + Clone>(a: &Vec<T>, b: &Vec<T>) -> 
 
         let a_val = &a[a_idx];
         let b_val = &b[b_idx];
-        if a_val < b_val {
-            result.push(a_val.clone());
-            a_idx += 1;
-        } else if a_val > b_val {
-            result.push(b_val.clone());
-            b_idx += 1;
-        } else {
-            result.push(a_val.clone());
-            a_idx += 1;
-            b_idx += 1;
+        match a_val.cmp(b_val) {
+            std::cmp::Ordering::Less => {
+                result.push(a_val.clone());
+                a_idx += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                result.push(b_val.clone());
+                b_idx += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                result.push(a_val.clone());
+                a_idx += 1;
+                b_idx += 1;
+            }
         }
     }
     result
 }
 
-pub fn merge_sorted_vecs_conjunction<T: Ord + Clone>(a: &Vec<T>, b: &Vec<T>) -> Vec<T> {
+pub fn merge_sorted_vecs_conjunction<T: Ord + Clone>(a: &[T], b: &[T]) -> Vec<T> {
     let mut result = Vec::with_capacity(a.len() + b.len());
     let mut a_idx = 0;
     let mut b_idx = 0;
     while a_idx < a.len() && b_idx < b.len() {
         let a_val = &a[a_idx];
         let b_val = &b[b_idx];
-        if a_val < b_val {
-            a_idx += 1;
-        } else if a_val > b_val {
-            b_idx += 1;
-        } else {
-            result.push(a_val.clone());
-            a_idx += 1;
-            b_idx += 1;
+        match a_val.cmp(b_val) {
+            std::cmp::Ordering::Less => {
+                a_idx += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                b_idx += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                result.push(a_val.clone());
+                a_idx += 1;
+                b_idx += 1;
+            }
         }
     }
     result

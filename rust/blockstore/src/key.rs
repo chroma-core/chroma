@@ -22,62 +22,70 @@ impl KeyWrapper {
     }
 }
 
-impl Into<KeyWrapper> for &str {
-    fn into(self) -> KeyWrapper {
-        KeyWrapper::String(self.to_string())
+impl From<&str> for KeyWrapper {
+    fn from(s: &str) -> KeyWrapper {
+        KeyWrapper::String(s.to_string())
     }
 }
 
-impl<'referred_data> From<&'referred_data KeyWrapper> for &'referred_data str {
-    fn from(key: &'referred_data KeyWrapper) -> Self {
+impl<'referred_data> TryFrom<&'referred_data KeyWrapper> for &'referred_data str {
+    type Error = &'static str;
+
+    fn try_from(key: &'referred_data KeyWrapper) -> Result<Self, &'static str> {
         match key {
-            KeyWrapper::String(s) => s,
-            _ => panic!("Invalid conversion"),
+            KeyWrapper::String(s) => Ok(s),
+            _ => Err("Invalid conversion"),
         }
     }
 }
 
-impl Into<KeyWrapper> for f32 {
-    fn into(self) -> KeyWrapper {
-        KeyWrapper::Float32(self)
+impl From<f32> for KeyWrapper {
+    fn from(f: f32) -> KeyWrapper {
+        KeyWrapper::Float32(f)
     }
 }
 
-impl From<&KeyWrapper> for f32 {
-    fn from(key: &KeyWrapper) -> Self {
+impl TryFrom<&KeyWrapper> for f32 {
+    type Error = &'static str;
+
+    fn try_from(key: &KeyWrapper) -> Result<Self, &'static str> {
         match key {
-            KeyWrapper::Float32(f) => f.clone(),
-            _ => panic!("Invalid conversion"),
+            KeyWrapper::Float32(f) => Ok(*f),
+            _ => Err("Invalid conversion"),
         }
     }
 }
 
-impl Into<KeyWrapper> for bool {
-    fn into(self) -> KeyWrapper {
-        KeyWrapper::Bool(self)
+impl From<bool> for KeyWrapper {
+    fn from(b: bool) -> KeyWrapper {
+        KeyWrapper::Bool(b)
     }
 }
 
-impl From<&KeyWrapper> for bool {
-    fn from(key: &KeyWrapper) -> Self {
+impl TryFrom<&KeyWrapper> for bool {
+    type Error = &'static str;
+
+    fn try_from(key: &KeyWrapper) -> Result<Self, &'static str> {
         match key {
-            KeyWrapper::Bool(b) => b.clone(),
-            _ => panic!("Invalid conversion"),
+            KeyWrapper::Bool(b) => Ok(*b),
+            _ => Err("Invalid conversion"),
         }
     }
 }
 
-impl Into<KeyWrapper> for u32 {
-    fn into(self) -> KeyWrapper {
-        KeyWrapper::Uint32(self)
+impl From<u32> for KeyWrapper {
+    fn from(u: u32) -> KeyWrapper {
+        KeyWrapper::Uint32(u)
     }
 }
 
-impl From<&KeyWrapper> for u32 {
-    fn from(key: &KeyWrapper) -> Self {
+impl TryFrom<&KeyWrapper> for u32 {
+    type Error = &'static str;
+
+    fn try_from(key: &KeyWrapper) -> Result<Self, &'static str> {
         match key {
-            KeyWrapper::Uint32(u) => u.clone(),
-            _ => panic!("Invalid conversion"),
+            KeyWrapper::Uint32(u) => Ok(*u),
+            _ => Err("Invalid conversion"),
         }
     }
 }
@@ -116,11 +124,7 @@ impl Eq for CompositeKey {}
 
 impl PartialOrd for CompositeKey {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.prefix == other.prefix {
-            self.key.partial_cmp(&other.key)
-        } else {
-            self.prefix.partial_cmp(&other.prefix)
-        }
+        Some(self.cmp(other))
     }
 }
 

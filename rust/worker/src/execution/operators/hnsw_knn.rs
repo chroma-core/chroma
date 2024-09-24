@@ -160,10 +160,10 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
                 return Err(Box::new(HnswKnnOperatorError::LogMaterializationError(e)));
             }
         };
-        let mut remaining_allowed_ids: HashSet<&String> =
-            HashSet::from_iter(input.allowed_ids.iter());
+        let mut remaining_allowed_ids: HashSet<&str> =
+            HashSet::from_iter(input.allowed_ids.iter().map(|x| x.as_str()));
         for (log, _) in logs.iter() {
-            remaining_allowed_ids.remove(&log.merged_user_id_ref().to_string());
+            remaining_allowed_ids.remove(log.merged_user_id_ref());
         }
         // If a filter list is supplied but it does not have anything for the segment, as it implies the data is all in the log
         // then return an empty response.

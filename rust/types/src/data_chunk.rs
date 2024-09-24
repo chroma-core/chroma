@@ -25,6 +25,11 @@ impl<T> Chunk<T> {
         self.visibility.iter().filter(|&v| *v).count()
     }
 
+    /// Returns whether the chunk has zero visible elements.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Returns the element at the given index
     /// if the index is out of bounds, it returns None
     /// # Arguments
@@ -140,28 +145,28 @@ mod tests {
         assert_eq!(chunk.len(), 2);
         let mut iter = chunk.iter();
         let elem = iter.next();
-        assert_eq!(elem.is_some(), true);
+        assert!(elem.is_some());
         let (record, index) = elem.unwrap();
         assert_eq!(record.record.id, "embedding_id_1");
         assert_eq!(index, 0);
         let elem = iter.next();
-        assert_eq!(elem.is_some(), true);
+        assert!(elem.is_some());
         let (record, index) = elem.unwrap();
         assert_eq!(record.record.id, "embedding_id_2");
         assert_eq!(index, 1);
         let elem = iter.next();
-        assert_eq!(elem.is_none(), true);
+        assert!(elem.is_none());
 
-        let visibility = vec![true, false].into();
+        let visibility = vec![true, false];
         chunk.set_visibility(visibility);
         assert_eq!(chunk.len(), 1);
         let mut iter = chunk.iter();
         let elem = iter.next();
-        assert_eq!(elem.is_some(), true);
+        assert!(elem.is_some());
         let (record, index) = elem.unwrap();
         assert_eq!(record.record.id, "embedding_id_1");
         assert_eq!(index, 0);
         let elem = iter.next();
-        assert_eq!(elem.is_none(), true);
+        assert!(elem.is_none());
     }
 }

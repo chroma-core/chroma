@@ -170,35 +170,27 @@ impl Storage {
 
     pub async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
         match self {
-            Storage::S3(s3) => s3
-                .put_file(key, path)
-                .await
-                .map_err(|e| PutError::S3Error(e)),
+            Storage::S3(s3) => s3.put_file(key, path).await.map_err(PutError::S3Error),
             Storage::Local(local) => local
                 .put_file(key, path)
                 .await
-                .map_err(|e| PutError::LocalError(e)),
-            Storage::AdmissionControlledS3(as3) => as3
-                .put_file(key, path)
-                .await
-                .map_err(|e| PutError::S3Error(e)),
+                .map_err(PutError::LocalError),
+            Storage::AdmissionControlledS3(as3) => {
+                as3.put_file(key, path).await.map_err(PutError::S3Error)
+            }
         }
     }
 
     pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
         match self {
-            Storage::S3(s3) => s3
-                .put_bytes(key, bytes)
-                .await
-                .map_err(|e| PutError::S3Error(e)),
+            Storage::S3(s3) => s3.put_bytes(key, bytes).await.map_err(PutError::S3Error),
             Storage::Local(local) => local
                 .put_bytes(key, &bytes)
                 .await
-                .map_err(|e| PutError::LocalError(e)),
-            Storage::AdmissionControlledS3(as3) => as3
-                .put_bytes(key, bytes)
-                .await
-                .map_err(|e| PutError::S3Error(e)),
+                .map_err(PutError::LocalError),
+            Storage::AdmissionControlledS3(as3) => {
+                as3.put_bytes(key, bytes).await.map_err(PutError::S3Error)
+            }
         }
     }
 }

@@ -48,14 +48,14 @@ impl Scheduler {
             .log
             .get_collections_with_new_data(self.min_compaction_size as u64)
             .await;
-        let collections = match collections {
+
+        match collections {
             Ok(collections) => collections,
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
-                return Vec::new();
+                Vec::new()
             }
-        };
-        collections
+        }
     }
 
     async fn verify_and_enrich_collections(
@@ -204,16 +204,16 @@ mod tests {
     #[tokio::test]
     async fn test_scheduler() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let mut in_memory_log = match *log {
+        let in_memory_log = match *log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
@@ -227,14 +227,14 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         in_memory_log.add_log(
-            collection_uuid_2.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_2.clone(),
+            collection_uuid_2,
+            InternalLogRecord {
+                collection_id: collection_uuid_2,
                 log_offset: 0,
                 log_ts: 2,
                 record: LogRecord {
@@ -248,7 +248,7 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
@@ -356,16 +356,16 @@ mod tests {
     )]
     async fn test_scheduler_panic() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let mut in_memory_log = match *log {
+        let in_memory_log = match *log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
@@ -379,12 +379,12 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 1,
                 log_ts: 2,
                 record: LogRecord {
@@ -398,12 +398,12 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 2,
                 log_ts: 3,
                 record: LogRecord {
@@ -417,12 +417,12 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 3,
                 log_ts: 4,
                 record: LogRecord {
@@ -436,7 +436,7 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
 

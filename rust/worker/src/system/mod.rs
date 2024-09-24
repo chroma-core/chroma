@@ -1,6 +1,7 @@
 mod executor;
 mod receiver;
 mod scheduler;
+#[allow(clippy::module_inception)]
 mod system;
 mod types;
 mod wrapped_message;

@@ -178,19 +178,16 @@ fn vec_to_f32(bytes: &[u8]) -> Result<&[f32], VectorConversionError> {
 
     unsafe {
         let (pre, mid, post) = bytes.align_to::<f32>();
-        if pre.len() != 0 || post.len() != 0 {
+        if !pre.is_empty() || !post.is_empty() {
             return Err(VectorConversionError::InvalidByteLength);
         }
-        return Ok(mid);
+        Ok(mid)
     }
 }
 
 fn f32_to_vec(vector: &[f32]) -> Vec<u8> {
     unsafe {
-        std::slice::from_raw_parts(
-            vector.as_ptr() as *const u8,
-            vector.len() * std::mem::size_of::<f32>(),
-        )
+        std::slice::from_raw_parts(vector.as_ptr() as *const u8, std::mem::size_of_val(vector))
     }
     .to_vec()
 }
@@ -277,10 +274,7 @@ mod tests {
 
     fn as_byte_view(input: &[f32]) -> Vec<u8> {
         unsafe {
-            std::slice::from_raw_parts(
-                input.as_ptr() as *const u8,
-                input.len() * std::mem::size_of::<f32>(),
-            )
+            std::slice::from_raw_parts(input.as_ptr() as *const u8, std::mem::size_of_val(input))
         }
         .to_vec()
     }

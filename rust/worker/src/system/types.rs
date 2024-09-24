@@ -1,6 +1,4 @@
-use super::{
-    scheduler::Scheduler, ChannelError, MessageHandlerError, RequestError, WrappedMessage,
-};
+use super::{scheduler::Scheduler, ChannelError, RequestError, WrappedMessage};
 use async_trait::async_trait;
 use core::panic;
 use futures::Stream;
@@ -10,7 +8,7 @@ use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
 
-pub(super) trait Message: Debug + Send + 'static {}
+pub(crate) trait Message: Debug + Send + 'static {}
 impl<M: Debug + Send + 'static> Message for M {}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -74,7 +72,7 @@ where
     Self: Component + 'static + Handler<M>,
     M: Message,
 {
-    fn register_stream<S>(&self, stream: S, ctx: &ComponentContext<Self>) -> ()
+    fn register_stream<S>(&self, stream: S, ctx: &ComponentContext<Self>)
     where
         S: Stream + Send + Stream<Item = M> + 'static,
     {
@@ -96,6 +94,7 @@ impl ConsumableJoinHandle {
     }
 
     async fn consume(&mut self) -> Result<(), JoinError> {
+        // NOTE(rescrv):  Do not clean this up by silencing the warning; refactor.
         match self.handle.lock().take() {
             Some(handle) => {
                 handle.await?;
@@ -113,7 +112,7 @@ impl ConsumableJoinHandle {
 ///
 /// See ReceiverForMessage for a trait generic over a message type.
 #[derive(Debug)]
-pub(super) struct ComponentSender<C: Component> {
+pub(crate) struct ComponentSender<C: Component> {
     sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>,
 }
 
@@ -137,6 +136,7 @@ impl<C: Component> ComponentSender<C> {
             .map_err(|_| ChannelError::SendError)
     }
 
+    #[allow(dead_code)]
     pub(super) async fn wrap_and_request<M>(
         &self,
         message: M,
@@ -157,7 +157,7 @@ impl<C: Component> ComponentSender<C> {
         match result {
             Ok(result) => Ok(result),
             Err(err) => match err {
-                MessageHandlerError::Panic(p) => Err(RequestError::HandlerPanic(p)),
+                super::MessageHandlerError::Panic(p) => Err(RequestError::HandlerPanic(p)),
             },
         }
     }
@@ -209,10 +209,10 @@ impl<C: Component> ComponentHandle<C> {
         sender: ComponentSender<C>,
     ) -> Self {
         ComponentHandle {
-            cancellation_token: cancellation_token,
+            cancellation_token,
             state: Arc::new(Mutex::new(ComponentState::Running)),
             join_handle,
-            sender: sender,
+            sender,
         }
     }
 
@@ -231,6 +231,7 @@ impl<C: Component> ComponentHandle<C> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn state(&self) -> ComponentState {
         return *self.state.lock();
     }
@@ -255,6 +256,7 @@ impl<C: Component> ComponentHandle<C> {
         self.sender.wrap_and_send(message, tracing_context).await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn request<M>(
         &self,
         message: M,

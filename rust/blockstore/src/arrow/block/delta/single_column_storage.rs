@@ -219,7 +219,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 }
 
 impl SingleColumnStorage<String> {
-    pub(super) fn to_arrow(
+    pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
@@ -245,7 +245,7 @@ impl SingleColumnStorage<String> {
             }
         }
         // Build arrow key with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
         // Build arrow value with fields.
         let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
         let value_arr = value_builder.finish();
@@ -260,7 +260,7 @@ impl SingleColumnStorage<String> {
 }
 
 impl SingleColumnStorage<Vec<u32>> {
-    pub(super) fn to_arrow(
+    pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
@@ -290,7 +290,7 @@ impl SingleColumnStorage<Vec<u32>> {
             }
         }
         // Build arrow key and value with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
 
         let value_field = Field::new(
             "value",
@@ -313,7 +313,7 @@ impl SingleColumnStorage<Vec<u32>> {
 }
 
 impl SingleColumnStorage<u32> {
-    pub(super) fn to_arrow(
+    pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
@@ -339,7 +339,7 @@ impl SingleColumnStorage<u32> {
             }
         }
         // Build arrow key with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
         let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
         let value_arr = value_builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
@@ -353,7 +353,7 @@ impl SingleColumnStorage<u32> {
 }
 
 impl SingleColumnStorage<RoaringBitmap> {
-    pub(super) fn to_arrow(
+    pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
@@ -389,7 +389,7 @@ impl SingleColumnStorage<RoaringBitmap> {
             }
         }
         // Build arrow key with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
 
         let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = value_builder.finish();

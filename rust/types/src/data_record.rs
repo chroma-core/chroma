@@ -13,7 +13,7 @@ pub struct DataRecord<'a> {
 impl DataRecord<'_> {
     pub fn get_size(&self) -> usize {
         let id_size = self.id.len();
-        let embedding_size = self.embedding.len() * std::mem::size_of::<f32>();
+        let embedding_size = std::mem::size_of_val(self.embedding);
         let metadata_size = match &self.metadata {
             Some(metadata) => {
                 let metadata_proto = Into::<chroma_proto::UpdateMetadata>::into(metadata.clone());

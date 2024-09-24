@@ -77,6 +77,7 @@ pub struct GetVectorsOrchestrator {
 }
 
 impl GetVectorsOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         system: System,
         get_ids: Vec<String>,

@@ -1,5 +1,4 @@
 use crate::key::{CompositeKey, KeyWrapper};
-use arrow::array::Int32Array;
 use chroma_error::ChromaError;
 use chroma_types::DataRecord;
 use parking_lot::RwLock;
@@ -366,7 +365,7 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
                 prefix: prefix.to_string(),
                 key,
             })
-            .map(|a| a.clone())
+            .cloned()
     }
 
     fn get_by_prefix_from_storage(
@@ -491,7 +490,7 @@ impl<'referred_data> Readable<'referred_data> for f32 {
                 prefix: prefix.to_string(),
                 key,
             })
-            .map(|a| *a)
+            .copied()
     }
 
     fn get_by_prefix_from_storage(
@@ -528,7 +527,7 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             .f32_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, *v))
             .collect()
     }
 
@@ -541,7 +540,7 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             .f32_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, *v))
             .collect()
     }
 
@@ -554,7 +553,7 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             .f32_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, *v))
             .collect()
     }
 
@@ -612,7 +611,7 @@ impl<'referred_data> Readable<'referred_data> for u32 {
                 prefix: prefix.to_string(),
                 key,
             })
-            .map(|a| *a)
+            .copied()
     }
 
     fn get_by_prefix_from_storage(
@@ -649,7 +648,7 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .u32_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, *v))
             .collect()
     }
 
@@ -662,7 +661,7 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .u32_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, *v))
             .collect()
     }
 
@@ -675,7 +674,7 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .u32_storage
             .iter()
             .filter(|(k, _)| k.prefix == prefix && k.key <= key)
-            .map(|(k, v)| (k, v.clone()))
+            .map(|(k, v)| (k, *v))
             .collect()
     }
 
@@ -737,7 +736,7 @@ impl<'referred_data> Readable<'referred_data> for bool {
                 prefix: prefix.to_string(),
                 key,
             })
-            .map(|a| *a)
+            .copied()
     }
 
     fn get_by_prefix_from_storage(
@@ -885,14 +884,14 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
         let id = storage.data_record_id_storage.get(&CompositeKey {
             prefix: prefix.to_string(),
             key: key.clone(),
-        });
+        })?;
         let embedding = storage.data_record_embedding_storage.get(&CompositeKey {
             prefix: prefix.to_string(),
             key,
-        });
+        })?;
         Some(DataRecord {
-            id: &id.unwrap(),
-            embedding: &embedding.unwrap(),
+            id,
+            embedding,
             metadata: None,
             document: None,
         })
@@ -1067,9 +1066,12 @@ pub struct StorageBuilder {
     // Roaring Bitmap Value
     roaring_bitmap_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, RoaringBitmap>>>>,
     // UInt32 Array Value
+    #[allow(clippy::type_complexity)]
     uint32_array_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<u32>>>>>,
     // Data Record Fields
+    #[allow(clippy::type_complexity)]
     data_record_id_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, String>>>>,
+    #[allow(clippy::type_complexity)]
     data_record_embedding_storage: Arc<RwLock<Option<BTreeMap<CompositeKey, Vec<f32>>>>>,
     pub(super) id: uuid::Uuid,
 }
