@@ -1279,6 +1279,7 @@ dependencies = [
  "chroma-error",
  "prost 0.12.3",
  "prost-types",
+ "roaring",
  "thiserror",
  "tonic 0.10.2",
  "tonic-build",
