@@ -1,12 +1,14 @@
 use anyhow::Result;
-use rand::seq::SliceRandom;
+use chroma_types::{LogRecord, OperationRecord, UpdateMetadataValue};
+use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, future::Future, path::PathBuf};
+use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc};
 use tantivy::{
     collector::TopDocs,
     doc,
     query::QueryParser,
-    schema::{Schema, STORED, TEXT},
+    schema::{IndexRecordOption, Schema, TextFieldIndexing, TextOptions},
+    tokenizer::WhitespaceTokenizer,
     Index, ReloadPolicy,
 };
 use tokio::io::AsyncWriteExt;
@@ -26,6 +28,7 @@ where
     Self: Sized,
 {
     const NAME: &'static str;
+    const DISPLAY_NAME: &'static str;
 
     fn init() -> impl Future<Output = Result<Self>> + Send;
     fn create_records_stream(
@@ -33,28 +36,53 @@ where
     ) -> impl Future<Output = Result<impl Stream<Item = Result<Record>>>> + Send;
 }
 
+impl<T: RecordDataset> RecordDataset for Arc<T> {
+    const NAME: &'static str = T::NAME;
+    const DISPLAY_NAME: &'static str = T::DISPLAY_NAME;
+
+    fn init() -> impl Future<Output = Result<Self>> + Send {
+        async move { Ok(Arc::new(T::init().await?)) }
+    }
+
+    fn create_records_stream(
+        &self,
+    ) -> impl Future<Output = Result<impl Stream<Item = Result<Record>>>> + Send {
+        self.as_ref().create_records_stream()
+    }
+}
+
 /// Represents a "known good" subset of queries from a query dataset that have at least `min_results_per_query` results in a corpus dataset.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FrozenQuerySubset {
-    queries: Vec<String>,
-    queries_from_dataset: String,
-    dataset_queries_tested_against: String,
-    min_results_per_query: usize,
+    pub queries: Vec<String>,
+    pub queries_from_dataset: String,
+    pub dataset_queries_tested_against: String,
+    pub min_results_per_query: usize,
 }
 
 trait TantivyIndexable {
-    /// Builds a Tantivy index from the records in the stream.
-    /// Record documents are stored in the "content" field.
     fn build_tantivy_index(&mut self) -> impl Future<Output = Result<(Index, Schema)>>;
 }
 
 impl<T: Stream<Item = Result<Record>> + Unpin> TantivyIndexable for T {
     async fn build_tantivy_index(&mut self) -> Result<(Index, Schema)> {
         let mut schema_builder = Schema::builder();
-        schema_builder.add_text_field("content", TEXT | STORED);
+
+        let text_field_indexing = TextFieldIndexing::default()
+            .set_tokenizer("whitespace")
+            .set_index_option(IndexRecordOption::WithFreqsAndPositions);
+        let text_options = TextOptions::default()
+            .set_indexing_options(text_field_indexing)
+            .set_stored();
+
+        schema_builder.add_text_field("content", text_options);
         let schema = schema_builder.build();
 
         let index = Index::create_in_ram(schema.clone());
+        index
+            .tokenizers()
+            .register("whitespace", WhitespaceTokenizer::default());
+
         let mut index_writer = index.writer(50_000_000)?;
         let content = schema.get_field("content")?;
 
@@ -86,13 +114,13 @@ where
         async move {
             let file_name = format!(
                 "frozen_query_subset_{}_{}_{}.bin",
-                CorpusDataset::NAME,
+                Self::NAME,
                 min_results_per_query,
                 max_num_of_queries
             );
 
             let file = get_or_populate_cached_dataset_file(
-                Self::NAME,
+                CorpusDataset::NAME,
                 &file_name,
                 Some(cache_dir.unwrap_or(get_dir_for_persistent_dataset_files())),
                 |mut file| async move {
@@ -117,10 +145,11 @@ where
                         .try_into()?;
 
                     let searcher = reader.searcher();
-                    let query_parser = QueryParser::for_index(
+                    let mut query_parser = QueryParser::for_index(
                         &corpus_index,
                         vec![corpus_index_schema.get_field("content")?],
                     );
+                    query_parser.set_conjunction_by_default();
 
                     let mut frozen_query_subset = FrozenQuerySubset {
                         queries: Vec::new(),
@@ -130,7 +159,9 @@ where
                     };
 
                     for query_text in shuffled_queries.iter() {
-                        let query = query_parser.parse_query(query_text)?;
+                        let query =
+                            query_parser.parse_query(format!("\"{}\"", query_text).as_str())?;
+
                         let top_docs =
                             searcher.search(&query, &TopDocs::with_limit(min_results_per_query))?;
                         if top_docs.len() >= min_results_per_query {
@@ -169,6 +200,7 @@ mod tests {
 
     impl RecordDataset for TestDataset {
         const NAME: &'static str = "test";
+        const DISPLAY_NAME: &'static str = "Test";
 
         fn init() -> impl Future<Output = Result<Self>> + Send {
             async move { Ok(TestDataset { records: vec![] }) }

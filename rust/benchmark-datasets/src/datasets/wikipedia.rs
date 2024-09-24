@@ -30,6 +30,7 @@ pub struct WikipediaDataset {
 
 impl RecordDataset for WikipediaDataset {
     const NAME: &'static str = "wikipedia";
+    const DISPLAY_NAME: &'static str = "Wikipedia";
 
     async fn init() -> Result<Self> {
         let file_path = get_or_populate_cached_dataset_file(

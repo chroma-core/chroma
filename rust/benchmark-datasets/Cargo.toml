@@ -1,5 +1,5 @@
 [package]
-name = "benchmark-datasets"
+name = "chroma-benchmark-datasets"
 version = "0.1.0"
 edition = "2021"
 
@@ -26,3 +26,5 @@ tantivy.workspace = true
 tokio = { workspace = true }
 tokio-stream = { version = "0.1.16", features = ["full"] }
 tokio-util = "0.7.12"
+chroma-types = { workspace = true }
+bloom = "0.3.2"

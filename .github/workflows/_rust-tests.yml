@@ -36,3 +36,24 @@ jobs:
         uses: ./.github/actions/tilt
       - name: Run tests
         run: cargo nextest run --profile k8s_integration
+  test-benches:
+    strategy:
+      matrix:
+        platform: [depot-ubuntu-22.04-16]
+    runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup
+        uses: ./.github/actions/rust
+      - name: Cache test datasets
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/chroma-test-datasets
+          key: chroma-test-datasets
+      - name: Build
+        run: cargo build --verbose
+      - name: Test benches
+        run: cargo nextest run --benches
