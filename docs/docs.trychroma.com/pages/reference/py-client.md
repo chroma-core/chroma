@@ -382,8 +382,7 @@ Get or create a collection with the given name and metadata.
 
 - `name` - The name of the collection to get or create
 - `metadata` - Optional metadata to associate with the collection. If
-  the collection alredy exists, the metadata will be updated if
-  provided and not None. If the collection does not exist, the
+  the collection alredy exists, the metadata will be ignored. If the collection does not exist, the
   new collection will be created with the provided metadata.
 - `embedding_function` - Optional function to use to embed documents
 - `data_loader` - Optional function to use to load records (documents, images, etc.)

@@ -238,20 +238,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 		if len(existing) != 0 {
 			if createCollection.GetOrCreate {
 				collection := convertCollectionToModel(existing)[0]
-				if createCollection.Metadata != nil && !createCollection.Metadata.Equals(collection.Metadata) {
-					updatedCollection, err := tc.UpdateCollection(ctx, &model.UpdateCollection{
-						ID:           collection.ID,
-						Metadata:     createCollection.Metadata,
-						TenantID:     tenantID,
-						DatabaseName: databaseName,
-					}, ts)
-					if err != nil {
-						log.Error("error updating collection", zap.Error(err))
-					}
-					result = updatedCollection
-				} else {
-					result = collection
-				}
+				result = collection
 				return nil
 			} else {
 				return common.ErrCollectionUniqueConstraintViolation
