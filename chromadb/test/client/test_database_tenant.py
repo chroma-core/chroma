@@ -3,6 +3,7 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.test.conftest import ClientFactories
 from chromadb.api.types import GetResult
 from typing import Dict, Any
+import numpy as np
 
 
 def test_database_tenant_collections(client_factories: ClientFactories) -> None:
@@ -176,8 +177,6 @@ def test_min_len_name(client_factories: ClientFactories) -> None:
 
 def check_embeddings(res: GetResult, records: Dict[str, Any]) -> None:
     if res["embeddings"] is not None:
-        for i, embedding in enumerate(res["embeddings"]):
-            for j, value in enumerate(embedding):
-                assert value == records["embeddings"][i][j]
+        assert np.array_equal(res["embeddings"], records["embeddings"])
     else:
         assert records["embeddings"] is None

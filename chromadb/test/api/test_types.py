@@ -29,7 +29,7 @@ def test_embedding_function_results_format_when_response_is_valid() -> None:
 
     embeddings = ef(random_documents())
     for i, e in enumerate(embeddings):
-        assert e.tolist() == valid_embeddings[i].tolist()
+        assert np.array_equal(e, valid_embeddings[i])
 
 
 def test_embedding_function_results_format_when_response_is_invalid() -> None:

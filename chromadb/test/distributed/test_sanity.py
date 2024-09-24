@@ -32,20 +32,20 @@ def test_add(
     embeddings = []
     for i in range(1000):
         ids.append(str(i))
-        embeddings.append(np.array([random.random(), random.random(), random.random()]))
+        embeddings.append(np.random.rand(1, 3)[0])
         collection.add(
             ids=[str(i)],
-            embeddings=[embeddings[-1]],  # type: ignore
+            embeddings=[embeddings[-1]],
         )
 
-    random_query = np.array([random.random(), random.random(), random.random()])
+    random_query = np.random.rand(1, 3)[0]
     print("Generated data with seed ", seed)
 
     invariants.ann_accuracy(
         collection,
         {
             "ids": ids,
-            "embeddings": embeddings,  # type: ignore[typeddict-item]
+            "embeddings": embeddings,
             "metadatas": None,
             "documents": None,
         },
@@ -70,18 +70,18 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
     documents = []
     for i in range(1000):
         ids.append(str(i))
-        embeddings.append(np.array([random.random(), random.random(), random.random()]))
+        embeddings.append(np.random.rand(1, 3)[0])
         documents.append(f"document_{i}")
         collection.add(
             ids=[str(i)],
-            embeddings=[embeddings[-1]],  # type: ignore
+            embeddings=[embeddings[-1]],
             documents=[documents[-1]],
         )
 
     time.sleep(COMPACTION_SLEEP)  # Wait for the documents to be compacted
 
-    random_query_1 = np.array([random.random(), random.random(), random.random()])
-    random_query_2 = np.array([random.random(), random.random(), random.random()])
+    random_query_1 = np.random.rand(1, 3)[0]
+    random_query_2 = np.random.rand(1, 3)[0]
     print("Generated data with seed ", seed)
 
     # Query the collection with a random query
@@ -89,7 +89,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
         collection,
         {
             "ids": ids,
-            "embeddings": embeddings,  # type: ignore[typeddict-item]
+            "embeddings": embeddings,
             "metadatas": None,
             "documents": documents,
         },

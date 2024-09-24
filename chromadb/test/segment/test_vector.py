@@ -85,7 +85,7 @@ def sample_embeddings() -> Iterator[OperationRecord]:
     sequence, and it's second nearest neighbor is the subsequent"""
 
     def create_record(i: int) -> OperationRecord:
-        vector = [i**1.1, i**1.1]
+        vector = np.array([i**1.1, i**1.1])
         record = OperationRecord(
             id=f"embedding_{i}",
             embedding=vector,
@@ -404,7 +404,7 @@ def _test_update(
     results = segment.get_vectors()
     assert len(results) == 3
     results = segment.get_vectors(ids=[embeddings[0]["id"]])
-    assert results[0]["embedding"].tolist() == [10.0, 10.0]
+    assert np.array_equal(results[0]["embedding"], np.array([10.0, 10.0]))
 
     # Test querying at the old location
     vector = cast(Vector, embeddings[0]["embedding"])
