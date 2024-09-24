@@ -763,7 +763,12 @@ class FastAPI(Server):
                 return self._api._add(
                     collection_id=_uuid(collection_id),
                     ids=add.ids,
-                    embeddings=cast(Embeddings, [np.array(embedding) for embedding in add.embeddings] if add.embeddings else None),
+                    embeddings=cast(
+                        Embeddings,
+                        [np.array(embedding) for embedding in add.embeddings]
+                        if add.embeddings
+                        else None,
+                    ),
                     metadatas=add.metadatas,  # type: ignore
                     documents=add.documents,  # type: ignore
                     uris=add.uris,  # type: ignore
@@ -799,7 +804,12 @@ class FastAPI(Server):
             return self._api._update(
                 collection_id=_uuid(collection_id),
                 ids=update.ids,
-                embeddings=cast(Embeddings, [np.array(embedding) for embedding in update.embeddings] if update.embeddings else None),
+                embeddings=cast(
+                    Embeddings,
+                    [np.array(embedding) for embedding in update.embeddings]
+                    if update.embeddings
+                    else None,
+                ),
                 metadatas=update.metadatas,  # type: ignore
                 documents=update.documents,  # type: ignore
                 uris=update.uris,  # type: ignore
@@ -830,7 +840,12 @@ class FastAPI(Server):
             return self._api._upsert(
                 collection_id=_uuid(collection_id),
                 ids=upsert.ids,
-                embeddings=cast(Embeddings, [np.array(embedding) for embedding in upsert.embeddings] if upsert.embeddings else None),
+                embeddings=cast(
+                    Embeddings,
+                    [np.array(embedding) for embedding in upsert.embeddings]
+                    if upsert.embeddings
+                    else None,
+                ),
                 metadatas=upsert.metadatas,  # type: ignore
                 documents=upsert.documents,  # type: ignore
                 uris=upsert.uris,  # type: ignore
@@ -878,7 +893,10 @@ class FastAPI(Server):
         )
 
         if get_result["embeddings"] is not None:
-            get_result["embeddings"]= [embedding.tolist() if isinstance(embedding, np.ndarray) else embedding for embedding in get_result["embeddings"]]
+            get_result["embeddings"] = [
+                embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+                for embedding in get_result["embeddings"]
+            ]
 
         return get_result
 
@@ -976,7 +994,12 @@ class FastAPI(Server):
 
             return self._api._query(
                 collection_id=_uuid(collection_id),
-                query_embeddings=cast(Embeddings, [np.array(embedding) for embedding in query.query_embeddings] if query.query_embeddings else None),
+                query_embeddings=cast(
+                    Embeddings,
+                    [np.array(embedding) for embedding in query.query_embeddings]
+                    if query.query_embeddings
+                    else None,
+                ),
                 n_results=query.n_results,
                 where=query.where,  # type: ignore
                 where_document=query.where_document,  # type: ignore
@@ -994,7 +1017,15 @@ class FastAPI(Server):
         )
 
         if nnresult["embeddings"] is not None:
-            nnresult["embeddings"]= [[embedding.tolist() if isinstance(embedding, np.ndarray) else embedding for embedding in result] for result in nnresult["embeddings"]]
+            nnresult["embeddings"] = [
+                [
+                    embedding.tolist()
+                    if isinstance(embedding, np.ndarray)
+                    else embedding
+                    for embedding in result
+                ]
+                for result in nnresult["embeddings"]
+            ]
 
         return nnresult
 

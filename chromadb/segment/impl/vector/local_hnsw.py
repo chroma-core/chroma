@@ -119,7 +119,9 @@ class LocalHnswSegment(VectorReader):
 
         results = []
         if self._index is not None:
-            vectors = cast(Sequence[Vector], np.array(self._index.get_items(labels))) # version 0.8 of hnswlib allows return_type="numpy"
+            vectors = cast(
+                Sequence[Vector], np.array(self._index.get_items(labels))
+            )  # version 0.8 of hnswlib allows return_type="numpy"
 
             for label, vector in zip(labels, vectors):
                 id = self._label_to_id[label]
@@ -158,7 +160,9 @@ class LocalHnswSegment(VectorReader):
 
         with ReadRWLock(self._lock):
             result_labels, distances = self._index.knn_query(
-                np.array(query_vectors, dtype=np.float32), k=k, filter=filter_function if ids else None
+                np.array(query_vectors, dtype=np.float32),
+                k=k,
+                filter=filter_function if ids else None,
             )
 
             # TODO: these casts are not correct, hnswlib returns np
@@ -173,7 +177,9 @@ class LocalHnswSegment(VectorReader):
                 ):
                     id = self._label_to_id[label]
                     if query["include_embeddings"]:
-                        embedding = np.array(self._index.get_items([label])[0]) # version 0.8 of hnswlib allows return_type="numpy"
+                        embedding = np.array(
+                            self._index.get_items([label])[0]
+                        )  # version 0.8 of hnswlib allows return_type="numpy"
                     else:
                         embedding = None
                     results.append(

@@ -5,11 +5,13 @@ import numpy as np
 
 
 def random_embeddings() -> Embeddings:
-    return cast(Embeddings, [embedding for embedding in np.random.random(size=(10, 10))])
+    return cast(
+        Embeddings, [embedding for embedding in np.random.random(size=(10, 10))]
+    )
 
 
 def random_image() -> Image:
-    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int32)
+    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int64)
 
 
 def random_documents() -> List[Document]:

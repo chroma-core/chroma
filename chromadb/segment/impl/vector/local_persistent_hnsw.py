@@ -395,7 +395,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             id_to_index[id] = i
 
         if len(hnsw_labels) > 0 and self._index is not None:
-            vectors = cast(Sequence[Vector], np.array(self._index.get_items(hnsw_labels))) # version 0.8 of hnswlib allows return_type="numpy"
+            vectors = cast(
+                Sequence[Vector], np.array(self._index.get_items(hnsw_labels))
+            )  # version 0.8 of hnswlib allows return_type="numpy"
 
             for label, vector in zip(hnsw_labels, vectors):
                 id = self._label_to_id[label]

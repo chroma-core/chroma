@@ -1,4 +1,3 @@
-import array
 from uuid import UUID
 from typing import Dict, Optional, Tuple, Union, cast
 from chromadb.api.configuration import CollectionConfigurationInternal

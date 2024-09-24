@@ -58,7 +58,6 @@ from uuid import UUID, uuid4
 import time
 import logging
 import re
-import numpy as np
 
 logger = logging.getLogger(__name__)
 

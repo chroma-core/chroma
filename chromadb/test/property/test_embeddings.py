@@ -799,7 +799,13 @@ def test_autocasting_validate_embeddings_for_compatible_types(
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
-            isinstance(value, np.ndarray) and (value.dtype == np.float32 or value.dtype == np.float64 or value.dtype == np.int32 or value.dtype == np.int64)
+            isinstance(value, np.ndarray)
+            and (
+                value.dtype == np.float32
+                or value.dtype == np.float64
+                or value.dtype == np.int32
+                or value.dtype == np.int64
+            )
             for value in validated_embeddings
         ]
     )
@@ -813,7 +819,13 @@ def test_autocasting_validate_embeddings_with_ndarray(
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
-            isinstance(value, np.ndarray) and (value.dtype == np.float32 or value.dtype == np.float64 or value.dtype == np.int32 or value.dtype == np.int64)
+            isinstance(value, np.ndarray)
+            and (
+                value.dtype == np.float32
+                or value.dtype == np.float64
+                or value.dtype == np.int32
+                or value.dtype == np.int64
+            )
             for value in validated_embeddings
         ]
     )
@@ -831,7 +843,7 @@ def test_autocasting_validate_embeddings_incompatible_types(
 
 
 def test_0dim_embedding_validation() -> None:
-    embds: Embeddings = [[]]
+    embds: Embeddings = [np.array([])]
     with pytest.raises(ValueError) as e:
         validate_embeddings(embds)
     assert "Expected each embedding in the embeddings to be a numpy array" in str(e)

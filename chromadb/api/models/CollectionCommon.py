@@ -152,7 +152,7 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[PyEmbedding],
@@ -245,7 +245,7 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[PyEmbedding],
@@ -334,7 +334,7 @@ class CollectionCommon(Generic[ClientT]):
         ):
             response["data"] = self._data_loader(response["uris"])
 
-        if ("embeddings" in include and response["embeddings"] is not None):
+        if "embeddings" in include and response["embeddings"] is not None:
             response["embeddings"] = np.array(response["embeddings"])
 
         # Remove URIs from the result if they weren't requested
@@ -345,7 +345,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_and_prepare_query_request(
         self,
-        query_embeddings: Optional[  # type: ignore[type-arg]
+        query_embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[PyEmbedding],
@@ -438,7 +438,7 @@ class CollectionCommon(Generic[ClientT]):
         ):
             response["data"] = [self._data_loader(uris) for uris in response["uris"]]
 
-        if ("embeddings" in include and response["embeddings"] is not None):
+        if "embeddings" in include and response["embeddings"] is not None:
             response["embeddings"] = np.array(response["embeddings"])
 
         # Remove URIs from the result if they weren't requested
@@ -511,7 +511,7 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_upsert_request(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[PyEmbedding],
@@ -563,7 +563,7 @@ class CollectionCommon(Generic[ClientT]):
 
     @staticmethod
     def _normalize_embeddings(
-        embeddings: Union[  # type: ignore[type-arg]
+        embeddings: Union[
             OneOrMany[Embedding],
             OneOrMany[PyEmbedding],
         ]

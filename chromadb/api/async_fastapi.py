@@ -450,7 +450,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, convert_np_embeddings_to_list(embeddings), metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings),
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
@@ -466,7 +472,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, convert_np_embeddings_to_list(embeddings) if embeddings is not None else None, metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings)
+            if embeddings is not None
+            else None,
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(
@@ -486,7 +500,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, convert_np_embeddings_to_list(embeddings), metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings),
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
@@ -508,7 +528,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             "post",
             "/collections/" + str(collection_id) + "/query",
             json={
-                "query_embeddings": [embedding.tolist() for embedding in query_embeddings] if query_embeddings is not None else None,
+                "query_embeddings": [
+                    embedding.tolist() for embedding in query_embeddings
+                ]
+                if query_embeddings is not None
+                else None,
                 "n_results": n_results,
                 "where": where,
                 "where_document": where_document,
