@@ -60,7 +60,7 @@ Embeddings = List[Embedding]
 
 
 def maybe_cast_one_to_many_embedding(
-    target: Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]  # type: ignore[type-arg]
+    target: Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]
 ) -> Embeddings:
     if isinstance(target, (List, np.ndarray)):
         # One Embedding
@@ -169,7 +169,9 @@ L = TypeVar("L", covariant=True, bound=Loadable)
 
 class GetResult(TypedDict):
     ids: List[ID]
-    embeddings: Optional[Union[List[Embedding], List[PyEmbedding], NDArray]]
+    embeddings: Optional[
+        Union[List[Embedding], List[PyEmbedding], NDArray[Union[np.int32, np.float32]]]
+    ]
     documents: Optional[List[Document]]
     uris: Optional[URIs]
     data: Optional[Loadable]
@@ -179,7 +181,13 @@ class GetResult(TypedDict):
 
 class QueryResult(TypedDict):
     ids: List[IDs]
-    embeddings: Optional[Union[List[List[Embedding]], List[List[PyEmbedding]], NDArray]]
+    embeddings: Optional[
+        Union[
+            List[List[Embedding]],
+            List[List[PyEmbedding]],
+            NDArray[Union[np.int32, np.float32]],
+        ]
+    ]
     documents: Optional[List[List[Document]]]
     uris: Optional[List[List[URI]]]
     data: Optional[List[Loadable]]
@@ -211,7 +219,9 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-            return validate_embeddings(normalize_embeddings(maybe_cast_one_to_many_embedding(result)))
+            return validate_embeddings(
+                normalize_embeddings(maybe_cast_one_to_many_embedding(result))
+            )
 
         setattr(cls, "__call__", __call__)
 
@@ -222,12 +232,13 @@ class EmbeddingFunction(Protocol[D]):
 
 
 def normalize_embeddings(
-        embeddings: Union[  # type: ignore[type-arg]
-            OneOrMany[Embedding],
-            OneOrMany[PyEmbedding],
-        ]
-    ) -> Embeddings:
-        return cast(Embeddings, [np.array(embedding) for embedding in embeddings])
+    embeddings: Union[
+        OneOrMany[Embedding],
+        OneOrMany[PyEmbedding],
+    ]
+) -> Embeddings:
+    return cast(Embeddings, [np.array(embedding) for embedding in embeddings])
+
 
 def validate_embedding_function(
     embedding_function: EmbeddingFunction[Embeddable],
@@ -521,16 +532,15 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         )
     for i, embedding in enumerate(embeddings):
         if embedding.ndim == 0:
-            raise ValueError(
-                f"Expected a 1D array, got {embedding}"
-            )
+            raise ValueError(f"Expected a 1D array, got {embedding}")
         if embedding.size == 0:
             raise ValueError(
                 f"Expected each embedding in the embeddings to be a non-empty numpy array, got empty embedding at pos {i}"
             )
         if not all(
             [
-                isinstance(value, (np.integer, float, np.floating)) and not isinstance(value, bool)
+                isinstance(value, (np.integer, float, np.floating))
+                and not isinstance(value, bool)
                 for value in embedding
             ]
         ):

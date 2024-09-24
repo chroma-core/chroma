@@ -6,7 +6,7 @@ from chromadb.db.impl.sqlite import SqliteDB
 from time import sleep
 import psutil
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Any
 from typing_extensions import Literal
 import numpy as np
 import numpy.typing as npt
@@ -39,8 +39,14 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
         embedding_list = None
     elif isinstance(record_set["embeddings"], list):
         assert record_set["embeddings"] is not None
-        if len(record_set["embeddings"]) > 0 and not all(isinstance(embedding, (list, np.ndarray)) for embedding in record_set["embeddings"]):
-            if all(isinstance(e, (int, float, np.integer, np.floating)) for e in record_set["embeddings"]):
+        if len(record_set["embeddings"]) > 0 and not all(
+            isinstance(embedding, (list, np.ndarray))
+            for embedding in record_set["embeddings"]
+        ):
+            if all(
+                isinstance(e, (int, float, np.integer, np.floating))
+                for e in record_set["embeddings"]
+            ):
                 embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
             else:
                 raise InvalidArgument("an embedding must be a list of floats or ints")
@@ -89,7 +95,7 @@ def _field_matches(
 
     if len(normalized_record_set["ids"]) == 0:
         if field_name == "embeddings":
-            assert cast(np.ndarray, actual_field).size == 0
+            assert cast(npt.NDArray[Any], actual_field).size == 0
         else:
             assert actual_field == []
         return

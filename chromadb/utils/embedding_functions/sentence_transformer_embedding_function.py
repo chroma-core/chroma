@@ -44,10 +44,11 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         return cast(
             Embeddings,
             [
-                embedding for embedding in self._model.encode(
+                embedding
+                for embedding in self._model.encode(
                     list(input),
                     convert_to_numpy=True,
                     normalize_embeddings=self._normalize_embeddings,
                 )
-            ]
+            ],
         )
