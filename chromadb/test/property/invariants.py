@@ -39,25 +39,26 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
         embedding_list = None
     elif isinstance(record_set["embeddings"], list):
         assert record_set["embeddings"] is not None
-        if len(record_set["embeddings"]) > 0 and not all(
-            isinstance(embedding, list) for embedding in record_set["embeddings"]
-        ):
-            if all(isinstance(e, (int, float)) for e in record_set["embeddings"]):
-                embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
-            else:
-                raise InvalidArgument("an embedding must be a list of floats or ints")
-        elif len(record_set["embeddings"]) > 0 and not all(
-            isinstance(embedding, np.ndarray) for embedding in record_set["embeddings"]
-        ):
+        if len(record_set["embeddings"]) > 0:
             if all(
-                isinstance(e, (np.integer, np.floating))
-                for e in record_set["embeddings"]
+                isinstance(embedding, list) for embedding in record_set["embeddings"]
             ):
-                embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
+                embedding_list = cast(types.Embeddings, record_set["embeddings"])
+            elif all(
+                isinstance(embedding, np.ndarray)
+                for embedding in record_set["embeddings"]
+            ):
+                embedding_list = cast(types.Embeddings, record_set["embeddings"])
             else:
-                raise InvalidArgument(
-                    "an embedding must be a numpy array of floats or ints"
-                )
+                if all(
+                    isinstance(e, (int, float, np.integer, np.floating))
+                    for e in record_set["embeddings"]
+                ):
+                    embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
+                else:
+                    raise InvalidArgument(
+                        "an embedding must be a list of floats or ints"
+                    )
         else:
             embedding_list = cast(types.Embeddings, record_set["embeddings"])
     else:
