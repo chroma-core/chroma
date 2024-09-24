@@ -26,6 +26,8 @@ The results returned by `collection.get()` is now ordered by internal ids. Where
 
 A subsequent change in behavior is `limit` and `offset`, which depends on the order of returned results. For example, if you have a collection named `coll` of documents with ids `["3", "2", "1", "0"]` inserted in this order, then previously `coll.get(limit=2, offset=2)["ids"]` gives you `["2", "3"]`, while currently this will give you `["1", "0"]`.
 
+The embeddings returned in `collection.get()`, `collection.query()`, and `collection.peek()` are now represented by a 2D numpy array instead of a Python list. We made this change because we are moving towards increasing performance on Local Chroma by internally representing embeddings with numpy arrays. You can still provide either a Python list or numpy array when submitting embeddings in a request.
+
 ### v0.5.6
 
 Chroma internally uses a write-ahead log. In all versions prior to v0.5.6, this log was never pruned. This resulted in the data directory being much larger than it needed to be, as well as the directory size not decreasing by the expected amount after deleting a collection.
