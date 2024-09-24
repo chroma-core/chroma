@@ -43,6 +43,8 @@ enum GetVectorsError {
     TaskSendError(#[from] ChannelError),
     #[error("System time error")]
     SystemTimeError(#[from] std::time::SystemTimeError),
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
 impl ChromaError for GetVectorsError {
@@ -50,6 +52,7 @@ impl ChromaError for GetVectorsError {
         match self {
             GetVectorsError::TaskSendError(e) => e.code(),
             GetVectorsError::SystemTimeError(_) => ErrorCodes::Internal,
+            GetVectorsError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
         }
     }
 }
@@ -74,6 +77,8 @@ pub struct GetVectorsOrchestrator {
     // Result channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<GetVectorsResult, Box<dyn ChromaError>>>>,
+    collection_version: u32,
+    log_position: u64,
 }
 
 impl GetVectorsOrchestrator {
@@ -86,6 +91,8 @@ impl GetVectorsOrchestrator {
         sysdb: Box<SysDb>,
         dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
+        collection_version: u32,
+        log_position: u64,
     ) -> Self {
         Self {
             state: ExecutionState::Pending,
@@ -100,6 +107,8 @@ impl GetVectorsOrchestrator {
             record_segment: None,
             collection: None,
             result_channel: None,
+            collection_version,
+            log_position,
         }
     }
 
@@ -132,7 +141,9 @@ impl GetVectorsOrchestrator {
         let input = PullLogsInput::new(
             collection.id,
             // The collection log position is inclusive, and we want to start from the next log
-            collection.log_position + 1,
+            // Note that we query using the incoming log position this is critical for correctness
+            // TODO: We should make all the log service code use u64 instead of i64
+            (self.log_position as i64) + 1,
             100,
             None,
             Some(end_timestamp),

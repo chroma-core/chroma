@@ -36,6 +36,9 @@ pub(crate) struct CountQueryOrchestrator {
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<Result<usize, Box<dyn ChromaError>>>>,
+    // Request version context
+    collection_version: u32,
+    log_position: u64,
 }
 
 #[derive(Error, Debug)]
@@ -52,6 +55,8 @@ enum CountQueryOrchestratorError {
     CollectionNotFound(Uuid),
     #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
 impl ChromaError for CountQueryOrchestratorError {
@@ -65,6 +70,7 @@ impl ChromaError for CountQueryOrchestratorError {
             CountQueryOrchestratorError::SystemTimeError(_) => ErrorCodes::Internal,
             CountQueryOrchestratorError::CollectionNotFound(_) => ErrorCodes::NotFound,
             CountQueryOrchestratorError::GetCollectionError(e) => e.code(),
+            CountQueryOrchestratorError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
         }
     }
 }
@@ -78,6 +84,8 @@ impl CountQueryOrchestrator {
         sysdb: Box<SysDb>,
         dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
+        collection_version: u32,
+        log_position: u64,
     ) -> Self {
         Self {
             system,
@@ -90,6 +98,8 @@ impl CountQueryOrchestrator {
             dispatcher,
             blockfile_provider,
             result_channel: None,
+            collection_version,
+            log_position,
         }
     }
 
@@ -170,7 +180,9 @@ impl CountQueryOrchestrator {
         let input = PullLogsInput::new(
             collection.id,
             // The collection log position is inclusive, and we want to start from the next log.
-            collection.log_position + 1,
+            // Note that we query using the incoming log position this is critical for correctness
+            // TODO: We should make all the log service code use u64 instead of i64
+            (self.log_position as i64) + 1,
             100,
             None,
             Some(end_timestamp),
