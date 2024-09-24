@@ -4,7 +4,7 @@ import pytest
 from chromadb.config import System, Settings
 from chromadb.logservice.logservice import LogService
 from chromadb.test.conftest import skip_if_not_cluster
-from chromadb.test.test_api import records  # type: ignore
+from chromadb.test.api.utils import records
 from chromadb.api.models.Collection import Collection
 import time
 
@@ -106,7 +106,7 @@ def test_update(client):  # type: ignore
 
     test_records_map = {
         "updated_records": {
-            "ids": [records["ids"][0]],
+            "ids": [records["ids"][0]],  # type: ignore[index]
             "embeddings": [[0.1, 0.2, 0.3]],
             "metadatas": [{"foo": "bar"}],
         },
