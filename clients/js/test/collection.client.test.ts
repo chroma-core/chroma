@@ -52,11 +52,11 @@ describe("collection operations", () => {
       "database": "default_database",
       "dimension": null,
       "id": undefined,
+      "log_position": 0,
       "metadata": null,
       "name": "test",
       "tenant": "default_tenant",
       "version": 0,
-      "log_position": 0,
     }
   `);
 
@@ -89,13 +89,13 @@ describe("collection operations", () => {
       "database": "default_database",
       "dimension": null,
       "id": undefined,
+      "log_position": 0,
       "metadata": {
         "test": "test",
       },
       "name": "test2",
       "tenant": "default_tenant",
       "version": 0,
-      "log_position": 0,
     }
   `);
   });
