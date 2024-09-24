@@ -271,6 +271,15 @@ def persist_generated_data_with_old_version(
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
         # Shutdown system
+
+        # Leave some records on the queue to be processed by the next version's
+        # segment manager. Delete first so we don't get warnings of adding
+        # existing embeddings
+        coll.delete(ids=embeddings_strategy["ids"])
+        segment_manager = system.instance(SegmentManager)
+        segment_manager.stop()
+        coll.add(**embeddings_strategy)
+
         system.stop()
     except Exception as e:
         conn.send(e)
