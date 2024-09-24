@@ -25,7 +25,12 @@ from uuid import UUID
 
 from chromadb.api.configuration import CollectionConfigurationInternal
 from pydantic import BaseModel
-from chromadb.api.types import GetResult, QueryResult, Embeddings
+from chromadb.api.types import (
+    GetResult,
+    QueryResult,
+    Embeddings,
+    convert_list_embeddings_to_np,
+)
 from chromadb.auth import (
     AuthzAction,
     AuthzResource,
@@ -765,7 +770,7 @@ class FastAPI(Server):
                     ids=add.ids,
                     embeddings=cast(
                         Embeddings,
-                        [np.array(embedding) for embedding in add.embeddings]
+                        convert_list_embeddings_to_np(add.embeddings)
                         if add.embeddings
                         else None,
                     ),
@@ -804,12 +809,9 @@ class FastAPI(Server):
             return self._api._update(
                 collection_id=_uuid(collection_id),
                 ids=update.ids,
-                embeddings=cast(
-                    Embeddings,
-                    [np.array(embedding) for embedding in update.embeddings]
-                    if update.embeddings
-                    else None,
-                ),
+                embeddings=convert_list_embeddings_to_np(update.embeddings)
+                if update.embeddings
+                else None,
                 metadatas=update.metadatas,  # type: ignore
                 documents=update.documents,  # type: ignore
                 uris=update.uris,  # type: ignore
@@ -842,7 +844,7 @@ class FastAPI(Server):
                 ids=upsert.ids,
                 embeddings=cast(
                     Embeddings,
-                    [np.array(embedding) for embedding in upsert.embeddings]
+                    convert_list_embeddings_to_np(upsert.embeddings)
                     if upsert.embeddings
                     else None,
                 ),
@@ -996,7 +998,7 @@ class FastAPI(Server):
                 collection_id=_uuid(collection_id),
                 query_embeddings=cast(
                     Embeddings,
-                    [np.array(embedding) for embedding in query.query_embeddings]
+                    convert_list_embeddings_to_np(query.query_embeddings)
                     if query.query_embeddings
                     else None,
                 ),

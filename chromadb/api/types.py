@@ -55,6 +55,7 @@ def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
 
 # Embeddings
 PyEmbedding = PyVector
+PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
 
@@ -62,9 +63,12 @@ Embeddings = List[Embedding]
 def maybe_cast_one_to_many_embedding(
     target: Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]
 ) -> Embeddings:
-    if isinstance(target, (List, np.ndarray)):
+    if isinstance(target, List):
         # One Embedding
-        if isinstance(target[0], (int, float, np.floating, np.integer)):
+        if isinstance(target[0], (int, float)):
+            return cast(Embeddings, [target])
+    elif isinstance(target, np.ndarray):
+        if isinstance(target[0], (np.floating, np.integer)):
             return cast(Embeddings, [target])
     # Already a sequence
     return cast(Embeddings, target)
@@ -170,7 +174,7 @@ L = TypeVar("L", covariant=True, bound=Loadable)
 class GetResult(TypedDict):
     ids: List[ID]
     embeddings: Optional[
-        Union[List[Embedding], List[PyEmbedding], NDArray[Union[np.int32, np.float32]]]
+        Union[Embeddings, PyEmbeddings, NDArray[Union[np.int32, np.float32]]]
     ]
     documents: Optional[List[Document]]
     uris: Optional[URIs]
@@ -183,8 +187,8 @@ class QueryResult(TypedDict):
     ids: List[IDs]
     embeddings: Optional[
         Union[
-            List[List[Embedding]],
-            List[List[PyEmbedding]],
+            List[Embeddings],
+            List[PyEmbeddings],
             NDArray[Union[np.int32, np.float32]],
         ]
     ]
@@ -532,10 +536,12 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         )
     for i, embedding in enumerate(embeddings):
         if embedding.ndim == 0:
-            raise ValueError(f"Expected a 1D array, got {embedding}")
+            raise ValueError(
+                f"Expected a 1-dimensional array, got a 0-dimensional array {embedding}"
+            )
         if embedding.size == 0:
             raise ValueError(
-                f"Expected each embedding in the embeddings to be a non-empty numpy array, got empty embedding at pos {i}"
+                f"Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos {i}"
             )
         if not all(
             [
@@ -554,7 +560,7 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
 def validate_batch(
     batch: Tuple[
         IDs,
-        Optional[Embeddings],
+        Optional[Union[Embeddings, PyEmbeddings]],
         Optional[Metadatas],
         Optional[Documents],
         Optional[URIs],
@@ -565,3 +571,11 @@ def validate_batch(
         raise ValueError(
             f"Batch size {len(batch[0])} exceeds maximum batch size {limits['max_batch_size']}"
         )
+
+
+def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:
+    return [embedding.tolist() for embedding in embeddings]
+
+
+def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
+    return [np.array(embedding) for embedding in embeddings]

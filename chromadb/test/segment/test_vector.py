@@ -86,7 +86,7 @@ def sample_embeddings() -> Iterator[OperationRecord]:
     sequence, and it's second nearest neighbor is the subsequent"""
 
     def create_record(i: int) -> OperationRecord:
-        vector = [i**1.1, i**1.1]
+        vector = np.array([i**1.1, i**1.1])
         record = OperationRecord(
             id=f"embedding_{i}",
             embedding=vector,

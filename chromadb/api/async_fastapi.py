@@ -17,13 +17,13 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
-from chromadb.utils.embeddings import convert_np_embeddings_to_list
 
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 
 from chromadb.api.types import (
     Documents,
     Embeddings,
+    PyEmbeddings,
     IDs,
     Include,
     Metadatas,
@@ -34,6 +34,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
+    convert_np_embeddings_to_list,
 )
 
 
@@ -417,7 +418,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[Embeddings],
+            Optional[PyEmbeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -528,9 +529,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             "post",
             "/collections/" + str(collection_id) + "/query",
             json={
-                "query_embeddings": [
-                    embedding.tolist() for embedding in query_embeddings
-                ]
+                "query_embeddings": convert_np_embeddings_to_list(query_embeddings)
                 if query_embeddings is not None
                 else None,
                 "n_results": n_results,

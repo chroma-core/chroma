@@ -334,7 +334,7 @@ class CollectionCommon(Generic[ClientT]):
         ):
             response["data"] = self._data_loader(response["uris"])
 
-        if "embeddings" in include and response["embeddings"] is not None:
+        if "embeddings" in include:
             response["embeddings"] = np.array(response["embeddings"])
 
         # Remove URIs from the result if they weren't requested

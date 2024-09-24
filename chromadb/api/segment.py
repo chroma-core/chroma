@@ -736,7 +736,7 @@ class SegmentAPI(ServerAPI):
 
         ids: List[List[str]] = []
         distances: List[List[float]] = []
-        embeddings: List[List[Embedding]] = []
+        embeddings: List[Embeddings] = []
         documents: List[List[Document]] = []
         uris: List[List[URI]] = []
         metadatas: List[List[t.Metadata]] = []
