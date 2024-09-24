@@ -20,6 +20,11 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.6.0
+
+The embeddings returned in `collection.get()`, `collection.query()`, and `collection.peek()` are now represented by a 2D numpy array instead of a Python list. We made this change because we are moving towards increasing performance on Local Chroma by internally representing embeddings with numpy arrays. You can still provide either a Python list or numpy array when submitting embeddings in a request.
+
+
 ### v0.5.10
 
 The results returned by `collection.get()` is now ordered by internal ids. Whereas previously, the results were ordered by user provided ids, although this behavior was not explicitly documented. We would like to make the change because using user provided ids may not be ideal for performance in hosted Chroma, and we hope to propagate the change to local Chroma for consistency of behavior. In general, newer documents in Chroma has larger internal ids.
