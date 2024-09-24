@@ -876,7 +876,7 @@ mod tests {
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        DirectComparison, DirectDocumentComparison, Where, WhereComparison, WhereDocument,
+        DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator, Where, WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -1108,11 +1108,11 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new_world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new_world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1122,11 +1122,11 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.get(0), Some(&(1 as usize)));
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1135,11 +1135,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1149,9 +1149,9 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1161,9 +1161,9 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1391,11 +1391,11 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new_world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new_world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1405,11 +1405,11 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.get(0), Some(&(1 as usize)));
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1418,11 +1418,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1433,9 +1433,9 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc1"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1445,9 +1445,9 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1695,11 +1695,11 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new_world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new_world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1709,11 +1709,11 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.get(0), Some(&(1 as usize)));
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1722,11 +1722,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1736,9 +1736,9 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1748,9 +1748,9 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc1"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)

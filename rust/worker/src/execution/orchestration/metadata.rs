@@ -1,8 +1,8 @@
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
-use crate::execution::operators::merge_metadata_results::{
-    MergeMetadataResultsOperator, MergeMetadataResultsOperatorError,
-    MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput,
+use crate::execution::operators::hydrate_metadata_results::{
+    HydrateMetadataResultsOperator, HydrateMetadataResultsOperatorError,
+    HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperatorOutput,
 };
 use crate::execution::operators::metadata_filtering::{
     MetadataFilteringError, MetadataFilteringInput, MetadataFilteringOperator,
@@ -17,9 +17,9 @@ use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Where;
 use chroma_types::{Chunk, Segment};
 use chroma_types::{Collection, LogRecord, Metadata, SegmentType};
-use chroma_types::{Where, WhereDocument};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -59,7 +59,7 @@ pub(crate) struct MetadataQueryOrchestrator {
     blockfile_provider: BlockfileProvider,
     // Query params
     where_clause: Option<Where>,
-    where_document_clause: Option<WhereDocument>,
+    where_document_clause: Option<Where>,
     offset: Option<u32>,
     limit: Option<u32>,
     include_metadata: bool,
@@ -109,7 +109,7 @@ impl MetadataQueryOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
         where_clause: Option<Where>,
-        where_document_clause: Option<WhereDocument>,
+        where_document_clause: Option<Where>,
         offset: Option<u32>,
         limit: Option<u32>,
         include_metadata: bool,
@@ -233,7 +233,7 @@ impl MetadataQueryOrchestrator {
         self.state = ExecutionState::Filter;
 
         let input = MetadataFilteringInput::new(
-            logs,
+            self.blockfile_provider.clone(),
             self.record_segment
                 .as_ref()
                 .expect("Expected record segment to be set")
@@ -242,10 +242,12 @@ impl MetadataQueryOrchestrator {
                 .as_ref()
                 .expect("Expected metadata segment to be set")
                 .clone(),
-            self.blockfile_provider.clone(),
+            logs,
+            self.query_ids.clone(),
             self.where_clause.clone(),
             self.where_document_clause.clone(),
-            self.query_ids.clone(),
+            self.offset.clone(),
+            self.limit.clone(),
         );
 
         let op = MetadataFilteringOperator::new();
@@ -434,18 +436,16 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
 
         self.state = ExecutionState::MergeResults;
 
-        let operator = MergeMetadataResultsOperator::new();
-        let input = MergeMetadataResultsOperatorInput::new(
-            output.log_records,
-            output.user_supplied_filtered_offset_ids,
-            output.where_condition_filtered_offset_ids,
+        let operator = HydrateMetadataResultsOperator::new();
+        let input = HydrateMetadataResultsOperatorInput::new(
+            self.blockfile_provider.clone(),
             self.record_segment
                 .as_ref()
                 .expect("Invariant violation. Record segment is not set.")
                 .clone(),
-            self.blockfile_provider.clone(),
-            self.offset,
-            self.limit,
+            output.log_records,
+            output.log_mask,
+            output.offset_ids,
             self.include_metadata,
         );
 
@@ -462,14 +462,17 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>>
+impl Handler<TaskResult<HydrateMetadataResultsOperatorOutput, HydrateMetadataResultsOperatorError>>
     for MetadataQueryOrchestrator
 {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>,
+        message: TaskResult<
+            HydrateMetadataResultsOperatorOutput,
+            HydrateMetadataResultsOperatorError,
+        >,
         ctx: &ComponentContext<Self>,
     ) {
         let message = message.into_inner();

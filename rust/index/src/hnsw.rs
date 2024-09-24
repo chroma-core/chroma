@@ -100,11 +100,11 @@ impl HnswIndexConfig {
             }
         }
 
-        let m = get_metadata_value_as::<i32>(metadata, "hnsw:M").unwrap_or(DEFAULT_HNSW_M as i32);
-        let ef_construction = get_metadata_value_as::<i32>(metadata, "hnsw:construction_ef")
-            .unwrap_or(DEFAULT_HNSW_EF_CONSTRUCTION as i32);
-        let ef_search = get_metadata_value_as::<i32>(metadata, "hnsw:search_ef")
-            .unwrap_or(DEFAULT_HNSW_EF_SEARCH as i32);
+        let m = get_metadata_value_as::<i64>(metadata, "hnsw:M").unwrap_or(DEFAULT_HNSW_M as i64);
+        let ef_construction = get_metadata_value_as::<i64>(metadata, "hnsw:construction_ef")
+            .unwrap_or(DEFAULT_HNSW_EF_CONSTRUCTION as i64);
+        let ef_search = get_metadata_value_as::<i64>(metadata, "hnsw:search_ef")
+            .unwrap_or(DEFAULT_HNSW_EF_SEARCH as i64);
         return Ok(HnswIndexConfig {
             max_elements: DEFAULT_MAX_ELEMENTS,
             m: m as usize,
@@ -848,7 +848,7 @@ pub mod test {
 
         // Try partial metadata
         let mut metadata = HashMap::new();
-        metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10 as i32));
+        metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10 as i64));
 
         let segment = Segment {
             id: Uuid::new_v4(),

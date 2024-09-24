@@ -5,6 +5,7 @@ use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
+use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
@@ -808,13 +809,15 @@ impl RecordSegmentReader<'_> {
     }
 
     /// Returns all offset_ids in the record segment sorted.
-    pub(crate) async fn get_all_offset_ids(&self) -> Result<Vec<u32>, Box<dyn ChromaError>> {
+    pub(crate) async fn get_all_offset_ids(&self) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
         let offset_id_count = self.count().await?;
-        let mut colllected_offset_ids = Vec::with_capacity(offset_id_count);
+        let mut collected_offset_ids = RoaringBitmap::new();
         for i in 0..offset_id_count {
             let record = self.id_to_user_id.get_at_index(i).await;
             match record {
-                Ok((_, offset_id, _)) => colllected_offset_ids.push(offset_id),
+                Ok((_, offset_id, _)) => {
+                    collected_offset_ids.insert(offset_id);
+                }
                 Err(e) => {
                     tracing::error!(
                         "[GetAllData] Error getting offset id for index {}: {}",
@@ -825,7 +828,7 @@ impl RecordSegmentReader<'_> {
                 }
             }
         }
-        Ok(colllected_offset_ids)
+        Ok(collected_offset_ids)
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {

@@ -1,28 +1,51 @@
+use std::{
+    collections::BTreeMap,
+    ops::{BitAnd, BitOr, Bound},
+};
+
 use crate::{
     execution::operator::Operator,
     segment::{
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
     },
 };
-use chroma_blockstore::{key::KeyWrapper, provider::BlockfileProvider};
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{
-    fulltext::types::process_where_document_clause_with_callback,
-    metadata::types::{process_where_clause_with_callback, MetadataIndexError},
-    utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
-};
+use chroma_index::metadata::types::MetadataIndexError;
 use chroma_types::{
-    Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
-    WhereClauseComparator, WhereDocument, WhereDocumentOperator,
+    BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
+    LogRecord, MaterializedLogOperation, MetadataValue, PrimitiveOperator, Segment, SetOperator,
+    SignedRoaringBitmap, Where, WhereChildren, WhereComparison,
 };
-use core::panic;
 use roaring::RoaringBitmap;
-use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use tonic::async_trait;
-use tracing::{Instrument, Span};
+use tracing::{trace, Instrument, Span};
+
+/// # Description
+/// The `MetadataFilteringOperator` should produce the offset ids of the matching documents.
+///
+/// # Input
+/// - `blockfile_provider` / `record_segment` / `metadata_segment`: handles to the underlying data.
+/// - `log_record`: the chunk of log that is not yet compacted, representing the latest updates.
+/// - `query_ids`: user provided ids, which must be a superset of returned documents.
+/// - `where_clause`: a boolean predicate on the metadata of the document.
+/// - `where_document_clause`: a boolean predicate on the content of the document.
+/// - `offset`: the number of records with smallest offset ids to skip, if specified
+/// - `limit`: the number of records with smallest offset ids to take after the skip, if specified
+///
+/// # Output
+/// - `log_record`: the same as `log_record` in the input.
+/// - `log_mask`: the offset ids in the log that matches the criteria in the input.
+/// - `offset_ids`: the offset_ids (in both log and compact storage) that matches the criteria in the input.
+///
+/// # Note
+/// - The `MetadataProvider` enum can be viewed as an universal interface for the metadata and document index.
+/// - In the input, `where_clause` and `where_document_clause` is represented with the same enum, as they share
+///   the same evaluation process. In the future we can trivially merge them together into a single field.
+/// - In the output, the `log_mask` should be a subset of `offset_ids`
 
 #[derive(Debug)]
 pub(crate) struct MetadataFilteringOperator {}
@@ -35,33 +58,39 @@ impl MetadataFilteringOperator {
 
 #[derive(Debug)]
 pub(crate) struct MetadataFilteringInput {
-    log_record: Chunk<LogRecord>,
+    blockfile_provider: BlockfileProvider,
     record_segment: Segment,
     metadata_segment: Segment,
-    blockfile_provider: BlockfileProvider,
-    where_clause: Option<Where>,
-    where_document_clause: Option<WhereDocument>,
+    log_record: Chunk<LogRecord>,
     query_ids: Option<Vec<String>>,
+    where_clause: Option<Where>,
+    where_document_clause: Option<Where>,
+    offset: Option<u32>,
+    limit: Option<u32>,
 }
 
 impl MetadataFilteringInput {
     pub(crate) fn new(
-        log_record: Chunk<LogRecord>,
+        blockfile_provider: BlockfileProvider,
         record_segment: Segment,
         metadata_segment: Segment,
-        blockfile_provider: BlockfileProvider,
-        where_clause: Option<Where>,
-        where_document_clause: Option<WhereDocument>,
+        log_record: Chunk<LogRecord>,
         query_ids: Option<Vec<String>>,
+        where_clause: Option<Where>,
+        where_document_clause: Option<Where>,
+        offset: Option<u32>,
+        limit: Option<u32>,
     ) -> Self {
         Self {
-            log_record,
+            blockfile_provider,
             record_segment,
             metadata_segment,
-            blockfile_provider,
+            log_record,
+            query_ids,
             where_clause,
             where_document_clause,
-            query_ids,
+            offset,
+            limit,
         }
     }
 }
@@ -69,41 +98,318 @@ impl MetadataFilteringInput {
 #[derive(Debug)]
 pub(crate) struct MetadataFilteringOutput {
     pub(crate) log_records: Chunk<LogRecord>,
-    // Offset Ids of documents that match the where and where_document clauses.
-    pub(crate) where_condition_filtered_offset_ids: Option<Vec<u32>>,
-    // Offset ids of documents that the user specified in the query directly.
-    pub(crate) user_supplied_filtered_offset_ids: Option<Vec<u32>>,
+    pub(crate) log_mask: RoaringBitmap,
+    pub(crate) offset_ids: RoaringBitmap,
 }
 
 #[derive(Error, Debug)]
 pub(crate) enum MetadataFilteringError {
     #[error("Error creating record segment reader {0}")]
-    MetadataFilteringRecordSegmentReaderCreationError(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderCreationError(#[from] RecordSegmentReaderCreationError),
     #[error("Error materializing logs {0}")]
-    MetadataFilteringLogMaterializationError(#[from] LogMaterializerError),
+    LogMaterializationError(#[from] LogMaterializerError),
     #[error("Error filtering documents by where or where_document clauses {0}")]
-    MetadataFilteringIndexError(#[from] MetadataIndexError),
+    IndexError(#[from] MetadataIndexError),
     #[error("Error from metadata segment reader {0}")]
-    MetadataFilteringMetadataSegmentReaderError(#[from] MetadataSegmentError),
+    MetadataSegmentReaderError(#[from] MetadataSegmentError),
     #[error("Error reading from record segment")]
-    MetadataFilteringRecordSegmentReaderError,
+    RecordSegmentReaderError,
     #[error("Invalid input")]
-    MetadataFilteringInvalidInput,
+    InvalidInput,
 }
 
 impl ChromaError for MetadataFilteringError {
     fn code(&self) -> ErrorCodes {
         match self {
-            MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(e) => {
-                e.code()
+            MetadataFilteringError::RecordSegmentReaderCreationError(e) => e.code(),
+            MetadataFilteringError::LogMaterializationError(e) => e.code(),
+            MetadataFilteringError::IndexError(e) => e.code(),
+            MetadataFilteringError::MetadataSegmentReaderError(e) => e.code(),
+            MetadataFilteringError::RecordSegmentReaderError => ErrorCodes::Internal,
+            MetadataFilteringError::InvalidInput => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+pub(crate) struct MetadataLogReader<'me> {
+    compact_metadata: BTreeMap<&'me str, BTreeMap<MetadataValue, RoaringBitmap>>,
+    document: BTreeMap<u32, &'me str>,
+    domain: RoaringBitmap,
+    uid_to_oid: BTreeMap<&'me str, u32>,
+}
+
+impl<'me> MetadataLogReader<'me> {
+    pub(crate) fn new(logs: &'me Chunk<MaterializedLogRecord<'me>>) -> Self {
+        let mut compact_metadata: BTreeMap<_, BTreeMap<_, RoaringBitmap>> = BTreeMap::new();
+        let mut document = BTreeMap::new();
+        let mut domain = RoaringBitmap::new();
+        let mut uid_to_oid = BTreeMap::new();
+        for (log, _) in logs.iter() {
+            domain.insert(log.offset_id);
+            uid_to_oid.insert(log.merged_user_id_ref(), log.offset_id);
+            if !matches!(
+                log.final_operation,
+                MaterializedLogOperation::DeleteExisting
+            ) {
+                let log_meta = log.merged_metadata_ref();
+                for (key, val) in log_meta.into_iter() {
+                    compact_metadata
+                        .entry(key)
+                        .or_default()
+                        .entry(val.clone())
+                        .or_default()
+                        .insert(log.offset_id);
+                }
+                if let Some(doc) = log.merged_document_ref() {
+                    document.insert(log.offset_id, doc);
+                }
             }
-            MetadataFilteringError::MetadataFilteringLogMaterializationError(e) => e.code(),
-            MetadataFilteringError::MetadataFilteringIndexError(e) => e.code(),
-            MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e) => e.code(),
-            MetadataFilteringError::MetadataFilteringRecordSegmentReaderError => {
-                ErrorCodes::Internal
+        }
+        Self {
+            compact_metadata,
+            document,
+            domain,
+            uid_to_oid,
+        }
+    }
+    pub(crate) fn get(
+        &self,
+        key: &str,
+        val: &MetadataValue,
+        op: &PrimitiveOperator,
+    ) -> Result<RoaringBitmap, MetadataFilteringError> {
+        use Bound::*;
+        use PrimitiveOperator::*;
+        if let Some(btm) = self.compact_metadata.get(key) {
+            let bounds = match op {
+                Equal => (Included(val), Included(val)),
+                NotEqual => return Err(MetadataFilteringError::InvalidInput),
+                GreaterThan => (Excluded(val), Unbounded),
+                GreaterThanOrEqual => (Included(val), Unbounded),
+                LessThan => (Unbounded, Excluded(val)),
+                LessThanOrEqual => (Unbounded, Excluded(val)),
+            };
+            Ok(btm
+                .range(bounds)
+                .map(|(_, v)| v)
+                .fold(RoaringBitmap::new(), BitOr::bitor))
+        } else {
+            Ok(RoaringBitmap::new())
+        }
+    }
+
+    pub(crate) fn search_user_ids(&self, uids: &Vec<String>) -> RoaringBitmap {
+        uids.into_iter()
+            .filter_map(|uid| self.uid_to_oid.get(uid.as_str()))
+            .collect()
+    }
+
+    pub(crate) fn domain(&'me self) -> &'me RoaringBitmap {
+        &self.domain
+    }
+}
+
+pub(crate) enum MetadataProvider<'me> {
+    Compact(&'me MetadataSegmentReader<'me>),
+    Log(&'me MetadataLogReader<'me>),
+}
+
+impl<'me> MetadataProvider<'me> {
+    pub(crate) fn from_metadata_segment_reader(reader: &'me MetadataSegmentReader<'me>) -> Self {
+        Self::Compact(reader)
+    }
+
+    pub(crate) fn from_metadata_log_reader(reader: &'me MetadataLogReader<'me>) -> Self {
+        Self::Log(reader)
+    }
+
+    pub(crate) async fn filter_by_document(
+        &self,
+        query: &str,
+    ) -> Result<RoaringBitmap, MetadataFilteringError> {
+        use MetadataProvider::*;
+        match self {
+            Compact(metadata_segment_reader) => {
+                if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
+                    Ok(reader
+                        .search(query)
+                        .await
+                        .map_err(|e| MetadataIndexError::FullTextError(e))?)
+                } else {
+                    Ok(RoaringBitmap::new())
+                }
             }
-            MetadataFilteringError::MetadataFilteringInvalidInput => ErrorCodes::InvalidArgument,
+            Log(metadata_log_reader) => Ok(metadata_log_reader
+                .document
+                .iter()
+                .filter_map(|(oid, doc)| doc.contains(query).then_some(oid))
+                .collect()),
+        }
+    }
+
+    pub(crate) async fn filter_by_metadata(
+        &self,
+        key: &str,
+        val: &MetadataValue,
+        op: &PrimitiveOperator,
+    ) -> Result<RoaringBitmap, MetadataFilteringError> {
+        use MetadataProvider::*;
+        use MetadataValue::*;
+        use PrimitiveOperator::*;
+        match self {
+            Compact(metadata_segment_reader) => {
+                let (metadata_index_reader, kw) = match val {
+                    Bool(b) => (
+                        metadata_segment_reader.bool_metadata_index_reader.as_ref(),
+                        &(*b).into(),
+                    ),
+                    Int(i) => (
+                        metadata_segment_reader.u32_metadata_index_reader.as_ref(),
+                        &(*i as u32).into(),
+                    ),
+                    Float(f) => (
+                        metadata_segment_reader.f32_metadata_index_reader.as_ref(),
+                        &(*f as f32).into(),
+                    ),
+                    Str(s) => (
+                        metadata_segment_reader
+                            .string_metadata_index_reader
+                            .as_ref(),
+                        &s.as_str().into(),
+                    ),
+                };
+                if let Some(reader) = metadata_index_reader {
+                    match op {
+                        Equal => Ok(reader.get(key, kw).await?),
+                        GreaterThan => Ok(reader.gt(key, kw).await?),
+                        GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
+                        LessThan => Ok(reader.lt(key, kw).await?),
+                        LessThanOrEqual => Ok(reader.lte(key, kw).await?),
+                        _ => Err(MetadataFilteringError::InvalidInput),
+                    }
+                } else {
+                    Ok(RoaringBitmap::new())
+                }
+            }
+            Log(metadata_log_reader) => metadata_log_reader.get(key, val, op),
+        }
+    }
+}
+
+pub(crate) trait RoaringMetadataFilter<'me> {
+    async fn eval(
+        &'me self,
+        meta_provider: &MetadataProvider<'me>,
+    ) -> Result<SignedRoaringBitmap, MetadataFilteringError>;
+}
+
+impl<'me> RoaringMetadataFilter<'me> for Where {
+    async fn eval(
+        &'me self,
+        meta_provider: &MetadataProvider<'me>,
+    ) -> Result<SignedRoaringBitmap, MetadataFilteringError> {
+        use Where::*;
+        match self {
+            DirectWhereComparison(direct_comparison) => direct_comparison.eval(meta_provider).await,
+            DirectWhereDocumentComparison(direct_document_comparison) => {
+                direct_document_comparison.eval(meta_provider).await
+            }
+            WhereChildren(where_children) => Box::pin(where_children.eval(meta_provider)).await,
+        }
+    }
+}
+
+impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
+    async fn eval(
+        &'me self,
+        meta_provider: &MetadataProvider<'me>,
+    ) -> Result<SignedRoaringBitmap, MetadataFilteringError> {
+        use PrimitiveOperator::*;
+        use SetOperator::*;
+        use SignedRoaringBitmap::*;
+        let result = match &self.comp {
+            WhereComparison::Primitive(primitive_operator, metadata_value) => {
+                match primitive_operator {
+                    NotEqual => Exclude(
+                        meta_provider
+                            .filter_by_metadata(&self.key, metadata_value, &Equal)
+                            .await?,
+                    ),
+                    _ => Include(
+                        meta_provider
+                            .filter_by_metadata(&self.key, metadata_value, primitive_operator)
+                            .await?,
+                    ),
+                }
+            }
+            WhereComparison::Set(set_operator, metadata_set_value) => match set_operator {
+                In => {
+                    Box::pin(
+                        Where::conjunction(
+                            metadata_set_value
+                                .into_vec()
+                                .into_iter()
+                                .map(|mv| {
+                                    Where::DirectWhereComparison(DirectWhereComparison {
+                                        key: self.key.clone(),
+                                        comp: WhereComparison::Primitive(Equal, mv.clone()),
+                                    })
+                                })
+                                .collect(),
+                        )
+                        .eval(meta_provider),
+                    )
+                    .await?
+                }
+                NotIn => Box::pin(
+                    (DirectWhereComparison {
+                        key: self.key.clone(),
+                        comp: WhereComparison::Set(In, metadata_set_value.clone()),
+                    })
+                    .eval(meta_provider),
+                )
+                .await?
+                .flip(),
+            },
+        };
+        Ok(result)
+    }
+}
+
+impl<'me> RoaringMetadataFilter<'me> for DirectDocumentComparison {
+    async fn eval(
+        &'me self,
+        meta_provider: &MetadataProvider<'me>,
+    ) -> Result<SignedRoaringBitmap, MetadataFilteringError> {
+        use DocumentOperator::*;
+        use SignedRoaringBitmap::*;
+        let contain = meta_provider
+            .filter_by_document(self.document.as_str())
+            .await?;
+        match self.operator {
+            Contains => Ok(Include(contain)),
+            NotContains => Ok(Exclude(contain)),
+        }
+    }
+}
+
+impl<'me> RoaringMetadataFilter<'me> for WhereChildren {
+    async fn eval(
+        &'me self,
+        meta_provider: &MetadataProvider<'me>,
+    ) -> Result<SignedRoaringBitmap, MetadataFilteringError> {
+        use BooleanOperator::*;
+        let mut child_evals = Vec::new();
+        for child in &self.children {
+            child_evals.push(child.eval(meta_provider).await?);
+        }
+        match self.operator {
+            And => Ok(child_evals
+                .into_iter()
+                .fold(SignedRoaringBitmap::full(), BitAnd::bitand)),
+            Or => Ok(child_evals
+                .into_iter()
+                .fold(SignedRoaringBitmap::empty(), BitOr::bitor)),
         }
     }
 }
@@ -120,618 +426,136 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         &self,
         input: &MetadataFilteringInput,
     ) -> Result<MetadataFilteringOutput, MetadataFilteringError> {
-        // Step 0: Create the record segment reader.
-        let record_segment_reader: Option<RecordSegmentReader>;
-        match RecordSegmentReader::from_segment(&input.record_segment, &input.blockfile_provider)
-            .await
+        use SignedRoaringBitmap::*;
+        trace!(
+            "[MetadataFilteringOperator] segment id: {}",
+            input.record_segment.id.to_string()
+        );
+
+        // Initialize record segment reader
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &input.record_segment,
+            &input.blockfile_provider,
+        )
+        .await
         {
-            Ok(reader) => {
-                record_segment_reader = Some(reader);
+            Ok(reader) => Ok(Some(reader)),
+            // Uninitialized segment is fine and means that the record
+            // segment is not yet initialized in storage.
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
             }
             Err(e) => {
-                match *e {
-                    // Uninitialized segment is fine and means that the record
-                    // segment is not yet initialized in storage.
-                    RecordSegmentReaderCreationError::UninitializedSegment => {
-                        record_segment_reader = None;
-                    }
-                    RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
-                        tracing::error!("Error creating record segment reader {}", e);
-                        return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
-                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                        ));
-                    }
-                    RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                        tracing::error!("Error creating record segment reader {}", e);
-                        return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles,
-                        ));
-                    }
-                };
+                tracing::error!("Error creating record segment reader {}", e);
+                Err(MetadataFilteringError::RecordSegmentReaderCreationError(*e))
             }
-        };
-        // Step 1: Materialize the logs.
-        let materializer =
-            LogMaterializer::new(record_segment_reader, input.log_record.clone(), None);
-        let mat_records = match materializer
+        }?;
+
+        // Materialize the logs
+        let materializer = LogMaterializer::new(
+            record_segment_reader.clone(),
+            input.log_record.clone(),
+            None,
+        );
+        let materialized_logs = materializer
             .materialize()
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
-        {
-            Ok(records) => records,
-            Err(e) => {
-                return Err(MetadataFilteringError::MetadataFilteringLogMaterializationError(e));
-            }
-        };
-        // Step 2: Apply where and where_document clauses on the materialized logs.
-        let mut ids_to_metadata: HashMap<u32, HashMap<&str, &MetadataValue>> = HashMap::new();
-        let mut ids_in_mat_log = HashSet::new();
-        for (records, _) in mat_records.iter() {
-            // It's important to account for even the deleted records here
-            // so that they can be ignored when reading from the segment later.
-            ids_in_mat_log.insert(records.offset_id);
-            // Skip deleted records.
-            if records.final_operation == MaterializedLogOperation::DeleteExisting {
-                continue;
-            }
-            ids_to_metadata.insert(records.offset_id, records.merged_metadata_ref());
-        }
-        let clo = |metadata_key: &str,
-                   metadata_value: &chroma_blockstore::key::KeyWrapper,
-                   metadata_type: chroma_types::MetadataType,
-                   comparator: WhereClauseComparator| {
-            match metadata_type {
-                chroma_types::MetadataType::StringType => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Str(string_value) => {
-                                        if let KeyWrapper::String(where_value) = metadata_value {
-                                            if *string_value == *where_value {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    // We don't allow these comparators for strings.
-                    WhereClauseComparator::LessThan => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        unimplemented!();
-                    }
-                },
-                chroma_types::MetadataType::BoolType => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Bool(bool_value) => {
-                                        if let KeyWrapper::Bool(where_value) = metadata_value {
-                                            if *bool_value == *where_value {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    // We don't allow these comparators for booleans.
-                    WhereClauseComparator::LessThan => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        unimplemented!();
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        unimplemented!();
-                    }
-                },
-                chroma_types::MetadataType::IntType => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if *int_value as u32 == *where_value {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    WhereClauseComparator::LessThan => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key less than this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) < (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key <= this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) <= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key > this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) > (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key >= this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) >= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                },
-                chroma_types::MetadataType::DoubleType => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key equal to this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) == (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    WhereClauseComparator::LessThan => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key < this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) < (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key <= this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) <= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key > this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) > (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        let mut result = RoaringBitmap::new();
-                        // Construct a bitmap consisting of all offset ids
-                        // that have this key >= this value.
-                        for (offset_id, meta_map) in &ids_to_metadata {
-                            if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) >= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        return result;
-                    }
-                },
-                chroma_types::MetadataType::StringListType => {
-                    todo!();
-                }
-                chroma_types::MetadataType::IntListType => {
-                    todo!();
-                }
-                chroma_types::MetadataType::DoubleListType => {
-                    todo!();
-                }
-                chroma_types::MetadataType::BoolListType => {
-                    todo!();
-                }
-            }
-        };
-        // This will be sorted by offset ids since rbms.insert() insert in sorted order.
-        let mtsearch_res = match &input.where_clause {
-            Some(where_clause) => match process_where_clause_with_callback(where_clause, &clo) {
-                Ok(r) => {
-                    let ids_as_u32: Vec<u32> = r.into_iter().map(|index| index as u32).collect();
-                    tracing::info!(
-                        "Filtered {} results from log based on where clause filtering",
-                        ids_as_u32.len()
-                    );
-                    Some(ids_as_u32)
-                }
-                Err(e) => {
-                    tracing::error!("Error filtering logs based on where clause {:?}", e);
-                    return Err(MetadataFilteringError::MetadataFilteringIndexError(e));
-                }
-            },
-            None => {
-                tracing::info!("Where clause not supplied by the user");
-                None
-            }
-        };
-        // AND this with where_document clause.
-        let cb = |query: &str, op: WhereDocumentOperator| {
-            match op {
-                WhereDocumentOperator::Contains => {
-                    // Note matching_contains is sorted (which is needed for correctness)
-                    // because materialized log record is sorted by offset id.
-                    let mut matching_contains = vec![];
-                    // Upstream sorts materialized records by offset id so matching_contains
-                    // will be sorted.
-                    // Note: Uncomment this out when adding FTS support for queries
-                    // containing _ or %. Currently, we disable such scenarios in tests
-                    // for distributed version.
-                    // Emulate sqlite behavior. _ and % match to any character in sqlite.
-                    // let normalized_query = query.replace("_", ".").replace("%", ".");
-                    // let re = Regex::new(normalized_query.as_str()).unwrap();
-                    for (record, _) in mat_records.iter() {
-                        if record.final_operation == MaterializedLogOperation::DeleteExisting {
-                            continue;
-                        }
-                        match record.merged_document_ref() {
-                            Some(doc) => {
-                                /* if re.is_match(doc) { */
-                                if doc.contains(query) {
-                                    matching_contains.push(record.offset_id as i32);
-                                }
-                            }
-                            None => {}
-                        };
-                    }
-                    return matching_contains;
-                }
-                WhereDocumentOperator::NotContains => {
-                    todo!()
-                }
-            }
-        };
-        // fts_result will be sorted by offset id.
-        let fts_result = match &input.where_document_clause {
-            Some(where_doc_clause) => {
-                match process_where_document_clause_with_callback(where_doc_clause, &cb) {
-                    Ok(res) => {
-                        let ids_as_u32: Vec<u32> =
-                            res.into_iter().map(|index| index as u32).collect();
-                        tracing::info!(
-                            "Filtered {} results from log based on where document filtering",
-                            ids_as_u32.len()
-                        );
-                        Some(ids_as_u32)
-                    }
-                    Err(e) => {
-                        tracing::error!("Error filtering logs based on where document {:?}", e);
-                        return Err(MetadataFilteringError::MetadataFilteringIndexError(e));
-                    }
-                }
-            }
-            None => {
-                tracing::info!("Where document not supplied by the user");
-                None
-            }
-        };
-        let mut merged_result: Option<Vec<u32>> = None;
-        if mtsearch_res.is_none() && fts_result.is_some() {
-            merged_result = fts_result;
-        } else if mtsearch_res.is_some() && fts_result.is_none() {
-            merged_result = mtsearch_res;
-        } else if mtsearch_res.is_some() && fts_result.is_some() {
-            merged_result = Some(merge_sorted_vecs_conjunction(
-                &mtsearch_res.expect("Already validated that it is not none"),
-                &fts_result.expect("Already validated that it is not none"),
-            ));
-        }
+            .map_err(|e| {
+                tracing::error!("Error materializing log: {}", e);
+                MetadataFilteringError::LogMaterializationError(e)
+            })?;
+        let metadata_log_reader = MetadataLogReader::new(&materialized_logs);
+        let log_metadata_provider =
+            MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 
-        let mut filtered_index_offset_ids: Option<Vec<usize>> = None;
-        if input.where_clause.is_some() || input.where_document_clause.is_some() {
-            // Get offset ids that satisfy where conditions from storage.
-            let metadata_segment_reader = MetadataSegmentReader::from_segment(
-                &input.metadata_segment,
-                &input.blockfile_provider,
-            )
-            .await
-            .map_err(|e| MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e))?;
-
-            filtered_index_offset_ids = metadata_segment_reader
-                .query(
-                    input.where_clause.as_ref(),
-                    input.where_document_clause.as_ref(),
-                    Some(&vec![]),
-                    0,
-                    0,
-                )
+        // Initialize metadata segment reader
+        let metadata_segement_reader =
+            MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
                 .await
-                .map_err(|e| {
-                    MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e)
-                })?;
-        }
+                .map_err(|e| MetadataFilteringError::MetadataSegmentReaderError(e))?;
+        let compact_metadata_provider =
+            MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
 
-        // This will be sorted by offset id.
-        let mut filter_from_mt_segment: Option<Vec<u32>> = None;
-        if let Some(filtered_index_offset_ids) = filtered_index_offset_ids {
-            // convert to u32 and also filter out the ones present in the
-            // materialized log. This is strictly needed for correctness as
-            // the ids that satisfy the predicate in the metadata segment
-            // could have been updated more recently (in the log) to NOT
-            // satisfy the predicate, hence we treat the materialized log
-            // as the source of truth for ids that are present in both the
-            // places.
-            filter_from_mt_segment = Some(
-                filtered_index_offset_ids
-                    .into_iter()
-                    .map(|index| index as u32)
-                    .filter(|x| !ids_in_mat_log.contains(x))
-                    .collect(),
-            );
-        }
+        let conjunction: Where;
+        let clause = match (&input.where_clause, &input.where_document_clause) {
+            (Some(wc), Some(wdc)) => {
+                conjunction = Where::conjunction(vec![wc.clone(), wdc.clone()]);
+                &conjunction
+            }
+            (Some(c), None) | (None, Some(c)) => c,
+            _ => {
+                conjunction = Where::conjunction(vec![]);
+                &conjunction
+            }
+        };
 
-        // It cannot happen that one is none and other is some.
-        if (filter_from_mt_segment.is_some() && merged_result.is_none())
-            || (filter_from_mt_segment.is_none() && merged_result.is_some())
-        {
-            panic!("Invariant violation. Both should either be none or some");
-        }
-        let mut where_condition_filtered_offset_ids = None;
-        if filter_from_mt_segment.is_some() && merged_result.is_some() {
-            where_condition_filtered_offset_ids = Some(merge_sorted_vecs_disjunction(
-                &filter_from_mt_segment.expect("Already checked that should be some"),
-                &merged_result.expect("Already checked that should be some"),
-            ));
-        }
+        // Filter on log and compact segment, then merge the results with user provided ids
+        let log_domain = metadata_log_reader.domain().clone();
+        let mut filtered_log_oids = clause.eval(&log_metadata_provider).await?;
+        let mut filtered_compact_oids =
+            clause.eval(&compact_metadata_provider).await? & Exclude(log_domain.clone());
 
-        // Hydrate offset ids for user supplied ids.
-        // First from the log.
-        let mut user_supplied_offset_ids: Vec<u32> = vec![];
-        let mut remaining_id_set: HashSet<String> = HashSet::new();
-        let mut query_ids_present = false;
-        match &input.query_ids {
-            Some(query_ids) => {
-                let query_ids_set: HashSet<String> = HashSet::from_iter(query_ids.iter().cloned());
-                query_ids_present = true;
-                remaining_id_set = query_ids.iter().cloned().collect();
-                for (log_records, _) in mat_records.iter() {
-                    let user_id = log_records.merged_user_id_ref();
-                    if query_ids_set.contains(user_id) {
-                        remaining_id_set.remove(user_id);
-                        if log_records.final_operation != MaterializedLogOperation::DeleteExisting {
-                            user_supplied_offset_ids.push(log_records.offset_id);
-                        }
+        if let Some(uids) = input.query_ids.as_ref() {
+            filtered_log_oids =
+                filtered_log_oids & Include(metadata_log_reader.search_user_ids(uids));
+            if let Some(reader) = record_segment_reader.as_ref() {
+                let mut compact_oids = RoaringBitmap::new();
+                for uid in uids {
+                    if let Ok(oid) = reader.get_offset_id_for_user_id(uid.as_str()).await {
+                        compact_oids.insert(oid);
                     }
                 }
-                tracing::info!(
-                    "For user supplied query ids, filtered {} records from log, {} ids remain",
-                    user_supplied_offset_ids.len(),
-                    remaining_id_set.len()
-                );
-                let record_segment_reader_2: Option<RecordSegmentReader>;
-                match RecordSegmentReader::from_segment(
-                    &input.record_segment,
-                    &input.blockfile_provider,
-                )
-                .await
-                {
-                    Ok(reader) => {
-                        record_segment_reader_2 = Some(reader);
-                    }
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => {
-                                record_segment_reader_2 = None;
-                            }
-                            RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
-                                tracing::error!("Error creating record segment reader {}", e);
-                                return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
-                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                        ));
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                tracing::error!("Error creating record segment reader {}", e);
-                                return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles,
-                        ));
-                            }
-                        };
-                    }
-                };
-                match &record_segment_reader_2 {
-                    Some(r) => {
-                        // Now read the remaining ids from storage.
-                        for ids in remaining_id_set {
-                            match r.get_offset_id_for_user_id(ids.as_str()).await {
-                                Ok(offset_id) => {
-                                    user_supplied_offset_ids.push(offset_id);
-                                }
-                                // It's ok for the user to supply a non existent id.
-                                Err(_) => (),
-                            }
-                        }
-                    }
-                    // It's ok for the user to supply a non existent id.
-                    None => (),
+                filtered_compact_oids = filtered_compact_oids & Include(compact_oids);
+            }
+        }
+
+        let materialized_log_oids = match filtered_log_oids {
+            Include(rbm) => rbm,
+            Exclude(rbm) => log_domain - rbm,
+        };
+
+        let materialized_compact_oids = match filtered_compact_oids {
+            Include(rbm) => rbm,
+            Exclude(rbm) => {
+                if let Some(reader) = record_segment_reader.as_ref() {
+                    reader
+                        .get_all_offset_ids()
+                        .await
+                        .map_err(|_| MetadataFilteringError::RecordSegmentReaderError)?
+                        - rbm
+                } else {
+                    RoaringBitmap::new()
                 }
             }
-            None => {
-                query_ids_present = false;
-            }
+        };
+
+        let mut merged_oids = materialized_log_oids.clone() | materialized_compact_oids;
+        if let Some(skip) = input.offset.as_ref() {
+            merged_oids.remove_smallest(*skip as u64);
         }
-        // need to sort user_supplied_offset_ids by offset id.
-        user_supplied_offset_ids.sort();
-        let mut filtered_offset_ids = None;
-        if query_ids_present {
-            tracing::info!(
-                "Filtered {} records (log + segment) based on user supplied ids",
-                user_supplied_offset_ids.len()
-            );
-            filtered_offset_ids = Some(user_supplied_offset_ids);
+
+        if let Some(take) = input.limit.as_ref() {
+            let size = merged_oids.len();
+            merged_oids.remove_biggest(size - (*take as u64).min(size));
         }
-        return Ok(MetadataFilteringOutput {
+
+        let log_mask = materialized_log_oids & merged_oids.clone();
+
+        Ok(MetadataFilteringOutput {
             log_records: input.log_record.clone(),
-            where_condition_filtered_offset_ids: where_condition_filtered_offset_ids,
-            user_supplied_filtered_offset_ids: filtered_offset_ids,
-        });
+            log_mask,
+            offset_ids: merged_oids,
+        })
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::execution::operator::Operator;
     use crate::{
-        execution::{
-            operator::Operator,
-            operators::metadata_filtering::{MetadataFilteringInput, MetadataFilteringOperator},
+        execution::operators::metadata_filtering::{
+            MetadataFilteringInput, MetadataFilteringOperator,
         },
         segment::{
             metadata_segment::MetadataSegmentWriter,
@@ -749,8 +573,8 @@ mod test {
     use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, DirectComparison, DirectDocumentComparison, LogRecord, Operation, OperationRecord,
-        UpdateMetadataValue, Where, WhereComparison, WhereDocument,
+        Chunk, DirectDocumentComparison, DirectWhereComparison, LogRecord, MetadataValue,
+        Operation, OperationRecord, PrimitiveOperator, UpdateMetadataValue, Where, WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -929,47 +753,36 @@ mod test {
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let operator = MetadataFilteringOperator::new();
-        let where_clause: Where = Where::DirectWhereComparison(DirectComparison {
+        let where_clause: Where = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new_world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new_world")),
             ),
         });
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("about dogs"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let input = MetadataFilteringInput::new(
-            data.clone(),
+            blockfile_provider.clone(),
             record_segment.clone(),
             metadata_segment.clone(),
-            blockfile_provider.clone(),
+            data.clone(),
+            None,
             Some(where_clause),
             Some(where_document_clause),
             None,
+            None,
         );
-        let mut res = operator
+        let res = operator
             .run(&input)
             .await
             .expect("Error during running of operator");
-        assert_eq!(None, res.user_supplied_filtered_offset_ids);
 
-        assert_eq!(
-            1,
-            res.where_condition_filtered_offset_ids
-                .clone()
-                .expect("Expected one document")
-                .len()
-        );
-        assert_eq!(
-            3,
-            *res.where_condition_filtered_offset_ids
-                .expect("Expected one document")
-                .get(0)
-                .expect("Expect not none")
-        );
+        assert_eq!(1, res.offset_ids.len());
+        assert_eq!(3, res.offset_ids.select(0).expect("Expect not none"));
     }
 
     #[tokio::test]
@@ -1122,42 +935,39 @@ mod test {
         }];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let operator = MetadataFilteringOperator::new();
-        let where_clause: Where = Where::DirectWhereComparison(DirectComparison {
+        let where_clause: Where = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comp: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let input = MetadataFilteringInput::new(
-            data.clone(),
+            blockfile_provider.clone(),
             record_segment.clone(),
             metadata_segment.clone(),
-            blockfile_provider.clone(),
+            data.clone(),
+            None,
             Some(where_clause),
             None,
             None,
+            None,
         );
-        let mut res = operator
+        let res = operator
             .run(&input)
             .await
             .expect("Error during running of operator");
-        assert_eq!(None, res.user_supplied_filtered_offset_ids);
 
+        assert_eq!(2, res.offset_ids.len());
+        // Already sorted.
+        assert_eq!(
+            1,
+            res.offset_ids.select(0).expect("Expected not none value")
+        );
         assert_eq!(
             2,
-            res.where_condition_filtered_offset_ids
-                .clone()
-                .expect("Expected one document")
-                .len()
+            res.offset_ids.select(1).expect("Expected not none value")
         );
-        let mut where_res = res
-            .where_condition_filtered_offset_ids
-            .expect("Expect not none")
-            .clone();
-        // Already sorted.
-        assert_eq!(1, *where_res.get(0).expect("Expected not none value"));
-        assert_eq!(2, *where_res.get(1).expect("Expected not none value"));
     }
 
     #[tokio::test]
@@ -1331,35 +1141,29 @@ mod test {
         let data: Chunk<LogRecord> = Chunk::new(data.into());
         let operator = MetadataFilteringOperator::new();
         let input = MetadataFilteringInput::new(
-            data.clone(),
+            blockfile_provider.clone(),
             record_segment.clone(),
             metadata_segment.clone(),
-            blockfile_provider.clone(),
-            None,
-            None,
+            data.clone(),
             Some(vec![
                 String::from("embedding_id_1"),
                 String::from("embedding_id_3"),
             ]),
+            None,
+            None,
+            None,
+            None,
         );
-        let mut res = operator
+
+        let res = operator
             .run(&input)
             .await
             .expect("Error during running of operator");
-        assert_eq!(None, res.where_condition_filtered_offset_ids);
-        let mut query_offset_id_vec = res
-            .user_supplied_filtered_offset_ids
-            .expect("Expected not none")
-            .clone();
-        // Already sorted.
-        assert_eq!(2, query_offset_id_vec.len());
-        assert_eq!(
-            1,
-            *query_offset_id_vec.get(0).expect("Expect not none value")
-        );
-        assert_eq!(
-            3,
-            *query_offset_id_vec.get(1).expect("Expect not none value")
-        );
+        assert_eq!(2, res.offset_ids.len());
+        assert_eq!(1, res.offset_ids.select(0).expect("Expect not none value"));
+        assert_eq!(3, res.offset_ids.select(1).expect("Expect not none value"));
     }
+
+    #[tokio::test]
+    async fn test_limit_offset() {}
 }
