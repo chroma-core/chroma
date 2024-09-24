@@ -92,13 +92,13 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             include_embeddings=query["include_embeddings"],
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            version_context=to_proto_request_version_context(
+                query["request_version_context"]
+            ),
         )
         response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
             request,
             timeout=self._request_timeout_seconds,
-            version_context=to_proto_request_version_context(
-                query["request_version_context"]
-            ),
         )
         results: List[List[VectorQueryResult]] = []
         for result in response.results:
