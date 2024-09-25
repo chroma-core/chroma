@@ -22,6 +22,7 @@ from chromadb.types import (
     OperationRecord,
     MetadataEmbeddingRecord,
     Operation,
+    RequestVersionContext,
     ScalarEncoding,
     Segment,
     SegmentScope,
@@ -168,14 +169,28 @@ def test_insert_and_count(
 
     sync(segment, max_id)
 
-    assert segment.count() == 3
+    assert (
+        segment.count(
+            request_version_context=RequestVersionContext(
+                collection_version=0, log_position=0
+            )
+        )
+        == 3
+    )
 
     for i in range(3):
         max_id = producer.submit_embedding(collection_id, next(sample_embeddings))
 
     sync(segment, max_id)
 
-    assert segment.count() == 6
+    assert (
+        segment.count(
+            request_version_context=RequestVersionContext(
+                collection_version=0, log_position=0
+            )
+        )
+        == 6
+    )
 
 
 def assert_equiv_records(
@@ -206,103 +221,143 @@ def test_get(
     segment.start()
 
     sync(segment, seq_ids[-1])
-
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     # get with bool key
-    result = segment.get_metadata(where={"bool_key": True})
+    result = segment.get_metadata(
+        where={"bool_key": True}, request_version_context=request_version_context
+    )
     assert len(result) == 5
 
-    result = segment.get_metadata(where={"bool_key": False})
+    result = segment.get_metadata(
+        where={"bool_key": False}, request_version_context=request_version_context
+    )
     assert len(result) == 4
 
     # Get all records
-    results = segment.get_metadata()
+    results = segment.get_metadata(request_version_context=request_version_context)
     assert_equiv_records(embeddings, results)
 
     # get by ID
-    result = segment.get_metadata(ids=[e["id"] for e in embeddings[0:5]])
+    result = segment.get_metadata(
+        ids=[e["id"] for e in embeddings[0:5]],
+        request_version_context=request_version_context,
+    )
     assert_equiv_records(embeddings[0:5], result)
 
     # Get with limit and offset
     # Cannot rely on order(yet), but can rely on retrieving exactly the
     # whole set eventually
     ret: List[MetadataEmbeddingRecord] = []
-    ret.extend(segment.get_metadata(limit=3))
+    ret.extend(
+        segment.get_metadata(limit=3, request_version_context=request_version_context)
+    )
     assert len(ret) == 3
-    ret.extend(segment.get_metadata(limit=3, offset=3))
+    ret.extend(
+        segment.get_metadata(
+            limit=3, offset=3, request_version_context=request_version_context
+        )
+    )
     assert len(ret) == 6
-    ret.extend(segment.get_metadata(limit=3, offset=6))
+    ret.extend(
+        segment.get_metadata(
+            limit=3, offset=6, request_version_context=request_version_context
+        )
+    )
     assert len(ret) == 9
-    ret.extend(segment.get_metadata(limit=3, offset=9))
+    ret.extend(
+        segment.get_metadata(
+            limit=3, offset=9, request_version_context=request_version_context
+        )
+    )
     assert len(ret) == 10
     assert_equiv_records(embeddings, ret)
 
     # Get with simple where
-    result = segment.get_metadata(where={"div_by_three": "true"})
+    result = segment.get_metadata(
+        where={"div_by_three": "true"}, request_version_context=request_version_context
+    )
     assert len(result) == 3
 
     # Get with gt/gte/lt/lte on int keys
     result = segment.get_metadata(
-        where={"int_key": {"$gt": 5}}  # type:ignore[dict-item]
+        where={"int_key": {"$gt": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 4
     result = segment.get_metadata(
-        where={"int_key": {"$gte": 5}}  # type:ignore[dict-item]
+        where={"int_key": {"$gte": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 5
     result = segment.get_metadata(
-        where={"int_key": {"$lt": 5}}  # type:ignore[dict-item]
+        where={"int_key": {"$lt": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 4
     result = segment.get_metadata(
-        where={"int_key": {"$lte": 5}}  # type:ignore[dict-item]
+        where={"int_key": {"$lte": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 5
 
     # Get with gt/lt on float keys with float values
     result = segment.get_metadata(
-        where={"float_key": {"$gt": 5.01}}  # type:ignore[dict-item]
+        where={"float_key": {"$gt": 5.01}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 5
     result = segment.get_metadata(
-        where={"float_key": {"$lt": 4.99}}  # type:ignore[dict-item]
+        where={"float_key": {"$lt": 4.99}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 4
 
     # Get with gt/lt on float keys with int values
     result = segment.get_metadata(
-        where={"float_key": {"$gt": 5}}  # type:ignore[dict-item]
+        where={"float_key": {"$gt": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 5
     result = segment.get_metadata(
-        where={"float_key": {"$lt": 5}}  # type:ignore[dict-item]
+        where={"float_key": {"$lt": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 4
 
     # Get with gt/lt on int keys with float values
     result = segment.get_metadata(
-        where={"int_key": {"$gt": 5.01}}  # type:ignore[dict-item]
+        where={"int_key": {"$gt": 5.01}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 4
     result = segment.get_metadata(
-        where={"int_key": {"$lt": 4.99}}  # type:ignore[dict-item]
+        where={"int_key": {"$lt": 4.99}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 4
 
     # Get with $ne
     # Returns metadata that has an int_key, but not equal to 5
     result = segment.get_metadata(
-        where={"int_key": {"$ne": 5}}  # type:ignore[dict-item]
+        where={"int_key": {"$ne": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 8
 
     # get with multiple heterogenous conditions
     result = segment.get_metadata(
-        where={"div_by_three": "true", "int_key": {"$gt": 5}}  # type:ignore[dict-item]
+        where={"div_by_three": "true", "int_key": {"$gt": 5}},  # type:ignore[dict-item]
+        request_version_context=request_version_context,
     )
     assert len(result) == 2
 
     # get with OR conditions
-    result = segment.get_metadata(where={"$or": [{"int_key": 1}, {"int_key": 2}]})
+    result = segment.get_metadata(
+        where={"$or": [{"int_key": 1}, {"int_key": 2}]},
+        request_version_context=request_version_context,
+    )
     assert len(result) == 2
 
     # get with AND conditions
@@ -312,7 +367,8 @@ def test_get(
                 {"int_key": 3},
                 {"float_key": {"$gt": 5}},  # type:ignore[dict-item]
             ]
-        }
+        },
+        request_version_context=request_version_context,
     )
     assert len(result) == 0
     result = segment.get_metadata(
@@ -321,7 +377,8 @@ def test_get(
                 {"int_key": 3},
                 {"float_key": {"$lt": 5}},  # type:ignore[dict-item]
             ]
-        }
+        },
+        request_version_context=request_version_context,
     )
     assert len(result) == 1
 
@@ -343,40 +400,61 @@ def test_fulltext(
     max_id = produce_fns(producer, collection_id, sample_embeddings, 100)[1][-1]
 
     sync(segment, max_id)
-
-    result = segment.get_metadata(where={"chroma:document": "four two"})
-    result2 = segment.get_metadata(ids=["embedding_42"])
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
+    result = segment.get_metadata(
+        where={"chroma:document": "four two"},
+        request_version_context=request_version_context,
+    )
+    result2 = segment.get_metadata(
+        ids=["embedding_42"], request_version_context=request_version_context
+    )
     assert result == result2
 
     # Test single result
-    result = segment.get_metadata(where_document={"$contains": "four two"})
+    result = segment.get_metadata(
+        where_document={"$contains": "four two"},
+        request_version_context=request_version_context,
+    )
     assert len(result) == 1
 
     # Test not_contains
-    result = segment.get_metadata(where_document={"$not_contains": "four two"})
+    result = segment.get_metadata(
+        where_document={"$not_contains": "four two"},
+        request_version_context=request_version_context,
+    )
     assert len(result) == len(
         [i for i in range(1, 100) if "four two" not in _build_document(i)]
     )
 
     # Test many results
-    result = segment.get_metadata(where_document={"$contains": "zero"})
+    result = segment.get_metadata(
+        where_document={"$contains": "zero"},
+        request_version_context=request_version_context,
+    )
     assert len(result) == 9
 
     # Test not_contains
-    result = segment.get_metadata(where_document={"$not_contains": "zero"})
+    result = segment.get_metadata(
+        where_document={"$not_contains": "zero"},
+        request_version_context=request_version_context,
+    )
     assert len(result) == len(
         [i for i in range(1, 100) if "zero" not in _build_document(i)]
     )
 
     # test $and
     result = segment.get_metadata(
-        where_document={"$and": [{"$contains": "four"}, {"$contains": "two"}]}
+        where_document={"$and": [{"$contains": "four"}, {"$contains": "two"}]},
+        request_version_context=request_version_context,
     )
     assert len(result) == 2
     assert set([r["id"] for r in result]) == {"embedding_42", "embedding_24"}
 
     result = segment.get_metadata(
-        where_document={"$and": [{"$not_contains": "four"}, {"$not_contains": "two"}]}
+        where_document={"$and": [{"$not_contains": "four"}, {"$not_contains": "two"}]},
+        request_version_context=request_version_context,
     )
     assert len(result) == len(
         [
@@ -388,7 +466,8 @@ def test_fulltext(
 
     # test $or
     result = segment.get_metadata(
-        where_document={"$or": [{"$contains": "zero"}, {"$contains": "one"}]}
+        where_document={"$or": [{"$contains": "zero"}, {"$contains": "one"}]},
+        request_version_context=request_version_context,
     )
     ones = [i for i in range(1, 100) if "one" in _build_document(i)]
     zeros = [i for i in range(1, 100) if "zero" in _build_document(i)]
@@ -396,7 +475,8 @@ def test_fulltext(
     assert set([r["id"] for r in result]) == expected
 
     result = segment.get_metadata(
-        where_document={"$or": [{"$not_contains": "zero"}, {"$not_contains": "one"}]}
+        where_document={"$or": [{"$not_contains": "zero"}, {"$not_contains": "one"}]},
+        request_version_context=request_version_context,
     )
     assert len(result) == len(
         [
@@ -410,6 +490,7 @@ def test_fulltext(
     result = segment.get_metadata(
         where={"int_key": {"$eq": 42}},  # type:ignore[dict-item]
         where_document={"$contains": "zero"},
+        request_version_context=request_version_context,
     )
     assert len(result) == 0
 
@@ -417,11 +498,15 @@ def test_fulltext(
     result = segment.get_metadata(
         where={"int_key": {"$eq": 42}},  # type:ignore[dict-item]
         where_document={"$contains": "four"},
+        request_version_context=request_version_context,
     )
     assert len(result) == 1
 
     # test partial words
-    result = segment.get_metadata(where_document={"$contains": "zer"})
+    result = segment.get_metadata(
+        where_document={"$contains": "zer"},
+        request_version_context=request_version_context,
+    )
     assert len(result) == 9
 
 
@@ -444,8 +529,11 @@ def test_delete(
 
     sync(segment, max_id)
 
-    assert segment.count() == 10
-    results = segment.get_metadata(ids=["embedding_0"])
+    version_context = RequestVersionContext(collection_version=0, log_position=0)
+    assert segment.count(request_version_context=version_context) == 10
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=version_context
+    )
     assert_equiv_records(embeddings[:1], results)
 
     # Delete by ID
@@ -462,8 +550,14 @@ def test_delete(
 
     sync(segment, max_id)
 
-    assert segment.count() == 9
-    assert segment.get_metadata(ids=["embedding_0"]) == []
+    version_context = RequestVersionContext(collection_version=0, log_position=0)
+    assert segment.count(request_version_context=version_context) == 9
+    assert (
+        segment.get_metadata(
+            ids=["embedding_0"], request_version_context=version_context
+        )
+        == []
+    )
 
     # Delete is idempotent
     max_id = produce_fns(
@@ -471,14 +565,21 @@ def test_delete(
     )[1][-1]
 
     sync(segment, max_id)
-    assert segment.count() == 9
-    assert segment.get_metadata(ids=["embedding_0"]) == []
+    assert segment.count(request_version_context=version_context) == 9
+    assert (
+        segment.get_metadata(
+            ids=["embedding_0"], request_version_context=version_context
+        )
+        == []
+    )
 
     # re-add
     max_id = producer.submit_embedding(collection_id, embeddings[0])
     sync(segment, max_id)
-    assert segment.count() == 10
-    results = segment.get_metadata(ids=["embedding_0"])
+    assert segment.count(request_version_context=version_context) == 10
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=version_context
+    )
 
 
 def test_update(system: System, sample_embeddings: Iterator[OperationRecord]) -> None:
@@ -503,9 +604,14 @@ def test_update(system: System, sample_embeddings: Iterator[OperationRecord]) ->
     )
     max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
-    results = segment.get_metadata(ids=["no_such_id"])
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
+    results = segment.get_metadata(
+        ids=["no_such_id"], request_version_context=request_version_context
+    )
     assert len(results) == 0
-    assert segment.count() == 3
+    assert segment.count(request_version_context=request_version_context) == 3
 
 
 def test_upsert(
@@ -539,7 +645,12 @@ def test_upsert(
         n=1,
     )[1][-1]
     sync(segment, max_id)
-    results = segment.get_metadata(ids=["no_such_id"])
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
+    results = segment.get_metadata(
+        ids=["no_such_id"], request_version_context=request_version_context
+    )
     assert results[0]["metadata"] == {"foo": "bar"}
 
 
@@ -559,8 +670,12 @@ def _test_update(
         max_id = producer.submit_embedding(collection_id, e)
 
     sync(segment, max_id)
-
-    results = segment.get_metadata(ids=["embedding_0"])
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert_equiv_records(embeddings[:1], results)
 
     # Update embedding with no metadata
@@ -573,9 +688,14 @@ def _test_update(
     )
     max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
-    results = segment.get_metadata(ids=["embedding_0"])
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert results[0]["metadata"] == {"chroma:document": "foo bar"}
-    results = segment.get_metadata(where_document={"$contains": "foo"})
+    results = segment.get_metadata(
+        where_document={"$contains": "foo"},
+        request_version_context=request_version_context,
+    )
     assert results[0]["metadata"] == {"chroma:document": "foo bar"}
 
     # Update and overrwrite key
@@ -588,11 +708,19 @@ def _test_update(
     )
     max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
-    results = segment.get_metadata(ids=["embedding_0"])
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert results[0]["metadata"] == {"chroma:document": "biz buz"}
-    results = segment.get_metadata(where_document={"$contains": "biz"})
+    results = segment.get_metadata(
+        where_document={"$contains": "biz"},
+        request_version_context=request_version_context,
+    )
     assert results[0]["metadata"] == {"chroma:document": "biz buz"}
-    results = segment.get_metadata(where_document={"$contains": "foo"})
+    results = segment.get_metadata(
+        where_document={"$contains": "foo"},
+        request_version_context=request_version_context,
+    )
     assert len(results) == 0
 
     # Update and add key
@@ -605,7 +733,9 @@ def _test_update(
     )
     max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
-    results = segment.get_metadata(ids=["embedding_0"])
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert results[0]["metadata"] == {"chroma:document": "biz buz", "baz": 42}
 
     # Update and delete key
@@ -618,9 +748,14 @@ def _test_update(
     )
     max_id = producer.submit_embedding(collection_id, update_record)
     sync(segment, max_id)
-    results = segment.get_metadata(ids=["embedding_0"])
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert results[0]["metadata"] == {"baz": 42}
-    results = segment.get_metadata(where_document={"$contains": "biz"})
+    results = segment.get_metadata(
+        where_document={"$contains": "biz"},
+        request_version_context=request_version_context,
+    )
     assert len(results) == 0
 
 
@@ -646,25 +781,30 @@ def test_limit(
 
     sync(segment, max_id)
     sync(segment2, max_id2)
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
 
-    assert segment.count() == 3
+    assert segment.count(request_version_context=request_version_context) == 3
 
     for i in range(3):
         max_id = producer.submit_embedding(collection_id, next(sample_embeddings))
 
     sync(segment, max_id)
 
-    assert segment.count() == 6
+    assert segment.count(request_version_context=request_version_context) == 6
 
-    res = segment.get_metadata(limit=3)
+    res = segment.get_metadata(limit=3, request_version_context=request_version_context)
     assert len(res) == 3
 
     # if limit is negative, throw error
     with pytest.raises(ValueError):
-        segment.get_metadata(limit=-1)
+        segment.get_metadata(limit=-1, request_version_context=request_version_context)
 
     # if offset is more than number of results, return empty list
-    res = segment.get_metadata(limit=3, offset=10)
+    res = segment.get_metadata(
+        limit=3, offset=10, request_version_context=request_version_context
+    )
     assert len(res) == 0
 
 
@@ -687,8 +827,13 @@ def test_delete_segment(
 
     sync(segment, max_id)
 
-    assert segment.count() == 10
-    results = segment.get_metadata(ids=["embedding_0"])
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
+    assert segment.count(request_version_context=request_version_context) == 10
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert_equiv_records(embeddings[:1], results)
     _id = segment._id
     segment.delete()
@@ -746,8 +891,13 @@ def test_delete_single_fts_record(
 
     sync(segment, max_id)
 
-    assert segment.count() == 10
-    results = segment.get_metadata(ids=["embedding_0"])
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
+    assert segment.count(request_version_context=request_version_context) == 10
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert_equiv_records(embeddings[:1], results)
     _id = segment._id
     _db = system.instance(SqliteDB)
@@ -805,18 +955,31 @@ def test_include_metadata(
     max_id = seq_ids[-1]
 
     sync(segment, max_id)
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
 
-    assert segment.count() == 10
-    results = segment.get_metadata(ids=["embedding_0"])
+    assert segment.count(request_version_context=request_version_context) == 10
+    results = segment.get_metadata(
+        ids=["embedding_0"], request_version_context=request_version_context
+    )
     assert_equiv_records(embeddings[:1], results)
 
     # Test include_metadata=False
-    results = segment.get_metadata(ids=["embedding_0"], include_metadata=False)
+    results = segment.get_metadata(
+        ids=["embedding_0"],
+        include_metadata=False,
+        request_version_context=request_version_context,
+    )
     assert len(results) == 1
     assert results[0]["metadata"] is None
 
     # Test include_metadata=True
-    results = segment.get_metadata(ids=["embedding_0"], include_metadata=True)
+    results = segment.get_metadata(
+        ids=["embedding_0"],
+        include_metadata=True,
+        request_version_context=request_version_context,
+    )
     assert len(results) == 1
     assert results[0]["metadata"] == embeddings[0]["metadata"]
 

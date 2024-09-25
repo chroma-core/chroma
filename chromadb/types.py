@@ -219,6 +219,26 @@ class LogRecord(TypedDict):
     record: OperationRecord
 
 
+class RequestVersionContext(TypedDict):
+    """The version and log position of the collection at the time of the request
+
+    This is used to ensure that the request is processed against the correct version of the collection,
+    as well as that the pulled logs are consistent with the start offset of the compacted collection.
+
+    For example, if the FE first queries the metadata segment and then queries the vector segment, the version
+    and log position of the collection may have changed between the two queries. The FE can use this context to
+    ensure that the second query is processed against the correct version of the collection.
+
+    If a query is shared between multiple segments, the version context should be passed to the query for each segment.
+    This ensures that the query is processed against the correct version of the collection.
+
+    Only used in the impls of distributed Chroma.
+    """
+
+    collection_version: int
+    log_position: int
+
+
 class VectorQuery(TypedDict):
     """A KNN/ANN query"""
 
@@ -227,6 +247,7 @@ class VectorQuery(TypedDict):
     allowed_ids: Optional[Sequence[str]]
     include_embeddings: bool
     options: Optional[Dict[str, Union[str, int, float, bool]]]
+    request_version_context: RequestVersionContext
 
 
 class VectorQueryResult(TypedDict):
