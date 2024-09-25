@@ -105,7 +105,7 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 		var compacted_offset, offset_err = r.GetLastCompactedOffsetForCollection(ctx, collectionId)
 		// Can happen that no row exists in the collection table if no compaction
 		// has ever happened for this collection or if the collection has been garbage
-		// collected. 
+		// collected.
 		if errors.Is(offset_err, pgx.ErrNoRows) {
 			compacted_offset = 0
 			offset_err = nil
