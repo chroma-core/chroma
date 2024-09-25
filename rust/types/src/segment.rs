@@ -119,7 +119,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
         Ok(Segment {
             id: segment_uuid,
             r#type: segment_type,
-            scope: scope,
+            scope,
             collection: collection_uuid,
             metadata: segment_metadata,
             file_path: file_paths,
