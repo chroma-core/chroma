@@ -66,21 +66,21 @@ impl MemoryBlockfileWriter {
 
 #[derive(Clone)]
 pub struct MemoryBlockfileReader<K: Key, V: Value> {
-    storage_manager: StorageManager,
+    _storage_manager: StorageManager,
     storage: Storage,
     marker: std::marker::PhantomData<(K, V)>,
 }
 
 impl<
         'storage,
-        K: Key + Into<KeyWrapper> + From<&'storage KeyWrapper>,
+        K: Key + Into<KeyWrapper> + TryFrom<&'storage KeyWrapper, Error = &'static str>,
         V: Value + Readable<'storage>,
     > MemoryBlockfileReader<K, V>
 {
     pub(crate) fn open(id: uuid::Uuid, storage_manager: StorageManager) -> Self {
         let storage = storage_manager.get(id).unwrap();
         Self {
-            storage_manager,
+            _storage_manager: storage_manager,
             storage,
             marker: std::marker::PhantomData,
         }
@@ -95,6 +95,7 @@ impl<
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn get_by_prefix(
         &'storage self,
         prefix: &str,
@@ -105,11 +106,18 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .map(|(key, value)| {
+                (
+                    key.prefix.as_str(),
+                    K::try_from(&key.key).unwrap(),
+                    value.clone(),
+                )
+            })
             .collect();
         Ok(values)
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn get_gt(
         &'storage self,
         prefix: &str,
@@ -122,11 +130,18 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .map(|(key, value)| {
+                (
+                    key.prefix.as_str(),
+                    K::try_from(&key.key).unwrap(),
+                    value.clone(),
+                )
+            })
             .collect();
         Ok(values)
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn get_lt(
         &'storage self,
         prefix: &str,
@@ -139,11 +154,18 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .map(|(key, value)| {
+                (
+                    key.prefix.as_str(),
+                    K::try_from(&key.key).unwrap(),
+                    value.clone(),
+                )
+            })
             .collect();
         Ok(values)
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn get_gte(
         &'storage self,
         prefix: &str,
@@ -156,11 +178,18 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .map(|(key, value)| {
+                (
+                    key.prefix.as_str(),
+                    K::try_from(&key.key).unwrap(),
+                    value.clone(),
+                )
+            })
             .collect();
         Ok(values)
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn get_lte(
         &'storage self,
         prefix: &str,
@@ -173,7 +202,13 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| (key.prefix.as_str(), K::from(&key.key), value.clone()))
+            .map(|(key, value)| {
+                (
+                    key.prefix.as_str(),
+                    K::try_from(&key.key).unwrap(),
+                    value.clone(),
+                )
+            })
             .collect();
         Ok(values)
     }
@@ -187,7 +222,7 @@ impl<
             Some((key, value)) => (key, value),
             None => return Err(Box::new(BlockfileError::NotFoundError)),
         };
-        Ok((key.prefix.as_str(), K::from(&key.key), value))
+        Ok((key.prefix.as_str(), K::try_from(&key.key).unwrap(), value))
     }
 
     pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
@@ -896,7 +931,8 @@ mod tests {
         for i in 0..n {
             let expected_key = format!("key{:04}", i);
             let expected_value = format!("value{:04}", i);
-            let (prefix, key, value) = reader.get_at_index(i).unwrap();
+            let (prefix, key, value) =
+                MemoryBlockfileReader::<&str, &str>::get_at_index(&reader, i).unwrap();
             assert_eq!(prefix, "prefix");
             assert_eq!(key, expected_key.as_str());
             assert_eq!(value, expected_value.as_str());

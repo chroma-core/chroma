@@ -212,7 +212,7 @@ impl DataRecordStorage {
         // https://docs.rs/arrow-buffer/52.2.0/src/arrow_buffer/buffer/null.rs.html#153-155
         let validity_bytes = bit_util::round_upto_multiple_of_64(bit_util::ceil(self.len(), 8)) * 2;
 
-        let total_size = prefix_size
+        prefix_size
             + key_size
             + id_size
             + embedding_size
@@ -223,9 +223,7 @@ impl DataRecordStorage {
             + id_offset
             + metdata_offset
             + document_offset
-            + validity_bytes;
-
-        total_size
+            + validity_bytes
     }
 
     fn split_internal<K: ArrowWriteableKey>(&self, split_size: usize) -> SplitInformation {
@@ -295,7 +293,7 @@ impl DataRecordStorage {
             }
         }
 
-        return SplitInformation {
+        SplitInformation {
             split_key: split_key.expect("split key should be set"),
             remaining_prefix_size: inner.prefix_size - prefix_size,
             remaining_key_size: inner.key_size - key_size,
@@ -303,7 +301,7 @@ impl DataRecordStorage {
             remaining_embedding_size: inner.embedding_size - embedding_size,
             remaining_metadata_size: inner.metadata_size - metadata_size,
             remaining_document_size: inner.document_size - document_size,
-        };
+        }
     }
 
     pub(super) fn split<K: ArrowWriteableKey>(
@@ -340,7 +338,7 @@ impl DataRecordStorage {
         inner.storage.len()
     }
 
-    pub(super) fn to_arrow(
+    pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
@@ -396,7 +394,7 @@ impl DataRecordStorage {
             }
         }
         // Build arrow key with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.to_arrow();
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
 
         let id_field = Field::new("id", arrow::datatypes::DataType::Utf8, true);
         let embedding_field = Field::new(

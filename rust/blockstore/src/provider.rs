@@ -60,7 +60,11 @@ impl BlockfileProvider {
 
     pub async fn open<
         'new,
-        K: Key + Into<KeyWrapper> + From<&'new KeyWrapper> + ArrowReadableKey<'new> + 'new,
+        K: Key
+            + Into<KeyWrapper>
+            + TryFrom<&'new KeyWrapper, Error = &'static str>
+            + ArrowReadableKey<'new>
+            + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
     >(
         &self,
@@ -80,7 +84,7 @@ impl BlockfileProvider {
         &self,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create::<K, V>(),
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create(),
             BlockfileProvider::ArrowBlockfileProvider(provider) => provider.create::<K, V>(),
         }
     }
@@ -97,7 +101,7 @@ impl BlockfileProvider {
         id: &uuid::Uuid,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork::<K, V>(id),
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork(id),
             BlockfileProvider::ArrowBlockfileProvider(provider) => provider.fork::<K, V>(id).await,
         }
     }

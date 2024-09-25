@@ -86,7 +86,7 @@ impl Value for Vec<u32> {
 
 impl Value for &[u32] {
     fn get_size(&self) -> usize {
-        self.len() * size_of::<u32>()
+        std::mem::size_of_val(*self)
     }
 }
 
@@ -236,7 +236,7 @@ impl<
         'referred_data,
         K: Key
             + Into<KeyWrapper>
-            + From<&'referred_data KeyWrapper>
+            + TryFrom<&'referred_data KeyWrapper, Error = &'static str>
             + ArrowReadableKey<'referred_data>,
         V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
     > BlockfileReader<'referred_data, K, V>
@@ -269,12 +269,8 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 let count = reader.count().await;
                 match count {
-                    Ok(c) => {
-                        return Ok(c);
-                    }
-                    Err(_) => {
-                        return Err(Box::new(BlockfileError::BlockNotFound));
-                    }
+                    Ok(c) => Ok(c),
+                    Err(_) => Err(Box::new(BlockfileError::BlockNotFound)),
                 }
             }
         }
@@ -351,7 +347,7 @@ impl<
         }
     }
 
-    pub async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
+    pub async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) {
         match self {
             BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {

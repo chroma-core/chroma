@@ -32,6 +32,7 @@ impl ArrowBlockfileFlusher {
         }
     }
 
+    #[allow(clippy::extra_unused_type_parameters)]
     pub(crate) async fn flush<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         self,
     ) -> Result<(), Box<dyn ChromaError>> {
