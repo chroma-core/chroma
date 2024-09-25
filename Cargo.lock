@@ -1209,6 +1209,9 @@ dependencies = [
 [[package]]
 name = "chroma-error"
 version = "0.1.0"
+dependencies = [
+ "tonic 0.10.2",
+]
 
 [[package]]
 name = "chroma-index"
