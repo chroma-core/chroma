@@ -52,6 +52,7 @@ describe("collection operations", () => {
       "database": "default_database",
       "dimension": null,
       "id": undefined,
+      "log_position": 0,
       "metadata": null,
       "name": "test",
       "tenant": "default_tenant",
@@ -88,6 +89,7 @@ describe("collection operations", () => {
       "database": "default_database",
       "dimension": null,
       "id": undefined,
+      "log_position": 0,
       "metadata": {
         "test": "test",
       },
