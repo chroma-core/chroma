@@ -26,6 +26,7 @@ from uuid import UUID
 from chromadb.api.configuration import CollectionConfigurationInternal
 from pydantic import BaseModel
 from chromadb.api.types import (
+    Embedding,
     GetResult,
     QueryResult,
     Embeddings,
@@ -72,7 +73,6 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import Collection as CollectionModel
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -896,7 +896,7 @@ class FastAPI(Server):
 
         if get_result["embeddings"] is not None:
             get_result["embeddings"] = [
-                embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+                cast(Embedding, embedding).tolist()
                 for embedding in get_result["embeddings"]
             ]
 
@@ -1020,12 +1020,7 @@ class FastAPI(Server):
 
         if nnresult["embeddings"] is not None:
             nnresult["embeddings"] = [
-                [
-                    embedding.tolist()
-                    if isinstance(embedding, np.ndarray)
-                    else embedding
-                    for embedding in result
-                ]
+                [cast(Embedding, embedding).tolist() for embedding in result]
                 for result in nnresult["embeddings"]
             ]
 
