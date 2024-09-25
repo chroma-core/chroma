@@ -93,6 +93,11 @@ message OperationRecord {
     Operation operation = 4;
 }
 
+message RequestVersionContext {
+    uint32 collection_version = 1;
+    uint64 log_position = 2;
+}
+
 /* Metadata Reader Interface */
 
 service MetadataReader {
@@ -103,6 +108,7 @@ service MetadataReader {
 message CountRecordsRequest {
     string segment_id = 1;
     string collection_id = 2;
+    RequestVersionContext version_context = 3;
 }
 
 // TODO: Add error propagation in the response.
@@ -119,6 +125,7 @@ message QueryMetadataRequest {
     optional uint32 offset = 6;
     string collection_id = 7;
     bool include_metadata = 8;
+    RequestVersionContext version_context = 9;
 }
 
 message QueryMetadataResponse {
@@ -295,6 +302,7 @@ message GetVectorsRequest {
     repeated string ids = 1;
     string segment_id = 2;
     string collection_id = 3;
+    RequestVersionContext version_context = 4;
 }
 
 message GetVectorsResponse {
@@ -313,6 +321,7 @@ message QueryVectorsRequest {
     bool include_embeddings = 4;
     string segment_id = 5;
     string collection_id = 6;
+    RequestVersionContext version_context = 7;
     // TODO: options as in types.py, its currently unused so can add later
 }
 
