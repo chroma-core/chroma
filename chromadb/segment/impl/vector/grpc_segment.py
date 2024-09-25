@@ -65,11 +65,11 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             ids=ids,
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            version_context=to_proto_request_version_context(request_version_context),
         )
         response: GetVectorsResponse = self._vector_reader_stub.GetVectors(
             request,
             timeout=self._request_timeout_seconds,
-            version_context=to_proto_request_version_context(request_version_context),
         )
         results: List[VectorEmbeddingRecord] = []
         for vector in response.records:

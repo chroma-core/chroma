@@ -58,7 +58,6 @@ class GrpcMetadataSegment(MetadataReader):
         response: pb.CountRecordsResponse = self._metadata_reader_stub.CountRecords(
             request,
             timeout=self._request_timeout_seconds,
-            version_context=to_proto_request_version_context(request_version_context),
         )
         return response.count
 
@@ -108,12 +107,12 @@ class GrpcMetadataSegment(MetadataReader):
             limit=limit,
             offset=offset,
             include_metadata=include_metadata,
+            version_context=to_proto_request_version_context(request_version_context),
         )
 
         response: pb.QueryMetadataResponse = self._metadata_reader_stub.QueryMetadata(
             request,
             timeout=self._request_timeout_seconds,
-            version_context=to_proto_request_version_context(request_version_context),
         )
         results: List[MetadataEmbeddingRecord] = []
         for record in response.records:
