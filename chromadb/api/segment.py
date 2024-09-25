@@ -1,3 +1,4 @@
+from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
@@ -15,8 +16,11 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.ingest import Producer
 from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
-from chromadb.errors import InvalidDimensionException, InvalidCollectionException
-
+from chromadb.errors import (
+    InvalidDimensionException,
+    InvalidCollectionException,
+    VersionMismatchError,
+)
 from chromadb.api.types import (
     URI,
     CollectionMetadata,
@@ -443,6 +447,12 @@ class SegmentAPI(ServerAPI):
         return True
 
     @trace_method("SegmentAPI._get", OpenTelemetryGranularity.OPERATION)
+    @retry(  # type: ignore[misc]
+        retry=retry_if_exception(lambda e: isinstance(e, VersionMismatchError)),
+        wait=wait_fixed(2),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
     @rate_limit(subject="collection_id", resource=Resource.GET_PER_MINUTE)
     @override
     def _get(
@@ -631,6 +641,12 @@ class SegmentAPI(ServerAPI):
         return ids_to_delete
 
     @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
+    @retry(  # type: ignore[misc]
+        retry=retry_if_exception(lambda e: isinstance(e, VersionMismatchError)),
+        wait=wait_fixed(2),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
     @override
     def _count(self, collection_id: UUID) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
@@ -644,6 +660,19 @@ class SegmentAPI(ServerAPI):
         return metadata_segment.count(request_version_context)
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
+    # We retry on version mismatch errors because the version of the collection
+    # may have changed between the time we got the version and the time we
+    # actually query the collection on the FE. We are fine with fixed
+    # wait time because the version mismatch error is not a error due to
+    # network issues or other transient issues. It is a result of the
+    # collection being updated between the time we got the version and
+    # the time we actually query the collection on the FE.
+    @retry(  # type: ignore[misc]
+        retry=retry_if_exception(lambda e: isinstance(e, VersionMismatchError)),
+        wait=wait_fixed(2),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
     @rate_limit(subject="collection_id", resource=Resource.QUERY_PER_MINUTE)
     @override
     def _query(
