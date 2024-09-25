@@ -76,7 +76,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             )
         except grpc.RpcError as rpc_error:
             message = rpc_error.details()
-            if message.contains("Collection version mismatch"):
+            if "Collection version mismatch" in message:
                 raise VersionMismatchError()
             raise rpc_error
 
@@ -113,7 +113,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             )
         except grpc.RpcError as rpc_error:
             message = rpc_error.details()
-            if message.contains("Collection version mismatch"):
+            if "Collection version mismatch" in message:
                 raise VersionMismatchError()
             raise rpc_error
 
