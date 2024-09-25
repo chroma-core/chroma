@@ -222,7 +222,8 @@ class LogRecord(TypedDict):
 class RequestVersionContext(TypedDict):
     """The version and log position of the collection at the time of the request
 
-    This is used to ensure that the request is processed against the correct version of the collection.
+    This is used to ensure that the request is processed against the correct version of the collection,
+    as well as that the pulled logs are consistent with the start offset of the compacted collection.
 
     For example, if the FE first queries the metadata segment and then queries the vector segment, the version
     and log position of the collection may have changed between the two queries. The FE can use this context to
