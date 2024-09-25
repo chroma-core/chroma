@@ -64,7 +64,7 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	assert.Equal(suite.t, []byte{1, 2, 3}, records[0].Record, "Failed to run garbage collection")
 	assert.Equal(suite.t, int64(1), records[0].Offset, "Failed to run garbage collection")
 
-	records, err = suite.lr.PullRecords(ctx, collectionID2.String(), 0, 1, time.Now().UnixNano())
+	records, err = suite.lr.PullRecords(ctx, collectionID2.String(), 1, 1, time.Now().UnixNano())
 	assert.NoError(suite.t, err, "Failed to pull records")
 	assert.Equal(suite.t, 0, len(records), "Failed to run garbage collection")
 
