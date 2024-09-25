@@ -146,6 +146,16 @@ impl WorkerServer {
             }
         };
 
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let mut proto_results_for_all = Vec::new();
 
         let mut query_vectors = Vec::new();
@@ -182,6 +192,8 @@ impl WorkerServer {
                     self.hnsw_index_provider.clone(),
                     self.blockfile_provider.clone(),
                     dispatcher,
+                    collection_version,
+                    log_position,
                 );
                 orchestrator.run().await
             }
@@ -256,6 +268,16 @@ impl WorkerServer {
             }
         };
 
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
             None => {
@@ -279,6 +301,8 @@ impl WorkerServer {
             self.sysdb.clone(),
             dispatcher,
             self.blockfile_provider.clone(),
+            collection_version,
+            log_position,
         );
         let result = orchestrator.run().await;
         let mut result = match result {
@@ -332,6 +356,16 @@ impl WorkerServer {
             Ok(uuid) => uuid,
             Err(_) => {
                 return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
             }
         };
 
@@ -392,6 +426,8 @@ impl WorkerServer {
             request.offset,
             request.limit,
             request.include_metadata,
+            collection_version,
+            log_position,
         );
 
         let result = orchestrator.run().await;
@@ -506,7 +542,16 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
             }
         };
 
-        println!("Querying count for segment {}", segment_uuid);
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
             None => {
@@ -529,6 +574,8 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
             self.sysdb.clone(),
             dispatcher.clone(),
             self.blockfile_provider.clone(),
+            collection_version,
+            log_position,
         );
 
         let result = orchestrator.run().await;

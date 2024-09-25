@@ -4,6 +4,7 @@ from chromadb.config import System
 from chromadb.proto.convert import (
     from_proto_vector_embedding_record,
     from_proto_vector_query_result,
+    to_proto_request_version_context,
     to_proto_vector,
 )
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
@@ -64,9 +65,11 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             ids=ids,
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            version_context=to_proto_request_version_context(request_version_context),
         )
         response: GetVectorsResponse = self._vector_reader_stub.GetVectors(
-            request, timeout=self._request_timeout_seconds
+            request,
+            timeout=self._request_timeout_seconds,
         )
         results: List[VectorEmbeddingRecord] = []
         for vector in response.records:
@@ -89,9 +92,13 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             include_embeddings=query["include_embeddings"],
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            version_context=to_proto_request_version_context(
+                query["request_version_context"]
+            ),
         )
         response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
-            request, timeout=self._request_timeout_seconds
+            request,
+            timeout=self._request_timeout_seconds,
         )
         results: List[List[VectorQueryResult]] = []
         for result in response.results:

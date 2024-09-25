@@ -63,7 +63,7 @@ pub enum MergeKnnResultsOperatorError {}
 
 impl ChromaError for MergeKnnResultsOperatorError {
     fn code(&self) -> ErrorCodes {
-        return ErrorCodes::UNKNOWN;
+        return ErrorCodes::Unknown;
     }
 }
 
