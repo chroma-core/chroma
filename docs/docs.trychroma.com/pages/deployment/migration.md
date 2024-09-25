@@ -26,6 +26,9 @@ The results returned by `collection.get()` is now ordered by internal ids. Where
 
 A subsequent change in behavior is `limit` and `offset`, which depends on the order of returned results. For example, if you have a collection named `coll` of documents with ids `["3", "2", "1", "0"]` inserted in this order, then previously `coll.get(limit=2, offset=2)["ids"]` gives you `["2", "3"]`, while currently this will give you `["1", "0"]`.
 
+We have also modified the behavior of `Client.get_or_create`. Previously, if a collection already existed and the `metadata` argument was provided, the existing collection's metadata would be overwritten with the new values. This has now changed. If the collection already exists, get_or_create will simply return the existing collection with the specified name, and any additional arguments—including `metadata`—will be ignored.
+
+
 ### v0.5.6
 
 Chroma internally uses a write-ahead log. In all versions prior to v0.5.6, this log was never pruned. This resulted in the data directory being much larger than it needed to be, as well as the directory size not decreasing by the expected amount after deleting a collection.
