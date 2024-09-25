@@ -9,6 +9,7 @@ from chromadb.proto.convert import (
 )
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import VectorReader
+from chromadb.errors import VersionMismatchError
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -67,10 +68,18 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             collection_id=self._segment["collection"].hex,
             version_context=to_proto_request_version_context(request_version_context),
         )
-        response: GetVectorsResponse = self._vector_reader_stub.GetVectors(
-            request,
-            timeout=self._request_timeout_seconds,
-        )
+
+        try:
+            response: GetVectorsResponse = self._vector_reader_stub.GetVectors(
+                request,
+                timeout=self._request_timeout_seconds,
+            )
+        except grpc.RpcError as rpc_error:
+            message = rpc_error.details()
+            if "Collection version mismatch" in message:
+                raise VersionMismatchError()
+            raise rpc_error
+
         results: List[VectorEmbeddingRecord] = []
         for vector in response.records:
             result = from_proto_vector_embedding_record(vector)
@@ -96,10 +105,18 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
                 query["request_version_context"]
             ),
         )
-        response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
-            request,
-            timeout=self._request_timeout_seconds,
-        )
+
+        try:
+            response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
+                request,
+                timeout=self._request_timeout_seconds,
+            )
+        except grpc.RpcError as rpc_error:
+            message = rpc_error.details()
+            if "Collection version mismatch" in message:
+                raise VersionMismatchError()
+            raise rpc_error
+
         results: List[List[VectorQueryResult]] = []
         for result in response.results:
             curr_result: List[VectorQueryResult] = []
