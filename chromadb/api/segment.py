@@ -908,6 +908,9 @@ def _records(
     # that we know that the embeddings, metadatas and documents have already been
     # normalized and are guaranteed to be consistently named lists.
 
+    if embeddings == []:
+        embeddings = None
+
     for i, id in enumerate(ids):
         metadata = None
         if metadatas:
