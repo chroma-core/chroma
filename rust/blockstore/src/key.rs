@@ -1,6 +1,19 @@
 use std::hash::{Hash, Hasher};
 
+use chroma_error::{ChromaError, ErrorCodes};
+
 use super::Key;
+
+// TODO(rescrv):  This used to be a panic/unwrap, but could be a nicer type.
+#[derive(thiserror::Error, Debug)]
+#[error("runtime type error")]
+pub struct InvalidKeyConversion;
+
+impl ChromaError for InvalidKeyConversion {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
 
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum KeyWrapper {
@@ -29,12 +42,12 @@ impl From<&str> for KeyWrapper {
 }
 
 impl<'referred_data> TryFrom<&'referred_data KeyWrapper> for &'referred_data str {
-    type Error = &'static str;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &'referred_data KeyWrapper) -> Result<Self, &'static str> {
+    fn try_from(key: &'referred_data KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::String(s) => Ok(s),
-            _ => Err("Invalid conversion"),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }
@@ -46,12 +59,12 @@ impl From<f32> for KeyWrapper {
 }
 
 impl TryFrom<&KeyWrapper> for f32 {
-    type Error = &'static str;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &KeyWrapper) -> Result<Self, &'static str> {
+    fn try_from(key: &KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::Float32(f) => Ok(*f),
-            _ => Err("Invalid conversion"),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }
@@ -63,12 +76,12 @@ impl From<bool> for KeyWrapper {
 }
 
 impl TryFrom<&KeyWrapper> for bool {
-    type Error = &'static str;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &KeyWrapper) -> Result<Self, &'static str> {
+    fn try_from(key: &KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::Bool(b) => Ok(*b),
-            _ => Err("Invalid conversion"),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }
@@ -80,12 +93,12 @@ impl From<u32> for KeyWrapper {
 }
 
 impl TryFrom<&KeyWrapper> for u32 {
-    type Error = &'static str;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &KeyWrapper) -> Result<Self, &'static str> {
+    fn try_from(key: &KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::Uint32(u) => Ok(*u),
-            _ => Err("Invalid conversion"),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }

@@ -5,7 +5,7 @@ use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
 use super::config::BlockfileProviderConfig;
-use super::key::KeyWrapper;
+use super::key::{InvalidKeyConversion, KeyWrapper};
 use super::memory::provider::MemoryBlockfileProvider;
 use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
@@ -62,7 +62,7 @@ impl BlockfileProvider {
         'new,
         K: Key
             + Into<KeyWrapper>
-            + TryFrom<&'new KeyWrapper, Error = &'static str>
+            + TryFrom<&'new KeyWrapper, Error = InvalidKeyConversion>
             + ArrowReadableKey<'new>
             + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
