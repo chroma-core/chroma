@@ -19,14 +19,14 @@ pub struct LocalStorage {
 impl LocalStorage {
     pub fn new(root: &str) -> LocalStorage {
         // Create the local storage with the root path.
-        return LocalStorage {
+        LocalStorage {
             root: root.to_string(),
-        };
+        }
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, String> {
         let mut stream = self
-            .get_stream(&key)
+            .get_stream(key)
             .instrument(tracing::trace_span!(parent: Span::current(), "Local Storage get"))
             .await?;
         let read_block_span =
@@ -73,11 +73,9 @@ impl LocalStorage {
         match std::fs::File::open(file_path) {
             Ok(file) => {
                 let stream = file.byte_stream();
-                return Ok(Box::new(stream));
+                Ok(Box::new(stream))
             }
-            Err(e) => {
-                return Err::<_, String>(e.to_string());
-            }
+            Err(e) => Err::<_, String>(e.to_string()),
         }
     }
 
@@ -90,24 +88,16 @@ impl LocalStorage {
         std::fs::create_dir_all(parent).unwrap();
         let res = std::fs::write(&path, bytes);
         match res {
-            Ok(_) => {
-                return Ok(());
-            }
-            Err(e) => {
-                return Err::<(), String>(e.to_string());
-            }
+            Ok(_) => Ok(()),
+            Err(e) => Err::<(), String>(e.to_string()),
         }
     }
 
     pub async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
         let file = std::fs::read(path);
         match file {
-            Ok(bytes_u8) => {
-                return self.put_bytes(key, &bytes_u8).await;
-            }
-            Err(e) => {
-                return Err::<(), String>(e.to_string());
-            }
+            Ok(bytes_u8) => self.put_bytes(key, &bytes_u8).await,
+            Err(e) => Err::<(), String>(e.to_string()),
         }
     }
 }
@@ -118,11 +108,9 @@ impl Configurable<StorageConfig> for LocalStorage {
         match &config {
             StorageConfig::Local(local_config) => {
                 let storage = LocalStorage::new(&local_config.root);
-                return Ok(storage);
+                Ok(storage)
             }
-            _ => {
-                return Err(Box::new(StorageConfigError::InvalidStorageConfig));
-            }
+            _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
     }
 }

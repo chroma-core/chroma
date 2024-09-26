@@ -125,10 +125,7 @@ where
     pub fn get(&self, key: &K) -> Option<V> {
         let read_guard = self.cache.read();
         let value = read_guard.get(key);
-        match value {
-            Some(v) => Some(v.clone()),
-            None => None,
-        }
+        value.cloned()
     }
 
     pub fn pop(&self) -> Option<(K, V)> {
@@ -261,6 +258,6 @@ impl ChromaError for CacheConfigError {
 pub trait Cacheable {
     // By default the weight of a type that is cacheable is 1.
     fn weight(&self) -> usize {
-        return 1;
+        1
     }
 }
