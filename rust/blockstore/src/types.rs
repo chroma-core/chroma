@@ -3,7 +3,7 @@ use super::arrow::flusher::ArrowBlockfileFlusher;
 use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
-use super::key::{KeyWrapper, InvalidKeyConversion};
+use super::key::{InvalidKeyConversion, KeyWrapper};
 use super::memory::reader_writer::{
     MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
 };

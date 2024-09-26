@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     arrow::types::{ArrowReadableKey, ArrowReadableValue},
-    key::{KeyWrapper, InvalidKeyConversion},
+    key::{InvalidKeyConversion, KeyWrapper},
     provider::{CreateError, OpenError},
     BlockfileReader, BlockfileWriter, Key, Value,
 };

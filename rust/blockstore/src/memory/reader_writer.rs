@@ -2,7 +2,7 @@ use super::{
     super::{BlockfileError, Key, Value},
     storage::{Readable, Storage, StorageBuilder, StorageManager, Writeable},
 };
-use crate::key::{KeyWrapper, InvalidKeyConversion};
+use crate::key::{InvalidKeyConversion, KeyWrapper};
 use chroma_error::ChromaError;
 
 #[derive(Clone)]
