@@ -1,9 +1,9 @@
 use super::{
     reader_writer::{MemoryBlockfileReader, MemoryBlockfileWriter},
-    storage::{Readable, StorageManager, Writeable},
+    storage::{Readable, StorageManager},
 };
 use crate::{
-    arrow::types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
+    arrow::types::{ArrowReadableKey, ArrowReadableValue},
     key::KeyWrapper,
     provider::{CreateError, OpenError},
     BlockfileReader, BlockfileWriter, Key, Value,
@@ -27,7 +27,11 @@ impl MemoryBlockfileProvider {
 
     pub(crate) fn open<
         'new,
-        K: Key + Into<KeyWrapper> + From<&'new KeyWrapper> + ArrowReadableKey<'new> + 'new,
+        K: Key
+            + Into<KeyWrapper>
+            + TryFrom<&'new KeyWrapper, Error = &'static str>
+            + ArrowReadableKey<'new>
+            + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
     >(
         &self,
@@ -37,13 +41,7 @@ impl MemoryBlockfileProvider {
         Ok(BlockfileReader::<K, V>::MemoryBlockfileReader(reader))
     }
 
-    pub(crate) fn create<
-        'new,
-        K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
-        V: Value + Writeable + ArrowWriteableValue + 'new,
-    >(
-        &self,
-    ) -> Result<BlockfileWriter, Box<CreateError>> {
+    pub(crate) fn create(&self) -> Result<BlockfileWriter, Box<CreateError>> {
         let writer: MemoryBlockfileWriter =
             MemoryBlockfileWriter::new(self.storage_manager.clone());
         Ok(BlockfileWriter::MemoryBlockfileWriter(writer))
@@ -53,10 +51,7 @@ impl MemoryBlockfileProvider {
         self.storage_manager.clear();
     }
 
-    pub(crate) fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
-        &self,
-        _id: &uuid::Uuid,
-    ) -> Result<BlockfileWriter, Box<CreateError>> {
+    pub(crate) fn fork(&self, _id: &uuid::Uuid) -> Result<BlockfileWriter, Box<CreateError>> {
         todo!();
     }
 }

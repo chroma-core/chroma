@@ -34,7 +34,7 @@ impl SingleColumnSizeTracker {
 
     /// The raw unpadded size of the prefix data in bytes.
     pub(super) fn get_prefix_size(&self) -> usize {
-        return self.prefix_size;
+        self.prefix_size
     }
 
     /// The arrow padded size of the prefix data in bytes.
@@ -44,7 +44,7 @@ impl SingleColumnSizeTracker {
 
     /// The raw unpadded size of the key data in bytes.
     pub(super) fn get_key_size(&self) -> usize {
-        return self.key_size;
+        self.key_size
     }
 
     /// The arrow padded size of the key data in bytes.
@@ -56,7 +56,7 @@ impl SingleColumnSizeTracker {
 
     /// The raw unpadded size of the value data in bytes.
     pub(super) fn get_value_size(&self) -> usize {
-        return self.value_size;
+        self.value_size
     }
 
     /// The arrow padded size of the value data in bytes.

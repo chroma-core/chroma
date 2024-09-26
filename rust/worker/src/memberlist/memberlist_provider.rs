@@ -150,7 +150,6 @@ impl CustomResourceMemberlistProvider {
         let stream = stream.then(|event| async move {
             match event {
                 Ok(event) => {
-                    let event = event;
                     println!("Kube stream event: {:?}", event);
                     Some(event)
                 }

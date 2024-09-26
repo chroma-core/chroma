@@ -595,7 +595,7 @@ impl Component for HnswQueryOrchestrator {
 
         // If segment is uninitialized and dimension is not set then we assume
         // that this is a query before any add so return empty response.
-        if hnsw_segment.file_path.len() <= 0 && collection.dimension.is_none() {
+        if hnsw_segment.file_path.len() == 0 && collection.dimension.is_none() {
             self.terminate_with_empty_response(ctx);
             return;
         }

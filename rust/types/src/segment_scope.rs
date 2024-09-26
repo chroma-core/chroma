@@ -33,7 +33,6 @@ impl TryFrom<chroma_proto::SegmentScope> for SegmentScope {
             chroma_proto::SegmentScope::Metadata => Ok(SegmentScope::METADATA),
             chroma_proto::SegmentScope::Record => Ok(SegmentScope::RECORD),
             chroma_proto::SegmentScope::Sqlite => Ok(SegmentScope::SQLITE),
-            _ => Err(SegmentScopeConversionError::InvalidScope),
         }
     }
 }
@@ -49,7 +48,6 @@ impl TryFrom<i32> for SegmentScope {
                 chroma_proto::SegmentScope::Metadata => Ok(SegmentScope::METADATA),
                 chroma_proto::SegmentScope::Record => Ok(SegmentScope::RECORD),
                 chroma_proto::SegmentScope::Sqlite => Ok(SegmentScope::SQLITE),
-                _ => Err(SegmentScopeConversionError::InvalidScope),
             },
             Err(_) => Err(SegmentScopeConversionError::DecodeError(
                 ConversionError::DecodeError,

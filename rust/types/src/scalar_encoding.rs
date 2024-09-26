@@ -28,7 +28,6 @@ impl TryFrom<chroma_proto::ScalarEncoding> for ScalarEncoding {
         match encoding {
             chroma_proto::ScalarEncoding::Float32 => Ok(ScalarEncoding::FLOAT32),
             chroma_proto::ScalarEncoding::Int32 => Ok(ScalarEncoding::INT32),
-            _ => Err(ScalarEncodingConversionError::InvalidEncoding),
         }
     }
 }
@@ -42,7 +41,6 @@ impl TryFrom<i32> for ScalarEncoding {
             Ok(encoding) => match encoding {
                 chroma_proto::ScalarEncoding::Float32 => Ok(ScalarEncoding::FLOAT32),
                 chroma_proto::ScalarEncoding::Int32 => Ok(ScalarEncoding::INT32),
-                _ => Err(ScalarEncodingConversionError::InvalidEncoding),
             },
             Err(_) => Err(ScalarEncodingConversionError::DecodeError(
                 ConversionError::DecodeError,
