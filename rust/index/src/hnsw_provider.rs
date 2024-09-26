@@ -71,11 +71,9 @@ impl Cacheable for HnswIndexRef {
 
 impl Debug for HnswIndexProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "HnswIndexProvider {{ temporary_storage_path: {:?} }}",
-            self.temporary_storage_path,
-        )
+        f.debug_struct("HnswIndexProvider")
+            .field("temporary_storage_path", &self.temporary_storage_path)
+            .finish_non_exhaustive()
     }
 }
 
