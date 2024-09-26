@@ -20,7 +20,7 @@ We will aim to provide:
 
 ## Migration Log
 
-### v0.5.9
+### v0.5.10
 
 The results returned by `collection.get()` is now ordered by internal ids. Whereas previously, the results were ordered by user provided ids, although this behavior was not explicitly documented. We would like to make the change because using user provided ids may not be ideal for performance in hosted Chroma, and we hope to propagate the change to local Chroma for consistency of behavior. In general, newer documents in Chroma has larger internal ids.
 
