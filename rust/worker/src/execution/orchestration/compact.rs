@@ -153,8 +153,8 @@ impl ChromaError for CompactionError {
 #[derive(Debug)]
 pub struct CompactionResponse {
     pub(crate) id: Uuid,
-    compaction_job: CompactionJob,
-    message: String,
+    pub(crate) compaction_job: CompactionJob,
+    pub(crate) message: String,
 }
 
 impl CompactOrchestrator {

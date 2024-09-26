@@ -162,7 +162,7 @@ impl CompactionManager {
             match job {
                 Ok(result) => {
                     println!("Compaction completed: {:?}", result);
-                    compacted.push(result.id);
+                    compacted.push(result.compaction_job.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
