@@ -3,7 +3,7 @@ use super::arrow::flusher::ArrowBlockfileFlusher;
 use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
-use super::key::{KeyWrapper, RuntimeTypeError};
+use super::key::{KeyWrapper, InvalidKeyConversion};
 use super::memory::reader_writer::{
     MemoryBlockfileFlusher, MemoryBlockfileReader, MemoryBlockfileWriter,
 };
@@ -236,7 +236,7 @@ impl<
         'referred_data,
         K: Key
             + Into<KeyWrapper>
-            + TryFrom<&'referred_data KeyWrapper, Error = RuntimeTypeError>
+            + TryFrom<&'referred_data KeyWrapper, Error = InvalidKeyConversion>
             + ArrowReadableKey<'referred_data>,
         V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
     > BlockfileReader<'referred_data, K, V>

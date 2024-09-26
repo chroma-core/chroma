@@ -7,9 +7,9 @@ use super::Key;
 // TODO(rescrv):  This used to be a panic/unwrap, but could be a nicer type.
 #[derive(thiserror::Error, Debug)]
 #[error("runtime type error")]
-pub struct RuntimeTypeError;
+pub struct InvalidKeyConversion;
 
-impl ChromaError for RuntimeTypeError {
+impl ChromaError for InvalidKeyConversion {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
     }
@@ -42,12 +42,12 @@ impl From<&str> for KeyWrapper {
 }
 
 impl<'referred_data> TryFrom<&'referred_data KeyWrapper> for &'referred_data str {
-    type Error = RuntimeTypeError;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &'referred_data KeyWrapper) -> Result<Self, RuntimeTypeError> {
+    fn try_from(key: &'referred_data KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::String(s) => Ok(s),
-            _ => Err(RuntimeTypeError),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }
@@ -59,12 +59,12 @@ impl From<f32> for KeyWrapper {
 }
 
 impl TryFrom<&KeyWrapper> for f32 {
-    type Error = RuntimeTypeError;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &KeyWrapper) -> Result<Self, RuntimeTypeError> {
+    fn try_from(key: &KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::Float32(f) => Ok(*f),
-            _ => Err(RuntimeTypeError),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }
@@ -76,12 +76,12 @@ impl From<bool> for KeyWrapper {
 }
 
 impl TryFrom<&KeyWrapper> for bool {
-    type Error = RuntimeTypeError;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &KeyWrapper) -> Result<Self, RuntimeTypeError> {
+    fn try_from(key: &KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::Bool(b) => Ok(*b),
-            _ => Err(RuntimeTypeError),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }
@@ -93,12 +93,12 @@ impl From<u32> for KeyWrapper {
 }
 
 impl TryFrom<&KeyWrapper> for u32 {
-    type Error = RuntimeTypeError;
+    type Error = InvalidKeyConversion;
 
-    fn try_from(key: &KeyWrapper) -> Result<Self, RuntimeTypeError> {
+    fn try_from(key: &KeyWrapper) -> Result<Self, InvalidKeyConversion> {
         match key {
             KeyWrapper::Uint32(u) => Ok(*u),
-            _ => Err(RuntimeTypeError),
+            _ => Err(InvalidKeyConversion),
         }
     }
 }

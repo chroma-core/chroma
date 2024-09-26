@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     arrow::types::{ArrowReadableKey, ArrowReadableValue},
-    key::{KeyWrapper, RuntimeTypeError},
+    key::{KeyWrapper, InvalidKeyConversion},
     provider::{CreateError, OpenError},
     BlockfileReader, BlockfileWriter, Key, Value,
 };
@@ -29,7 +29,7 @@ impl MemoryBlockfileProvider {
         'new,
         K: Key
             + Into<KeyWrapper>
-            + TryFrom<&'new KeyWrapper, Error = RuntimeTypeError>
+            + TryFrom<&'new KeyWrapper, Error = InvalidKeyConversion>
             + ArrowReadableKey<'new>
             + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,

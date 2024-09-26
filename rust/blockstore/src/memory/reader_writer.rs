@@ -2,7 +2,7 @@ use super::{
     super::{BlockfileError, Key, Value},
     storage::{Readable, Storage, StorageBuilder, StorageManager, Writeable},
 };
-use crate::key::{KeyWrapper, RuntimeTypeError};
+use crate::key::{KeyWrapper, InvalidKeyConversion};
 use chroma_error::ChromaError;
 
 #[derive(Clone)]
@@ -73,7 +73,7 @@ pub struct MemoryBlockfileReader<K: Key, V: Value> {
 
 impl<
         'storage,
-        K: Key + Into<KeyWrapper> + TryFrom<&'storage KeyWrapper, Error = RuntimeTypeError>,
+        K: Key + Into<KeyWrapper> + TryFrom<&'storage KeyWrapper, Error = InvalidKeyConversion>,
         V: Value + Readable<'storage>,
     > MemoryBlockfileReader<K, V>
 {
