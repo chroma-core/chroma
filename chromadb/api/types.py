@@ -189,7 +189,7 @@ class QueryResult(TypedDict):
         Union[
             List[Embeddings],
             List[PyEmbeddings],
-            NDArray[Union[np.int32, np.float32]],
+            List[NDArray[Union[np.int32, np.float32]]],
         ]
     ]
     documents: Optional[List[List[Document]]]
