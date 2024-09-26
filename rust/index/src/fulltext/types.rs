@@ -419,7 +419,7 @@ impl<'me> FullTextIndexReader<'me> {
                 panic!("Invariant violation. Multiple frequency values found for a token.");
             }
             let res = res[0];
-            if res.1 == 0 {
+            if res.1 <= 0 {
                 panic!("Invariant violation. Zero frequency token found.");
             }
             // Throw away the "value" since we store frequencies in the keys.
