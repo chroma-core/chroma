@@ -552,8 +552,13 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);
-        let (num_completed, number_failed) = manager.compact_batch().await;
+        let mut compacted = vec![];
+        let (num_completed, number_failed) = manager.compact_batch(&mut compacted).await;
         assert_eq!(num_completed, 2);
         assert_eq!(number_failed, 0);
+        assert!(
+            (compacted == vec![collection_uuid_1, collection_uuid_2])
+                || (compacted == vec![collection_uuid_2, collection_uuid_1])
+        );
     }
 }
