@@ -29,7 +29,9 @@ pub(crate) struct DistributedHNSWSegmentWriter {
 
 impl Debug for DistributedHNSWSegmentWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DistributedHNSWSegment")
+        f.debug_struct("DistributedHNSWSegmentWriter")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
@@ -254,23 +256,20 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegmentReader {
     index: HnswIndexRef,
-    hnsw_index_provider: HnswIndexProvider,
     pub(crate) id: Uuid,
 }
 
 impl Debug for DistributedHNSWSegmentReader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DistributedHNSWSegmentReader")
+        f.debug_struct("DistributedHNSWSegmentReader")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
 impl DistributedHNSWSegmentReader {
-    fn new(index: HnswIndexRef, hnsw_index_provider: HnswIndexProvider, id: Uuid) -> Self {
-        return DistributedHNSWSegmentReader {
-            index,
-            hnsw_index_provider,
-            id,
-        };
+    fn new(index: HnswIndexRef, id: Uuid) -> Self {
+        return DistributedHNSWSegmentReader { index, id };
     }
 
     pub(crate) async fn from_segment(
@@ -341,9 +340,7 @@ impl DistributedHNSWSegmentReader {
                 };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
-                index,
-                hnsw_index_provider,
-                segment.id,
+                index, segment.id,
             )))
         } else {
             return Err(Box::new(

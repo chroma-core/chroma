@@ -47,7 +47,9 @@ pub(crate) struct MetadataSegmentWriter<'me> {
 
 impl Debug for MetadataSegmentWriter<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "MetadataSegmentWriter")
+        f.debug_struct("MetadataSegmentWriter")
+            .field("id", &self.id)
+            .finish()
     }
 }
 

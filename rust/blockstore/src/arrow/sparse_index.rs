@@ -535,11 +535,11 @@ impl Debug for SparseIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let forward = self.forward.lock();
         let reverse = self.reverse.lock();
-        write!(
-            f,
-            "SparseIndex {{ id: {}, forward: {:?}, reverse: {:?} }}",
-            self.id, forward, reverse
-        )
+        f.debug_struct("SparseIndex")
+            .field("id", &self.id)
+            .field("forward", &forward)
+            .field("reverse", &reverse)
+            .finish()
     }
 }
 
