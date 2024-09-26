@@ -283,7 +283,7 @@ impl Component for CompactionManager {
 
 impl Debug for CompactionManager {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CompactionManager")
+        f.debug_struct("CompactionManager").finish()
     }
 }
 

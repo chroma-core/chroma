@@ -27,11 +27,11 @@ pub enum BlockStorage {
 impl Debug for BlockStorage {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            BlockStorage::String(_) => write!(f, "String"),
-            BlockStorage::VecUInt32(_) => write!(f, "VecUInt32"),
-            BlockStorage::UInt32(_) => write!(f, "UInt32"),
-            BlockStorage::RoaringBitmap(_) => write!(f, "RoaringBitmap"),
-            BlockStorage::DataRecord(_) => write!(f, "DataRecord"),
+            BlockStorage::String(_) => f.debug_struct("String").finish(),
+            BlockStorage::VecUInt32(_) => f.debug_struct("VecUInt32").finish(),
+            BlockStorage::UInt32(_) => f.debug_struct("UInt32").finish(),
+            BlockStorage::RoaringBitmap(_) => f.debug_struct("RoaringBitmap").finish(),
+            BlockStorage::DataRecord(_) => f.debug_struct("DataRecord").finish(),
         }
     }
 }

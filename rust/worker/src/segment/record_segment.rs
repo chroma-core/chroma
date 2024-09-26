@@ -31,7 +31,9 @@ pub(crate) struct RecordSegmentWriter {
 
 impl Debug for RecordSegmentWriter {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "RecordSegmentWriter")
+        f.debug_struct("RecordSegmentWriter")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
@@ -520,7 +522,7 @@ pub(crate) struct RecordSegmentFlusher {
 
 impl Debug for RecordSegmentFlusher {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "RecordSegmentFlusher")
+        f.debug_struct("RecordSegmentFlusher").finish()
     }
 }
 

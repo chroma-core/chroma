@@ -30,10 +30,10 @@ impl Debug for BlockfileProvider {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(_provider) => {
-                write!(f, "HashMapBlockfileProvider")
+                f.debug_struct("HashMapBlockfileProvider").finish()
             }
             BlockfileProvider::ArrowBlockfileProvider(_provider) => {
-                write!(f, "ArrowBlockfileProvider")
+                f.debug_struct("ArrowBlockfileProvider").finish()
             }
         }
     }
