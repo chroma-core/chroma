@@ -300,7 +300,7 @@ mod tests {
         let results_guard = received_results.lock();
         let result = &results_guard.first().unwrap().result;
 
-        assert_eq!(result.is_err(), true);
-        matches!(result, Err(TaskError::Panic(Some(msg))) if *msg == "MockOperator panicking".to_string());
+        assert!(result.is_err());
+        matches!(result, Err(TaskError::Panic(Some(msg))) if msg == "MockOperator panicking");
     }
 }

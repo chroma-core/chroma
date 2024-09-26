@@ -33,6 +33,7 @@ pub(crate) struct CollectionRecord {
     pub(crate) id: Uuid,
     pub(crate) tenant_id: String,
     pub(crate) last_compaction_time: i64,
+    #[allow(dead_code)]
     pub(crate) first_record_time: i64,
     pub(crate) offset: i64,
     pub(crate) collection_version: i32,
@@ -41,6 +42,7 @@ pub(crate) struct CollectionRecord {
 #[derive(Clone, Debug)]
 pub(crate) enum Log {
     Grpc(GrpcLog),
+    #[allow(dead_code)]
     InMemory(InMemoryLog),
 }
 
@@ -94,6 +96,7 @@ impl Log {
 
 #[derive(Clone, Debug)]
 pub(crate) struct GrpcLog {
+    #[allow(clippy::type_complexity)]
     client: LogServiceClient<
         interceptor::InterceptedService<
             tonic::transport::Channel,
@@ -103,6 +106,7 @@ pub(crate) struct GrpcLog {
 }
 
 impl GrpcLog {
+    #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         client: LogServiceClient<
             interceptor::InterceptedService<
@@ -140,11 +144,7 @@ impl Configurable<LogConfig> for GrpcLog {
                 let connection_string = format!("http://{}:{}", host, port);
                 let endpoint_res = match Endpoint::from_shared(connection_string) {
                     Ok(endpoint) => endpoint,
-                    Err(e) => {
-                        return Err(Box::new(GrpcLogError::FailedToConnect(
-                            tonic::transport::Error::from(e),
-                        )))
-                    }
+                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
                 };
                 let endpoint_res = endpoint_res
                     .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
@@ -220,7 +220,7 @@ impl GrpcLog {
             .client
             .get_all_collection_info_to_compact(
                 chroma_proto::GetAllCollectionInfoToCompactRequest {
-                    min_compaction_size: min_compaction_size,
+                    min_compaction_size,
                 },
             )
             .await;
@@ -338,11 +338,12 @@ impl Debug for InternalLogRecord {
 // This is used for testing only
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
-    collection_to_log: HashMap<String, Vec<Box<InternalLogRecord>>>,
+    collection_to_log: HashMap<String, Vec<InternalLogRecord>>,
     offsets: HashMap<String, i64>,
 }
 
 impl InMemoryLog {
+    #[cfg(test)]
     pub fn new() -> InMemoryLog {
         InMemoryLog {
             collection_to_log: HashMap::new(),
@@ -350,11 +351,12 @@ impl InMemoryLog {
         }
     }
 
-    pub fn add_log(&mut self, collection_id: Uuid, log: Box<InternalLogRecord>) {
+    #[cfg(test)]
+    pub fn add_log(&mut self, collection_id: Uuid, log: InternalLogRecord) {
         let logs = self
             .collection_to_log
             .entry(collection_id.to_string())
-            .or_insert(Vec::new());
+            .or_default();
         // Ensure that the log offset is correct. Since we only use the InMemoryLog for testing,
         // we expect callers to send us logs in the correct order.
         let next_offset = logs.len() as i64;

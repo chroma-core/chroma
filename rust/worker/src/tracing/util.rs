@@ -37,17 +37,11 @@ pub(crate) fn client_interceptor(request: Request<()>) -> Result<Request<()>, St
             .as_str(),
     );
     // Errors are not fatal.
-    match trace_id {
-        Ok(id) => {
-            metadata.append(TRACE_ID_HEADER_KEY, id);
-        }
-        Err(_) => (),
+    if let Ok(id) = trace_id {
+        metadata.append(TRACE_ID_HEADER_KEY, id);
     }
-    match span_id {
-        Ok(id) => {
-            metadata.append(SPAN_ID_HEADER_KEY, id);
-        }
-        Err(_) => (),
+    if let Ok(id) = span_id {
+        metadata.append(SPAN_ID_HEADER_KEY, id);
     }
     Ok(mut_request)
 }

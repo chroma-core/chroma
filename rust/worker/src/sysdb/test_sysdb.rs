@@ -25,6 +25,7 @@ struct Inner {
 }
 
 impl TestSysDb {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         TestSysDb {
             inner: Arc::new(Mutex::new(Inner {
@@ -35,16 +36,19 @@ impl TestSysDb {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn add_collection(&mut self, collection: Collection) {
         let mut inner = self.inner.lock();
         inner.collections.insert(collection.id, collection);
     }
 
+    #[cfg(test)]
     pub(crate) fn add_segment(&mut self, segment: Segment) {
         let mut inner = self.inner.lock();
         inner.segments.insert(segment.id, segment);
     }
 
+    #[cfg(test)]
     pub(crate) fn add_tenant_last_compaction_time(
         &mut self,
         tenant: String,
@@ -113,7 +117,7 @@ impl TestSysDb {
         let mut collections = Vec::new();
         for collection in inner.collections.values() {
             if !TestSysDb::filter_collections(
-                &collection,
+                collection,
                 collection_id,
                 name.clone(),
                 tenant.clone(),
@@ -136,8 +140,7 @@ impl TestSysDb {
         let inner = self.inner.lock();
         let mut segments = Vec::new();
         for segment in inner.segments.values() {
-            if !TestSysDb::filter_segments(&segment, id, r#type.clone(), scope.clone(), collection)
-            {
+            if !TestSysDb::filter_segments(segment, id, r#type.clone(), scope.clone(), collection) {
                 continue;
             }
             segments.push(segment.clone());

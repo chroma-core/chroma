@@ -64,6 +64,7 @@ impl ChromaError for ChannelError {
 }
 
 #[derive(Error, Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum RequestError {
     #[error("Failed to send request")]
     SendError,

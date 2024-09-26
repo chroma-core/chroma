@@ -126,8 +126,8 @@ impl Dispatcher {
     /// Handle a work request from a worker thread
     /// # Parameters
     /// - worker: The request for work
-    /// If no work is available, the worker will be placed in a queue and a task will be sent to it
-    /// when one is available
+    ///   If no work is available, the worker will be placed in a queue and a task will be sent to
+    ///   it when one is available
     async fn handle_work_request(&mut self, request: TaskRequestMessage) {
         match self.task_queue.pop() {
             Some(task) => match request
@@ -170,7 +170,7 @@ impl TaskRequestMessage {
     /// Create a new TaskRequestMessage
     /// # Parameters
     /// - reply_to: The receiver to send the task to, this is the worker thread
-    /// that is requesting the task
+    ///   that is requesting the task
     pub(super) fn new(reply_to: Box<dyn ReceiverForMessage<TaskMessage>>) -> Self {
         TaskRequestMessage { reply_to }
     }
@@ -279,13 +279,13 @@ mod tests {
             let tmp_dir = tempfile::tempdir().unwrap();
             let file_path = tmp_dir.path().join(input);
             let mut tmp_file = File::create(file_path.clone()).await.unwrap();
-            tmp_file.write(b"Test write").await.unwrap();
+            tmp_file.write_all(b"Test write").await.unwrap();
             tmp_file.flush().await.unwrap();
             let mut read_fs = File::open(file_path)
                 .await
                 .expect("Error opening file previously created");
             let mut buffer = [0; 10];
-            read_fs.read(&mut buffer[..]).await.unwrap();
+            read_fs.read_exact(&mut buffer[..]).await.unwrap();
             let read_value =
                 String::from_utf8(buffer.to_vec()).expect("Error creating string from utf8");
             assert_eq!(read_value, String::from("Test write"));
@@ -356,7 +356,7 @@ mod tests {
             let task = wrap(Box::new(MockIoOperator {}), filename, ctx.receiver());
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
-            let res = self.dispatcher.send(task, None).await;
+            let _res = self.dispatcher.send(task, None).await;
         }
     }
 
@@ -412,7 +412,7 @@ mod tests {
             let task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
-            let res = self.dispatcher.send(task, None).await;
+            let _res = self.dispatcher.send(task, None).await;
         }
     }
 
@@ -434,7 +434,7 @@ mod tests {
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
         // Join on the dispatch user, since it will kill itself after DISPATCH_COUNT messages
-        dispatch_user_handle.join().await;
+        dispatch_user_handle.join().await.unwrap();
         // We should have received DISPATCH_COUNT messages
         assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
         // The sent tasks should be equal to the received tasks
@@ -462,7 +462,7 @@ mod tests {
         // yield to allow the component to process the messages
         tokio::task::yield_now().await;
         // Join on the dispatch user, since it will kill itself after DISPATCH_COUNT messages
-        dispatch_user_handle.join().await;
+        dispatch_user_handle.join().await.unwrap();
         // We should have received DISPATCH_COUNT messages
         assert_eq!(counter.load(Ordering::SeqCst), DISPATCH_COUNT);
         // The sent tasks should be equal to the received tasks

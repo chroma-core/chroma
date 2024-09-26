@@ -268,12 +268,10 @@ impl CountQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one segment exists from
                 // the check above
-                return Ok(segments.into_iter().next().unwrap());
+                Ok(segments.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(CountQueryOrchestratorError::GetSegmentsError(e)));
-            }
-        };
+            Err(e) => Err(Box::new(CountQueryOrchestratorError::GetSegmentsError(e))),
+        }
     }
 
     // shared
@@ -281,7 +279,7 @@ impl CountQueryOrchestrator {
         &self,
         mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
+        _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
@@ -296,12 +294,10 @@ impl CountQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one collection exists from
                 // the check above
-                return Ok(collections.into_iter().next().unwrap());
+                Ok(collections.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(CountQueryOrchestratorError::GetCollectionError(e)));
-            }
-        };
+            Err(e) => Err(Box::new(CountQueryOrchestratorError::GetCollectionError(e))),
+        }
     }
 
     ///  Run the orchestrator and return the result.
@@ -393,7 +389,7 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOr
             .expect("Expect channel to be present");
         match channel.send(Ok(msg.count)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_) => {
                 // Log an error - this implied the listener was dropped
                 println!("[CountQueryOrchestrator] Result channel dropped before sending result");
             }

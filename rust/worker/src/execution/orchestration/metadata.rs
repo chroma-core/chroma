@@ -50,8 +50,6 @@ pub(crate) struct MetadataQueryOrchestrator {
     record_segment: Option<Segment>,
     metadata_segment: Option<Segment>,
     collection: Option<Collection>,
-    // State machine management
-    merge_dependency_count: u32,
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
@@ -107,6 +105,7 @@ impl ChromaError for MetadataQueryOrchestratorError {
 }
 
 impl MetadataQueryOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
@@ -133,7 +132,6 @@ impl MetadataQueryOrchestrator {
             record_segment: None,
             metadata_segment: None,
             collection: None,
-            merge_dependency_count: 2,
             log,
             sysdb,
             dispatcher,
@@ -345,21 +343,19 @@ impl MetadataQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one segment exists from
                 // the check above
-                return Ok(segments.into_iter().next().unwrap());
+                Ok(segments.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
-                    e,
-                )));
-            }
-        };
+            Err(e) => Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
+                e,
+            ))),
+        }
     }
 
     async fn get_collection_from_id(
         &self,
         mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
+        _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
@@ -374,14 +370,12 @@ impl MetadataQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one collection exists from
                 // the check above
-                return Ok(collections.into_iter().next().unwrap());
+                Ok(collections.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(
-                    MetadataQueryOrchestratorError::GetCollectionError(e),
-                ));
-            }
-        };
+            Err(e) => Err(Box::new(
+                MetadataQueryOrchestratorError::GetCollectionError(e),
+            )),
+        }
     }
 
     ///  Run the orchestrator and return the result.
@@ -515,7 +509,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
 
         match result_channel.send(Ok(output)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_) => {
                 // Log an error - this implied the listener was dropped
                 println!(
                     "[MetadataQueryOrchestrator] Result channel dropped before sending result"
