@@ -18,5 +18,9 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __call__(self, input: Documents) -> Embeddings:
         return cast(
-            Embeddings, self._model.encode(list(input), convert_to_numpy=True).tolist()
+            Embeddings,
+            [
+                embedding
+                for embedding in self._model.encode(list(input), convert_to_numpy=True)
+            ],
         )  # noqa E501

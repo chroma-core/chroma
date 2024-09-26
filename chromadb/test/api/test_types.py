@@ -5,11 +5,13 @@ import numpy as np
 
 
 def random_embeddings() -> Embeddings:
-    return cast(Embeddings, np.random.random(size=(10, 10)).tolist())
+    return cast(
+        Embeddings, [embedding for embedding in np.random.random(size=(10, 10))]
+    )
 
 
 def random_image() -> Image:
-    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int32)
+    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int64)
 
 
 def random_documents() -> List[Document]:
@@ -24,7 +26,10 @@ def test_embedding_function_results_format_when_response_is_valid() -> None:
             return valid_embeddings
 
     ef = TestEmbeddingFunction()
-    assert valid_embeddings == ef(random_documents())
+
+    embeddings = ef(random_documents())
+    for i, e in enumerate(embeddings):
+        assert np.array_equal(e, valid_embeddings[i])
 
 
 def test_embedding_function_results_format_when_response_is_invalid() -> None:

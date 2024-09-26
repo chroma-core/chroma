@@ -9,6 +9,9 @@ from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel
 
+import numpy as np
+from numpy.typing import NDArray
+
 from chromadb.api.configuration import (
     CollectionConfigurationInternal,
     ConfigurationInternal,
@@ -193,7 +196,8 @@ class Operation(Enum):
     DELETE = "DELETE"
 
 
-Vector = Union[Sequence[float], Sequence[int]]
+PyVector = Union[Sequence[float], Sequence[int]]
+Vector = NDArray[Union[np.int32, np.float32]]
 
 
 class VectorEmbeddingRecord(TypedDict):

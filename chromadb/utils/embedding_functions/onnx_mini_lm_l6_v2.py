@@ -197,7 +197,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
-        return cast(Embeddings, self._forward(input).tolist())
+        return cast(Embeddings, self._forward(input))
 
     def _download_model_if_not_exists(self) -> None:
         onnx_files = [

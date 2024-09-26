@@ -9,16 +9,16 @@ from chromadb.types import (
 )
 from chromadb.config import Component
 from uuid import UUID
-import array
+import numpy as np
 
 
 def encode_vector(vector: Vector, encoding: ScalarEncoding) -> bytes:
     """Encode a vector into a byte array."""
 
     if encoding == ScalarEncoding.FLOAT32:
-        return array.array("f", vector).tobytes()
+        return np.array(vector, dtype=np.float32).tobytes()
     elif encoding == ScalarEncoding.INT32:
-        return array.array("i", vector).tobytes()
+        return np.array(vector, dtype=np.int32).tobytes()
     else:
         raise ValueError(f"Unsupported encoding: {encoding.value}")
 
@@ -27,9 +27,9 @@ def decode_vector(vector: bytes, encoding: ScalarEncoding) -> Vector:
     """Decode a byte array into a vector"""
 
     if encoding == ScalarEncoding.FLOAT32:
-        return array.array("f", vector).tolist()
+        return np.frombuffer(vector, dtype=np.float32)
     elif encoding == ScalarEncoding.INT32:
-        return array.array("i", vector).tolist()
+        return np.frombuffer(vector, dtype=np.float32)
     else:
         raise ValueError(f"Unsupported encoding: {encoding.value}")
 

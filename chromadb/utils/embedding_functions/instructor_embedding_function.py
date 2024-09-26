@@ -26,8 +26,22 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __call__(self, input: Documents) -> Embeddings:
         if self._instruction is None:
-            return cast(Embeddings, self._model.encode(input).tolist())
+            return cast(
+                Embeddings,
+                [
+                    embedding
+                    for embedding in self._model.encode(input, convert_to_numpy=True)
+                ],
+            )
 
         texts_with_instructions = [[self._instruction, text] for text in input]
 
-        return cast(Embeddings, self._model.encode(texts_with_instructions).tolist())
+        return cast(
+            Embeddings,
+            [
+                embedding
+                for embedding in self._model.encode(
+                    texts_with_instructions, convert_to_numpy=True
+                )
+            ],
+        )

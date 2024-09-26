@@ -19,6 +19,7 @@ from chromadb.api.types import (
     DataLoader,
     Embedding,
     Embeddings,
+    PyEmbedding,
     Embeddable,
     GetResult,
     Include,
@@ -151,10 +152,10 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ],
         metadatas: Optional[OneOrMany[Metadata]],
@@ -244,10 +245,10 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_embedding_set(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ],
         metadatas: Optional[OneOrMany[Metadata]],
@@ -317,6 +318,12 @@ class CollectionCommon(Generic[ClientT]):
 
         return valid_ids, valid_where, valid_where_document, valid_include
 
+    def _transform_peek_response(self, response: GetResult) -> GetResult:
+        if response["embeddings"] is not None:
+            response["embeddings"] = np.array(response["embeddings"])
+
+        return response
+
     def _transform_get_response(
         self, response: GetResult, include: Include
     ) -> GetResult:
@@ -327,6 +334,9 @@ class CollectionCommon(Generic[ClientT]):
         ):
             response["data"] = self._data_loader(response["uris"])
 
+        if "embeddings" in include:
+            response["embeddings"] = np.array(response["embeddings"])
+
         # Remove URIs from the result if they weren't requested
         if "uris" not in include:
             response["uris"] = None
@@ -335,10 +345,10 @@ class CollectionCommon(Generic[ClientT]):
 
     def _validate_and_prepare_query_request(
         self,
-        query_embeddings: Optional[  # type: ignore[type-arg]
+        query_embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ],
         query_texts: Optional[OneOrMany[Document]],
@@ -428,6 +438,11 @@ class CollectionCommon(Generic[ClientT]):
         ):
             response["data"] = [self._data_loader(uris) for uris in response["uris"]]
 
+        if "embeddings" in include and response["embeddings"] is not None:
+            response["embeddings"] = [
+                np.array(embedding) for embedding in response["embeddings"]
+            ]
+
         # Remove URIs from the result if they weren't requested
         if "uris" not in include:
             response["uris"] = None
@@ -498,10 +513,10 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_upsert_request(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[  # type: ignore[type-arg]
+        embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ],
         metadatas: Optional[OneOrMany[Metadata]],
@@ -550,14 +565,12 @@ class CollectionCommon(Generic[ClientT]):
 
     @staticmethod
     def _normalize_embeddings(
-        embeddings: Union[  # type: ignore[type-arg]
+        embeddings: Union[
             OneOrMany[Embedding],
-            OneOrMany[np.ndarray],
+            OneOrMany[PyEmbedding],
         ]
     ) -> Embeddings:
-        if isinstance(embeddings, np.ndarray):
-            return embeddings.tolist()  # type: ignore
-        return embeddings  # type: ignore
+        return cast(Embeddings, [np.array(embedding) for embedding in embeddings])
 
     def _embed(self, input: Any) -> Embeddings:
         if self._embedding_function is None:

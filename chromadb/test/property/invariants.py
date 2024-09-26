@@ -6,7 +6,7 @@ from chromadb.db.impl.sqlite import SqliteDB
 from time import sleep
 import psutil
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Any
 from typing_extensions import Literal
 import numpy as np
 import numpy.typing as npt
@@ -39,18 +39,31 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
         embedding_list = None
     elif isinstance(record_set["embeddings"], list):
         assert record_set["embeddings"] is not None
-        if len(record_set["embeddings"]) > 0 and not all(
-            isinstance(embedding, list) for embedding in record_set["embeddings"]
-        ):
-            if all(isinstance(e, (int, float)) for e in record_set["embeddings"]):
-                embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
+        if len(record_set["embeddings"]) > 0:
+            if all(
+                isinstance(embedding, list) for embedding in record_set["embeddings"]
+            ):
+                embedding_list = cast(types.Embeddings, record_set["embeddings"])
+            elif all(
+                isinstance(embedding, np.ndarray)
+                for embedding in record_set["embeddings"]
+            ):
+                embedding_list = cast(types.Embeddings, record_set["embeddings"])
             else:
-                raise InvalidArgument("an embedding must be a list of floats or ints")
+                if all(
+                    isinstance(e, (int, float, np.integer, np.floating))
+                    for e in record_set["embeddings"]
+                ):
+                    embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
+                else:
+                    raise InvalidArgument(
+                        "an embedding must be a list of floats or ints"
+                    )
         else:
             embedding_list = cast(types.Embeddings, record_set["embeddings"])
     else:
         raise InvalidArgument(
-            "embeddings must be a list of lists, a list of numbers, or None"
+            "embeddings must be a list of lists, a list of numpy arrays, a list of numbers, or None"
         )
 
     return {
@@ -90,7 +103,10 @@ def _field_matches(
     actual_field = result[field_name]
 
     if len(normalized_record_set["ids"]) == 0:
-        assert actual_field == []
+        if field_name == "embeddings":
+            assert cast(npt.NDArray[Any], actual_field).size == 0
+        else:
+            assert actual_field == []
         return
 
     # This assert should never happen, if we include metadatas/documents it will be
@@ -157,8 +173,8 @@ def _exact_distances(
     ] = distance_functions.l2,
 ) -> Tuple[List[List[int]], List[List[float]]]:
     """Return the ordered indices and distances from each query to each target"""
-    np_query = np.array(query)
-    np_targets = np.array(targets)
+    np_query = np.array(query, dtype=np.float32)
+    np_targets = np.array(targets, dtype=np.float32)
 
     # Compute the distance between each query and each target, using the distance function
     distances = np.apply_along_axis(
@@ -228,7 +244,7 @@ def ann_accuracy(
         # The higher the dimensionality, the more noise is introduced, since each float element
         # of the vector has noise added, which is then subsequently included in all normalization calculations.
         # This means that higher dimensions will have more noise, and thus more error.
-        assert all(isinstance(e, list) for e in embeddings)
+        assert all(isinstance(e, (list, np.ndarray)) for e in embeddings)
         dim = len(embeddings[0])
         accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 

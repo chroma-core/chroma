@@ -9,6 +9,7 @@ from chromadb.types import (
     Metadata,
     UpdateMetadata,
     Vector,
+    PyVector,
     LiteralValue,
     LogicalOperator,
     WhereOperator,
@@ -53,16 +54,21 @@ def maybe_cast_one_to_many_ids(target: OneOrMany[ID]) -> IDs:
 
 
 # Embeddings
+PyEmbedding = PyVector
+PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
 
 
 def maybe_cast_one_to_many_embedding(
-    target: Union[OneOrMany[Embedding], OneOrMany[np.ndarray]]  # type: ignore[type-arg]
+    target: Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]
 ) -> Embeddings:
     if isinstance(target, List):
         # One Embedding
         if isinstance(target[0], (int, float)):
+            return cast(Embeddings, [target])
+    elif isinstance(target, np.ndarray):
+        if isinstance(target[0], (np.floating, np.integer)):
             return cast(Embeddings, [target])
     # Already a sequence
     return cast(Embeddings, target)
@@ -167,7 +173,9 @@ L = TypeVar("L", covariant=True, bound=Loadable)
 
 class GetResult(TypedDict):
     ids: List[ID]
-    embeddings: Optional[List[Embedding]]
+    embeddings: Optional[
+        Union[Embeddings, PyEmbeddings, NDArray[Union[np.int32, np.float32]]]
+    ]
     documents: Optional[List[Document]]
     uris: Optional[URIs]
     data: Optional[Loadable]
@@ -177,7 +185,13 @@ class GetResult(TypedDict):
 
 class QueryResult(TypedDict):
     ids: List[IDs]
-    embeddings: Optional[List[List[Embedding]]]
+    embeddings: Optional[
+        Union[
+            List[Embeddings],
+            List[PyEmbeddings],
+            List[NDArray[Union[np.int32, np.float32]]],
+        ]
+    ]
     documents: Optional[List[List[Document]]]
     uris: Optional[List[List[URI]]]
     data: Optional[List[Loadable]]
@@ -209,7 +223,9 @@ class EmbeddingFunction(Protocol[D]):
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
             result = call(self, input)
-            return validate_embeddings(maybe_cast_one_to_many_embedding(result))
+            return validate_embeddings(
+                normalize_embeddings(maybe_cast_one_to_many_embedding(result))
+            )
 
         setattr(cls, "__call__", __call__)
 
@@ -217,6 +233,15 @@ class EmbeddingFunction(Protocol[D]):
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> Embeddings:
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
+
+
+def normalize_embeddings(
+    embeddings: Union[
+        OneOrMany[Embedding],
+        OneOrMany[PyEmbedding],
+    ]
+) -> Embeddings:
+    return cast(Embeddings, [np.array(embedding) for embedding in embeddings])
 
 
 def validate_embedding_function(
@@ -495,8 +520,8 @@ def validate_n_results(n_results: int) -> int:
 
 
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
-    """Validates embeddings to ensure it is a list of list of ints, or floats"""
-    if not isinstance(embeddings, list):
+    """Validates embeddings to ensure it is a list of numpy arrays of ints, or floats"""
+    if not isinstance(embeddings, (list, np.ndarray)):
         raise ValueError(
             f"Expected embeddings to be a list, got {type(embeddings).__name__}"
         )
@@ -504,19 +529,24 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         raise ValueError(
             f"Expected embeddings to be a list with at least one item, got {len(embeddings)} embeddings"
         )
-    if not all([isinstance(e, list) for e in embeddings]):
+    if not all([isinstance(e, np.ndarray) for e in embeddings]):
         raise ValueError(
-            "Expected each embedding in the embeddings to be a list, got "
+            "Expected each embedding in the embeddings to be a numpy array, got "
             f"{list(set([type(e).__name__ for e in embeddings]))}"
         )
     for i, embedding in enumerate(embeddings):
-        if len(embedding) == 0:
+        if embedding.ndim == 0:
             raise ValueError(
-                f"Expected each embedding in the embeddings to be a non-empty list, got empty embedding at pos {i}"
+                f"Expected a 1-dimensional array, got a 0-dimensional array {embedding}"
+            )
+        if embedding.size == 0:
+            raise ValueError(
+                f"Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos {i}"
             )
         if not all(
             [
-                isinstance(value, (int, float)) and not isinstance(value, bool)
+                isinstance(value, (np.integer, float, np.floating))
+                and not isinstance(value, bool)
                 for value in embedding
             ]
         ):
@@ -530,7 +560,7 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
 def validate_batch(
     batch: Tuple[
         IDs,
-        Optional[Embeddings],
+        Optional[Union[Embeddings, PyEmbeddings]],
         Optional[Metadatas],
         Optional[Documents],
         Optional[URIs],
@@ -541,3 +571,11 @@ def validate_batch(
         raise ValueError(
             f"Batch size {len(batch[0])} exceeds maximum batch size {limits['max_batch_size']}"
         )
+
+
+def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:
+    return [embedding.tolist() for embedding in embeddings]
+
+
+def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
+    return [np.array(embedding) for embedding in embeddings]

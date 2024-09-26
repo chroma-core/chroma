@@ -1,6 +1,9 @@
 import pytest
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.test.conftest import ClientFactories
+from chromadb.api.types import GetResult
+from typing import Dict, Any
+import numpy as np
 
 
 def test_database_tenant_collections(client_factories: ClientFactories) -> None:
@@ -99,14 +102,14 @@ def test_database_collections_add(client_factories: ClientFactories) -> None:
     coll_default.add(**records_default)  # type: ignore
 
     # Make sure the collections are isolated
-    res = coll_new.get(include=["embeddings", "documents"])
+    res = coll_new.get(include=["embeddings", "documents"])  # type: ignore
     assert res["ids"] == records_new["ids"]
-    assert res["embeddings"] == records_new["embeddings"]
+    check_embeddings(res=res, records=records_new)
     assert res["documents"] == records_new["documents"]
 
-    res = coll_default.get(include=["embeddings", "documents"])
+    res = coll_default.get(include=["embeddings", "documents"])  # type: ignore
     assert res["ids"] == records_default["ids"]
-    assert res["embeddings"] == records_default["embeddings"]
+    check_embeddings(res=res, records=records_default)
     assert res["documents"] == records_default["documents"]
 
 
@@ -146,14 +149,14 @@ def test_tenant_collections_add(client_factories: ClientFactories) -> None:
     coll_tenant2.add(**records_tenant2)  # type: ignore
 
     # Make sure the collections are isolated
-    res = coll_tenant1.get(include=["embeddings", "documents"])
+    res = coll_tenant1.get(include=["embeddings", "documents"])  # type: ignore
     assert res["ids"] == records_tenant1["ids"]
-    assert res["embeddings"] == records_tenant1["embeddings"]
+    check_embeddings(res=res, records=records_tenant1)
     assert res["documents"] == records_tenant1["documents"]
 
-    res = coll_tenant2.get(include=["embeddings", "documents"])
+    res = coll_tenant2.get(include=["embeddings", "documents"])  # type: ignore
     assert res["ids"] == records_tenant2["ids"]
-    assert res["embeddings"] == records_tenant2["embeddings"]
+    check_embeddings(res=res, records=records_tenant2)
     assert res["documents"] == records_tenant2["documents"]
 
 
@@ -170,3 +173,10 @@ def test_min_len_name(client_factories: ClientFactories) -> None:
     # Create a tenant with a name of length 1 and expect an error
     with pytest.raises(Exception):
         admin_client.create_tenant("a")
+
+
+def check_embeddings(res: GetResult, records: Dict[str, Any]) -> None:
+    if res["embeddings"] is not None:
+        assert np.array_equal(res["embeddings"], records["embeddings"])
+    else:
+        assert records["embeddings"] is None

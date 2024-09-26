@@ -23,6 +23,7 @@ from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api.types import (
     Documents,
     Embeddings,
+    PyEmbeddings,
     IDs,
     Include,
     Metadatas,
@@ -33,6 +34,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
+    convert_np_embeddings_to_list,
 )
 
 
@@ -416,7 +418,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[Embeddings],
+            Optional[PyEmbeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -449,7 +451,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings),
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
@@ -465,7 +473,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings)
+            if embeddings is not None
+            else None,
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(
@@ -485,7 +501,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings),
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(
             batch, "/collections/" + str(collection_id) + "/upsert"
@@ -507,7 +529,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             "post",
             "/collections/" + str(collection_id) + "/query",
             json={
-                "query_embeddings": query_embeddings,
+                "query_embeddings": convert_np_embeddings_to_list(query_embeddings)
+                if query_embeddings is not None
+                else None,
                 "n_results": n_results,
                 "where": where,
                 "where_document": where_document,

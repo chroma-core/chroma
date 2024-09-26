@@ -21,6 +21,7 @@ import logging
 import random
 import re
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
+import numpy as np
 
 
 def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
@@ -369,8 +370,8 @@ def test_empty_filter(client: ClientAPI) -> None:
     coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
-    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
-    test_query_embedding: Embedding = [1, 2]
+    test_embeddings: Embeddings = [np.array([1, 1]), np.array([2, 2]), np.array([3, 3])]
+    test_query_embedding: Embedding = np.array([1, 2])
     test_query_embeddings: Embeddings = [test_query_embedding, test_query_embedding]
 
     coll.add(ids=test_ids, embeddings=test_embeddings)
@@ -382,7 +383,8 @@ def test_empty_filter(client: ClientAPI) -> None:
         include=["embeddings", "distances", "metadatas"],  # type: ignore[list-item]
     )
     assert res["ids"] == [[]]
-    assert res["embeddings"] == [[]]
+    if res["embeddings"] is not None:
+        assert cast(np.ndarray, res["embeddings"][0]).size == 0
     assert res["distances"] == [[]]
     assert res["metadatas"] == [[]]
     assert set(res["included"]) == set(["embeddings", "distances", "metadatas"])
@@ -405,7 +407,7 @@ def test_boolean_metadata(client: ClientAPI) -> None:
     coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
-    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_embeddings: Embeddings = [np.array([1, 1]), np.array([2, 2]), np.array([3, 3])]
     test_metadatas: Metadatas = [{"test": True}, {"test": False}, {"test": True}]
 
     coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
@@ -422,7 +424,7 @@ def test_get_empty(client: ClientAPI) -> None:
     coll = client.create_collection(name="test")
 
     test_ids: IDs = ["1", "2", "3"]
-    test_embeddings: Embeddings = [[1, 1], [2, 2], [3, 3]]
+    test_embeddings: Embeddings = [np.array([1, 1]), np.array([2, 2]), np.array([3, 3])]
     test_metadatas: Metadatas = [{"test": 10}, {"test": 20}, {"test": 30}]
 
     def check_empty_res(res: GetResult) -> None:
