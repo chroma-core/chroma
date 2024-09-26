@@ -28,7 +28,7 @@ A subsequent change in behavior is `limit` and `offset`, which depends on the or
 
 We have also modified the behavior of `Client.get_or_create`. Previously, if a collection already existed and the `metadata` argument was provided, the existing collection's metadata would be overwritten with the new values. This has now changed. If the collection already exists, get_or_create will simply return the existing collection with the specified name, and any additional arguments—including `metadata`—will be ignored.
 
-The embeddings returned in `collection.get()`, `collection.query()`, and `collection.peek()` are now represented by a 2D numpy array instead of a Python list. We made this change because we are moving towards increasing performance on Local Chroma by internally representing embeddings with numpy arrays. You can still provide either a Python list or numpy array when submitting embeddings in a request.
+The embeddings returned in `collection.get()`, `collection.query()`, and `collection.peek()` are now represented by a 2-d numpy array instead of a Python list. We made this change because we are moving towards increasing performance on Local Chroma by internally representing embeddings with numpy arrays. You can still provide either a Python list or numpy array when submitting embeddings in a request. If your request returns multiple embeddings, like in `.query()`, it will be a python list of 2-d numpy arrays.
 
 
 ### v0.5.6
