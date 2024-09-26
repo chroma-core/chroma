@@ -429,9 +429,8 @@ impl HnswIndexProvider {
     }
 
     /// Purge all entries from the cache and remove temporary files from disk.
-    pub async fn purge_all_entries(&mut self) {
-        while let Some((_, index)) = self.cache.pop() {
-            let index_id = index.inner.read().id;
+    pub async fn purge_by_id(&mut self, index_ids: &[Uuid]) {
+        for index_id in index_ids {
             match self.remove_temporary_files(&index_id).await {
                 Ok(_) => {}
                 Err(e) => {

@@ -29,6 +29,7 @@ use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
 use tracing::Span;
+use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -145,7 +146,7 @@ impl CompactionManager {
 
     // TODO: make the return type more informative
     #[instrument(name = "CompactionManager::compact_batch")]
-    pub(crate) async fn compact_batch(&mut self) -> (u32, u32) {
+    pub(crate) async fn compact_batch(&mut self, compacted: &mut Vec<Uuid>) -> (u32, u32) {
         self.scheduler.schedule().await;
         let mut jobs = FuturesUnordered::new();
         for job in self.scheduler.get_jobs() {
@@ -161,6 +162,7 @@ impl CompactionManager {
             match job {
                 Ok(result) => {
                     println!("Compaction completed: {:?}", result);
+                    compacted.push(result.id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
@@ -298,9 +300,10 @@ impl Handler<ScheduleMessage> for CompactionManager {
         ctx: &ComponentContext<CompactionManager>,
     ) {
         println!("CompactionManager: Performing compaction");
-        self.compact_batch().await;
+        let mut ids = Vec::new();
+        self.compact_batch(&mut ids).await;
 
-        self.hnsw_index_provider.purge_all_entries().await;
+        self.hnsw_index_provider.purge_by_id(&ids).await;
         self.blockfile_provider.clear();
 
         // Compaction is done, schedule the next compaction
