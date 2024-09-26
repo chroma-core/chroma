@@ -55,10 +55,7 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
 
 impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
     fn from(value: UpdateMetadataValue) -> Self {
-        let proto_value = match value {
-            UpdateMetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
-            },
+        match value {
             UpdateMetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::IntValue(
                     value as i64,
@@ -75,8 +72,7 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                 )),
             },
             UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
-        };
-        proto_value
+        }
     }
 }
 
@@ -200,10 +196,7 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
 
 impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
     fn from(value: MetadataValue) -> Self {
-        let proto_value = match value {
-            MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
-            },
+        match value {
             MetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::IntValue(
                     value as i64,
@@ -219,8 +212,10 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
                     value,
                 )),
             },
-        };
-        proto_value
+            MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
+            },
+        }
     }
 }
 
@@ -301,6 +296,7 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     }
 }
 
+#[derive(Debug, Default)]
 pub struct MetadataDelta<'referred_data> {
     pub metadata_to_update: HashMap<
         &'referred_data str,
@@ -312,11 +308,7 @@ pub struct MetadataDelta<'referred_data> {
 
 impl<'referred_data> MetadataDelta<'referred_data> {
     pub fn new() -> Self {
-        Self {
-            metadata_to_update: HashMap::new(),
-            metadata_to_delete: HashMap::new(),
-            metadata_to_insert: HashMap::new(),
-        }
+        Self::default()
     }
 }
 
@@ -804,7 +796,7 @@ mod tests {
                             )),
                         },
                     ],
-                    operator: chroma_proto::BooleanOperator::And.try_into().unwrap(),
+                    operator: chroma_proto::BooleanOperator::And.into(),
                 },
             )),
         };
@@ -824,9 +816,7 @@ mod tests {
             r#where_document: Some(chroma_proto::where_document::WhereDocument::Direct(
                 chroma_proto::DirectWhereDocument {
                     document: "foo".to_string(),
-                    operator: chroma_proto::WhereDocumentOperator::Contains
-                        .try_into()
-                        .unwrap(),
+                    operator: chroma_proto::WhereDocumentOperator::Contains.into(),
                 },
             )),
         };
@@ -852,8 +842,7 @@ mod tests {
                                     chroma_proto::DirectWhereDocument {
                                         document: "foo".to_string(),
                                         operator: chroma_proto::WhereDocumentOperator::Contains
-                                            .try_into()
-                                            .unwrap(),
+                                            .into(),
                                     },
                                 ),
                             ),
@@ -864,14 +853,13 @@ mod tests {
                                     chroma_proto::DirectWhereDocument {
                                         document: "bar".to_string(),
                                         operator: chroma_proto::WhereDocumentOperator::Contains
-                                            .try_into()
-                                            .unwrap(),
+                                            .into(),
                                     },
                                 ),
                             ),
                         },
                     ],
-                    operator: chroma_proto::BooleanOperator::And.try_into().unwrap(),
+                    operator: chroma_proto::BooleanOperator::And.into(),
                 },
             )),
         };
