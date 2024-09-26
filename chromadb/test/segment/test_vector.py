@@ -441,7 +441,9 @@ def _test_update(
     assert segment.count(request_version_context=request_version_context) == 3
     results = segment.get_vectors(request_version_context=request_version_context)
     assert len(results) == 3
-    results = segment.get_vectors(ids=[embeddings[0]["id"]], request_version_context=request_version_context)
+    results = segment.get_vectors(
+        ids=[embeddings[0]["id"]], request_version_context=request_version_context
+    )
     assert np.array_equal(results[0]["embedding"], np.array([10.0, 10.0]))
 
     # Test querying at the old location
