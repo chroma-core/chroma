@@ -540,14 +540,7 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(reduce(lambda x, y: x | y, criteria))
             else:
                 expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key == ParameterValue(k))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(metadata_t.id.isin(sq))
+                clause.append(_where_clause(k, expr, metadata_t))
         return reduce(lambda x, y: x & y, clause)
 
     @trace_method(
@@ -578,7 +571,7 @@ class SqliteMetadataSegment(MetadataReader):
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x | y, criteria)
-            elif k == "$contains":
+            elif k in ("$contains", "$not_contains"):
                 v = cast(str, v)
                 search_term = f"%{v}%"
 
@@ -588,20 +581,11 @@ class SqliteMetadataSegment(MetadataReader):
                     .select(fulltext_t.rowid)
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
-                return metadata_t.id.isin(sq)
-            elif k == "$not_contains":
-                v = cast(str, v)
-                search_term = f"%{v}%"
-
-                sq = (
-                    self._db.querybuilder()
-                    .from_(fulltext_t)
-                    .select(fulltext_t.rowid)
-                    .where(
-                        fulltext_t.string_value.not_like(ParameterValue(search_term))
-                    )
+                return (
+                    metadata_t.id.isin(sq)
+                    if k == "$contains"
+                    else metadata_t.id.notin(sq)
                 )
-                return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
@@ -664,6 +648,7 @@ class SqliteMetadataSegment(MetadataReader):
 
 
 def _where_clause(
+    key: str,
     expr: Union[
         LiteralValue,
         Dict[WhereOperator, LiteralValue],
@@ -675,83 +660,52 @@ def _where_clause(
 
     # Literal value case
     if isinstance(expr, (str, int, float, bool)):
-        return _where_clause({cast(WhereOperator, "$eq"): expr}, table)
+        return _where_clause(key, {cast(WhereOperator, "$eq"): expr}, table)
 
     # Operator dict case
     operator, value = next(iter(expr.items()))
-    return _value_criterion(value, operator, table)
+    return _value_criterion(key, value, operator, table)
 
 
 def _value_criterion(
+    key: str,
     value: Union[LiteralValue, List[LiteralValue]],
     op: Union[WhereOperator, InclusionExclusionOperator],
     table: Table,
 ) -> Criterion:
-    """Return a criterion to compare a value with the appropriate columns given its type
-    and the operation type."""
-    if isinstance(value, str):
-        cols = [table.string_value]
-    # isinstance(True, int) evaluates to True, so we need to check for bools separately
-    elif isinstance(value, bool) and op in ("$eq", "$ne"):
-        cols = [table.bool_value]
-    elif isinstance(value, int) and op in ("$eq", "$ne"):
-        cols = [table.int_value]
-    elif isinstance(value, float) and op in ("$eq", "$ne"):
-        cols = [table.float_value]
-    elif isinstance(value, list) and op in ("$in", "$nin"):
-        _v = value
-        if len(_v) == 0:
-            raise ValueError(f"Empty list for {op} operator")
-        if isinstance(value[0], str):
-            col_exprs = [
-                table.string_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.string_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], bool):
-            col_exprs = [
-                table.bool_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.bool_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], int):
-            col_exprs = [
-                table.int_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.int_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], float):
-            col_exprs = [
-                table.float_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.float_value.notin(ParameterValue(_v))
-            ]
-    elif isinstance(value, list) and op in ("$in", "$nin"):
-        col_exprs = [
-            table.int_value.isin(ParameterValue(value))
-            if op == "$in"
-            else table.int_value.notin(ParameterValue(value)),
-            table.float_value.isin(ParameterValue(value))
-            if op == "$in"
-            else table.float_value.notin(ParameterValue(value)),
-        ]
-    else:
-        cols = [table.int_value, table.float_value]
+    """Creates the filter for a single operator"""
+    sub_q = table.select(table.id).where(table.key == ParameterValue(key))
+    p_val = ParameterValue(value)
 
-    if op == "$eq":
-        col_exprs = [col == ParameterValue(value) for col in cols]
-    elif op == "$ne":
-        col_exprs = [col != ParameterValue(value) for col in cols]
+    if isinstance(value, bool) or (
+        isinstance(value, list) and isinstance(value[0], bool)
+    ):
+        col = table.bool_value
+    elif isinstance(value, int) or (
+        isinstance(value, list) and isinstance(value[0], int)
+    ):
+        col = table.int_value
+    elif isinstance(value, float) or (
+        isinstance(value, list) and isinstance(value[0], float)
+    ):
+        col = table.float_value
+    else:
+        col = table.string_value
+
+    if op in ("$eq", "$ne"):
+        expr = col == p_val
     elif op == "$gt":
-        col_exprs = [col > ParameterValue(value) for col in cols]
+        expr = col > p_val
     elif op == "$gte":
-        col_exprs = [col >= ParameterValue(value) for col in cols]
+        expr = col >= p_val
     elif op == "$lt":
-        col_exprs = [col < ParameterValue(value) for col in cols]
+        expr = col < p_val
     elif op == "$lte":
-        col_exprs = [col <= ParameterValue(value) for col in cols]
-
-    if op == "$ne":
-        return reduce(lambda x, y: x & y, col_exprs)
+        expr = col <= p_val
     else:
-        return reduce(lambda x, y: x | y, col_exprs)
+        expr = col.isin(p_val)
+
+    if op in ("$ne", "$nin"):
+        return table.id.notin(sub_q.where(expr))
+    else:
+        return table.id.isin(sub_q.where(expr))
