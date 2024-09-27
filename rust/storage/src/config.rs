@@ -29,6 +29,7 @@ pub enum S3CredentialsConfig {
 /// - bucket: The name of the bucket to use.
 pub struct S3StorageConfig {
     pub bucket: String,
+    pub endpoint: String,
     pub credentials: S3CredentialsConfig,
     pub connect_timeout_ms: u64,
     pub request_timeout_ms: u64,
