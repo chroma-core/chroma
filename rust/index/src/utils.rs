@@ -1,5 +1,8 @@
 use rand::Rng;
 
+// This is not reserved for testing.  If you need to use it outside test contexts, remove this
+// line.  It exists solely to satisfy the linter.
+#[cfg(test)]
 pub(super) fn generate_random_data(n: usize, d: usize) -> Vec<f32> {
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
     let mut data = vec![0.0f32; n * d];
