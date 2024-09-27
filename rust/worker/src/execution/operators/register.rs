@@ -29,11 +29,11 @@ impl RegisterOperator {
 /// * `tenant` - The tenant id.
 /// * `collection_id` - The collection id.
 /// * `log_position` - The log position. Note that this is the log position for the last record that
-/// was flushed to S3.
+///   was flushed to S3.
 /// * `collection_version` - The collection version. This is the current collection version before
-/// the flush operation. This version will be incremented by 1 after the flush operation. If the
-/// collection version in sysdb is not the same as the current collection version, the flush operation
-/// will fail.
+///   the flush operation. This version will be incremented by 1 after the flush operation. If the
+///   collection version in sysdb is not the same as the current collection version, the flush
+///   operation will fail.
 /// * `segment_flush_info` - The segment flush info.
 /// * `sysdb` - The sysdb client.
 /// * `log` - The log client.
@@ -75,7 +75,7 @@ impl RegisterInput {
 /// * `result` - The result of the flush compaction operation.
 #[derive(Debug)]
 pub struct RegisterOutput {
-    sysdb_registration_result: FlushCompactionResponse,
+    _sysdb_registration_result: FlushCompactionResponse,
 }
 
 #[derive(Error, Debug)]
@@ -109,7 +109,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         let result = sysdb
             .flush_compaction(
                 input.tenant.clone(),
-                input.collection_id.clone(),
+                input.collection_id,
                 input.log_position,
                 input.collection_version,
                 input.segment_flush_info.clone(),
@@ -130,7 +130,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 
         match result {
             Ok(_) => Ok(RegisterOutput {
-                sysdb_registration_result: sysdb_registration_result,
+                _sysdb_registration_result: sysdb_registration_result,
             }),
             Err(error) => Err(RegisterError::UpdateLogOffsetError(error)),
         }
@@ -251,11 +251,11 @@ mod tests {
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(
-            result.sysdb_registration_result.collection_id,
+            result._sysdb_registration_result.collection_id,
             collection_uuid_1
         );
         assert_eq!(
-            result.sysdb_registration_result.collection_version,
+            result._sysdb_registration_result.collection_version,
             collection_version + 1
         );
 

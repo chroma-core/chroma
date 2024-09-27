@@ -17,7 +17,7 @@ pub struct GetVectorsOperator {}
 
 impl GetVectorsOperator {
     pub fn new() -> Box<Self> {
-        return Box::new(GetVectorsOperator {});
+        Box::new(GetVectorsOperator {})
     }
 }
 
@@ -42,12 +42,12 @@ impl GetVectorsOperatorInput {
         log_records: Chunk<LogRecord>,
         search_user_ids: Vec<String>,
     ) -> Self {
-        return GetVectorsOperatorInput {
+        GetVectorsOperatorInput {
             record_segment_definition,
             blockfile_provider,
             log_records,
             search_user_ids,
-        };
+        }
     }
 }
 

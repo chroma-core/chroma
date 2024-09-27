@@ -18,7 +18,9 @@ pub async fn get_record_dataset<RecordCorpus: RecordDataset>() -> RecordCorpus {
         .with_style(style.clone());
     record_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
 
-    let record_corpus = RecordCorpus::init()
+    
+
+    RecordCorpus::init()
         .and_then(|r| async {
             record_corpus_spinner.set_style(finish_style.clone());
             record_corpus_spinner.set_prefix("✔︎");
@@ -26,9 +28,7 @@ pub async fn get_record_dataset<RecordCorpus: RecordDataset>() -> RecordCorpus {
             Ok(r)
         })
         .await
-        .expect("Failed to initialize record corpus");
-
-    record_corpus
+        .expect("Failed to initialize record corpus")
 }
 
 pub async fn get_record_query_dataset_pair<

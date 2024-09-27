@@ -77,15 +77,11 @@ enum ExecutionState {
 #[derive(Error, Debug)]
 enum HnswSegmentQueryError {
     #[error(transparent)]
-    HnswSegmentQueryError(#[from] super::common::GetHnswSegmentByIdError),
+    GetByIdError(#[from] super::common::GetHnswSegmentByIdError),
     #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
-    #[error("Collection: {0} not found")]
-    CollectionNotFound(Uuid),
     #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
-    #[error("Record segment not found for collection: {0}")]
-    RecordSegmentNotFound(Uuid),
     #[error("Collection has no dimension set")]
     CollectionHasNoDimension,
     #[error("Collection version mismatch")]
@@ -95,11 +91,9 @@ enum HnswSegmentQueryError {
 impl ChromaError for HnswSegmentQueryError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswSegmentQueryError::HnswSegmentQueryError(e) => e.code(),
+            HnswSegmentQueryError::GetByIdError(e) => e.code(),
             HnswSegmentQueryError::GetSegmentsError(_) => ErrorCodes::Internal,
-            HnswSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::GetCollectionError(_) => ErrorCodes::Internal,
-            HnswSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
             HnswSegmentQueryError::CollectionHasNoDimension => ErrorCodes::InvalidArgument,
             HnswSegmentQueryError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
         }
@@ -143,6 +137,7 @@ pub(crate) struct HnswQueryOrchestrator {
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     // Result channel
+    #[allow(clippy::type_complexity)]
     result_channel: Option<
         tokio::sync::oneshot::Sender<Result<Vec<Vec<VectorQueryResult>>, Box<dyn ChromaError>>>,
     >,
@@ -152,6 +147,7 @@ pub(crate) struct HnswQueryOrchestrator {
 }
 
 impl HnswQueryOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         system: System,
         query_vectors: Vec<Vec<f32>>,
@@ -226,7 +222,7 @@ impl HnswQueryOrchestrator {
         let end_timestamp = match end_timestamp {
             // TODO: change protobuf definition to use u64 instead of i64
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
-            Err(e) => {
+            Err(_) => {
                 // Log an error and reply + return
                 return;
             }
@@ -453,7 +449,7 @@ impl HnswQueryOrchestrator {
                 "Invariant violation. HNSW result offset ids are not set for query vector index",
             );
 
-        if hnsw_result_offset_ids.len() > 0 {
+        if !hnsw_result_offset_ids.is_empty() {
             // Eagerly dispatch prefetch tasks.
             let offset_ids_to_prefetch: Vec<u32> =
                 hnsw_result_offset_ids.iter().map(|x| *x as u32).collect();
@@ -520,7 +516,7 @@ impl HnswQueryOrchestrator {
         }
         match result_channel.send(Ok(empty_resp)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_) => {
                 // Log an error - this implied the listener was dropped
                 tracing::error!(
                     "[HnswQueryOrchestrator] Result channel dropped before sending empty response"
@@ -595,7 +591,7 @@ impl Component for HnswQueryOrchestrator {
 
         // If segment is uninitialized and dimension is not set then we assume
         // that this is a query before any add so return empty response.
-        if hnsw_segment.file_path.len() == 0 && collection.dimension.is_none() {
+        if hnsw_segment.file_path.is_empty() && collection.dimension.is_none() {
             self.terminate_with_empty_response(ctx);
             return;
         }
@@ -663,7 +659,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for HnswQueryOrchestrato
         match message {
             Ok(pull_logs_output) => {
                 let logs = pull_logs_output.logs();
-                if logs.len() > 0 {
+                if !logs.is_empty() {
                     self.brute_force_query(logs.clone(), ctx.receiver()).await;
                 } else {
                     // Skip running the brute force query if there are no logs
@@ -790,7 +786,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
             {
                 let query_result = VectorQueryResult {
                     id: index,
-                    distance: distance,
+                    distance,
                     vector: Some(vector),
                 };
                 query_results.push(query_result);
@@ -799,7 +795,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
             for (index, distance) in output_ids.drain(..).zip(output_distances.drain(..)) {
                 let query_result = VectorQueryResult {
                     id: index,
-                    distance: distance,
+                    distance,
                     vector: None,
                 };
                 query_results.push(query_result);
@@ -839,7 +835,7 @@ impl Handler<TaskResult<MergeKnnResultsOperatorOutput, Box<dyn ChromaError>>>
                 .expect("Invariant violation. Results are not set")))
             {
                 Ok(_) => (),
-                Err(e) => {
+                Err(_) => {
                     // Log an error
                 }
             }

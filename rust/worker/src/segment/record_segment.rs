@@ -51,8 +51,6 @@ pub enum RecordSegmentWriterCreationError {
     BlockfileCreateError(#[from] Box<CreateError>),
     #[error("Blockfile Open Error")]
     BlockfileOpenError(#[from] Box<OpenError>),
-    #[error("No exisiting offset id found")]
-    NoExistingOffsetId,
 }
 
 impl RecordSegmentWriter {
@@ -135,7 +133,7 @@ impl RecordSegmentWriter {
                 4 => {
                     tracing::debug!("Found files, loading blockfiles for record segment");
                     let user_id_to_id_bf_id = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
-                        Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.get(0) {
+                        Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.first() {
                             Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,
                             None => {
                                 return Err(RecordSegmentWriterCreationError::MissingFile(
@@ -150,7 +148,7 @@ impl RecordSegmentWriter {
                         }
                     };
                     let id_to_user_id_bf_id = match segment.file_path.get(OFFSET_ID_TO_USER_ID) {
-                        Some(id_to_user_id_bf_id) => match id_to_user_id_bf_id.get(0) {
+                        Some(id_to_user_id_bf_id) => match id_to_user_id_bf_id.first() {
                             Some(id_to_user_id_bf_id) => id_to_user_id_bf_id,
                             None => {
                                 return Err(RecordSegmentWriterCreationError::MissingFile(
@@ -165,7 +163,7 @@ impl RecordSegmentWriter {
                         }
                     };
                     let id_to_data_bf_id = match segment.file_path.get(OFFSET_ID_TO_DATA) {
-                        Some(id_to_data_bf_id) => match id_to_data_bf_id.get(0) {
+                        Some(id_to_data_bf_id) => match id_to_data_bf_id.first() {
                             Some(id_to_data_bf_id) => id_to_data_bf_id,
                             None => {
                                 return Err(RecordSegmentWriterCreationError::MissingFile(
@@ -180,7 +178,7 @@ impl RecordSegmentWriter {
                         }
                     };
                     let max_offset_id_bf_id = match segment.file_path.get(MAX_OFFSET_ID) {
-                        Some(max_offset_id_file_id) => match max_offset_id_file_id.get(0) {
+                        Some(max_offset_id_file_id) => match max_offset_id_file_id.first() {
                             Some(max_offset_id_file_id) => max_offset_id_file_id,
                             None => {
                                 return Err(RecordSegmentWriterCreationError::MissingFile(
@@ -291,12 +289,6 @@ pub enum ApplyMaterializedLogError {
     BlockfileDeleteError,
     #[error("Error updating blockfile")]
     BlockfileUpdateError,
-    #[error("Embedding not set in the user write")]
-    EmbeddingNotSet,
-    #[error("Metadata update not valid")]
-    MetadataUpdateNotValid,
-    #[error("Document delete error")]
-    DocumentDeleteError,
     #[error("Allocation error")]
     AllocationError,
     #[error("FTS Document add error")]
@@ -315,13 +307,10 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileSetError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileUpdateError => ErrorCodes::Internal,
-            ApplyMaterializedLogError::MetadataUpdateNotValid => ErrorCodes::Internal,
-            ApplyMaterializedLogError::DocumentDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::AllocationError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentAddError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentUpdateError => ErrorCodes::Internal,
-            ApplyMaterializedLogError::EmbeddingNotSet => ErrorCodes::InvalidArgument,
             ApplyMaterializedLogError::HnswIndexError(_) => ErrorCodes::Internal,
         }
     }
@@ -580,7 +569,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
         }
 
         match res_max_offset_id {
-            Ok(f) => {
+            Ok(_) => {
                 flushed_files.insert(
                     MAX_OFFSET_ID.to_string(),
                     vec![max_offset_id_bf_id.to_string()],
@@ -638,17 +627,11 @@ impl RecordSegmentReader<'_> {
                 let id_to_data_bf_id = &segment.file_path.get(OFFSET_ID_TO_DATA).unwrap()[0];
 
                 let max_offset_id_bf_id = match segment.file_path.get(MAX_OFFSET_ID) {
-                    Some(max_offset_id_file_id) => match max_offset_id_file_id.get(0) {
-                        Some(max_offset_id_file_id) => Some(max_offset_id_file_id),
-                        None => None,
-                    },
+                    Some(max_offset_id_file_id) => max_offset_id_file_id.first(),
                     None => None,
                 };
                 let max_offset_id_bf_uuid = match max_offset_id_bf_id {
-                    Some(id) => match Uuid::parse_str(id) {
-                        Ok(max_offset_id_bf_uuid) => Some(max_offset_id_bf_uuid),
-                        Err(_) => None,
-                    },
+                    Some(id) => Uuid::parse_str(id).ok(),
                     None => None,
                 };
 
@@ -841,19 +824,20 @@ impl RecordSegmentReader<'_> {
         self.id_to_user_id.count().await
     }
 
-    pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) -> () {
+    pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) {
         let prefixes = vec![""; keys.len()];
         self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
     }
 
-    pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) -> () {
+    #[allow(dead_code)]
+    pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) {
         let prefixes = vec![""; keys.len()];
         self.user_id_to_id
             .load_blocks_for_keys(&prefixes, &keys)
             .await
     }
 
-    pub(crate) async fn prefetch_id_to_user_id(&self, keys: &[u32]) -> () {
+    pub(crate) async fn prefetch_id_to_user_id(&self, keys: &[u32]) {
         let prefixes = vec![""; keys.len()];
         self.id_to_user_id
             .load_blocks_for_keys(&prefixes, keys)

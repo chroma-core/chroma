@@ -27,8 +27,8 @@ impl PartitionInput {
     /// # Parameters
     /// * `records` - The records to partition.
     /// * `max_partition_size` - The maximum size of a partition. Since we are trying to
-    /// partition the records by id, which can casue the partition size to be larger than this
-    /// value.
+    ///   partition the records by id, which can casue the partition size to be larger than this
+    ///   value.
     pub fn new(records: Chunk<LogRecord>, max_partition_size: usize) -> Self {
         PartitionInput {
             records,
@@ -46,16 +46,12 @@ pub struct PartitionOutput {
 }
 
 #[derive(Debug, Error)]
-pub enum PartitionError {
-    #[error("Failed to partition records.")]
-    PartitionError,
-}
+#[error("Failed to partition records.")]
+pub struct PartitionError;
 
 impl ChromaError for PartitionError {
     fn code(&self) -> ErrorCodes {
-        match self {
-            PartitionError::PartitionError => ErrorCodes::Internal,
-        }
+        ErrorCodes::Internal
     }
 }
 
@@ -112,9 +108,9 @@ impl PartitionOperator {
 
     fn determine_partition_size(&self, num_records: usize, threshold: usize) -> usize {
         if num_records < threshold {
-            return num_records;
+            num_records
         } else {
-            return threshold;
+            threshold
         }
     }
 }

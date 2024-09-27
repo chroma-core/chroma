@@ -150,8 +150,10 @@ impl ChromaError for CompactionError {
 // TODO: we need to improve this response
 #[derive(Debug)]
 pub struct CompactionResponse {
+    #[allow(dead_code)]
     pub(crate) id: Uuid,
     pub(crate) compaction_job: CompactionJob,
+    #[allow(dead_code)]
     pub(crate) message: String,
 }
 

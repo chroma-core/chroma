@@ -14,7 +14,7 @@ use chroma_index::{
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
 use chroma_types::{
-    Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Segment, Where,
     WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use core::panic;
@@ -85,10 +85,6 @@ pub(crate) enum MetadataFilteringError {
     MetadataFilteringIndexError(#[from] MetadataIndexError),
     #[error("Error from metadata segment reader {0}")]
     MetadataFilteringMetadataSegmentReaderError(#[from] MetadataSegmentError),
-    #[error("Error reading from record segment")]
-    MetadataFilteringRecordSegmentReaderError,
-    #[error("Invalid input")]
-    MetadataFilteringInvalidInput,
 }
 
 impl ChromaError for MetadataFilteringError {
@@ -100,10 +96,6 @@ impl ChromaError for MetadataFilteringError {
             MetadataFilteringError::MetadataFilteringLogMaterializationError(e) => e.code(),
             MetadataFilteringError::MetadataFilteringIndexError(e) => e.code(),
             MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e) => e.code(),
-            MetadataFilteringError::MetadataFilteringRecordSegmentReaderError => {
-                ErrorCodes::Internal
-            }
-            MetadataFilteringError::MetadataFilteringInvalidInput => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -188,19 +180,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Str(string_value) => {
-                                        if let KeyWrapper::String(where_value) = metadata_value {
-                                            if *string_value == *where_value {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Str(string_value) = *val {
+                                    if let KeyWrapper::String(where_value) = metadata_value {
+                                        if *string_value == *where_value {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -226,19 +215,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Bool(bool_value) => {
-                                        if let KeyWrapper::Bool(where_value) = metadata_value {
-                                            if *bool_value == *where_value {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Bool(bool_value) = *val {
+                                    if let KeyWrapper::Bool(where_value) = metadata_value {
+                                        if *bool_value == *where_value {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -264,19 +250,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if *int_value as u32 == *where_value {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Int(int_value) = *val {
+                                    if let KeyWrapper::Uint32(where_value) = metadata_value {
+                                        if *int_value as u32 == *where_value {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -287,19 +270,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key less than this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) < (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Int(int_value) = *val {
+                                    if let KeyWrapper::Uint32(where_value) = metadata_value {
+                                        if ((*int_value) as u32) < (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::LessThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -307,19 +287,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) <= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Int(int_value) = *val {
+                                    if let KeyWrapper::Uint32(where_value) = metadata_value {
+                                        if ((*int_value) as u32) <= (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThan => {
                         let mut result = RoaringBitmap::new();
@@ -327,19 +304,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) > (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Int(int_value) = *val {
+                                    if let KeyWrapper::Uint32(where_value) = metadata_value {
+                                        if ((*int_value) as u32) > (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -347,19 +321,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) >= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Int(int_value) = *val {
+                                    if let KeyWrapper::Uint32(where_value) = metadata_value {
+                                        if ((*int_value) as u32) >= (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                 },
                 chroma_types::MetadataType::DoubleType => match comparator {
@@ -369,19 +340,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) == (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Float(float_value) = *val {
+                                    if let KeyWrapper::Float32(where_value) = metadata_value {
+                                        if ((*float_value) as f32) == (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -392,19 +360,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key < this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) < (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Float(float_value) = *val {
+                                    if let KeyWrapper::Float32(where_value) = metadata_value {
+                                        if ((*float_value) as f32) < (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::LessThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -412,19 +377,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) <= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Float(float_value) = *val {
+                                    if let KeyWrapper::Float32(where_value) = metadata_value {
+                                        if ((*float_value) as f32) <= (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThan => {
                         let mut result = RoaringBitmap::new();
@@ -432,19 +394,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) > (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Float(float_value) = *val {
+                                    if let KeyWrapper::Float32(where_value) = metadata_value {
+                                        if ((*float_value) as f32) > (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -452,19 +411,16 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) >= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
+                                if let MetadataValue::Float(float_value) = *val {
+                                    if let KeyWrapper::Float32(where_value) = metadata_value {
+                                        if ((*float_value) as f32) >= (*where_value) {
+                                            result.insert(*offset_id);
                                         }
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                 },
                 chroma_types::MetadataType::StringListType => {
@@ -521,17 +477,14 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         if record.final_operation == MaterializedLogOperation::DeleteExisting {
                             continue;
                         }
-                        match record.merged_document_ref() {
-                            Some(doc) => {
-                                /* if re.is_match(doc) { */
-                                if doc.contains(query) {
-                                    matching_contains.push(record.offset_id as i32);
-                                }
+                        if let Some(doc) = record.merged_document_ref() {
+                            /* if re.is_match(doc) { */
+                            if doc.contains(query) {
+                                matching_contains.push(record.offset_id as i32);
                             }
-                            None => {}
                         };
                     }
-                    return matching_contains;
+                    matching_contains
                 }
                 WhereDocumentOperator::NotContains => {
                     todo!()
@@ -582,7 +535,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 &input.blockfile_provider,
             )
             .await
-            .map_err(|e| MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e))?;
+            .map_err(MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError)?;
 
             filtered_index_offset_ids = metadata_segment_reader
                 .query(
@@ -634,8 +587,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         // Hydrate offset ids for user supplied ids.
         // First from the log.
         let mut user_supplied_offset_ids: Vec<u32> = vec![];
-        let mut remaining_id_set: HashSet<String> = HashSet::new();
-        let mut query_ids_present = false;
+        let mut remaining_id_set: HashSet<String>;
+        let query_ids_present;
         match &input.query_ids {
             Some(query_ids) => {
                 let query_ids_set: HashSet<String> = HashSet::from_iter(query_ids.iter().cloned());
@@ -691,12 +644,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     Some(r) => {
                         // Now read the remaining ids from storage.
                         for ids in remaining_id_set {
-                            match r.get_offset_id_for_user_id(ids.as_str()).await {
-                                Ok(offset_id) => {
-                                    user_supplied_offset_ids.push(offset_id);
-                                }
-                                // It's ok for the user to supply a non existent id.
-                                Err(_) => (),
+                            if let Ok(offset_id) = r.get_offset_id_for_user_id(ids.as_str()).await {
+                                user_supplied_offset_ids.push(offset_id);
                             }
                         }
                     }
@@ -720,7 +669,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         }
         return Ok(MetadataFilteringOutput {
             log_records: input.log_record.clone(),
-            where_condition_filtered_offset_ids: where_condition_filtered_offset_ids,
+            where_condition_filtered_offset_ids,
             user_supplied_filtered_offset_ids: filtered_offset_ids,
         });
     }

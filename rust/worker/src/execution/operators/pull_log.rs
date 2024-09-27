@@ -163,7 +163,7 @@ mod tests {
             Log::InMemory(ref mut log) => {
                 log.add_log(
                     collection_uuid_1.clone(),
-                    Box::new(InternalLogRecord {
+                    InternalLogRecord {
                         collection_id: collection_uuid_1.clone(),
                         log_offset: 0,
                         log_ts: 1,
@@ -178,11 +178,11 @@ mod tests {
                                 operation: Operation::Add,
                             },
                         },
-                    }),
+                    },
                 );
                 log.add_log(
                     collection_uuid_1.clone(),
-                    Box::new(InternalLogRecord {
+                    InternalLogRecord {
                         collection_id: collection_uuid_1.clone(),
                         log_offset: 1,
                         log_ts: 2,
@@ -197,7 +197,7 @@ mod tests {
                                 operation: Operation::Add,
                             },
                         },
-                    }),
+                    },
                 );
             }
             _ => panic!("Expected InMemoryLog"),

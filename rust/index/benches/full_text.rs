@@ -170,7 +170,7 @@ fn bench_querying(c: &mut Criterion) {
                     .await
                     .unwrap();
 
-                assert!(result.len() > 0, "Query result is empty");
+                assert!(!result.is_empty(), "Query result is empty");
             },
             criterion::BatchSize::SmallInput,
         )
