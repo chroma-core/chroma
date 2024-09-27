@@ -674,36 +674,38 @@ def _value_criterion(
     table: Table,
 ) -> Criterion:
     """Creates the filter for a single operator"""
+
+    def is_numeric(obj: object) -> bool:
+        return (not isinstance(obj, bool)) and isinstance(obj, (int, float))
+
     sub_q = table.select(table.id).where(table.key == ParameterValue(key))
     p_val = ParameterValue(value)
 
-    if isinstance(value, bool) or (
-        isinstance(value, list) and isinstance(value[0], bool)
-    ):
-        col = table.bool_value
-    elif isinstance(value, int) or (
-        isinstance(value, list) and isinstance(value[0], int)
-    ):
-        col = table.int_value
-    elif isinstance(value, float) or (
-        isinstance(value, list) and isinstance(value[0], float)
-    ):
-        col = table.float_value
+    if is_numeric(value) or (isinstance(value, list) and is_numeric(value[0])):
+        int_col, float_col = table.int_value, table.float_value
+        if op in ("$eq", "$ne"):
+            expr = (int_col == p_val) | (float_col == p_val)
+        elif op == "$gt":
+            expr = (int_col > p_val) | (float_col > p_val)
+        elif op == "$gte":
+            expr = (int_col >= p_val) | (float_col >= p_val)
+        elif op == "$lt":
+            expr = (int_col < p_val) | (float_col < p_val)
+        elif op == "$lte":
+            expr = (int_col <= p_val) | (float_col <= p_val)
+        else:
+            expr = int_col.isin(p_val) | float_col.isin(p_val)
     else:
-        col = table.string_value
-
-    if op in ("$eq", "$ne"):
-        expr = col == p_val
-    elif op == "$gt":
-        expr = col > p_val
-    elif op == "$gte":
-        expr = col >= p_val
-    elif op == "$lt":
-        expr = col < p_val
-    elif op == "$lte":
-        expr = col <= p_val
-    else:
-        expr = col.isin(p_val)
+        if isinstance(value, bool) or (
+            isinstance(value, list) and isinstance(value[0], bool)
+        ):
+            col = table.bool_value
+        else:
+            col = table.string_value
+        if op in ("$eq", "$ne"):
+            expr = col == p_val
+        else:
+            expr = col.isin(p_val)
 
     if op in ("$ne", "$nin"):
         return table.id.notin(sub_q.where(expr))
