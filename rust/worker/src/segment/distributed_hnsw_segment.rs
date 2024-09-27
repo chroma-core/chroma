@@ -199,8 +199,10 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                     if index_len + 1 > index_capacity {
                         index.with_upgraded(|index| {
                             // Bump allocation by 2x
-                            index.resize(index_capacity * 2);
-                        });
+                            index
+                                .resize(index_capacity * 2)
+                                .map(|_| ApplyMaterializedLogError::AllocationError)
+                        })?;
                     }
 
                     match index.add(record.offset_id as usize, embedding) {

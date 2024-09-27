@@ -23,7 +23,6 @@ use futures::FutureExt;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::u32;
 use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
 use uuid::Uuid;
@@ -127,7 +126,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             ));
         }
         let (pls_writer, pls_reader) = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => match pls_path.get(0) {
+            Some(pls_path) => match pls_path.first() {
                 Some(pls_uuid) => {
                     let pls_uuid = match Uuid::parse_str(pls_uuid) {
                         Ok(uuid) => uuid,
@@ -154,7 +153,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             },
         };
         let (freqs_writer, freqs_reader) = match segment.file_path.get(FULL_TEXT_FREQS) {
-            Some(freqs_path) => match freqs_path.get(0) {
+            Some(freqs_path) => match freqs_path.first() {
                 Some(freqs_uuid) => {
                     let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
                         Ok(uuid) => uuid,
@@ -210,7 +209,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (string_metadata_writer, string_metadata_index_reader) =
             match segment.file_path.get(STRING_METADATA) {
-                Some(string_metadata_path) => match string_metadata_path.get(0) {
+                Some(string_metadata_path) => match string_metadata_path.first() {
                     Some(string_metadata_uuid) => {
                         let string_metadata_uuid = match Uuid::parse_str(string_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -286,7 +285,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (f32_metadata_writer, f32_metadata_index_reader) =
             match segment.file_path.get(F32_METADATA) {
-                Some(f32_metadata_path) => match f32_metadata_path.get(0) {
+                Some(f32_metadata_path) => match f32_metadata_path.first() {
                     Some(f32_metadata_uuid) => {
                         let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -443,7 +442,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into str metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -457,7 +456,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -471,7 +470,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -485,7 +484,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into bool metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -509,7 +508,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from str metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -523,7 +522,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -537,7 +536,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -551,7 +550,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from bool metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -591,7 +590,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             for (key, value) in metadata.iter() {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
-                                    Err(e) => {
+                                    Err(_) => {
                                         return Err(ApplyMaterializedLogError::BlockfileSetError);
                                     }
                                 }
@@ -622,7 +621,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     match self.delete_metadata(key, value, segment_offset_id).await
                                     {
                                         Ok(()) => {}
-                                        Err(e) => {
+                                        Err(_) => {
                                             return Err(
                                                 ApplyMaterializedLogError::BlockfileDeleteError,
                                             );
@@ -668,7 +667,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(e) => {
+                            Err(_) => {
                                 return Err(ApplyMaterializedLogError::BlockfileUpdateError);
                             }
                         }
@@ -680,7 +679,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(e) => {
+                            Err(_) => {
                                 return Err(ApplyMaterializedLogError::BlockfileSetError);
                             }
                         }
@@ -692,7 +691,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(e) => {
+                            Err(_match ) => {
                                 return Err(ApplyMaterializedLogError::BlockfileDeleteError);
                             }
                         }

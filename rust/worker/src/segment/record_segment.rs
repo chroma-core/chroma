@@ -297,6 +297,8 @@ pub enum ApplyMaterializedLogError {
     MetadataUpdateNotValid,
     #[error("Document delete error")]
     DocumentDeleteError,
+    #[error("Allocation error")]
+    AllocationError,
     #[error("FTS Document add error")]
     FTSDocumentAddError,
     #[error("FTS Document delete error")]
@@ -315,6 +317,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileUpdateError => ErrorCodes::Internal,
             ApplyMaterializedLogError::MetadataUpdateNotValid => ErrorCodes::Internal,
             ApplyMaterializedLogError::DocumentDeleteError => ErrorCodes::Internal,
+            ApplyMaterializedLogError::AllocationError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentAddError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentDeleteError => ErrorCodes::Internal,
             ApplyMaterializedLogError::FTSDocumentUpdateError => ErrorCodes::Internal,

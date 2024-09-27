@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chroma_types::{LogRecord, OperationRecord, UpdateMetadataValue};
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc};
@@ -40,8 +39,8 @@ impl<T: RecordDataset> RecordDataset for Arc<T> {
     const NAME: &'static str = T::NAME;
     const DISPLAY_NAME: &'static str = T::DISPLAY_NAME;
 
-    fn init() -> impl Future<Output = Result<Self>> + Send {
-        async move { Ok(Arc::new(T::init().await?)) }
+    async fn init() -> Result<Self> {
+        Ok(Arc::new(T::init().await?))
     }
 
     fn create_records_stream(

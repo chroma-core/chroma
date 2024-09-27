@@ -21,12 +21,9 @@ pub(crate) fn materialize_update_metadata(
     let mut metadata = Metadata::new();
     let mut deleted_metadata = DeletedMetadata::new();
     for (key, value) in update_metdata {
-        match value {
-            UpdateMetadataValue::None => {
-                deleted_metadata.insert(key.clone());
-                continue;
-            }
-            _ => {}
+        if let UpdateMetadataValue::None = value {
+            deleted_metadata.insert(key.clone());
+            continue;
         }
         // Should be a valid conversion for not None values.
         let res = value.try_into();
@@ -89,37 +86,35 @@ pub(crate) fn merge_update_metadata(
         }
         None => (),
     }
-    let mut final_mt;
-    if merged_metadata.is_empty() {
-        final_mt = None;
+    let final_mt = if merged_metadata.is_empty() {
+        None
     } else {
-        final_mt = Some(merged_metadata);
-    }
-    let mut final_deleted;
-    if deleted_metadata.is_empty() {
-        final_deleted = None;
+        Some(merged_metadata)
+    };
+    let final_deleted = if deleted_metadata.is_empty() {
+        None
     } else {
-        final_deleted = Some(deleted_metadata);
-    }
+        Some(deleted_metadata)
+    };
     Ok((final_mt, final_deleted))
 }
 
 #[derive(Error, Debug)]
 pub enum LogMaterializerError {
     #[error("Error materializing document metadata {0}")]
-    MetadataMaterializationError(#[from] MetadataValueConversionError),
+    MetadataMaterialization(#[from] MetadataValueConversionError),
     #[error("Error materializing document embedding")]
-    EmbeddingMaterializationError,
+    EmbeddingMaterialization,
     #[error("Error reading record segment {0}")]
-    RecordSegmentError(#[from] Box<dyn ChromaError>),
+    RecordSegment(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for LogMaterializerError {
     fn code(&self) -> ErrorCodes {
         match self {
-            LogMaterializerError::MetadataMaterializationError(e) => e.code(),
-            LogMaterializerError::EmbeddingMaterializationError => ErrorCodes::Internal,
-            LogMaterializerError::RecordSegmentError(e) => e.code(),
+            LogMaterializerError::MetadataMaterialization(e) => e.code(),
+            LogMaterializerError::EmbeddingMaterialization => ErrorCodes::Internal,
+            LogMaterializerError::RecordSegment(e) => e.code(),
         }
     }
 }
@@ -425,7 +420,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
                     deleted_metadata = Some(m.1);
                 }
                 Err(e) => {
-                    return Err(LogMaterializerError::MetadataMaterializationError(e));
+                    return Err(LogMaterializerError::MetadataMaterialization(e));
                 }
             },
             None => {
@@ -442,7 +437,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
         let embedding = match &log_record.embedding {
             Some(embedding) => Some(embedding.as_slice()),
             None => {
-                return Err(LogMaterializerError::EmbeddingMaterializationError);
+                return Err(LogMaterializerError::EmbeddingMaterialization);
             }
         };
 
@@ -524,7 +519,7 @@ impl<'me> LogMaterializer<'me> {
                         {
                             Ok(res) => res,
                             Err(e) => {
-                                return Err(LogMaterializerError::RecordSegmentError(e));
+                                return Err(LogMaterializerError::RecordSegment(e));
                             }
                         };
                         if exists {
@@ -539,7 +534,7 @@ impl<'me> LogMaterializer<'me> {
                                     );
                                 }
                                 Err(e) => {
-                                    return Err(LogMaterializerError::RecordSegmentError(e));
+                                    return Err(LogMaterializerError::RecordSegment(e));
                                 }
                             }
                         }
@@ -673,7 +668,7 @@ impl<'me> LogMaterializer<'me> {
                                 record_from_map.metadata_to_be_deleted = meta.1;
                             }
                             Err(e) => {
-                                return Err(LogMaterializerError::MetadataMaterializationError(e));
+                                return Err(LogMaterializerError::MetadataMaterialization(e));
                             }
                         };
                         match log_record.record.document.as_ref() {
@@ -742,7 +737,7 @@ impl<'me> LogMaterializer<'me> {
                                             record_from_map.metadata_to_be_deleted = meta.1;
                                         }
                                         Err(e) => {
-                                            return Err(LogMaterializerError::MetadataMaterializationError(e));
+                                            return Err(LogMaterializerError::MetadataMaterialization(e));
                                         }
                                     };
                                     match log_record.record.document.as_ref() {
@@ -790,7 +785,7 @@ impl<'me> LogMaterializer<'me> {
                                     record_from_map.metadata_to_be_deleted = meta.1;
                                 }
                                 Err(e) => {
-                                    return Err(LogMaterializerError::MetadataMaterializationError(e));
+                                    return Err(LogMaterializerError::MetadataMaterialization(e));
                                 }
                             };
                             match log_record.record.document.as_ref() {
