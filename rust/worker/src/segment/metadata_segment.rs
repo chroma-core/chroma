@@ -591,7 +591,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
                                     Err(_) => {
-                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
+                                        return Err(ApplyMaterializedLogError::BlockfileSet);
                                     }
                                 }
                             }
@@ -623,7 +623,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         Ok(()) => {}
                                         Err(_) => {
                                             return Err(
-                                                ApplyMaterializedLogError::BlockfileDeleteError,
+                                                ApplyMaterializedLogError::BlockfileDelete,
                                             );
                                         }
                                     }
@@ -642,7 +642,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         Err(e) => {
                                             tracing::error!("Error deleting document {:?}", e);
                                             return Err(
-                                                ApplyMaterializedLogError::FTSDocumentDeleteError,
+                                                ApplyMaterializedLogError::FTSDocumentDelete,
                                             );
                                         }
                                     }
@@ -668,7 +668,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         {
                             Ok(()) => {}
                             Err(_) => {
-                                return Err(ApplyMaterializedLogError::BlockfileUpdateError);
+                                return Err(ApplyMaterializedLogError::BlockfileUpdate);
                             }
                         }
                     }
@@ -680,7 +680,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         {
                             Ok(()) => {}
                             Err(_) => {
-                                return Err(ApplyMaterializedLogError::BlockfileSetError);
+                                return Err(ApplyMaterializedLogError::BlockfileSet);
                             }
                         }
                     }
@@ -692,7 +692,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         {
                             Ok(()) => {}
                             Err(_match ) => {
-                                return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                                return Err(ApplyMaterializedLogError::BlockfileDelete);
                             }
                         }
                     }
@@ -712,7 +712,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                 e
                                             );
                                             return Err(
-                                                ApplyMaterializedLogError::FTSDocumentUpdateError,
+                                                ApplyMaterializedLogError::FTSDocumentUpdate,
                                             );
                                         }
                                     }
@@ -729,7 +729,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             e
                                         );
                                         return Err(
-                                            ApplyMaterializedLogError::FTSDocumentAddError,
+                                            ApplyMaterializedLogError::FTSDocumentAdd,
                                         );
                                     }
                                 },
@@ -751,7 +751,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             Ok(()) => {}
                                             Err(_) => {
                                                 return Err(
-                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                    ApplyMaterializedLogError::BlockfileDelete,
                                                 );
                                             }
                                         }
@@ -770,7 +770,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             Err(e) => {
                                                 tracing::error!("Error deleting document {:?}", e);
                                                 return Err(
-                                                    ApplyMaterializedLogError::FTSDocumentDeleteError,
+                                                    ApplyMaterializedLogError::FTSDocumentDelete,
                                                 );
                                             }
                                         }
@@ -793,7 +793,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
                                     Err(_) => {
-                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
+                                        return Err(ApplyMaterializedLogError::BlockfileSet);
                                     }
                                 }
                             }
@@ -1779,27 +1779,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2064,27 +2061,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2211,7 +2205,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(2 as usize)));
+        assert_eq!(res.first(), Some(&(2_usize)));
         let where_clause = Where::DirectWhereComparison(DirectComparison {
             key: String::from("hello"),
             comparison: WhereComparison::SingleStringComparison(
@@ -2225,7 +2219,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(1 as usize)));
+        assert_eq!(res.first(), Some(&(1_usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2242,7 +2236,7 @@ mod test {
             String::from("hello"),
             MetadataValue::Str(String::from("new world")),
         );
-        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
         let mut id2_mt = HashMap::new();
         id2_mt.insert(String::from("hello"), MetadataValue::Float(1.0));
         assert_eq!(res.get(1).as_ref().unwrap().metadata, Some(id2_mt));
@@ -2310,27 +2304,24 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2452,7 +2443,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(1 as usize)));
+        assert_eq!(res.first(), Some(&(1_usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2469,7 +2460,7 @@ mod test {
             String::from("bye"),
             MetadataValue::Str(String::from("world")),
         );
-        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
     }
 
     #[tokio::test]
@@ -2525,27 +2516,24 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2662,7 +2650,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(1 as usize)));
+        assert_eq!(res.first(), Some(&(1_usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2675,7 +2663,7 @@ mod test {
         assert_eq!(res.len(), 1);
         res.sort_by(|x, y| x.id.cmp(y.id));
         assert_eq!(
-            res.get(0).as_ref().unwrap().document,
+            res.first().as_ref().unwrap().document,
             Some(String::from("bye").as_str())
         );
     }

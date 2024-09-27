@@ -1696,7 +1696,7 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(1 as usize)));
+        assert_eq!(res.first(), Some(&(1_usize)));
         let where_document_clause =
             WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc1"),
@@ -1772,27 +1772,24 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()

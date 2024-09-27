@@ -76,6 +76,7 @@ impl ChromaError for CountQueryOrchestratorError {
 }
 
 impl CountQueryOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,

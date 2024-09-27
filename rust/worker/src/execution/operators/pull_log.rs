@@ -162,9 +162,9 @@ mod tests {
         match *log {
             Log::InMemory(ref mut log) => {
                 log.add_log(
-                    collection_uuid_1.clone(),
+                    collection_uuid_1,
                     InternalLogRecord {
-                        collection_id: collection_uuid_1.clone(),
+                        collection_id: collection_uuid_1,
                         log_offset: 0,
                         log_ts: 1,
                         record: LogRecord {
@@ -181,9 +181,9 @@ mod tests {
                     },
                 );
                 log.add_log(
-                    collection_uuid_1.clone(),
+                    collection_uuid_1,
                     InternalLogRecord {
-                        collection_id: collection_uuid_1.clone(),
+                        collection_id: collection_uuid_1,
                         log_offset: 1,
                         log_ts: 2,
                         record: LogRecord {

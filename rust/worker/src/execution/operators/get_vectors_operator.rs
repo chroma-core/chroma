@@ -66,13 +66,13 @@ pub struct GetVectorsOperatorOutput {
 #[derive(Debug, Error)]
 pub enum GetVectorsOperatorError {
     #[error("Error creating record segment reader {0}")]
-    RecordSegmentReaderCreationError(
+    RecordSegmentReaderCreation(
         #[from] crate::segment::record_segment::RecordSegmentReaderCreationError,
     ),
     #[error(transparent)]
-    RecordSegmentReaderError(#[from] Box<dyn ChromaError>),
+    RecordSegmentReader(#[from] Box<dyn ChromaError>),
     #[error("Error materializing logs {0}")]
-    LogMaterializationError(#[from] LogMaterializerError),
+    LogMaterialization(#[from] LogMaterializerError),
 }
 
 impl ChromaError for GetVectorsOperatorError {
@@ -106,14 +106,10 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
             Err(e) => match *e {
                 record_segment::RecordSegmentReaderCreationError::UninitializedSegment => None,
                 record_segment::RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreationError(
-                        *e,
-                    ))
+                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
                 }
                 record_segment::RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreationError(
-                        *e,
-                    ))
+                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
                 }
             },
         };
@@ -126,7 +122,7 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
         let mat_records = match materializer.materialize().await {
             Ok(records) => records,
             Err(e) => {
-                return Err(GetVectorsOperatorError::LogMaterializationError(e));
+                return Err(GetVectorsOperatorError::LogMaterialization(e));
             }
         };
 

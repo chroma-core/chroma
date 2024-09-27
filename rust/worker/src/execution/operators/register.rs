@@ -150,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_operator() {
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
-        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
+        let log = Box::new(Log::InMemory(InMemoryLog::new()));
         let collection_version = 0;
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
@@ -191,7 +191,7 @@ mod tests {
         let segment_id_1 = Uuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
 
         let segment_1 = Segment {
-            id: segment_id_1.clone(),
+            id: segment_id_1,
             r#type: SegmentType::HnswDistributed,
             scope: SegmentScope::VECTOR,
             collection: collection_uuid_1,
@@ -203,7 +203,7 @@ mod tests {
         file_path_2.insert("hnsw".to_string(), vec!["path_2".to_string()]);
         let segment_id_2 = Uuid::from_str("00000000-0000-0000-0000-000000000004").unwrap();
         let segment_2 = Segment {
-            id: segment_id_2.clone(),
+            id: segment_id_2,
             r#type: SegmentType::HnswDistributed,
             scope: SegmentScope::VECTOR,
             collection: collection_uuid_2,
@@ -225,11 +225,11 @@ mod tests {
         file_path_4.insert("hnsw".to_string(), vec!["path_4".to_string()]);
         let segment_flush_info = vec![
             SegmentFlushInfo {
-                segment_id: segment_id_1.clone(),
+                segment_id: segment_id_1,
                 file_paths: file_path_3.clone(),
             },
             SegmentFlushInfo {
-                segment_id: segment_id_2.clone(),
+                segment_id: segment_id_2,
                 file_paths: file_path_4.clone(),
             },
         ];

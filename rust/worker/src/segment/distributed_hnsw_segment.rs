@@ -198,14 +198,14 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                             // Bump allocation by 2x
                             index
                                 .resize(index_capacity * 2)
-                                .map(|_| ApplyMaterializedLogError::AllocationError)
+                                .map(|_| ApplyMaterializedLogError::Allocation)
                         })?;
                     }
 
                     match index.add(record.offset_id as usize, embedding) {
                         Ok(_) => {}
                         Err(e) => {
-                            return Err(ApplyMaterializedLogError::HnswIndexError(e));
+                            return Err(ApplyMaterializedLogError::HnswIndex(e));
                         }
                     }
                 }
@@ -217,7 +217,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                     match self.index.inner.read().delete(record.offset_id as usize) {
                         Ok(_) => {}
                         Err(e) => {
-                            return Err(ApplyMaterializedLogError::HnswIndexError(e));
+                            return Err(ApplyMaterializedLogError::HnswIndex(e));
                         }
                     }
                 }
