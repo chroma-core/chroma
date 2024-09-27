@@ -201,11 +201,11 @@ mod tests {
         const NAME: &'static str = "test";
         const DISPLAY_NAME: &'static str = "Test";
 
-        async fn init() -> Result<Self> { Ok(TestDataset { records: vec![] }) }
+        async fn init() -> Result<Self> {
+            Ok(TestDataset { records: vec![] })
+        }
 
-        async fn create_records_stream(
-            &self,
-        ) -> Result<impl Stream<Item = Result<Record>>> {
+        async fn create_records_stream(&self) -> Result<impl Stream<Item = Result<Record>>> {
             let records = self.records.clone();
             Ok(futures::stream::iter(records.into_iter().map(Ok)))
         }

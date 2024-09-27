@@ -394,7 +394,9 @@ impl WorkerServer {
                 Ok(where_clause) => Some(where_clause),
                 Err(_) => {
                     tracing::error!("Error converting where clause");
-                    return Err(Status::internal("Error converting where clause".to_string()));
+                    return Err(Status::internal(
+                        "Error converting where clause".to_string(),
+                    ));
                 }
             },
             None => None,
@@ -405,7 +407,9 @@ impl WorkerServer {
                 Ok(where_document_clause) => Some(where_document_clause),
                 Err(_) => {
                     tracing::error!("Error converting where document clause");
-                    return Err(Status::internal("Error converting where document clause".to_string()));
+                    return Err(Status::internal(
+                        "Error converting where document clause".to_string(),
+                    ));
                 }
             },
             None => None,

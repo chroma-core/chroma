@@ -18,8 +18,6 @@ pub async fn get_record_dataset<RecordCorpus: RecordDataset>() -> RecordCorpus {
         .with_style(style.clone());
     record_corpus_spinner.enable_steady_tick(Duration::from_millis(50));
 
-    
-
     RecordCorpus::init()
         .and_then(|r| async {
             record_corpus_spinner.set_style(finish_style.clone());

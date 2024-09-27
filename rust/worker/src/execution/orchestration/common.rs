@@ -91,9 +91,7 @@ pub(super) async fn get_collection_by_id(
             }
             Ok(collections.drain(..).next().unwrap())
         }
-        Err(e) => {
-            Err(Box::new(GetCollectionByIdError::GetCollectionError(e)))
-        }
+        Err(e) => Err(Box::new(GetCollectionByIdError::GetCollectionError(e))),
     }
 }
 
