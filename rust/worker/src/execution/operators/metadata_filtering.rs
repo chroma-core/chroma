@@ -14,7 +14,7 @@ use chroma_index::{
     utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction},
 };
 use chroma_types::{
-    Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, Segment, Where,
+    Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Segment, Where,
     WhereClauseComparator, WhereDocument, WhereDocumentOperator,
 };
 use core::panic;
@@ -78,32 +78,22 @@ pub(crate) struct MetadataFilteringOutput {
 #[derive(Error, Debug)]
 pub(crate) enum MetadataFilteringError {
     #[error("Error creating record segment reader {0}")]
-    MetadataFilteringRecordSegmentReaderCreationError(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderCreation(#[from] RecordSegmentReaderCreationError),
     #[error("Error materializing logs {0}")]
-    MetadataFilteringLogMaterializationError(#[from] LogMaterializerError),
+    LogMaterialization(#[from] LogMaterializerError),
     #[error("Error filtering documents by where or where_document clauses {0}")]
-    MetadataFilteringIndexError(#[from] MetadataIndexError),
+    Index(#[from] MetadataIndexError),
     #[error("Error from metadata segment reader {0}")]
-    MetadataFilteringMetadataSegmentReaderError(#[from] MetadataSegmentError),
-    #[error("Error reading from record segment")]
-    MetadataFilteringRecordSegmentReaderError,
-    #[error("Invalid input")]
-    MetadataFilteringInvalidInput,
+    MetadataSegmentReader(#[from] MetadataSegmentError),
 }
 
 impl ChromaError for MetadataFilteringError {
     fn code(&self) -> ErrorCodes {
         match self {
-            MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(e) => {
-                e.code()
-            }
-            MetadataFilteringError::MetadataFilteringLogMaterializationError(e) => e.code(),
-            MetadataFilteringError::MetadataFilteringIndexError(e) => e.code(),
-            MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e) => e.code(),
-            MetadataFilteringError::MetadataFilteringRecordSegmentReaderError => {
-                ErrorCodes::Internal
-            }
-            MetadataFilteringError::MetadataFilteringInvalidInput => ErrorCodes::InvalidArgument,
+            MetadataFilteringError::RecordSegmentReaderCreation(e) => e.code(),
+            MetadataFilteringError::LogMaterialization(e) => e.code(),
+            MetadataFilteringError::Index(e) => e.code(),
+            MetadataFilteringError::MetadataSegmentReader(e) => e.code(),
         }
     }
 }
@@ -137,13 +127,13 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     }
                     RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
                         tracing::error!("Error creating record segment reader {}", e);
-                        return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
+                        return Err(MetadataFilteringError::RecordSegmentReaderCreation(
                             RecordSegmentReaderCreationError::BlockfileOpenError(e),
                         ));
                     }
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                         tracing::error!("Error creating record segment reader {}", e);
-                        return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
+                        return Err(MetadataFilteringError::RecordSegmentReaderCreation(
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles,
                         ));
                     }
@@ -160,7 +150,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         {
             Ok(records) => records,
             Err(e) => {
-                return Err(MetadataFilteringError::MetadataFilteringLogMaterializationError(e));
+                return Err(MetadataFilteringError::LogMaterialization(e));
             }
         };
         // Step 2: Apply where and where_document clauses on the materialized logs.
@@ -188,19 +178,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Str(string_value) => {
-                                        if let KeyWrapper::String(where_value) = metadata_value {
-                                            if *string_value == *where_value {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Str(string_value),
+                                    KeyWrapper::String(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if *string_value == *where_value {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -226,19 +215,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Bool(bool_value) => {
-                                        if let KeyWrapper::Bool(where_value) = metadata_value {
-                                            if *bool_value == *where_value {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Bool(bool_value),
+                                    KeyWrapper::Bool(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if *bool_value == *where_value {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -264,19 +252,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if *int_value as u32 == *where_value {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Int(int_value),
+                                    KeyWrapper::Uint32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if *int_value as u32 == *where_value {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -287,19 +274,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key less than this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) < (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Int(int_value),
+                                    KeyWrapper::Uint32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*int_value) as u32) < (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::LessThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -307,19 +293,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) <= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Int(int_value),
+                                    KeyWrapper::Uint32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*int_value) as u32) <= (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThan => {
                         let mut result = RoaringBitmap::new();
@@ -327,19 +312,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) > (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Int(int_value),
+                                    KeyWrapper::Uint32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*int_value) as u32) > (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -347,19 +331,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Int(int_value) => {
-                                        if let KeyWrapper::Uint32(where_value) = metadata_value {
-                                            if ((*int_value) as u32) >= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Int(int_value),
+                                    KeyWrapper::Uint32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*int_value) as u32) >= (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                 },
                 chroma_types::MetadataType::DoubleType => match comparator {
@@ -369,19 +352,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key equal to this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) == (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Float(float_value),
+                                    KeyWrapper::Float32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*float_value) as f32) == (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::NotEqual => {
                         todo!();
@@ -392,19 +374,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key < this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) < (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Float(float_value),
+                                    KeyWrapper::Float32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*float_value) as f32) < (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::LessThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -412,19 +393,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key <= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) <= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Float(float_value),
+                                    KeyWrapper::Float32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*float_value) as f32) <= (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThan => {
                         let mut result = RoaringBitmap::new();
@@ -432,19 +412,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key > this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) > (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Float(float_value),
+                                    KeyWrapper::Float32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*float_value) as f32) > (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                     WhereClauseComparator::GreaterThanOrEqual => {
                         let mut result = RoaringBitmap::new();
@@ -452,19 +431,18 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         // that have this key >= this value.
                         for (offset_id, meta_map) in &ids_to_metadata {
                             if let Some(val) = meta_map.get(metadata_key) {
-                                match *val {
-                                    MetadataValue::Float(float_value) => {
-                                        if let KeyWrapper::Float32(where_value) = metadata_value {
-                                            if ((*float_value) as f32) >= (*where_value) {
-                                                result.insert(*offset_id);
-                                            }
-                                        }
+                                if let (
+                                    MetadataValue::Float(float_value),
+                                    KeyWrapper::Float32(where_value),
+                                ) = (*val, metadata_value)
+                                {
+                                    if ((*float_value) as f32) >= (*where_value) {
+                                        result.insert(*offset_id);
                                     }
-                                    _ => (),
                                 }
                             }
                         }
-                        return result;
+                        result
                     }
                 },
                 chroma_types::MetadataType::StringListType => {
@@ -494,7 +472,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 }
                 Err(e) => {
                     tracing::error!("Error filtering logs based on where clause {:?}", e);
-                    return Err(MetadataFilteringError::MetadataFilteringIndexError(e));
+                    return Err(MetadataFilteringError::Index(e));
                 }
             },
             None => {
@@ -521,17 +499,14 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                         if record.final_operation == MaterializedLogOperation::DeleteExisting {
                             continue;
                         }
-                        match record.merged_document_ref() {
-                            Some(doc) => {
-                                /* if re.is_match(doc) { */
-                                if doc.contains(query) {
-                                    matching_contains.push(record.offset_id as i32);
-                                }
+                        if let Some(doc) = record.merged_document_ref() {
+                            /* if re.is_match(doc) { */
+                            if doc.contains(query) {
+                                matching_contains.push(record.offset_id as i32);
                             }
-                            None => {}
                         };
                     }
-                    return matching_contains;
+                    matching_contains
                 }
                 WhereDocumentOperator::NotContains => {
                     todo!()
@@ -553,7 +528,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     }
                     Err(e) => {
                         tracing::error!("Error filtering logs based on where document {:?}", e);
-                        return Err(MetadataFilteringError::MetadataFilteringIndexError(e));
+                        return Err(MetadataFilteringError::Index(e));
                     }
                 }
             }
@@ -582,7 +557,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                 &input.blockfile_provider,
             )
             .await
-            .map_err(|e| MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e))?;
+            .map_err(MetadataFilteringError::MetadataSegmentReader)?;
 
             filtered_index_offset_ids = metadata_segment_reader
                 .query(
@@ -593,9 +568,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     0,
                 )
                 .await
-                .map_err(|e| {
-                    MetadataFilteringError::MetadataFilteringMetadataSegmentReaderError(e)
-                })?;
+                .map_err(MetadataFilteringError::MetadataSegmentReader)?;
         }
 
         // This will be sorted by offset id.
@@ -634,8 +607,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         // Hydrate offset ids for user supplied ids.
         // First from the log.
         let mut user_supplied_offset_ids: Vec<u32> = vec![];
-        let mut remaining_id_set: HashSet<String> = HashSet::new();
-        let mut query_ids_present = false;
+        let mut remaining_id_set: HashSet<String>;
+        let query_ids_present;
         match &input.query_ids {
             Some(query_ids) => {
                 let query_ids_set: HashSet<String> = HashSet::from_iter(query_ids.iter().cloned());
@@ -674,15 +647,15 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                             }
                             RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
                                 tracing::error!("Error creating record segment reader {}", e);
-                                return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
-                            RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                        ));
+                                return Err(MetadataFilteringError::RecordSegmentReaderCreation(
+                                    RecordSegmentReaderCreationError::BlockfileOpenError(e),
+                                ));
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 tracing::error!("Error creating record segment reader {}", e);
-                                return Err(MetadataFilteringError::MetadataFilteringRecordSegmentReaderCreationError(
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles,
-                        ));
+                                return Err(MetadataFilteringError::RecordSegmentReaderCreation(
+                                    RecordSegmentReaderCreationError::InvalidNumberOfFiles,
+                                ));
                             }
                         };
                     }
@@ -691,12 +664,8 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
                     Some(r) => {
                         // Now read the remaining ids from storage.
                         for ids in remaining_id_set {
-                            match r.get_offset_id_for_user_id(ids.as_str()).await {
-                                Ok(offset_id) => {
-                                    user_supplied_offset_ids.push(offset_id);
-                                }
-                                // It's ok for the user to supply a non existent id.
-                                Err(_) => (),
+                            if let Ok(offset_id) = r.get_offset_id_for_user_id(ids.as_str()).await {
+                                user_supplied_offset_ids.push(offset_id);
                             }
                         }
                     }
@@ -720,7 +689,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         }
         return Ok(MetadataFilteringOutput {
             log_records: input.log_record.clone(),
-            where_condition_filtered_offset_ids: where_condition_filtered_offset_ids,
+            where_condition_filtered_offset_ids,
             user_supplied_filtered_offset_ids: filtered_offset_ids,
         });
     }
@@ -830,27 +799,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -950,7 +916,7 @@ mod test {
             Some(where_document_clause),
             None,
         );
-        let mut res = operator
+        let res = operator
             .run(&input)
             .await
             .expect("Error during running of operator");
@@ -967,7 +933,7 @@ mod test {
             3,
             *res.where_condition_filtered_offset_ids
                 .expect("Expected one document")
-                .get(0)
+                .first()
                 .expect("Expect not none")
         );
     }
@@ -1047,27 +1013,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1138,7 +1101,7 @@ mod test {
             None,
             None,
         );
-        let mut res = operator
+        let res = operator
             .run(&input)
             .await
             .expect("Error during running of operator");
@@ -1151,12 +1114,12 @@ mod test {
                 .expect("Expected one document")
                 .len()
         );
-        let mut where_res = res
+        let where_res = res
             .where_condition_filtered_offset_ids
             .expect("Expect not none")
             .clone();
         // Already sorted.
-        assert_eq!(1, *where_res.get(0).expect("Expected not none value"));
+        assert_eq!(1, *where_res.first().expect("Expected not none value"));
         assert_eq!(2, *where_res.get(1).expect("Expected not none value"));
     }
 
@@ -1235,27 +1198,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1342,12 +1302,12 @@ mod test {
                 String::from("embedding_id_3"),
             ]),
         );
-        let mut res = operator
+        let res = operator
             .run(&input)
             .await
             .expect("Error during running of operator");
         assert_eq!(None, res.where_condition_filtered_offset_ids);
-        let mut query_offset_id_vec = res
+        let query_offset_id_vec = res
             .user_supplied_filtered_offset_ids
             .expect("Expected not none")
             .clone();
@@ -1355,7 +1315,7 @@ mod test {
         assert_eq!(2, query_offset_id_vec.len());
         assert_eq!(
             1,
-            *query_offset_id_vec.get(0).expect("Expect not none value")
+            *query_offset_id_vec.first().expect("Expect not none value")
         );
         assert_eq!(
             3,

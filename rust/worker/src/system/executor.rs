@@ -68,15 +68,14 @@ where
                 message = channel.recv() => {
                     match message {
                         Some(mut message) => {
-                            let parent_span: tracing::Span;
-                            match message.get_tracing_context() {
+                            let parent_span: tracing::Span = match message.get_tracing_context() {
                                 Some(spn) => {
-                                    parent_span = spn;
+                                    spn
                                 },
                                 None => {
-                                    parent_span = Span::current().clone();
+                                    Span::current().clone()
                                 }
-                            }
+                            };
                             let child_span = trace_span!(parent: parent_span, "Component received message", "name" =  C::get_name());
                             let component_context = ComponentContext {
                                     system: self.inner.system.clone(),

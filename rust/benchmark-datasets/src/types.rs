@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chroma_types::{LogRecord, OperationRecord, UpdateMetadataValue};
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc};
@@ -40,8 +39,8 @@ impl<T: RecordDataset> RecordDataset for Arc<T> {
     const NAME: &'static str = T::NAME;
     const DISPLAY_NAME: &'static str = T::DISPLAY_NAME;
 
-    fn init() -> impl Future<Output = Result<Self>> + Send {
-        async move { Ok(Arc::new(T::init().await?)) }
+    async fn init() -> Result<Self> {
+        Ok(Arc::new(T::init().await?))
     }
 
     fn create_records_stream(
@@ -202,17 +201,13 @@ mod tests {
         const NAME: &'static str = "test";
         const DISPLAY_NAME: &'static str = "Test";
 
-        fn init() -> impl Future<Output = Result<Self>> + Send {
-            async move { Ok(TestDataset { records: vec![] }) }
+        async fn init() -> Result<Self> {
+            Ok(TestDataset { records: vec![] })
         }
 
-        fn create_records_stream(
-            &self,
-        ) -> impl Future<Output = Result<impl Stream<Item = Result<Record>>>> + Send {
-            async move {
-                let records = self.records.clone();
-                Ok(futures::stream::iter(records.into_iter().map(Ok)))
-            }
+        async fn create_records_stream(&self) -> Result<impl Stream<Item = Result<Record>>> {
+            let records = self.records.clone();
+            Ok(futures::stream::iter(records.into_iter().map(Ok)))
         }
     }
 
@@ -221,7 +216,7 @@ mod tests {
     #[tokio::test]
     async fn test_frozen_query_subset() {
         let mut test_dataset = TestDataset::init().await.unwrap();
-        test_dataset.records = vec!["foo 0", "foo 1", "foo 3", "bar 0", "bar 2"]
+        test_dataset.records = ["foo 0", "foo 1", "foo 3", "bar 0", "bar 2"]
             .iter()
             .map(|&content| Record {
                 document: content.to_string(),
@@ -230,7 +225,7 @@ mod tests {
             .collect();
 
         let mut test_query_dataset = TestDataset::init().await.unwrap();
-        test_query_dataset.records = vec!["foo", "bar", "baz"]
+        test_query_dataset.records = ["foo", "bar", "baz"]
             .iter()
             .map(|&content| Record {
                 document: content.to_string(),

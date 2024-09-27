@@ -71,9 +71,10 @@ pub async fn query_service_entrypoint() {
         // TODO: add more signal handling
         _ = sigterm.recv() => {
             dispatcher_handle.stop();
-            dispatcher_handle.join().await;
+            let _ = dispatcher_handle.join().await;
             system.stop().await;
             system.join().await;
+            let _ = server_join_handle.await;
         },
     };
     println!("Server stopped");
@@ -145,11 +146,11 @@ pub async fn compaction_service_entrypoint() {
         // TODO: add more signal handling
         _ = sigterm.recv() => {
             memberlist_handle.stop();
-            memberlist_handle.join().await;
+            let _ = memberlist_handle.join().await;
             dispatcher_handle.stop();
-            dispatcher_handle.join().await;
+            let _ = dispatcher_handle.join().await;
             compaction_manager_handle.stop();
-            compaction_manager_handle.join().await;
+            let _ = compaction_manager_handle.join().await;
             system.stop().await;
             system.join().await;
         },

@@ -53,21 +53,21 @@ impl System {
                     trace_span!(parent: Span::current(), "component spawn", "name" = C::get_name());
                 let task_future = async move { executor.run(rx).await };
                 let join_handle = tokio::spawn(task_future.instrument(child_span));
-                return ComponentHandle::new(
+                ComponentHandle::new(
                     cancel_token,
                     Some(ConsumableJoinHandle::new(join_handle)),
                     sender,
-                );
+                )
             }
             ComponentRuntime::Dedicated => {
                 println!("Spawning on dedicated thread");
                 // Spawn on a dedicated thread
                 let rt = Builder::new_current_thread().enable_all().build().unwrap();
-                let join_handle = std::thread::spawn(move || {
+                let _join_handle = std::thread::spawn(move || {
                     rt.block_on(async move { executor.run(rx).await });
                 });
                 // TODO: Implement Join for dedicated threads
-                return ComponentHandle::new(cancel_token, None, sender);
+                ComponentHandle::new(cancel_token, None, sender)
             }
         }
     }

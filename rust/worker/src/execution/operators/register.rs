@@ -29,11 +29,11 @@ impl RegisterOperator {
 /// * `tenant` - The tenant id.
 /// * `collection_id` - The collection id.
 /// * `log_position` - The log position. Note that this is the log position for the last record that
-/// was flushed to S3.
+///   was flushed to S3.
 /// * `collection_version` - The collection version. This is the current collection version before
-/// the flush operation. This version will be incremented by 1 after the flush operation. If the
-/// collection version in sysdb is not the same as the current collection version, the flush operation
-/// will fail.
+///   the flush operation. This version will be incremented by 1 after the flush operation. If the
+///   collection version in sysdb is not the same as the current collection version, the flush
+///   operation will fail.
 /// * `segment_flush_info` - The segment flush info.
 /// * `sysdb` - The sysdb client.
 /// * `log` - The log client.
@@ -75,7 +75,7 @@ impl RegisterInput {
 /// * `result` - The result of the flush compaction operation.
 #[derive(Debug)]
 pub struct RegisterOutput {
-    sysdb_registration_result: FlushCompactionResponse,
+    _sysdb_registration_result: FlushCompactionResponse,
 }
 
 #[derive(Error, Debug)]
@@ -109,7 +109,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         let result = sysdb
             .flush_compaction(
                 input.tenant.clone(),
-                input.collection_id.clone(),
+                input.collection_id,
                 input.log_position,
                 input.collection_version,
                 input.segment_flush_info.clone(),
@@ -130,7 +130,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 
         match result {
             Ok(_) => Ok(RegisterOutput {
-                sysdb_registration_result: sysdb_registration_result,
+                _sysdb_registration_result: sysdb_registration_result,
             }),
             Err(error) => Err(RegisterError::UpdateLogOffsetError(error)),
         }
@@ -150,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_operator() {
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
-        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
+        let log = Box::new(Log::InMemory(InMemoryLog::new()));
         let collection_version = 0;
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
@@ -191,7 +191,7 @@ mod tests {
         let segment_id_1 = Uuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
 
         let segment_1 = Segment {
-            id: segment_id_1.clone(),
+            id: segment_id_1,
             r#type: SegmentType::HnswDistributed,
             scope: SegmentScope::VECTOR,
             collection: collection_uuid_1,
@@ -203,7 +203,7 @@ mod tests {
         file_path_2.insert("hnsw".to_string(), vec!["path_2".to_string()]);
         let segment_id_2 = Uuid::from_str("00000000-0000-0000-0000-000000000004").unwrap();
         let segment_2 = Segment {
-            id: segment_id_2.clone(),
+            id: segment_id_2,
             r#type: SegmentType::HnswDistributed,
             scope: SegmentScope::VECTOR,
             collection: collection_uuid_2,
@@ -225,11 +225,11 @@ mod tests {
         file_path_4.insert("hnsw".to_string(), vec!["path_4".to_string()]);
         let segment_flush_info = vec![
             SegmentFlushInfo {
-                segment_id: segment_id_1.clone(),
+                segment_id: segment_id_1,
                 file_paths: file_path_3.clone(),
             },
             SegmentFlushInfo {
-                segment_id: segment_id_2.clone(),
+                segment_id: segment_id_2,
                 file_paths: file_path_4.clone(),
             },
         ];
@@ -251,11 +251,11 @@ mod tests {
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(
-            result.sysdb_registration_result.collection_id,
+            result._sysdb_registration_result.collection_id,
             collection_uuid_1
         );
         assert_eq!(
-            result.sysdb_registration_result.collection_version,
+            result._sysdb_registration_result.collection_version,
             collection_version + 1
         );
 

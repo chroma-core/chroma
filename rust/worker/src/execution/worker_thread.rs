@@ -45,9 +45,9 @@ impl Component for WorkerThread {
         ComponentRuntime::Dedicated
     }
 
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         let req = TaskRequestMessage::new(ctx.receiver());
-        let res = self.dispatcher.send(req, None).await;
+        let _req = self.dispatcher.send(req, None).await;
         // TODO: what to do with resp?
     }
 }
@@ -61,7 +61,7 @@ impl Handler<TaskMessage> for WorkerThread {
             trace_span!(parent: Span::current(), "Task execution", name = task.get_name());
         task.run().instrument(child_span).await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.receiver());
-        let res = self.dispatcher.send(req, None).await;
+        let _res = self.dispatcher.send(req, None).await;
         // TODO: task run should be able to error and we should send it as part of the result
     }
 }

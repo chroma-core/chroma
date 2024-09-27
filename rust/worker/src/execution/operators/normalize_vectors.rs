@@ -11,7 +11,7 @@ pub struct NormalizeVectorOperatorInput {
 }
 
 pub struct NormalizeVectorOperatorOutput {
-    pub normalized_vectors: Vec<Vec<f32>>,
+    pub _normalized_vectors: Vec<Vec<f32>>,
 }
 
 pub fn normalize(vector: &[f32]) -> Vec<f32> {
@@ -43,7 +43,9 @@ impl Operator<NormalizeVectorOperatorInput, NormalizeVectorOperatorOutput>
             let normalized_vector = normalize(vector);
             normalized_vectors.push(normalized_vector);
         }
-        Ok(NormalizeVectorOperatorOutput { normalized_vectors })
+        Ok(NormalizeVectorOperatorOutput {
+            _normalized_vectors: normalized_vectors,
+        })
     }
 }
 
@@ -71,7 +73,7 @@ mod tests {
 
         let output = operator.run(&input).await.unwrap();
         let expected_output = NormalizeVectorOperatorOutput {
-            normalized_vectors: vec![
+            _normalized_vectors: vec![
                 vec![0.26726124, 0.5345225, 0.8017837],
                 vec![0.45584232, 0.5698029, 0.6837635],
                 vec![0.5025707, 0.5743665, 0.64616233],
@@ -79,9 +81,9 @@ mod tests {
         };
 
         for (a, b) in output
-            .normalized_vectors
+            ._normalized_vectors
             .iter()
-            .zip(expected_output.normalized_vectors.iter())
+            .zip(expected_output._normalized_vectors.iter())
         {
             assert!(float_eps_eq(a, b), "{:?} != {:?}", a, b);
         }

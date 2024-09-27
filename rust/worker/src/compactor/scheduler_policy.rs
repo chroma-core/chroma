@@ -44,7 +44,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
             tasks.push(CompactionJob {
-                collection_id: collection.id.clone(),
+                collection_id: collection.id,
                 tenant_id: collection.tenant_id.clone(),
                 offset: collection.offset,
                 collection_version: collection.collection_version,

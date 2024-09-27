@@ -163,6 +163,7 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         let mut remaining_allowed_ids: HashSet<&String> =
             HashSet::from_iter(input.allowed_ids.iter());
         for (log, _) in logs.iter() {
+            #[allow(clippy::unnecessary_to_owned)]
             remaining_allowed_ids.remove(&log.merged_user_id_ref().to_string());
         }
         // If a filter list is supplied but it does not have anything for the segment, as it implies the data is all in the log

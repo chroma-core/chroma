@@ -37,6 +37,7 @@ pub(crate) struct CompactionManager {
     // Dependencies
     log: Box<Log>,
     sysdb: Box<SysDb>,
+    #[allow(dead_code)]
     storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
@@ -45,6 +46,7 @@ pub(crate) struct CompactionManager {
     // Config
     compaction_manager_queue_size: usize,
     compaction_interval: Duration,
+    #[allow(dead_code)]
     min_compaction_size: usize,
     max_compaction_size: usize,
     max_partition_size: usize,
@@ -65,6 +67,7 @@ impl ChromaError for CompactionError {
 }
 
 impl CompactionManager {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         scheduler: Scheduler,
         log: Box<Log>,
@@ -344,7 +347,7 @@ mod tests {
     #[tokio::test]
     async fn test_compaction_manager() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let mut in_memory_log = match *log {
+        let in_memory_log = match *log {
             Log::InMemory(ref mut log) => log,
             _ => panic!("Expected InMemoryLog"),
         };
@@ -353,9 +356,9 @@ mod tests {
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
@@ -369,14 +372,14 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         in_memory_log.add_log(
-            collection_uuid_2.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_2.clone(),
+            collection_uuid_2,
+            InternalLogRecord {
+                collection_id: collection_uuid_2,
                 log_offset: 0,
                 log_ts: 2,
                 record: LogRecord {
@@ -390,7 +393,7 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));

@@ -20,7 +20,6 @@ use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
 use chroma_types::{MetadataValue, ScalarEncoding};
-use std::collections::HashMap;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -247,7 +246,7 @@ impl WorkerServer {
             results: proto_results_for_all,
         };
 
-        return Ok(Response::new(resp));
+        Ok(Response::new(resp))
     }
 
     async fn get_vectors_instrumented(
@@ -395,7 +394,9 @@ impl WorkerServer {
                 Ok(where_clause) => Some(where_clause),
                 Err(_) => {
                     tracing::error!("Error converting where clause");
-                    return Err(Status::internal(format!("Error converting where clause",)));
+                    return Err(Status::internal(
+                        "Error converting where clause".to_string(),
+                    ));
                 }
             },
             None => None,
@@ -406,9 +407,9 @@ impl WorkerServer {
                 Ok(where_document_clause) => Some(where_document_clause),
                 Err(_) => {
                     tracing::error!("Error converting where document clause");
-                    return Err(Status::internal(format!(
-                        "Error converting where document clause",
-                    )));
+                    return Err(Status::internal(
+                        "Error converting where document clause".to_string(),
+                    ));
                 }
             },
             None => None,
@@ -454,16 +455,10 @@ impl WorkerServer {
             {
                 // The transport layer assumes the document exists in the metadata
                 // with the special key "chroma:document"
-                let mut output_metadata = match metadata {
-                    Some(metadata) => metadata,
-                    None => HashMap::new(),
-                };
-                match document {
-                    Some(document) => {
-                        output_metadata
-                            .insert("chroma:document".to_string(), MetadataValue::Str(document));
-                    }
-                    None => {}
+                let mut output_metadata = metadata.unwrap_or_default();
+                if let Some(document) = document {
+                    output_metadata
+                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
                 }
                 let record = chroma_proto::MetadataEmbeddingRecord {
                     id,
