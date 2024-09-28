@@ -1,8 +1,4 @@
----
-title: JS Collection
----
-
-# Class: Collection
+# JS Collection
 
 [Collection](../modules/Collection.md).Collection
 

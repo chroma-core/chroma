@@ -1,6 +1,4 @@
----
-title: JS Client
----
+# JS Client
 
 # Class: ChromaClient
 
