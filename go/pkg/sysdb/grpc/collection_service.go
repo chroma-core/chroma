@@ -48,8 +48,12 @@ func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.Res
 
 // The fact that we ignore the metadata of the generated collections is a
 // bit weird, but it is the easiest way to excercise all cases
+
+// NOTE: In current implementation, we do not support updating the metadata of an existing collection via this RPC.
+//		 The call will fail if the collection already exists. Leaving the comments about cases 0,1,2,3 above for future reference.
 func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
 	res := &coordinatorpb.CreateCollectionResponse{}
+
 	createCollection, err := convertToCreateCollectionModel(req)
 	if err != nil {
 		log.Error("CreateCollection failed. error converting to create collection model", zap.Error(err), zap.String("collection_id", req.Id), zap.String("collection_name", req.Name))
@@ -65,7 +69,28 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		res.Created = false
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	collection, created, err := s.coordinator.CreateCollection(ctx, createCollection)
+
+	// Convert the request segments to create segment models
+	createSegments := []*model.CreateSegment{}
+	for _, segment := range req.Segments {
+		createSegment, err := convertSegmentToModel(segment)
+		if err != nil {
+			log.Error("Error in creating segments for the collection", zap.Error(err))
+			res.Collection = nil // We don't need to set the collection in case of error
+			res.Created = false
+			if err == common.ErrSegmentUniqueConstraintViolation {
+				log.Error("segment id already exist", zap.Error(err))
+				res.Status = failResponseWithError(err, 409)
+				return res, nil
+			}
+			res.Status = failResponseWithError(err, errorCode)
+			return res, nil
+		}
+		createSegments = append(createSegments, createSegment)
+	}
+
+	// Create the collection and segments
+	collection, created, err := s.coordinator.CreateCollectionAndSegments(ctx, createCollection, createSegments)
 	if err != nil {
 		log.Error("CreateCollection failed. error creating collection", zap.Error(err), zap.String("collection_id", req.Id), zap.String("collection_name", req.Name))
 		res.Collection = &coordinatorpb.Collection{

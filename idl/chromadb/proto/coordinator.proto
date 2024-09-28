@@ -104,6 +104,9 @@ message CreateCollectionRequest {
   optional bool get_or_create = 6;
   string tenant = 7;
   string database = 8;
+  // When segments are set, then the collection and segments will be created as
+  // a single atomic operation.
+  repeated Segment segments = 9;  // Optional.
 }
 
 message CreateCollectionResponse {
@@ -117,6 +120,7 @@ message DeleteCollectionRequest {
   string id = 1;
   string tenant = 2;
   string database = 3;
+  optional bool with_segments = 4;
 }
 
 message DeleteCollectionResponse {
