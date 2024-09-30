@@ -199,6 +199,7 @@ copyright Qdrant, licensed under the Apache 2.0 license.
    See the License for the specific language governing permissions and
    limitations under the License.
 */
+#![allow(clippy::missing_safety_doc)]
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86::*;
