@@ -62,22 +62,22 @@ pub struct HydrateMetadataResultsOperatorOutput {
 #[derive(Error, Debug)]
 pub enum HydrateMetadataResultsOperatorError {
     #[error("Error creating Record Segment")]
-    RecordSegmentCreationError(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentCreation(#[from] RecordSegmentReaderCreationError),
     #[error("Error reading Record Segment")]
-    RecordSegmentReadError,
+    RecordSegmentRead,
     #[error("Error converting metadata")]
-    MetadataConversionError(#[from] MetadataValueConversionError),
+    MetadataConversion(#[from] MetadataValueConversionError),
     #[error("Error materializing logs")]
-    LogMaterializationError(#[from] LogMaterializerError),
+    LogMaterialization(#[from] LogMaterializerError),
 }
 
 impl ChromaError for HydrateMetadataResultsOperatorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HydrateMetadataResultsOperatorError::RecordSegmentCreationError(e) => e.code(),
-            HydrateMetadataResultsOperatorError::RecordSegmentReadError => ErrorCodes::Internal,
-            HydrateMetadataResultsOperatorError::MetadataConversionError(e) => e.code(),
-            HydrateMetadataResultsOperatorError::LogMaterializationError(e) => e.code(),
+            HydrateMetadataResultsOperatorError::RecordSegmentCreation(e) => e.code(),
+            HydrateMetadataResultsOperatorError::RecordSegmentRead => ErrorCodes::Internal,
+            HydrateMetadataResultsOperatorError::MetadataConversion(e) => e.code(),
+            HydrateMetadataResultsOperatorError::LogMaterialization(e) => e.code(),
         }
     }
 }
@@ -116,7 +116,9 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             }
             Err(e) => {
                 tracing::error!("Error creating record segment reader {}", e);
-                Err(HydrateMetadataResultsOperatorError::RecordSegmentCreationError(*e))
+                Err(HydrateMetadataResultsOperatorError::RecordSegmentCreation(
+                    *e,
+                ))
             }
         }?;
 
@@ -132,7 +134,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             .await
             .map_err(|e| {
                 tracing::error!("Error materializing log: {}", e);
-                HydrateMetadataResultsOperatorError::LogMaterializationError(e)
+                HydrateMetadataResultsOperatorError::LogMaterialization(e)
             })?;
 
         // A hash map that map an offset id to the corresponding log
@@ -172,7 +174,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                             .await
                             .map_err(|e| {
                                 tracing::error!("Error reading record segment: {}", e);
-                                HydrateMetadataResultsOperatorError::RecordSegmentReadError
+                                HydrateMetadataResultsOperatorError::RecordSegmentRead
                             })?
                             .to_string();
                         let mut rec_meta = None;
@@ -180,7 +182,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                         if input.include_metadata {
                             let record = reader.get_data_for_offset_id(oid).await.map_err(|e| {
                                 tracing::error!("Error reading Record Segment: {}", e);
-                                HydrateMetadataResultsOperatorError::RecordSegmentReadError
+                                HydrateMetadataResultsOperatorError::RecordSegmentRead
                             })?;
                             rec_meta = record.metadata;
                             rec_doc = record.document.map(str::to_string);
@@ -188,7 +190,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                         (rec_id, rec_meta, rec_doc)
                     } else {
                         tracing::error!("Error reading record segment.");
-                        return Err(HydrateMetadataResultsOperatorError::RecordSegmentReadError);
+                        return Err(HydrateMetadataResultsOperatorError::RecordSegmentRead);
                     }
                 }
             };

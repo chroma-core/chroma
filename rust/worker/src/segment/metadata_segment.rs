@@ -23,7 +23,6 @@ use futures::FutureExt;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::u32;
 use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
 use uuid::Uuid;
@@ -589,8 +588,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             for (key, value) in metadata.iter() {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
-                                    Err(e) => {
-                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
+                                    Err(_) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileSet);
                                     }
                                 }
                             }
@@ -620,9 +619,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     match self.delete_metadata(key, value, segment_offset_id).await
                                     {
                                         Ok(()) => {}
-                                        Err(e) => {
+                                        Err(_) => {
                                             return Err(
-                                                ApplyMaterializedLogError::BlockfileDeleteError,
+                                                ApplyMaterializedLogError::BlockfileDelete,
                                             );
                                         }
                                     }
@@ -641,7 +640,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         Err(e) => {
                                             tracing::error!("Error deleting document {:?}", e);
                                             return Err(
-                                                ApplyMaterializedLogError::FTSDocumentDeleteError,
+                                                ApplyMaterializedLogError::FTSDocumentDelete,
                                             );
                                         }
                                     }
@@ -666,8 +665,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(e) => {
-                                return Err(ApplyMaterializedLogError::BlockfileUpdateError);
+                            Err(_) => {
+                                return Err(ApplyMaterializedLogError::BlockfileUpdate);
                             }
                         }
                     }
@@ -678,8 +677,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(e) => {
-                                return Err(ApplyMaterializedLogError::BlockfileSetError);
+                            Err(_) => {
+                                return Err(ApplyMaterializedLogError::BlockfileSet);
                             }
                         }
                     }
@@ -690,8 +689,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             .await
                         {
                             Ok(()) => {}
-                            Err(e) => {
-                                return Err(ApplyMaterializedLogError::BlockfileDeleteError);
+                            Err(_) => {
+                                return Err(ApplyMaterializedLogError::BlockfileDelete);
                             }
                         }
                     }
@@ -712,7 +711,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                     e
                                                 );
                                                 return Err(
-                                                    ApplyMaterializedLogError::FTSDocumentUpdateError,
+                                                    ApplyMaterializedLogError::FTSDocumentUpdate,
                                                 );
                                             }
                                         }
@@ -729,7 +728,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                                 e
                                             );
                                             return Err(
-                                                ApplyMaterializedLogError::FTSDocumentAddError,
+                                                ApplyMaterializedLogError::FTSDocumentAdd,
                                             );
                                         }
                                     },
@@ -752,9 +751,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         match self.delete_metadata(key, value, segment_offset_id).await
                                         {
                                             Ok(()) => {}
-                                            Err(e) => {
+                                            Err(_) => {
                                                 return Err(
-                                                    ApplyMaterializedLogError::BlockfileDeleteError,
+                                                    ApplyMaterializedLogError::BlockfileDelete,
                                                 );
                                             }
                                         }
@@ -773,7 +772,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                             Err(e) => {
                                                 tracing::error!("Error deleting document {:?}", e);
                                                 return Err(
-                                                    ApplyMaterializedLogError::FTSDocumentDeleteError,
+                                                    ApplyMaterializedLogError::FTSDocumentDelete,
                                                 );
                                             }
                                         }
@@ -795,8 +794,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             for (key, value) in metadata.iter() {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
-                                    Err(e) => {
-                                        return Err(ApplyMaterializedLogError::BlockfileSetError);
+                                    Err(_) => {
+                                        return Err(ApplyMaterializedLogError::BlockfileSet);
                                     }
                                 }
                             }
@@ -908,12 +907,7 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             vec![full_text_freqs_id.to_string()],
         );
 
-        match self
-            .bool_metadata_index_flusher
-            .flush()
-            .await
-            .map_err(|e| e)
-        {
+        match self.bool_metadata_index_flusher.flush().await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -934,12 +928,7 @@ impl SegmentFlusher for MetadataSegmentFlusher {
         }
         flushed.insert(U32_METADATA.to_string(), vec![u32_metadata_id.to_string()]);
 
-        match self
-            .string_metadata_index_flusher
-            .flush()
-            .await
-            .map_err(|e| e)
-        {
+        match self.string_metadata_index_flusher.flush().await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -991,11 +980,11 @@ impl MetadataSegmentReader<'_> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_reader = match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
+
+                    match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    pls_reader
+                    }
                 }
                 None => None,
             },
@@ -1150,10 +1139,7 @@ impl MetadataSegmentReader<'_> {
             },
             None => None,
         };
-        let f32_metadata_index_reader = match f32_metadata_reader {
-            Some(reader) => Some(MetadataIndexReader::new_f32(reader)),
-            None => None,
-        };
+        let f32_metadata_index_reader = f32_metadata_reader.map(MetadataIndexReader::new_f32);
 
         Ok(MetadataSegmentReader {
             full_text_index_reader,

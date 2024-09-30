@@ -56,10 +56,11 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
 impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
     fn from(value: UpdateMetadataValue) -> Self {
         match value {
+            UpdateMetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
+            },
             UpdateMetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::IntValue(
-                    value as i64,
-                )),
+                value: Some(chroma_proto::update_metadata_value::Value::IntValue(value)),
             },
             UpdateMetadataValue::Float(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
@@ -198,9 +199,7 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
     fn from(value: MetadataValue) -> Self {
         match value {
             MetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::IntValue(
-                    value as i64,
-                )),
+                value: Some(chroma_proto::update_metadata_value::Value::IntValue(value)),
             },
             MetadataValue::Float(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
