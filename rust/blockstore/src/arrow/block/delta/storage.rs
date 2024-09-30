@@ -27,11 +27,11 @@ pub enum BlockStorage {
 impl Debug for BlockStorage {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            BlockStorage::String(_) => write!(f, "String"),
-            BlockStorage::VecUInt32(_) => write!(f, "VecUInt32"),
-            BlockStorage::UInt32(_) => write!(f, "UInt32"),
-            BlockStorage::RoaringBitmap(_) => write!(f, "RoaringBitmap"),
-            BlockStorage::DataRecord(_) => write!(f, "DataRecord"),
+            BlockStorage::String(_) => f.debug_struct("String").finish(),
+            BlockStorage::VecUInt32(_) => f.debug_struct("VecUInt32").finish(),
+            BlockStorage::UInt32(_) => f.debug_struct("UInt32").finish(),
+            BlockStorage::RoaringBitmap(_) => f.debug_struct("RoaringBitmap").finish(),
+            BlockStorage::DataRecord(_) => f.debug_struct("DataRecord").finish(),
         }
     }
 }
@@ -89,7 +89,7 @@ impl BlockKeyArrowBuilder {
         }
     }
 
-    pub fn to_arrow(&mut self) -> (Field, ArrayRef, Field, ArrayRef) {
+    pub fn as_arrow(&mut self) -> (Field, ArrayRef, Field, ArrayRef) {
         match self {
             BlockKeyArrowBuilder::String((ref mut prefix_builder, ref mut key_builder)) => {
                 let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
@@ -220,29 +220,29 @@ impl BlockStorage {
         }
     }
 
-    pub fn to_record_batch<K: ArrowWriteableKey>(self) -> RecordBatch {
+    pub fn into_record_batch<K: ArrowWriteableKey>(self) -> RecordBatch {
         let key_builder =
             K::get_arrow_builder(self.len(), self.get_prefix_size(), self.get_key_size());
         match self {
             BlockStorage::String(builder) => {
                 // TODO: handle error
-                builder.to_arrow(key_builder).unwrap()
+                builder.into_arrow(key_builder).unwrap()
             }
             BlockStorage::UInt32(builder) => {
                 // TODO: handle error
-                builder.to_arrow(key_builder).unwrap()
+                builder.into_arrow(key_builder).unwrap()
             }
             BlockStorage::DataRecord(builder) => {
                 // TODO: handle error
-                builder.to_arrow(key_builder).unwrap()
+                builder.into_arrow(key_builder).unwrap()
             }
             BlockStorage::VecUInt32(builder) => {
                 // TODO: handle error
-                builder.to_arrow(key_builder).unwrap()
+                builder.into_arrow(key_builder).unwrap()
             }
             BlockStorage::RoaringBitmap(builder) => {
                 // TODO: handle error
-                builder.to_arrow(key_builder).unwrap()
+                builder.into_arrow(key_builder).unwrap()
             }
         }
     }

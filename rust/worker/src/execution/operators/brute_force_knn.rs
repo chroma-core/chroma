@@ -46,7 +46,7 @@ pub struct BruteForceKnnOperatorInput {
 /// * `user_ids` - The user ids of the nearest neighbors.
 /// * `embeddings` - The embeddings of the nearest neighbors.
 /// * `distances` - The distances of the nearest neighbors.
-/// One row for each query vector.
+///    One row for each query vector.
 #[derive(Debug)]
 pub struct BruteForceKnnOperatorOutput {
     pub user_ids: Vec<String>,
@@ -146,11 +146,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             }
         };
 
-        let should_normalize = match input.distance_metric {
-            DistanceFunction::Cosine => true,
-            _ => false,
-        };
-
+        let should_normalize = matches!(input.distance_metric, DistanceFunction::Cosine);
         let normalized_query = match should_normalize {
             true => Some(normalize(&input.query)),
             false => None,
@@ -244,7 +240,7 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
-        return (blockfile_provider, record_segment_definition);
+        (blockfile_provider, record_segment_definition)
     }
 
     #[tokio::test]
@@ -318,7 +314,7 @@ mod tests {
         let norm_1 = (1.0_f32.powi(2) + 2.0_f32.powi(2) + 3.0_f32.powi(2)).sqrt();
         let data_1 = vec![1.0 / norm_1, 2.0 / norm_1, 3.0 / norm_1];
 
-        let norm_2 = (0.0_f32.powi(2) + -1.0_f32.powi(2) + 6.0_f32.powi(2)).sqrt();
+        let norm_2 = (0.0_f32.powi(2) + -(1.0_f32.powi(2)) + 6.0_f32.powi(2)).sqrt();
         let data_2 = vec![0.0 / norm_2, -1.0 / norm_2, 6.0 / norm_2];
         let data = vec![
             LogRecord {
@@ -472,7 +468,7 @@ mod tests {
         match res {
             Ok(_) => panic!("Expected error"),
             Err(e) => match e {
-                BruteForceKnnOperatorError::LogMaterializationError(e) => {
+                BruteForceKnnOperatorError::LogMaterializationError(_) => {
                     // We expect an error here because the second record is malformed.
                 }
                 _ => panic!("Unexpected error"),

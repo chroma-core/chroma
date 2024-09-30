@@ -48,7 +48,6 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use thiserror::Error;
-use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -75,7 +74,6 @@ enum ExecutionState {
     Write,
     Flush,
     Register,
-    Finished,
 }
 
 #[derive(Debug)]
@@ -152,12 +150,15 @@ impl ChromaError for CompactionError {
 // TODO: we need to improve this response
 #[derive(Debug)]
 pub struct CompactionResponse {
-    id: Uuid,
-    compaction_job: CompactionJob,
-    message: String,
+    #[allow(dead_code)]
+    pub(crate) id: Uuid,
+    pub(crate) compaction_job: CompactionJob,
+    #[allow(dead_code)]
+    pub(crate) message: String,
 }
 
 impl CompactOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         compaction_job: CompactionJob,
         system: System,
@@ -353,7 +354,7 @@ impl CompactOrchestrator {
             self.compaction_job.collection_id,
             log_position,
             self.compaction_job.collection_version,
-            segment_flush_info.into(),
+            segment_flush_info,
             self.sysdb.clone(),
             self.log.clone(),
         );

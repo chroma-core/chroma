@@ -20,6 +20,7 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.ingest.impl.utils import trigger_vector_segments_max_seq_id_migration
 from chromadb.segment import SegmentManager
+from chromadb.segment.impl.manager.local import LocalSegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
@@ -270,6 +271,13 @@ def persist_generated_data_with_old_version(
         embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
+
+        # Leave writes on the queue to be processed by the next version's
+        # segment manager so we can test cross version serialization
+        # compatibility.
+        system.instance(LocalSegmentManager).stop()
+        coll.upsert(**embeddings_strategy)
+
         # Shutdown system
         system.stop()
     except Exception as e:

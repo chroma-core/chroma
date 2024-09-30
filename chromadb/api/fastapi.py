@@ -15,6 +15,7 @@ from chromadb.api import ServerAPI
 from chromadb.api.types import (
     Documents,
     Embeddings,
+    PyEmbeddings,
     IDs,
     Include,
     Metadatas,
@@ -25,6 +26,7 @@ from chromadb.api.types import (
     QueryResult,
     CollectionMetadata,
     validate_batch,
+    convert_np_embeddings_to_list,
 )
 from chromadb.auth import (
     ClientAuthProvider,
@@ -381,7 +383,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         batch: Tuple[
             IDs,
-            Optional[Embeddings],
+            Optional[PyEmbeddings],
             Optional[Metadatas],
             Optional[Documents],
             Optional[URIs],
@@ -418,7 +420,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings),
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
         return True
@@ -438,7 +446,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings)
+            if embeddings is not None
+            else None,
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/update")
         return True
@@ -458,7 +474,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
-        batch = (ids, embeddings, metadatas, documents, uris)
+        batch = (
+            ids,
+            convert_np_embeddings_to_list(embeddings),
+            metadatas,
+            documents,
+            uris,
+        )
         validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(batch, "/collections/" + str(collection_id) + "/upsert")
         return True
@@ -479,7 +501,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             "post",
             "/collections/" + str(collection_id) + "/query",
             json={
-                "query_embeddings": query_embeddings,
+                "query_embeddings": convert_np_embeddings_to_list(query_embeddings)
+                if query_embeddings is not None
+                else None,
                 "n_results": n_results,
                 "where": where,
                 "where_document": where_document,

@@ -344,7 +344,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     def _prepare_vector_encoding_metadata(
         self, embedding: OperationRecord
     ) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
-        if embedding["embedding"]:
+        if embedding["embedding"] is not None:
             encoding_type = cast(ScalarEncoding, embedding["encoding"])
             encoding = encoding_type.value
             embedding_bytes = encode_vector(embedding["embedding"], encoding_type)

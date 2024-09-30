@@ -37,18 +37,7 @@ impl Eq for SparseIndexDelimiter {}
 
 impl PartialOrd for SparseIndexDelimiter {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (SparseIndexDelimiter::Start, SparseIndexDelimiter::Start) => {
-                Some(std::cmp::Ordering::Equal)
-            }
-            (SparseIndexDelimiter::Start, SparseIndexDelimiter::Key(_)) => {
-                Some(std::cmp::Ordering::Less)
-            }
-            (SparseIndexDelimiter::Key(_), SparseIndexDelimiter::Start) => {
-                Some(std::cmp::Ordering::Greater)
-            }
-            (SparseIndexDelimiter::Key(k1), SparseIndexDelimiter::Key(k2)) => k1.partial_cmp(k2),
-        }
+        Some(self.cmp(other))
     }
 }
 
@@ -107,10 +96,10 @@ impl SparseIndex {
         search_keys.sort();
         let mut result_uuids = Vec::new();
         let forward = self.forward.lock();
-        let mut curr_iter = forward.iter();
+        let curr_iter = forward.iter();
         let mut next_iter = forward.iter().skip(1);
         let mut search_iter = search_keys.iter().peekable();
-        while let Some((curr_key, curr_block_id)) = curr_iter.next() {
+        for (curr_key, curr_block_id) in curr_iter {
             let search_key = match search_iter.peek() {
                 Some(key) => SparseIndexDelimiter::Key((**key).clone()),
                 None => {
@@ -147,9 +136,7 @@ impl SparseIndex {
             .range(..=SparseIndexDelimiter::Key(search_key.clone()))
             .next_back()
         {
-            Some((_, block_id)) => {
-                return *block_id;
-            }
+            Some((_, block_id)) => *block_id,
             None => {
                 panic!("No blocks in the sparse index");
             }
@@ -158,24 +145,22 @@ impl SparseIndex {
 
     pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
         let lock_guard = self.forward.lock();
-        let mut curr_iter = lock_guard.iter();
+        let curr_iter = lock_guard.iter();
         let mut next_iter = lock_guard.iter().skip(1);
         let mut block_ids = vec![];
-        while let Some((curr_key, curr_uuid)) = curr_iter.next() {
-            let non_start_curr_key: Option<&CompositeKey>;
-            match curr_key {
-                SparseIndexDelimiter::Start => non_start_curr_key = None,
-                SparseIndexDelimiter::Key(k) => non_start_curr_key = Some(k),
-            }
+        for (curr_key, curr_uuid) in curr_iter {
+            let non_start_curr_key: Option<&CompositeKey> = match curr_key {
+                SparseIndexDelimiter::Start => None,
+                SparseIndexDelimiter::Key(k) => Some(k),
+            };
             if let Some((next_key, _)) = next_iter.next() {
                 // This can't be a start key but we still need to extract it.
-                let non_start_next_key: Option<&CompositeKey>;
-                match next_key {
+                let non_start_next_key: Option<&CompositeKey> = match next_key {
                     SparseIndexDelimiter::Start => {
                         panic!("Invariant violation. Sparse index is not valid.");
                     }
-                    SparseIndexDelimiter::Key(k) => non_start_next_key = Some(k),
-                }
+                    SparseIndexDelimiter::Key(k) => Some(k),
+                };
                 // If delimeter starts with the same prefix then there will be keys inside the
                 // block with this prefix.
                 if non_start_curr_key.is_some()
@@ -209,10 +194,10 @@ impl SparseIndex {
         key: K,
     ) -> Vec<Uuid> {
         let lock_guard = self.forward.lock();
-        let mut curr_iter = lock_guard.iter();
+        let curr_iter = lock_guard.iter();
         let mut next_iter = lock_guard.iter().skip(1);
         let mut block_ids = vec![];
-        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+        for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
                 SparseIndexDelimiter::Start => None,
                 SparseIndexDelimiter::Key(k) => Some(k),
@@ -226,18 +211,17 @@ impl SparseIndex {
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
             }
-            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
-                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
-                    block_ids.push(*curr_uuid);
-                }
+            if (curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix)
+                && (next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix)
+            {
+                block_ids.push(*curr_uuid);
             }
-            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
-                if curr_key.unwrap().key > key.clone().into() {
+            if let Some(curr_key) = curr_key {
+                if (curr_key.key > key.clone().into())
+                    || next_key.is_none()
+                    || next_key.unwrap().key > key.clone().into()
+                {
                     block_ids.push(*curr_uuid);
-                } else {
-                    if next_key.is_none() || next_key.unwrap().key > key.clone().into() {
-                        block_ids.push(*curr_uuid);
-                    }
                 }
             }
         }
@@ -250,10 +234,10 @@ impl SparseIndex {
         key: K,
     ) -> Vec<Uuid> {
         let lock_guard = self.forward.lock();
-        let mut curr_iter = lock_guard.iter();
+        let curr_iter = lock_guard.iter();
         let mut next_iter = lock_guard.iter().skip(1);
         let mut block_ids = vec![];
-        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+        for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
                 SparseIndexDelimiter::Start => None,
                 SparseIndexDelimiter::Key(k) => Some(k),
@@ -267,13 +251,13 @@ impl SparseIndex {
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
             }
-            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
-                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
-                    block_ids.push(*curr_uuid);
-                }
+            if (curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix)
+                && (next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix)
+            {
+                block_ids.push(*curr_uuid);
             }
-            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
-                if curr_key.unwrap().key < key.clone().into() {
+            if let Some(curr_key) = curr_key {
+                if curr_key.prefix.as_str() == prefix && curr_key.key < key.clone().into() {
                     block_ids.push(*curr_uuid);
                 }
             }
@@ -287,10 +271,10 @@ impl SparseIndex {
         key: K,
     ) -> Vec<Uuid> {
         let lock_guard = self.forward.lock();
-        let mut curr_iter = lock_guard.iter();
+        let curr_iter = lock_guard.iter();
         let mut next_iter = lock_guard.iter().skip(1);
         let mut block_ids = vec![];
-        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+        for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
                 SparseIndexDelimiter::Start => None,
                 SparseIndexDelimiter::Key(k) => Some(k),
@@ -304,18 +288,17 @@ impl SparseIndex {
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
             }
-            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
-                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
-                    block_ids.push(*curr_uuid);
-                }
+            if (curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix)
+                && (next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix)
+            {
+                block_ids.push(*curr_uuid);
             }
-            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
-                if curr_key.unwrap().key >= key.clone().into() {
+            if let Some(curr_key) = curr_key {
+                if curr_key.key >= key.clone().into()
+                    || next_key.is_none()
+                    || next_key.unwrap().key >= key.clone().into()
+                {
                     block_ids.push(*curr_uuid);
-                } else {
-                    if next_key.is_none() || next_key.unwrap().key >= key.clone().into() {
-                        block_ids.push(*curr_uuid);
-                    }
                 }
             }
         }
@@ -328,10 +311,10 @@ impl SparseIndex {
         key: K,
     ) -> Vec<Uuid> {
         let lock_guard = self.forward.lock();
-        let mut curr_iter = lock_guard.iter();
+        let curr_iter = lock_guard.iter();
         let mut next_iter = lock_guard.iter().skip(1);
         let mut block_ids = vec![];
-        while let Some((curr_delim, curr_uuid)) = curr_iter.next() {
+        for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
                 SparseIndexDelimiter::Start => None,
                 SparseIndexDelimiter::Key(k) => Some(k),
@@ -345,13 +328,13 @@ impl SparseIndex {
                     SparseIndexDelimiter::Key(k) => Some(k),
                 };
             }
-            if curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix {
-                if next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix {
-                    block_ids.push(*curr_uuid);
-                }
+            if (curr_key.is_none() || curr_key.unwrap().prefix.as_str() < prefix)
+                && (next_key.is_none() || next_key.unwrap().prefix.as_str() >= prefix)
+            {
+                block_ids.push(*curr_uuid);
             }
-            if curr_key.is_some() && curr_key.unwrap().prefix.as_str() == prefix {
-                if curr_key.unwrap().key <= key.clone().into() {
+            if let Some(curr_key) = curr_key {
+                if curr_key.prefix.as_str() == prefix && curr_key.key <= key.clone().into() {
                     block_ids.push(*curr_uuid);
                 }
             }
@@ -397,7 +380,7 @@ impl SparseIndex {
         let mut reverse = self.reverse.lock();
         if let Some(id) = forward.remove(&key_copy) {
             reverse.remove(&id);
-            forward.insert(SparseIndexDelimiter::Start, id.clone());
+            forward.insert(SparseIndexDelimiter::Start, id);
             reverse.insert(id, SparseIndexDelimiter::Start);
         }
     }
@@ -454,9 +437,9 @@ impl SparseIndex {
         let forward = self.forward.lock();
         let mut first = true;
         // Two pointer traversal to check if the keys are in order and that the start key is first
-        let mut iter_slow = forward.iter();
+        let iter_slow = forward.iter();
         let mut iter_fast = forward.iter().skip(1);
-        while let Some((curr_key, _)) = iter_slow.next() {
+        for (curr_key, _) in iter_slow {
             if first {
                 if curr_key != &SparseIndexDelimiter::Start {
                     return false;
@@ -552,11 +535,11 @@ impl Debug for SparseIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let forward = self.forward.lock();
         let reverse = self.reverse.lock();
-        write!(
-            f,
-            "SparseIndex {{ id: {}, forward: {:?}, reverse: {:?} }}",
-            self.id, forward, reverse
-        )
+        f.debug_struct("SparseIndex")
+            .field("id", &self.id)
+            .field("forward", &forward)
+            .field("reverse", &reverse)
+            .finish()
     }
 }
 
@@ -660,20 +643,22 @@ mod tests {
         let block_id_3 = uuid::Uuid::new_v4();
         blockfile_key = CompositeKey::new("prefix".to_string(), "f");
         sparse_index.add_block(blockfile_key.clone(), block_id_3);
-        let mut composite_keys = Vec::new();
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "b"));
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "c"));
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "d"));
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "e"));
+        let composite_keys = vec![
+            CompositeKey::new("prefix".to_string(), "b"),
+            CompositeKey::new("prefix".to_string(), "c"),
+            CompositeKey::new("prefix".to_string(), "d"),
+            CompositeKey::new("prefix".to_string(), "e"),
+        ];
         let blocks = sparse_index.get_all_target_block_ids(composite_keys);
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains(&block_id_1));
         assert!(blocks.contains(&block_id_2));
-        composite_keys = Vec::new();
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "f"));
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "g"));
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "h"));
-        composite_keys.push(CompositeKey::new("prefix".to_string(), "i"));
+        let composite_keys = vec![
+            CompositeKey::new("prefix".to_string(), "f"),
+            CompositeKey::new("prefix".to_string(), "g"),
+            CompositeKey::new("prefix".to_string(), "h"),
+            CompositeKey::new("prefix".to_string(), "i"),
+        ];
         let blocks = sparse_index.get_all_target_block_ids(composite_keys);
         assert_eq!(blocks.len(), 1);
         assert!(blocks.contains(&block_id_3));

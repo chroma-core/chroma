@@ -112,13 +112,13 @@ class BruteForceIndex:
         return [
             VectorEmbeddingRecord(
                 id=id,
-                embedding=self.vectors[self.id_to_index[id]].tolist(),
+                embedding=self.vectors[self.id_to_index[id]],
             )
             for id in target_ids
         ]
 
     def query(self, query: VectorQuery) -> Sequence[Sequence[VectorQueryResult]]:
-        np_query = np.array(query["vectors"])
+        np_query = np.array(query["vectors"], dtype=np.float32)
         allowed_ids = (
             None if query["allowed_ids"] is None else set(query["allowed_ids"])
         )
@@ -128,7 +128,7 @@ class BruteForceIndex:
             np_query,
         )
 
-        indices = np.argsort(distances).tolist()
+        indices = np.argsort(distances)
         # Filter out deleted labels
         filtered_results = []
         for i, index_list in enumerate(indices):
@@ -144,7 +144,7 @@ class BruteForceIndex:
                             VectorQueryResult(
                                 id=id,
                                 distance=distances[i][j].item(),
-                                embedding=self.vectors[j].tolist(),
+                                embedding=self.vectors[j],
                             )
                         )
             filtered_results.append(curr_results)

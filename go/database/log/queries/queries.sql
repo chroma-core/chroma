@@ -45,3 +45,6 @@ DELETE FROM collection c where c.id = ANY(@collection_ids::text[]);
 
 -- name: GetAllCollections :many
 SELECT id FROM collection;
+
+-- name: GetLastCompactedOffset :one
+SELECT record_compaction_offset_position FROM collection c WHERE c.id = $1;

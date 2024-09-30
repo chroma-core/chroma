@@ -62,12 +62,12 @@ impl<C: Component> WrappedMessage<C> {
         }
     }
 
-    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
+    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) {
         self.boxed_message.handle_and_reply(component, ctx).await;
     }
 
     pub(super) fn get_tracing_context(&self) -> Option<tracing::Span> {
-        return self.tracing_context.clone();
+        self.tracing_context.clone()
     }
 }
 

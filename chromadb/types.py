@@ -9,6 +9,9 @@ from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel
 
+import numpy as np
+from numpy.typing import NDArray
+
 from chromadb.api.configuration import (
     CollectionConfigurationInternal,
     ConfigurationInternal,
@@ -66,9 +69,10 @@ class Collection(
     dimension: Optional[int]
     tenant: str
     database: str
-    # The version is only used in the distributed version of chroma
+    # The version and log position is only used in the distributed version of chroma
     # in single-node chroma, this field is always 0
     version: int
+    log_position: int
 
     def __init__(
         self,
@@ -80,6 +84,7 @@ class Collection(
         tenant: str,
         database: str,
         version: int = 0,
+        log_position: int = 0,
     ):
         super().__init__(
             id=id,
@@ -90,6 +95,7 @@ class Collection(
             tenant=tenant,
             database=database,
             version=version,
+            log_position=log_position,
         )
 
     # TODO: This throws away type information.
@@ -190,7 +196,8 @@ class Operation(Enum):
     DELETE = "DELETE"
 
 
-Vector = Union[Sequence[float], Sequence[int]]
+PyVector = Union[Sequence[float], Sequence[int]]
+Vector = NDArray[Union[np.int32, np.float32]]
 
 
 class VectorEmbeddingRecord(TypedDict):
@@ -216,6 +223,26 @@ class LogRecord(TypedDict):
     record: OperationRecord
 
 
+class RequestVersionContext(TypedDict):
+    """The version and log position of the collection at the time of the request
+
+    This is used to ensure that the request is processed against the correct version of the collection,
+    as well as that the pulled logs are consistent with the start offset of the compacted collection.
+
+    For example, if the FE first queries the metadata segment and then queries the vector segment, the version
+    and log position of the collection may have changed between the two queries. The FE can use this context to
+    ensure that the second query is processed against the correct version of the collection.
+
+    If a query is shared between multiple segments, the version context should be passed to the query for each segment.
+    This ensures that the query is processed against the correct version of the collection.
+
+    Only used in the impls of distributed Chroma.
+    """
+
+    collection_version: int
+    log_position: int
+
+
 class VectorQuery(TypedDict):
     """A KNN/ANN query"""
 
@@ -224,6 +251,7 @@ class VectorQuery(TypedDict):
     allowed_ids: Optional[Sequence[str]]
     include_embeddings: bool
     options: Optional[Dict[str, Union[str, int, float, bool]]]
+    request_version_context: RequestVersionContext
 
 
 class VectorQueryResult(TypedDict):

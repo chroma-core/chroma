@@ -16,7 +16,6 @@ use chroma_cache::cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
-use core::panic;
 use futures::StreamExt;
 use std::sync::Arc;
 use thiserror::Error;
@@ -57,12 +56,8 @@ impl ArrowBlockfileProvider {
             Ok(Some(sparse_index)) => Ok(BlockfileReader::ArrowBlockfileReader(
                 ArrowBlockfileReader::new(*id, self.block_manager.clone(), sparse_index),
             )),
-            Ok(None) => {
-                return Err(Box::new(OpenError::NotFound));
-            }
-            Err(e) => {
-                return Err(Box::new(OpenError::Other(Box::new(e))));
-            }
+            Ok(None) => Err(Box::new(OpenError::NotFound)),
+            Err(e) => Err(Box::new(OpenError::Other(Box::new(e)))),
         }
     }
 
@@ -213,8 +208,7 @@ impl BlockManager {
 
     pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> BlockDelta {
         let new_block_id = Uuid::new_v4();
-        let block = BlockDelta::new::<K, V>(new_block_id);
-        block
+        BlockDelta::new::<K, V>(new_block_id)
     }
 
     pub(super) async fn fork<KeyWrite: ArrowWriteableKey, ValueWrite: ArrowWriteableValue>(
@@ -255,8 +249,7 @@ impl BlockManager {
     ) -> Block {
         let delta_id = delta.id;
         let record_batch = delta.finish::<K, V>();
-        let block = Block::from_record_batch(delta_id, record_batch);
-        block
+        Block::from_record_batch(delta_id, record_batch)
     }
 
     pub(super) fn cached(&self, id: &Uuid) -> bool {
@@ -286,7 +279,7 @@ impl BlockManager {
                                 let _guard = self.write_mutex.lock().await;
                                 match self.block_cache.get(id) {
                                     Some(b) => {
-                                        return Ok(Some(b));
+                                        Ok(Some(b))
                                     }
                                     None => {
                                         self.block_cache.insert(*id, block.clone());
@@ -300,13 +293,13 @@ impl BlockManager {
                                     key,
                                     e
                                 );
-                                return Err(GetError::BlockLoadError(e));
+                                Err(GetError::BlockLoadError(e))
                             }
                         }
                     }
                     Err(e) => {
                         tracing::error!("Error converting bytes to Block {:?}", e);
-                        return Err(GetError::StorageGetError(e));
+                        Err(GetError::StorageGetError(e))
                     }
                 }
             }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold")).await
@@ -431,26 +424,26 @@ impl SparseIndexManager {
                                 match index {
                                     Ok(index) => {
                                         self.cache.insert(*id, index.clone());
-                                        return Ok(Some(index));
+                                        Ok(Some(index))
                                     }
                                     Err(e) => {
                                         tracing::error!(
                                             "Error turning block into sparse index: {}",
                                             e
                                         );
-                                        return Err(SparseIndexManagerError::UUIDParseError(e));
+                                        Err(SparseIndexManagerError::UUIDParseError(e))
                                     }
                                 }
                             }
                             Err(e) => {
                                 tracing::error!("Error turning bytes into block: {}", e);
-                                return Err(SparseIndexManagerError::BlockLoadError(e));
+                                Err(SparseIndexManagerError::BlockLoadError(e))
                             }
                         }
                     }
                     Err(e) => {
                         tracing::error!("Error reading sparse index from storage: {}", e);
-                        return Err(SparseIndexManagerError::StorageGetError(e));
+                        Err(SparseIndexManagerError::StorageGetError(e))
                     }
                 }
             }

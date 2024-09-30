@@ -50,8 +50,6 @@ pub(crate) struct MetadataQueryOrchestrator {
     record_segment: Option<Segment>,
     metadata_segment: Option<Segment>,
     collection: Option<Collection>,
-    // State machine management
-    merge_dependency_count: u32,
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
@@ -65,6 +63,9 @@ pub(crate) struct MetadataQueryOrchestrator {
     include_metadata: bool,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<MetadataQueryOrchestratorResult>>,
+    // Request version context
+    collection_version: u32,
+    log_position: u64,
 }
 
 #[derive(Error, Debug)]
@@ -81,6 +82,8 @@ enum MetadataQueryOrchestratorError {
     CollectionNotFound(Uuid),
     #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
 impl ChromaError for MetadataQueryOrchestratorError {
@@ -94,11 +97,15 @@ impl ChromaError for MetadataQueryOrchestratorError {
             MetadataQueryOrchestratorError::SystemTimeError(_) => ErrorCodes::Internal,
             MetadataQueryOrchestratorError::CollectionNotFound(_) => ErrorCodes::NotFound,
             MetadataQueryOrchestratorError::GetCollectionError(e) => e.code(),
+            MetadataQueryOrchestratorError::CollectionVersionMismatch => {
+                ErrorCodes::VersionMismatch
+            }
         }
     }
 }
 
 impl MetadataQueryOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
@@ -113,6 +120,8 @@ impl MetadataQueryOrchestrator {
         offset: Option<u32>,
         limit: Option<u32>,
         include_metadata: bool,
+        collection_version: u32,
+        log_position: u64,
     ) -> Self {
         Self {
             state: ExecutionState::Pending,
@@ -123,7 +132,6 @@ impl MetadataQueryOrchestrator {
             record_segment: None,
             metadata_segment: None,
             collection: None,
-            merge_dependency_count: 2,
             log,
             sysdb,
             dispatcher,
@@ -134,6 +142,8 @@ impl MetadataQueryOrchestrator {
             limit,
             include_metadata,
             result_channel: None,
+            collection_version,
+            log_position,
         }
     }
 
@@ -182,8 +192,19 @@ impl MetadataQueryOrchestrator {
             }
         };
 
+        // If the collection version does not match the version in the request, return an error
+        if collection.version as u32 != self.collection_version {
+            terminate_with_error(
+                self.result_channel.take(),
+                Box::new(MetadataQueryOrchestratorError::CollectionVersionMismatch),
+                ctx,
+            );
+            return;
+        }
+
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
+        self.pull_logs(ctx).await;
     }
 
     async fn pull_logs(&mut self, ctx: &ComponentContext<Self>) {
@@ -211,7 +232,9 @@ impl MetadataQueryOrchestrator {
         let input = PullLogsInput::new(
             collection.id,
             // The collection log position is inclusive, and we want to start from the next log.
-            collection.log_position + 1,
+            // Note: We use the log position sent in the request for transactionality
+            // TODO: Change log service to use u64 instead of i64
+            (self.log_position as i64) + 1,
             100,
             None,
             Some(end_timestamp),
@@ -320,21 +343,19 @@ impl MetadataQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one segment exists from
                 // the check above
-                return Ok(segments.into_iter().next().unwrap());
+                Ok(segments.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
-                    e,
-                )));
-            }
-        };
+            Err(e) => Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
+                e,
+            ))),
+        }
     }
 
     async fn get_collection_from_id(
         &self,
         mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
+        _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
@@ -349,14 +370,12 @@ impl MetadataQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one collection exists from
                 // the check above
-                return Ok(collections.into_iter().next().unwrap());
+                Ok(collections.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(
-                    MetadataQueryOrchestratorError::GetCollectionError(e),
-                ));
-            }
-        };
+            Err(e) => Err(Box::new(
+                MetadataQueryOrchestratorError::GetCollectionError(e),
+            )),
+        }
     }
 
     ///  Run the orchestrator and return the result.
@@ -385,7 +404,6 @@ impl Component for MetadataQueryOrchestrator {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         self.start(ctx).await;
-        self.pull_logs(ctx).await;
     }
 }
 
@@ -491,7 +509,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
 
         match result_channel.send(Ok(output)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_) => {
                 // Log an error - this implied the listener was dropped
                 println!(
                     "[MetadataQueryOrchestrator] Result channel dropped before sending result"

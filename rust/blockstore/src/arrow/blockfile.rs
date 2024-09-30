@@ -87,7 +87,7 @@ impl ArrowBlockfileWriter {
         Self {
             block_manager,
             sparse_index_manager,
-            block_deltas: block_deltas,
+            block_deltas,
             sparse_index: new_sparse_index,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
@@ -143,11 +143,7 @@ impl ArrowBlockfileWriter {
 
         let delta = {
             let deltas = self.block_deltas.lock();
-            let delta = match deltas.get(&target_block_id) {
-                None => None,
-                Some(delta) => Some(delta.clone()),
-            };
-            delta
+            deltas.get(&target_block_id).cloned()
         };
 
         let delta = match delta {
@@ -208,11 +204,7 @@ impl ArrowBlockfileWriter {
         // TODO: clean this up as its redudant with the set method
         let delta = {
             let deltas = self.block_deltas.lock();
-            let delta = match deltas.get(&target_block_id) {
-                None => None,
-                Some(delta) => Some(delta.clone()),
-            };
-            delta
+            deltas.get(&target_block_id).cloned()
         };
 
         let delta = match delta {
@@ -278,7 +270,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
-    pub async fn get_block(&self, block_id: Uuid) -> Result<Option<&Block>, GetError> {
+    pub(super) async fn get_block(&self, block_id: Uuid) -> Result<Option<&Block>, GetError> {
+        // NOTE(rescrv):  This will complain with clippy, but we don't want to hold a reference to
+        // the loaded_blocks map across a call to the block manager.
+        #[allow(clippy::map_entry)]
         if !self.loaded_blocks.lock().contains_key(&block_id) {
             let block = match self.block_manager.get(&block_id).await {
                 Ok(Some(block)) => block,
@@ -302,7 +297,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // We never drop the Box<Block> while the reference is still alive
             // We never drop the HashMap while the reference is still alive
             // We never drop the HashMap while the Box<Block> is still alive
-            return Ok(Some(unsafe { transmute(&**block) }));
+            return Ok(Some(unsafe { transmute::<&Block, &Block>(&**block) }));
         }
 
         Ok(None)
@@ -315,7 +310,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     /// - `block_ids`: A list of block ids to load.
     /// # Returns
     /// - `()`: Returns nothing.
-    async fn load_blocks(&self, block_ids: &[Uuid]) -> () {
+    async fn load_blocks(&self, block_ids: &[Uuid]) {
         // TODO: These need to be separate tasks enqueued onto dispatcher.
         let mut futures = Vec::new();
         for block_id in block_ids {
@@ -323,8 +318,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // We do not dispatch if block is present in the block manager's cache
             // but not present in the reader's cache (i.e. loaded_blocks). The
             // next read for this block using this reader instance will populate it.
-            if !self.block_manager.cached(&block_id)
-                && !self.loaded_blocks.lock().contains_key(&block_id)
+            if !self.block_manager.cached(block_id)
+                && !self.loaded_blocks.lock().contains_key(block_id)
             {
                 futures.push(self.get_block(*block_id));
             }
@@ -332,11 +327,11 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         join_all(futures).await;
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) -> () {
+    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) {
         let mut composite_keys = Vec::new();
-        let mut prefix_iter = prefixes.iter();
+        let prefix_iter = prefixes.iter();
         let mut key_iter = keys.iter();
-        while let Some(prefix) = prefix_iter.next() {
+        for prefix in prefix_iter {
             if let Some(key) = key_iter.next() {
                 let composite_key = CompositeKey::new(prefix.to_string(), key.clone());
                 composite_keys.push(composite_key);
@@ -369,7 +364,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     key,
                     target_block_id
                 );
-                return Err(Box::new(BlockfileError::NotFoundError));
+                Err(Box::new(BlockfileError::NotFoundError))
             }
         }
     }
@@ -412,15 +407,13 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block = block.unwrap();
         let res = block.get_at_index::<'me, K, V>(index - block_offset);
         match res {
-            Some((prefix, key, value)) => {
-                return Ok((prefix, key, value));
-            }
+            Some((prefix, key, value)) => Ok((prefix, key, value)),
             _ => {
                 tracing::error!(
                     "Value not found at index {:?} for block",
                     index - block_offset,
                 );
-                return Err(Box::new(BlockfileError::NotFoundError));
+                Err(Box::new(BlockfileError::NotFoundError))
             }
         }
     }
@@ -461,7 +454,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             };
         }
-        return Ok(result);
+        Ok(result)
     }
 
     /// Returns all arrow records whose key < supplied key.
@@ -500,7 +493,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             };
         }
-        return Ok(result);
+        Ok(result)
     }
 
     /// Returns all arrow records whose key >= supplied key.
@@ -539,7 +532,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             };
         }
-        return Ok(result);
+        Ok(result)
     }
 
     /// Returns all arrow records whose key <= supplied key.
@@ -578,7 +571,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             };
         }
-        return Ok(result);
+        Ok(result)
     }
 
     /// Returns all arrow records whose prefix is same as supplied prefix.
@@ -644,9 +637,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let mut block_ids: Vec<Uuid> = vec![];
         {
             let lock_guard = self.sparse_index.forward.lock();
-            let mut curr_iter = lock_guard.iter();
-            while let Some((_, block_id)) = curr_iter.next() {
-                block_ids.push(block_id.clone());
+            let curr_iter = lock_guard.iter();
+            for (_, block_id) in curr_iter {
+                block_ids.push(*block_id);
             }
         }
         // Preload all blocks in parallel using the load_blocks helper
@@ -662,7 +655,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(e));
                 }
             };
-            result = result + block.len();
+            result += block.len();
         }
 
         Ok(result)
@@ -723,7 +716,7 @@ mod tests {
         let count = reader.count().await;
         match count {
             Ok(c) => assert_eq!(2, c),
-            Err(_) => assert!(true, "Error getting count"),
+            Err(_) => panic!("Error getting count"),
         }
     }
 
@@ -746,10 +739,7 @@ mod tests {
                 let prefix = format!("{}/{}", "prefix", j);
                 for i in 1..=num_keys {
                     let key = format!("{}/{}", "key", i);
-                    writer
-                        .set(prefix.as_str(), key.as_str(), i as u32)
-                        .await
-                        .unwrap();
+                    writer.set(prefix.as_str(), key.as_str(), i).await.unwrap();
                 }
             }
             // commit.
@@ -787,7 +777,7 @@ mod tests {
                         }
                     }
                 }
-                Err(_) => assert!(true, "Error running get by prefix"),
+                Err(_) => panic!("Error running get by prefix"),
             }
         });
     }
@@ -810,7 +800,7 @@ mod tests {
             let prefix = "prefix";
             for i in 1..num_keys {
                 let key = format!("{}/{}", "key", i);
-                writer.set(prefix, key.as_str(), i as u32).await.unwrap();
+                writer.set(prefix, key.as_str(), i).await.unwrap();
             }
             // commit.
             let flusher = writer.commit::<&str, u32>().unwrap();
@@ -838,13 +828,12 @@ mod tests {
                     }
                     for i in 1..num_keys {
                         let key = format!("{}/{}", "key", i);
-                        let condition: bool;
-                        match operation {
-                            ComparisonOperation::GreaterThan => condition = key > query,
-                            ComparisonOperation::GreaterThanOrEquals => condition = key >= query,
-                            ComparisonOperation::LessThan => condition = key < query,
-                            ComparisonOperation::LessThanOrEquals => condition = key <= query,
-                        }
+                        let condition: bool = match operation {
+                            ComparisonOperation::GreaterThan => key > query,
+                            ComparisonOperation::GreaterThanOrEquals => key >= query,
+                            ComparisonOperation::LessThan => key < query,
+                            ComparisonOperation::LessThanOrEquals => key <= query,
+                        };
                         if condition {
                             assert!(
                                 kv_map.contains_key(key.as_str()),
@@ -860,7 +849,7 @@ mod tests {
                         }
                     }
                 }
-                Err(_) => assert!(true, "Error getting gt"),
+                Err(_) => panic!("Error getting gt"),
             }
         });
     }
@@ -1187,7 +1176,7 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             println!("Setting key: {}", key);
-            let value = roaring::RoaringBitmap::from_iter((0..i).map(|x| x as u32));
+            let value = roaring::RoaringBitmap::from_iter(0..i);
             writer.set("key", key.as_str(), value).await.unwrap();
         }
         let flusher = writer.commit::<&str, roaring::RoaringBitmap>().unwrap();
@@ -1492,7 +1481,7 @@ mod tests {
 
         for i in 0..delete_end {
             let key = format!("{:04}", i);
-            assert_eq!(reader.contains("key", &key).await.unwrap(), false);
+            assert!(!reader.contains("key", &key).await.unwrap());
         }
 
         for i in delete_end..n * 2 {
@@ -1549,7 +1538,7 @@ mod tests {
         let n = 20000;
         let fixed_key = "key";
         for i in 0..n {
-            let value = i as u32;
+            let value: u32 = i;
             writer.set("prefix", fixed_key, value).await.unwrap();
         }
 

@@ -81,7 +81,7 @@ impl Stream for AsyncFileStream {
                     Poll::Ready(None)
                 } else {
                     let mut data = Vec::new();
-                    data.extend_from_slice(&read_buf.filled());
+                    data.extend_from_slice(read_buf.filled());
                     Poll::Ready(Some(Ok(data)))
                 }
             }

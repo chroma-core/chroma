@@ -36,6 +36,9 @@ pub(crate) struct CountQueryOrchestrator {
     blockfile_provider: BlockfileProvider,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<Result<usize, Box<dyn ChromaError>>>>,
+    // Request version context
+    collection_version: u32,
+    log_position: u64,
 }
 
 #[derive(Error, Debug)]
@@ -52,6 +55,8 @@ enum CountQueryOrchestratorError {
     CollectionNotFound(Uuid),
     #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
 impl ChromaError for CountQueryOrchestratorError {
@@ -65,11 +70,13 @@ impl ChromaError for CountQueryOrchestratorError {
             CountQueryOrchestratorError::SystemTimeError(_) => ErrorCodes::Internal,
             CountQueryOrchestratorError::CollectionNotFound(_) => ErrorCodes::NotFound,
             CountQueryOrchestratorError::GetCollectionError(e) => e.code(),
+            CountQueryOrchestratorError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
         }
     }
 }
 
 impl CountQueryOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
@@ -78,6 +85,8 @@ impl CountQueryOrchestrator {
         sysdb: Box<SysDb>,
         dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
+        collection_version: u32,
+        log_position: u64,
     ) -> Self {
         Self {
             system,
@@ -90,6 +99,8 @@ impl CountQueryOrchestrator {
             dispatcher,
             blockfile_provider,
             result_channel: None,
+            collection_version,
+            log_position,
         }
     }
 
@@ -140,8 +151,19 @@ impl CountQueryOrchestrator {
             }
         };
 
+        // If the collection version does not match the request version then we terminate with an error
+        if collection.version as u32 != self.collection_version {
+            terminate_with_error(
+                self.result_channel.take(),
+                Box::new(CountQueryOrchestratorError::CollectionVersionMismatch),
+                ctx,
+            );
+            return;
+        }
+
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
+        self.pull_logs(ctx).await;
     }
 
     // shared
@@ -170,7 +192,9 @@ impl CountQueryOrchestrator {
         let input = PullLogsInput::new(
             collection.id,
             // The collection log position is inclusive, and we want to start from the next log.
-            collection.log_position + 1,
+            // Note that we query using the incoming log position this is critical for correctness
+            // TODO: We should make all the log service code use u64 instead of i64
+            (self.log_position as i64) + 1,
             100,
             None,
             Some(end_timestamp),
@@ -245,12 +269,10 @@ impl CountQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one segment exists from
                 // the check above
-                return Ok(segments.into_iter().next().unwrap());
+                Ok(segments.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(CountQueryOrchestratorError::GetSegmentsError(e)));
-            }
-        };
+            Err(e) => Err(Box::new(CountQueryOrchestratorError::GetSegmentsError(e))),
+        }
     }
 
     // shared
@@ -258,7 +280,7 @@ impl CountQueryOrchestrator {
         &self,
         mut sysdb: Box<SysDb>,
         collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
+        _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
@@ -273,12 +295,10 @@ impl CountQueryOrchestrator {
                 }
                 // Unwrap is safe as we know at least one collection exists from
                 // the check above
-                return Ok(collections.into_iter().next().unwrap());
+                Ok(collections.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(CountQueryOrchestratorError::GetCollectionError(e)));
-            }
-        };
+            Err(e) => Err(Box::new(CountQueryOrchestratorError::GetCollectionError(e))),
+        }
     }
 
     ///  Run the orchestrator and return the result.
@@ -307,7 +327,6 @@ impl Component for CountQueryOrchestrator {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         self.start(ctx).await;
-        self.pull_logs(ctx).await;
     }
 }
 
@@ -371,7 +390,7 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOr
             .expect("Expect channel to be present");
         match channel.send(Ok(msg.count)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_) => {
                 // Log an error - this implied the listener was dropped
                 println!("[CountQueryOrchestrator] Result channel dropped before sending result");
             }

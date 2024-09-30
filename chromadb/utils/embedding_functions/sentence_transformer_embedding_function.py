@@ -43,9 +43,12 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         return cast(
             Embeddings,
-            self._model.encode(
-                list(input),
-                convert_to_numpy=True,
-                normalize_embeddings=self._normalize_embeddings,
-            ).tolist(),
+            [
+                embedding
+                for embedding in self._model.encode(
+                    list(input),
+                    convert_to_numpy=True,
+                    normalize_embeddings=self._normalize_embeddings,
+                )
+            ],
         )

@@ -46,7 +46,7 @@ impl MergeKnnResultsOperatorInput {
             include_vectors,
             k,
             record_segment_definition,
-            blockfile_provider: blockfile_provider,
+            blockfile_provider,
         }
     }
 }
@@ -63,7 +63,7 @@ pub enum MergeKnnResultsOperatorError {}
 
 impl ChromaError for MergeKnnResultsOperatorError {
     fn code(&self) -> ErrorCodes {
-        return ErrorCodes::UNKNOWN;
+        ErrorCodes::Unknown
     }
 }
 
@@ -183,13 +183,14 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn merge_results(
-    hnsw_result_user_ids: &Vec<&str>,
-    hnsw_result_distances: &Vec<f32>,
+    hnsw_result_user_ids: &[&str],
+    hnsw_result_distances: &[f32],
     hnsw_result_vectors: &Option<Vec<Vec<f32>>>,
-    brute_force_result_user_ids: &Vec<String>,
-    brute_force_result_distances: &Vec<f32>,
-    brute_force_result_vectors: &Vec<Vec<f32>>,
+    brute_force_result_user_ids: &[String],
+    brute_force_result_distances: &[f32],
+    brute_force_result_vectors: &[Vec<f32>],
     include_vectors: bool,
     k: usize,
 ) -> (Vec<String>, Vec<f32>, Option<Vec<Vec<f32>>>) {

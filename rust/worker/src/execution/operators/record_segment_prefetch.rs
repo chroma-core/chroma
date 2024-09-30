@@ -2,7 +2,7 @@ use crate::{
     execution::operator::{Operator, OperatorType},
     segment::record_segment::RecordSegmentReader,
 };
-use chroma_blockstore::{key, provider::BlockfileProvider};
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Segment;
 use thiserror::Error;
@@ -14,13 +14,6 @@ pub(crate) struct OffsetIdToDataKeys {
 }
 
 #[derive(Debug)]
-pub(crate) struct UserIdToOffsetIdKeys {
-    // TODO: Can we avoid full copies here as it
-    // might turn out to be expensive.
-    pub(crate) keys: Vec<String>,
-}
-
-#[derive(Debug)]
 pub(crate) struct OffsetIdToUserIdKeys {
     pub(crate) keys: Vec<u32>,
 }
@@ -28,7 +21,6 @@ pub(crate) struct OffsetIdToUserIdKeys {
 #[derive(Debug)]
 pub(crate) enum Keys {
     OffsetIdToDataKeys(OffsetIdToDataKeys),
-    UserIdToOffsetIdKeys(UserIdToOffsetIdKeys),
     OffsetIdToUserIdKeys(OffsetIdToUserIdKeys),
 }
 
@@ -122,28 +114,6 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
                 };
                 record_segment_reader
                     .prefetch_id_to_user_id(&keys.keys)
-                    .await;
-            }
-            Keys::UserIdToOffsetIdKeys(keys) => {
-                if keys.keys.is_empty() {
-                    return Ok(RecordSegmentPrefetchIoOutput {});
-                }
-                // Construct record segment reader.
-                let record_segment_reader = match RecordSegmentReader::from_segment(
-                    &input.segment,
-                    &input.provider,
-                )
-                .await
-                {
-                    Ok(reader) => reader,
-                    Err(_) => {
-                        return Err(
-                            RecordSegmentPrefetchIoOperatorError::RecordSegmentReaderCreationError,
-                        );
-                    }
-                };
-                record_segment_reader
-                    .prefetch_user_id_to_id(keys.keys.iter().map(|x| x.as_str()).collect())
                     .await;
             }
         }

@@ -7,14 +7,11 @@ use chroma_index::hnsw_provider::{
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{
-    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
-    IndexConfigFromSegmentError,
+    HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig, IndexConfigFromSegmentError,
 };
 use chroma_types::{MaterializedLogOperation, Segment};
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -29,7 +26,9 @@ pub(crate) struct DistributedHNSWSegmentWriter {
 
 impl Debug for DistributedHNSWSegmentWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DistributedHNSWSegment")
+        f.debug_struct("DistributedHNSWSegmentWriter")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
@@ -74,11 +73,11 @@ impl DistributedHNSWSegmentWriter {
         hnsw_index_provider: HnswIndexProvider,
         id: Uuid,
     ) -> Self {
-        return DistributedHNSWSegmentWriter {
+        DistributedHNSWSegmentWriter {
             index,
             hnsw_index_provider,
             id,
-        };
+        }
     }
 
     pub(crate) async fn from_segment(
@@ -87,7 +86,7 @@ impl DistributedHNSWSegmentWriter {
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
-        let index_config = match IndexConfig::from_segment(&segment, dimensionality as i32) {
+        let _index_config = match IndexConfig::from_segment(segment, dimensionality as i32) {
             Ok(ic) => ic,
             Err(e) => {
                 return Err(Box::new(
@@ -97,7 +96,7 @@ impl DistributedHNSWSegmentWriter {
         };
         let persist_path = &hnsw_index_provider.temporary_storage_path;
 
-        let hnsw_config = match HnswIndexConfig::from_segment(segment, persist_path) {
+        let _hnsw_config = match HnswIndexConfig::from_segment(segment, persist_path) {
             Ok(hc) => hc,
             Err(e) => {
                 return Err(Box::new(
@@ -109,7 +108,7 @@ impl DistributedHNSWSegmentWriter {
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
-        if segment.file_path.len() > 0 {
+        if !segment.file_path.is_empty() {
             println!("Loading HNSW index from files");
             // Check if its in the providers cache, if not load the index from the files
             let index_id = match &segment.file_path.get(HNSW_INDEX) {
@@ -197,14 +196,16 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                     if index_len + 1 > index_capacity {
                         index.with_upgraded(|index| {
                             // Bump allocation by 2x
-                            index.resize(index_capacity * 2);
-                        });
+                            index
+                                .resize(index_capacity * 2)
+                                .map(|_| ApplyMaterializedLogError::Allocation)
+                        })?;
                     }
 
                     match index.add(record.offset_id as usize, embedding) {
                         Ok(_) => {}
                         Err(e) => {
-                            return Err(ApplyMaterializedLogError::HnswIndexError(e));
+                            return Err(ApplyMaterializedLogError::HnswIndex(e));
                         }
                     }
                 }
@@ -216,7 +217,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                     match self.index.inner.read().delete(record.offset_id as usize) {
                         Ok(_) => {}
                         Err(e) => {
-                            return Err(ApplyMaterializedLogError::HnswIndexError(e));
+                            return Err(ApplyMaterializedLogError::HnswIndex(e));
                         }
                     }
                 }
@@ -254,23 +255,20 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegmentReader {
     index: HnswIndexRef,
-    hnsw_index_provider: HnswIndexProvider,
     pub(crate) id: Uuid,
 }
 
 impl Debug for DistributedHNSWSegmentReader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DistributedHNSWSegmentReader")
+        f.debug_struct("DistributedHNSWSegmentReader")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
 impl DistributedHNSWSegmentReader {
-    fn new(index: HnswIndexRef, hnsw_index_provider: HnswIndexProvider, id: Uuid) -> Self {
-        return DistributedHNSWSegmentReader {
-            index,
-            hnsw_index_provider,
-            id,
-        };
+    fn new(index: HnswIndexRef, id: Uuid) -> Self {
+        DistributedHNSWSegmentReader { index, id }
     }
 
     pub(crate) async fn from_segment(
@@ -279,8 +277,8 @@ impl DistributedHNSWSegmentReader {
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentReader>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
-        let index_config = IndexConfig::from_segment(&segment, dimensionality as i32);
-        let index_config = match index_config {
+        let index_config = IndexConfig::from_segment(segment, dimensionality as i32);
+        let _index_config = match index_config {
             Ok(ic) => ic,
             Err(e) => {
                 return Err(Box::new(
@@ -288,12 +286,12 @@ impl DistributedHNSWSegmentReader {
                 ));
             }
         };
-        let persist_path = &hnsw_index_provider.temporary_storage_path;
+        let _persist_path = &hnsw_index_provider.temporary_storage_path;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
-        if segment.file_path.len() > 0 {
+        if !segment.file_path.is_empty() {
             println!("Loading HNSW index from files");
             // Check if its in the providers cache, if not load the index from the files
             let index_id = match &segment.file_path.get(HNSW_INDEX) {
@@ -341,14 +339,12 @@ impl DistributedHNSWSegmentReader {
                 };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
-                index,
-                hnsw_index_provider,
-                segment.id,
+                index, segment.id,
             )))
         } else {
-            return Err(Box::new(
+            Err(Box::new(
                 DistributedHNSWSegmentFromSegmentError::Uninitialized,
-            ));
+            ))
         }
     }
 

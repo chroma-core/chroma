@@ -4,10 +4,12 @@ from chromadb.config import System
 from chromadb.proto.convert import (
     from_proto_vector_embedding_record,
     from_proto_vector_query_result,
+    to_proto_request_version_context,
     to_proto_vector,
 )
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment import VectorReader
+from chromadb.errors import VersionMismatchError
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
@@ -16,6 +18,7 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Metadata,
+    RequestVersionContext,
     ScalarEncoding,
     Segment,
     VectorEmbeddingRecord,
@@ -55,16 +58,28 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
     @trace_method("GrpcVectorSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self,
+        request_version_context: RequestVersionContext,
+        ids: Optional[Sequence[str]] = None,
     ) -> Sequence[VectorEmbeddingRecord]:
         request = GetVectorsRequest(
             ids=ids,
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            version_context=to_proto_request_version_context(request_version_context),
         )
-        response: GetVectorsResponse = self._vector_reader_stub.GetVectors(
-            request, timeout=self._request_timeout_seconds
-        )
+
+        try:
+            response: GetVectorsResponse = self._vector_reader_stub.GetVectors(
+                request,
+                timeout=self._request_timeout_seconds,
+            )
+        except grpc.RpcError as rpc_error:
+            message = rpc_error.details()
+            if "Collection version mismatch" in message:
+                raise VersionMismatchError()
+            raise rpc_error
+
         results: List[VectorEmbeddingRecord] = []
         for vector in response.records:
             result = from_proto_vector_embedding_record(vector)
@@ -86,10 +101,22 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
             include_embeddings=query["include_embeddings"],
             segment_id=self._segment["id"].hex,
             collection_id=self._segment["collection"].hex,
+            version_context=to_proto_request_version_context(
+                query["request_version_context"]
+            ),
         )
-        response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
-            request, timeout=self._request_timeout_seconds
-        )
+
+        try:
+            response: QueryVectorsResponse = self._vector_reader_stub.QueryVectors(
+                request,
+                timeout=self._request_timeout_seconds,
+            )
+        except grpc.RpcError as rpc_error:
+            message = rpc_error.details()
+            if "Collection version mismatch" in message:
+                raise VersionMismatchError()
+            raise rpc_error
+
         results: List[List[VectorQueryResult]] = []
         for result in response.results:
             curr_result: List[VectorQueryResult] = []
@@ -99,7 +126,7 @@ class GrpcVectorSegment(VectorReader, EnforceOverrides):
         return results
 
     @override
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         raise NotImplementedError()
 
     @override

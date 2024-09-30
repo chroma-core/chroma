@@ -219,10 +219,10 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
         ]
 
         # Convert the hex strings to dtype
-        embeddings: types.Embeddings = np.array(
-            [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
-            dtype=self.dtype,
-        ).tolist()
+        embeddings: types.Embeddings = [
+            np.array([int(char, 16) / 15.0 for char in text], dtype=self.dtype)
+            for text in padded_texts
+        ]
 
         return embeddings
 
@@ -376,7 +376,10 @@ def collections(
 
 @st.composite
 def metadata(
-    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+    draw: st.DrawFn,
+    collection: Collection,
+    min_size: int = 0,
+    max_size: Optional[int] = None,
 ) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
@@ -429,7 +432,7 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
 
     # Blacklist certain unicode characters that affect sqlite processing.
     # For example, the null (/x00) character makes sqlite stop processing a string.
-    blacklist_categories = ("Cc", "Cs")
+    blacklist_categories = ("Cc", "Cs")  # type: ignore
     if collection.known_document_keywords:
         known_words_st = st.sampled_from(collection.known_document_keywords)
     else:
@@ -550,10 +553,11 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     # This is hacky, but the distributed system does not support $in or $in so we
     # need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $in and $nin
+    legal_ops: List[Optional[str]]
     if not NOT_CLUSTER_ONLY:
-        legal_ops: List[Optional[str]] = [None, "$eq"]
+        legal_ops = [None, "$eq"]
     else:
-        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+        legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
 
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
@@ -599,7 +603,6 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     # This is hacky, but the distributed system does not support $not_contains
     # so we need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $not_contains
-    op: WhereOperator
     if not NOT_CLUSTER_ONLY:
         op = draw(st.sampled_from(["$contains"]))
     else:

@@ -2,8 +2,10 @@
 resolver = "2"
 
 members = [
+   "rust/benchmark-datasets",
    "rust/blockstore",
    "rust/cache",
+   "rust/chroma",
    "rust/config",
    "rust/distance",
    "rust/error",
@@ -11,7 +13,6 @@ members = [
    "rust/storage",
    "rust/types",
    "rust/worker",
-   "rust/benchmark-datasets",
 ]
 
 [workspace.dependencies]

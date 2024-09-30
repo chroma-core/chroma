@@ -14,7 +14,6 @@ use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
 use chroma_types::Segment;
 use parking_lot::RwLock;
-use rand::seq::index;
 use std::fmt::Debug;
 use std::path::Path;
 use std::{path::PathBuf, sync::Arc};
@@ -26,7 +25,7 @@ use uuid::Uuid;
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
 // what files to read from disk. We could in the future have the C++ code return the files
 // but ideally we have a rust implementation of hnswlib
-const FILES: [&'static str; 4] = [
+const FILES: [&str; 4] = [
     "header.bin",
     "data_level0.bin",
     "length.bin",
@@ -71,11 +70,9 @@ impl Cacheable for HnswIndexRef {
 
 impl Debug for HnswIndexProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "HnswIndexProvider {{ temporary_storage_path: {:?} }}",
-            self.temporary_storage_path,
-        )
+        f.debug_struct("HnswIndexProvider")
+            .field("temporary_storage_path", &self.temporary_storage_path)
+            .finish_non_exhaustive()
     }
 }
 
@@ -111,9 +108,10 @@ impl HnswIndexProvider {
                 let index_with_lock = index.inner.read();
                 if index_with_lock.id == *index_id {
                     // Clone is cheap because we are just cloning the Arc.
-                    return Some(index.clone());
+                    Some(index.clone())
+                } else {
+                    None
                 }
-                return None;
             }
             None => None,
         }
@@ -150,7 +148,7 @@ impl HnswIndexProvider {
             }
         }
 
-        let index_config = IndexConfig::from_segment(&segment, dimensionality);
+        let index_config = IndexConfig::from_segment(segment, dimensionality);
 
         let index_config = match index_config {
             Ok(index_config) => index_config,
@@ -180,9 +178,7 @@ impl HnswIndexProvider {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
                 match self.get(&new_id, &segment.collection) {
-                    Some(index) => {
-                        return Ok(index.clone());
-                    }
+                    Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
@@ -290,7 +286,7 @@ impl HnswIndexProvider {
         }
 
         // Thread safe.
-        let index_config = IndexConfig::from_segment(&segment, dimensionality);
+        let index_config = IndexConfig::from_segment(segment, dimensionality);
         let index_config = match index_config {
             Ok(index_config) => index_config,
             Err(e) => {
@@ -299,13 +295,8 @@ impl HnswIndexProvider {
         };
 
         // Thread safe.
-        let hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path);
-        let hnsw_config = match hnsw_config {
-            Ok(hnsw_config) => hnsw_config,
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderOpenError::HnswConfigError(*e)));
-            }
-        };
+        let _hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)
+            .map_err(|e| Box::new(HnswIndexProviderOpenError::HnswConfigError(*e)))?;
 
         let index_storage_path_str = match index_storage_path.to_str() {
             Some(index_storage_path_str) => index_storage_path_str,
@@ -320,9 +311,7 @@ impl HnswIndexProvider {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
                 match self.get(id, &segment.collection) {
-                    Some(index) => {
-                        return Ok(index.clone());
-                    }
+                    Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
@@ -362,7 +351,7 @@ impl HnswIndexProvider {
             }
         }
 
-        let index_config = match IndexConfig::from_segment(&segment, dimensionality) {
+        let index_config = match IndexConfig::from_segment(segment, dimensionality) {
             Ok(index_config) => index_config,
             Err(e) => {
                 return Err(Box::new(HnswIndexProviderCreateError::IndexConfigError(*e)));
@@ -376,18 +365,12 @@ impl HnswIndexProvider {
             }
         };
         // HnswIndex init is not thread safe. We should not call it from multiple threads
-        let index = match HnswIndex::init(&index_config, Some(&hnsw_config), id) {
-            Ok(index) => index,
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderCreateError::IndexInitError(e)));
-            }
-        };
+        let index = HnswIndex::init(&index_config, Some(&hnsw_config), id)
+            .map_err(|e| Box::new(HnswIndexProviderCreateError::IndexInitError(e)))?;
 
         let _guard = self.write_mutex.lock().await;
         match self.get(&id, &segment.collection) {
-            Some(index) => {
-                return Ok(index.clone());
-            }
+            Some(index) => Ok(index.clone()),
             None => {
                 let index = HnswIndexRef {
                     inner: Arc::new(RwLock::new(index)),
@@ -430,11 +413,10 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    /// Purge all entries from the cache and remove temporary files from disk.
-    pub async fn purge_all_entries(&mut self) {
-        while let Some((_, index)) = self.cache.pop() {
-            let index_id = index.inner.read().id;
-            match self.remove_temporary_files(&index_id).await {
+    /// Purge entries from the cache by index ID and remove temporary files from disk.
+    pub async fn purge_by_id(&mut self, index_ids: &[Uuid]) {
+        for index_id in index_ids {
+            match self.remove_temporary_files(index_id).await {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to remove temporary files: {}", e);
@@ -449,10 +431,9 @@ impl HnswIndexProvider {
     }
 
     async fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
-        match tokio::fs::create_dir_all(path).await {
-            Ok(_) => Ok(()),
-            Err(e) => return Err(Box::new(HnswIndexProviderFileError::IOError(e))),
-        }
+        tokio::fs::create_dir_all(path)
+            .await
+            .map_err(|e| Box::new(HnswIndexProviderFileError::IOError(e)))
     }
 }
 

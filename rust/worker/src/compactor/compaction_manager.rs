@@ -29,6 +29,7 @@ use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
 use tracing::Span;
+use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -36,6 +37,7 @@ pub(crate) struct CompactionManager {
     // Dependencies
     log: Box<Log>,
     sysdb: Box<SysDb>,
+    #[allow(dead_code)]
     storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
@@ -44,6 +46,7 @@ pub(crate) struct CompactionManager {
     // Config
     compaction_manager_queue_size: usize,
     compaction_interval: Duration,
+    #[allow(dead_code)]
     min_compaction_size: usize,
     max_compaction_size: usize,
     max_partition_size: usize,
@@ -64,6 +67,7 @@ impl ChromaError for CompactionError {
 }
 
 impl CompactionManager {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         scheduler: Scheduler,
         log: Box<Log>,
@@ -145,7 +149,7 @@ impl CompactionManager {
 
     // TODO: make the return type more informative
     #[instrument(name = "CompactionManager::compact_batch")]
-    pub(crate) async fn compact_batch(&mut self) -> (u32, u32) {
+    pub(crate) async fn compact_batch(&mut self, compacted: &mut Vec<Uuid>) -> (u32, u32) {
         self.scheduler.schedule().await;
         let mut jobs = FuturesUnordered::new();
         for job in self.scheduler.get_jobs() {
@@ -161,6 +165,7 @@ impl CompactionManager {
             match job {
                 Ok(result) => {
                     println!("Compaction completed: {:?}", result);
+                    compacted.push(result.compaction_job.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
@@ -283,7 +288,7 @@ impl Component for CompactionManager {
 
 impl Debug for CompactionManager {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CompactionManager")
+        f.debug_struct("CompactionManager").finish()
     }
 }
 
@@ -298,9 +303,10 @@ impl Handler<ScheduleMessage> for CompactionManager {
         ctx: &ComponentContext<CompactionManager>,
     ) {
         println!("CompactionManager: Performing compaction");
-        self.compact_batch().await;
+        let mut ids = Vec::new();
+        self.compact_batch(&mut ids).await;
 
-        self.hnsw_index_provider.purge_all_entries().await;
+        self.hnsw_index_provider.purge_by_id(&ids).await;
         self.blockfile_provider.clear();
 
         // Compaction is done, schedule the next compaction
@@ -341,7 +347,7 @@ mod tests {
     #[tokio::test]
     async fn test_compaction_manager() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let mut in_memory_log = match *log {
+        let in_memory_log = match *log {
             Log::InMemory(ref mut log) => log,
             _ => panic!("Expected InMemoryLog"),
         };
@@ -350,9 +356,9 @@ mod tests {
 
         let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
@@ -366,14 +372,14 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
         let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         in_memory_log.add_log(
-            collection_uuid_2.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_2.clone(),
+            collection_uuid_2,
+            InternalLogRecord {
+                collection_id: collection_uuid_2,
                 log_offset: 0,
                 log_ts: 2,
                 record: LogRecord {
@@ -387,7 +393,7 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
@@ -549,8 +555,13 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);
-        let (num_completed, number_failed) = manager.compact_batch().await;
+        let mut compacted = vec![];
+        let (num_completed, number_failed) = manager.compact_batch(&mut compacted).await;
         assert_eq!(num_completed, 2);
         assert_eq!(number_failed, 0);
+        assert!(
+            (compacted == vec![collection_uuid_1, collection_uuid_2])
+                || (compacted == vec![collection_uuid_2, collection_uuid_1])
+        );
     }
 }

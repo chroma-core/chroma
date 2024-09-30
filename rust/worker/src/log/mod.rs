@@ -1,4 +1,5 @@
 pub(crate) mod config;
+#[allow(clippy::module_inception)]
 pub(crate) mod log;
 use self::config::LogConfig;
 use chroma_config::Configurable;

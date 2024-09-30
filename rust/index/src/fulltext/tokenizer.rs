@@ -46,8 +46,9 @@ impl ChromaTokenizer for TantivyChromaTokenizer {
     }
 }
 
+#[cfg(test)]
 mod test {
-    use super::*;
+    use super::{ChromaTokenizer, NgramTokenizer, TantivyChromaTokenizer};
 
     #[test]
     fn test_get_tokens() {

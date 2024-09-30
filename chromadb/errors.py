@@ -125,6 +125,17 @@ class BatchSizeExceededError(ChromaError):
         return "BatchSizeExceededError"
 
 
+class VersionMismatchError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 500
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "VersionMismatchError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
@@ -135,4 +146,5 @@ error_types: Dict[str, Type[ChromaError]] = {
     "AuthorizationError": AuthorizationError,
     "NotFoundError": NotFoundError,
     "BatchSizeExceededError": BatchSizeExceededError,
+    "VersionMismatchError": VersionMismatchError,
 }

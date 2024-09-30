@@ -20,7 +20,6 @@ use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
 use chroma_types::{MetadataValue, ScalarEncoding};
-use std::collections::HashMap;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -146,6 +145,16 @@ impl WorkerServer {
             }
         };
 
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let mut proto_results_for_all = Vec::new();
 
         let mut query_vectors = Vec::new();
@@ -182,6 +191,8 @@ impl WorkerServer {
                     self.hnsw_index_provider.clone(),
                     self.blockfile_provider.clone(),
                     dispatcher,
+                    collection_version,
+                    log_position,
                 );
                 orchestrator.run().await
             }
@@ -193,10 +204,11 @@ impl WorkerServer {
         let result = match result {
             Ok(result) => result,
             Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                tracing::error!("Error running orchestrator: {}", e);
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
@@ -234,7 +246,7 @@ impl WorkerServer {
             results: proto_results_for_all,
         };
 
-        return Ok(Response::new(resp));
+        Ok(Response::new(resp))
     }
 
     async fn get_vectors_instrumented(
@@ -253,6 +265,16 @@ impl WorkerServer {
             Ok(uuid) => uuid,
             Err(_) => {
                 return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
             }
         };
 
@@ -279,15 +301,18 @@ impl WorkerServer {
             self.sysdb.clone(),
             dispatcher,
             self.blockfile_provider.clone(),
+            collection_version,
+            log_position,
         );
         let result = orchestrator.run().await;
         let mut result = match result {
             Ok(result) => result,
             Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                tracing::error!("Error running orchestrator: {}", e);
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
@@ -335,6 +360,16 @@ impl WorkerServer {
             }
         };
 
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
             None => {
@@ -359,7 +394,9 @@ impl WorkerServer {
                 Ok(where_clause) => Some(where_clause),
                 Err(_) => {
                     tracing::error!("Error converting where clause");
-                    return Err(Status::internal(format!("Error converting where clause",)));
+                    return Err(Status::internal(
+                        "Error converting where clause".to_string(),
+                    ));
                 }
             },
             None => None,
@@ -370,9 +407,9 @@ impl WorkerServer {
                 Ok(where_document_clause) => Some(where_document_clause),
                 Err(_) => {
                     tracing::error!("Error converting where document clause");
-                    return Err(Status::internal(format!(
-                        "Error converting where document clause",
-                    )));
+                    return Err(Status::internal(
+                        "Error converting where document clause".to_string(),
+                    ));
                 }
             },
             None => None,
@@ -392,6 +429,8 @@ impl WorkerServer {
             request.offset,
             request.limit,
             request.include_metadata,
+            collection_version,
+            log_position,
         );
 
         let result = orchestrator.run().await;
@@ -399,10 +438,10 @@ impl WorkerServer {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!("Error running orchestrator: {}", e);
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
@@ -416,16 +455,10 @@ impl WorkerServer {
             {
                 // The transport layer assumes the document exists in the metadata
                 // with the special key "chroma:document"
-                let mut output_metadata = match metadata {
-                    Some(metadata) => metadata,
-                    None => HashMap::new(),
-                };
-                match document {
-                    Some(document) => {
-                        output_metadata
-                            .insert("chroma:document".to_string(), MetadataValue::Str(document));
-                    }
-                    None => {}
+                let mut output_metadata = metadata.unwrap_or_default();
+                if let Some(document) = document {
+                    output_metadata
+                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
                 }
                 let record = chroma_proto::MetadataEmbeddingRecord {
                     id,
@@ -506,7 +539,16 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
             }
         };
 
-        println!("Querying count for segment {}", segment_uuid);
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
             None => {
@@ -529,6 +571,8 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
             self.sysdb.clone(),
             dispatcher.clone(),
             self.blockfile_provider.clone(),
+            collection_version,
+            log_position,
         );
 
         let result = orchestrator.run().await;

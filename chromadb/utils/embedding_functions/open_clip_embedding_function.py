@@ -59,13 +59,13 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
                 self._preprocess(pil_image).unsqueeze(0)
             )
             image_features /= image_features.norm(dim=-1, keepdim=True)
-            return cast(Embedding, image_features.squeeze().tolist())
+            return cast(Embedding, image_features.squeeze())
 
     def _encode_text(self, text: Document) -> Embedding:
         with self._torch.no_grad():
             text_features = self._model.encode_text(self._tokenizer(text))
             text_features /= text_features.norm(dim=-1, keepdim=True)
-            return cast(Embedding, text_features.squeeze().tolist())
+            return cast(Embedding, text_features.squeeze())
 
     def __call__(self, input: Union[Documents, Images]) -> Embeddings:
         embeddings: Embeddings = []

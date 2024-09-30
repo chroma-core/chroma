@@ -5,7 +5,7 @@ use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
 use super::config::BlockfileProviderConfig;
-use super::key::KeyWrapper;
+use super::key::{InvalidKeyConversion, KeyWrapper};
 use super::memory::provider::MemoryBlockfileProvider;
 use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
@@ -30,10 +30,10 @@ impl Debug for BlockfileProvider {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(_provider) => {
-                write!(f, "HashMapBlockfileProvider")
+                f.debug_struct("HashMapBlockfileProvider").finish()
             }
             BlockfileProvider::ArrowBlockfileProvider(_provider) => {
-                write!(f, "ArrowBlockfileProvider")
+                f.debug_struct("ArrowBlockfileProvider").finish()
             }
         }
     }
@@ -60,7 +60,11 @@ impl BlockfileProvider {
 
     pub async fn open<
         'new,
-        K: Key + Into<KeyWrapper> + From<&'new KeyWrapper> + ArrowReadableKey<'new> + 'new,
+        K: Key
+            + Into<KeyWrapper>
+            + TryFrom<&'new KeyWrapper, Error = InvalidKeyConversion>
+            + ArrowReadableKey<'new>
+            + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
     >(
         &self,
@@ -80,7 +84,7 @@ impl BlockfileProvider {
         &self,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create::<K, V>(),
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create(),
             BlockfileProvider::ArrowBlockfileProvider(provider) => provider.create::<K, V>(),
         }
     }
@@ -97,7 +101,7 @@ impl BlockfileProvider {
         id: &uuid::Uuid,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork::<K, V>(id),
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork(id),
             BlockfileProvider::ArrowBlockfileProvider(provider) => provider.fork::<K, V>(id).await,
         }
     }

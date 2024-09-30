@@ -24,7 +24,7 @@ pub(crate) type Memberlist = Vec<String>;
 pub(crate) trait MemberlistProvider:
     Component + Configurable<MemberlistProviderConfig>
 {
-    fn subscribe(&mut self, receiver: Box<dyn ReceiverForMessage<Memberlist> + Send>) -> ();
+    fn subscribe(&mut self, receiver: Box<dyn ReceiverForMessage<Memberlist> + Send>);
 }
 
 /* =========== CRD ============== */
@@ -51,6 +51,7 @@ pub(crate) struct CustomResourceMemberlistProvider {
     memberlist_name: String,
     kube_client: Client,
     kube_ns: String,
+    #[allow(dead_code)]
     memberlist_cr_client: Api<MemberListKubeResource>,
     queue_size: usize,
     current_memberlist: RwLock<Memberlist>,
@@ -88,9 +89,7 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
     async fn try_from_config(
         config: &MemberlistProviderConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let my_config = match &config {
-            MemberlistProviderConfig::CustomResource(config) => config,
-        };
+        let MemberlistProviderConfig::CustomResource(my_config) = &config;
         let kube_client = match Client::try_default().await {
             Ok(client) => client,
             Err(err) => {
@@ -118,6 +117,9 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
 }
 
 impl CustomResourceMemberlistProvider {
+    // This is not reserved for testing.  If you need to use it outside test contexts, remove this
+    // line.  It exists solely to satisfy the linter.
+    #[cfg(test)]
     fn new(
         memberlist_name: String,
         kube_client: Client,
@@ -150,7 +152,6 @@ impl CustomResourceMemberlistProvider {
         let stream = stream.then(|event| async move {
             match event {
                 Ok(event) => {
-                    let event = event;
                     println!("Kube stream event: {:?}", event);
                     Some(event)
                 }
@@ -163,7 +164,7 @@ impl CustomResourceMemberlistProvider {
         self.register_stream(stream, ctx);
     }
 
-    async fn notify_subscribers(&self) -> () {
+    async fn notify_subscribers(&self) {
         let curr_memberlist = self.current_memberlist.read().clone();
 
         for subscriber in self.subscribers.iter() {
@@ -232,7 +233,7 @@ impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistP
 
 #[async_trait]
 impl MemberlistProvider for CustomResourceMemberlistProvider {
-    fn subscribe(&mut self, sender: Box<dyn ReceiverForMessage<Memberlist> + Send>) -> () {
+    fn subscribe(&mut self, sender: Box<dyn ReceiverForMessage<Memberlist> + Send>) {
         self.subscribers.push(sender);
     }
 }
@@ -257,7 +258,7 @@ mod tests {
             kube_ns.clone(),
             10,
         );
-        let mut system = System::new();
-        let handle = system.start_component(memberlist_provider);
+        let system = System::new();
+        let _handle = system.start_component(memberlist_provider);
     }
 }

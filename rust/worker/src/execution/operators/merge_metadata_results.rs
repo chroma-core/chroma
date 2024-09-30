@@ -41,6 +41,7 @@ pub struct MergeMetadataResultsOperatorInput {
 }
 
 impl MergeMetadataResultsOperatorInput {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         filtered_log: Chunk<LogRecord>,
         user_offset_ids: Option<Vec<u32>>,
@@ -74,22 +75,22 @@ pub struct MergeMetadataResultsOperatorOutput {
 #[derive(Error, Debug)]
 pub enum MergeMetadataResultsOperatorError {
     #[error("Error creating Record Segment")]
-    RecordSegmentCreationError(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentCreation(#[from] RecordSegmentReaderCreationError),
     #[error("Error reading Record Segment")]
-    RecordSegmentReadError,
+    RecordSegmentRead,
     #[error("Error converting metadata")]
-    MetadataConversionError(#[from] MetadataValueConversionError),
+    MetadataConversion(#[from] MetadataValueConversionError),
     #[error("Error materializing logs")]
-    LogMaterializationError(#[from] LogMaterializerError),
+    LogMaterialization(#[from] LogMaterializerError),
 }
 
 impl ChromaError for MergeMetadataResultsOperatorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            MergeMetadataResultsOperatorError::RecordSegmentCreationError(e) => e.code(),
-            MergeMetadataResultsOperatorError::RecordSegmentReadError => ErrorCodes::Internal,
-            MergeMetadataResultsOperatorError::MetadataConversionError(e) => e.code(),
-            MergeMetadataResultsOperatorError::LogMaterializationError(e) => e.code(),
+            MergeMetadataResultsOperatorError::RecordSegmentCreation(e) => e.code(),
+            MergeMetadataResultsOperatorError::RecordSegmentRead => ErrorCodes::Internal,
+            MergeMetadataResultsOperatorError::MetadataConversion(e) => e.code(),
+            MergeMetadataResultsOperatorError::LogMaterialization(e) => e.code(),
         }
     }
 }
@@ -128,7 +129,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             }
             Err(e) => {
                 tracing::error!("Error creating record segment reader {}", e);
-                Err(MergeMetadataResultsOperatorError::RecordSegmentCreationError(*e))
+                Err(MergeMetadataResultsOperatorError::RecordSegmentCreation(*e))
             }
         }?;
 
@@ -144,7 +145,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
             .await
             .map_err(|e| {
                 tracing::error!("Error materializing log: {}", e);
-                MergeMetadataResultsOperatorError::LogMaterializationError(e)
+                MergeMetadataResultsOperatorError::LogMaterialization(e)
             })?;
 
         let deleted_offset_ids: HashSet<u32> =
@@ -181,7 +182,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         let compact_offset_ids =
                             reader.get_all_offset_ids().await.map_err(|e| {
                                 tracing::error!("Error reading record segment: {}", e);
-                                MergeMetadataResultsOperatorError::RecordSegmentReadError
+                                MergeMetadataResultsOperatorError::RecordSegmentRead
                             })?;
                         // We take the set union of offset ids from the log and from the record segment.
                         merge_sorted_vecs_disjunction(&live_log_offset_ids, &compact_offset_ids)
@@ -238,7 +239,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                     .await
                     .map_err(|e| {
                         tracing::error!("Error reading record segment: {}", e);
-                        MergeMetadataResultsOperatorError::RecordSegmentReadError
+                        MergeMetadataResultsOperatorError::RecordSegmentRead
                     })?;
                 ids[index] = user_id.to_string();
                 if input.include_metadata {
@@ -247,7 +248,7 @@ impl Operator<MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOut
                         .await
                         .map_err(|e| {
                             tracing::error!("Error reading Record Segment: {}", e);
-                            MergeMetadataResultsOperatorError::RecordSegmentReadError
+                            MergeMetadataResultsOperatorError::RecordSegmentRead
                         })?;
                     metadata[index] = record.metadata;
                     documents[index] = record.document.map(str::to_string);
@@ -367,27 +368,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -467,6 +465,7 @@ mod test {
         );
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(2, output.ids.len());
+        #[allow(clippy::type_complexity)]
         let mut id_to_data: HashMap<
             &String,
             (
@@ -475,10 +474,10 @@ mod test {
             ),
         > = HashMap::new();
         id_to_data.insert(
-            output.ids.get(0).expect("Not none key"),
+            output.ids.first().expect("Not none key"),
             (
-                output.documents.get(0).expect("Not none value"),
-                output.metadata.get(0).expect("Not none value"),
+                output.documents.first().expect("Not none value"),
+                output.metadata.first().expect("Not none value"),
             ),
         );
         id_to_data.insert(
@@ -491,21 +490,15 @@ mod test {
         let mut ids_sorted = output.ids.clone();
         ids_sorted.sort();
         assert_eq!(
-            *ids_sorted.get(0).expect("Expected not none id"),
+            *ids_sorted.first().expect("Expected not none id"),
             String::from("embedding_id_1")
         );
         assert_eq!(
             *ids_sorted.get(1).expect("Expected not none id"),
             String::from("embedding_id_3")
         );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_1")),
-            true
-        );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_3")),
-            true
-        );
+        assert!(id_to_data.contains_key(&String::from("embedding_id_1")));
+        assert!(id_to_data.contains_key(&String::from("embedding_id_3")));
         assert_eq!(
             id_to_data
                 .get(&String::from("embedding_id_1"))
@@ -663,27 +656,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -763,6 +753,7 @@ mod test {
         );
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(3, output.ids.len());
+        #[allow(clippy::type_complexity)]
         let mut id_to_data: HashMap<
             &String,
             (
@@ -771,10 +762,10 @@ mod test {
             ),
         > = HashMap::new();
         id_to_data.insert(
-            output.ids.get(0).expect("Not none key"),
+            output.ids.first().expect("Not none key"),
             (
-                output.documents.get(0).expect("Not none value"),
-                output.metadata.get(0).expect("Not none value"),
+                output.documents.first().expect("Not none value"),
+                output.metadata.first().expect("Not none value"),
             ),
         );
         id_to_data.insert(
@@ -794,7 +785,7 @@ mod test {
         let mut ids_sorted = output.ids.clone();
         ids_sorted.sort();
         assert_eq!(
-            *ids_sorted.get(0).expect("Expected not none id"),
+            *ids_sorted.first().expect("Expected not none id"),
             String::from("embedding_id_1")
         );
         assert_eq!(
@@ -805,18 +796,9 @@ mod test {
             *ids_sorted.get(2).expect("Expected not none id"),
             String::from("embedding_id_3")
         );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_1")),
-            true
-        );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_2")),
-            true
-        );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_3")),
-            true
-        );
+        assert!(id_to_data.contains_key(&String::from("embedding_id_1")));
+        assert!(id_to_data.contains_key(&String::from("embedding_id_2")));
+        assert!(id_to_data.contains_key(&String::from("embedding_id_3")));
         assert_eq!(
             id_to_data
                 .get(&String::from("embedding_id_1"))
@@ -999,24 +981,21 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            _ => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        _ => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1110,7 +1089,7 @@ mod test {
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(2, output.ids.len());
         assert_eq!(
-            output.ids.get(0).expect("There should be two ids"),
+            output.ids.first().expect("There should be two ids"),
             &String::from("embedding_id_2")
         );
         assert_eq!(
@@ -1157,7 +1136,7 @@ mod test {
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(2, output.ids.len());
         assert_eq!(
-            output.ids.get(0).expect("There should be two ids"),
+            output.ids.first().expect("There should be two ids"),
             &String::from("embedding_id_3")
         );
         assert_eq!(
@@ -1178,7 +1157,7 @@ mod test {
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(1, output.ids.len());
         assert_eq!(
-            output.ids.get(0).expect("There should be one id"),
+            output.ids.first().expect("There should be one id"),
             &String::from("embedding_id_2")
         );
     }

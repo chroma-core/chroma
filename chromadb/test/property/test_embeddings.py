@@ -799,12 +799,12 @@ def test_autocasting_validate_embeddings_for_compatible_types(
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
-            isinstance(value, list)
-            and all(
-                [
-                    isinstance(vec, (int, float)) and not isinstance(vec, bool)
-                    for vec in value
-                ]
+            isinstance(value, np.ndarray)
+            and (
+                value.dtype == np.float32
+                or value.dtype == np.float64
+                or value.dtype == np.int32
+                or value.dtype == np.int64
             )
             for value in validated_embeddings
         ]
@@ -819,12 +819,12 @@ def test_autocasting_validate_embeddings_with_ndarray(
     validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
-            isinstance(value, list)
-            and all(
-                [
-                    isinstance(vec, (int, float)) and not isinstance(vec, bool)
-                    for vec in value
-                ]
+            isinstance(value, np.ndarray)
+            and (
+                value.dtype == np.float32
+                or value.dtype == np.float64
+                or value.dtype == np.int32
+                or value.dtype == np.int64
             )
             for value in validated_embeddings
         ]
@@ -843,7 +843,10 @@ def test_autocasting_validate_embeddings_incompatible_types(
 
 
 def test_0dim_embedding_validation() -> None:
-    embds: Embeddings = [[]]
+    embds: Embeddings = [np.array([])]
     with pytest.raises(ValueError) as e:
         validate_embeddings(embds)
-    assert "Expected each embedding in the embeddings to be a non-empty list" in str(e)
+    assert (
+        "Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos"
+        in str(e)
+    )

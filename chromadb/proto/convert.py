@@ -1,4 +1,3 @@
-import array
 from uuid import UUID
 from typing import Dict, Optional, Tuple, Union, cast
 from chromadb.api.configuration import CollectionConfigurationInternal
@@ -9,6 +8,7 @@ from chromadb.types import (
     LogRecord,
     Metadata,
     Operation,
+    RequestVersionContext,
     ScalarEncoding,
     Segment,
     SegmentScope,
@@ -19,15 +19,17 @@ from chromadb.types import (
     VectorEmbeddingRecord,
     VectorQueryResult,
 )
+import numpy as np
+from numpy.typing import NDArray
 
 
 # TODO: Unit tests for this file, handling optional states etc
 def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
     if encoding == ScalarEncoding.FLOAT32:
-        as_bytes = array.array("f", vector).tobytes()
+        as_bytes = np.array(vector, dtype=np.float32).tobytes()
         proto_encoding = proto.ScalarEncoding.FLOAT32
     elif encoding == ScalarEncoding.INT32:
-        as_bytes = array.array("i", vector).tobytes()
+        as_bytes = np.array(vector, dtype=np.int32).tobytes()
         proto_encoding = proto.ScalarEncoding.INT32
     else:
         raise ValueError(
@@ -35,17 +37,17 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
             or {ScalarEncoding.INT32}"
         )
 
-    return proto.Vector(dimension=len(vector), vector=as_bytes, encoding=proto_encoding)
+    return proto.Vector(dimension=vector.size, vector=as_bytes, encoding=proto_encoding)
 
 
 def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
     encoding = vector.encoding
-    as_array: Union[array.array[float], array.array[int]]
+    as_array: Union[NDArray[np.int32], NDArray[np.float32]]
     if encoding == proto.ScalarEncoding.FLOAT32:
-        as_array = array.array("f")
+        as_array = np.frombuffer(vector.vector, dtype=np.float32)
         out_encoding = ScalarEncoding.FLOAT32
     elif encoding == proto.ScalarEncoding.INT32:
-        as_array = array.array("i")
+        as_array = np.frombuffer(vector.vector, dtype=np.int32)
         out_encoding = ScalarEncoding.INT32
     else:
         raise ValueError(
@@ -53,8 +55,7 @@ def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
             {proto.ScalarEncoding.FLOAT32} or {proto.ScalarEncoding.INT32}"
         )
 
-    as_array.frombytes(vector.vector)
-    return (as_array.tolist(), out_encoding)
+    return (as_array, out_encoding)
 
 
 def from_proto_operation(operation: proto.Operation) -> Operation:
@@ -214,6 +215,7 @@ def from_proto_collection(collection: proto.Collection) -> Collection:
         database=collection.database,
         tenant=collection.tenant,
         version=collection.version,
+        log_position=collection.log_position,
     )
 
 
@@ -293,4 +295,22 @@ def from_proto_vector_query_result(
         id=vector_query_result.id,
         distance=vector_query_result.distance,
         embedding=from_proto_vector(vector_query_result.vector)[0],
+    )
+
+
+def from_proto_request_version_context(
+    request_version_context: proto.RequestVersionContext,
+) -> RequestVersionContext:
+    return RequestVersionContext(
+        collection_version=request_version_context.collection_version,
+        log_position=request_version_context.log_position,
+    )
+
+
+def to_proto_request_version_context(
+    request_version_context: RequestVersionContext,
+) -> proto.RequestVersionContext:
+    return proto.RequestVersionContext(
+        collection_version=request_version_context["collection_version"],
+        log_position=request_version_context["log_position"],
     )
