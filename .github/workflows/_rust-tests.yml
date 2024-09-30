@@ -16,6 +16,8 @@ jobs:
         uses: actions/checkout@v3
       - name: Setup
         uses: ./.github/actions/rust
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Build
         run: cargo build --verbose
       - name: Test
