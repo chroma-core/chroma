@@ -27,11 +27,9 @@ impl HydrateMetadataResultsOperator {
 pub struct HydrateMetadataResultsOperatorInput {
     blockfile_provider: BlockfileProvider,
     record_segment_definition: Segment,
-    // Result of PullLogs.
+    // Result of PullLogs
     log_record: Chunk<LogRecord>,
-    // The matching offset ids in the log
-    log_mask: RoaringBitmap,
-    // The matching offset ids (both log and compact).
+    // The matching offset ids (both log and compact)
     offset_ids: RoaringBitmap,
     include_metadata: bool,
 }
@@ -41,7 +39,6 @@ impl HydrateMetadataResultsOperatorInput {
         blockfile_provider: BlockfileProvider,
         record_segment_definition: Segment,
         log_record: Chunk<LogRecord>,
-        log_mask: RoaringBitmap,
         offset_ids: RoaringBitmap,
         include_metadata: bool,
     ) -> Self {
@@ -49,7 +46,6 @@ impl HydrateMetadataResultsOperatorInput {
             blockfile_provider,
             record_segment_definition,
             log_record,
-            log_mask,
             offset_ids,
             include_metadata,
         }
@@ -114,7 +110,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
         {
             Ok(reader) => Ok(Some(reader)),
             // Uninitialized segment is fine and means that the record
-            // segment is not yet initialized in storage.
+            // segment is not yet initialized in storage
             Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
                 Ok(None)
             }
@@ -124,7 +120,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             }
         }?;
 
-        // Materialize the logs.
+        // Materialize the logs
         let materializer = LogMaterializer::new(
             record_segment_reader.clone(),
             input.log_record.clone(),
@@ -144,7 +140,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             .iter()
             .flat_map(|(log, _)| {
                 input
-                    .log_mask
+                    .offset_ids
                     .contains(log.offset_id)
                     .then_some((log.offset_id, log))
             })
@@ -168,7 +164,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                     }
                     (log.merged_user_id(), log_meta, log_doc)
                 }
-                // The offset id is in the compact storage
+                // The offset id is in the record segment
                 None => {
                     if let Some(reader) = record_segment_reader.as_ref() {
                         let rec_id = reader
@@ -200,8 +196,6 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             metadata.push(meta);
             documents.push(doc);
         }
-
-        // Hydrate the remaining data from the record segment.
 
         Ok(HydrateMetadataResultsOperatorOutput {
             ids,
@@ -408,7 +402,6 @@ mod test {
             blockfile_provider,
             record_segment,
             data,
-            RoaringBitmap::from([1, 3]),
             RoaringBitmap::from([1, 2, 3]),
             true,
         );

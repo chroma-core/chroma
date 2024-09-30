@@ -458,7 +458,6 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
                 .expect("Invariant violation. Record segment is not set.")
                 .clone(),
             output.log_records,
-            output.log_mask,
             output.offset_ids,
             self.include_metadata,
         );
