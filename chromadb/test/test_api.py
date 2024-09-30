@@ -364,6 +364,12 @@ def test_delete(client):
     with pytest.raises(Exception):
         collection.delete()
 
+def test_delete_returns_none(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+    assert collection.delete(ids=batch_records["ids"]) is None
 
 def test_delete_with_index(client):
     client.reset()
