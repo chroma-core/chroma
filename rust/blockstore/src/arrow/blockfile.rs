@@ -375,11 +375,11 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<(&'me str, K, V), Box<dyn ChromaError>> {
         let mut block_offset = 0;
         let mut block = None;
-        let sparse_index_len = self.sparse_index.len();
+        let sparse_index_len = self.sparse_index.data.lock().len();
         for i in 0..sparse_index_len {
             let uuid = {
-                let sparse_index_forward = self.sparse_index.forward.lock();
-                *sparse_index_forward.iter().nth(i).unwrap().1
+                let data = self.sparse_index.data.lock();
+                *data.forward.iter().nth(i).unwrap().1
             };
             block = match self.get_block(uuid).await {
                 Ok(Some(block)) => Some(block),
@@ -636,8 +636,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         let mut block_ids: Vec<Uuid> = vec![];
         {
-            let lock_guard = self.sparse_index.forward.lock();
-            let curr_iter = lock_guard.iter();
+            let lock_guard = self.sparse_index.data.lock();
+            let curr_iter = lock_guard.forward.iter();
             for (_, block_id) in curr_iter {
                 block_ids.push(*block_id);
             }
