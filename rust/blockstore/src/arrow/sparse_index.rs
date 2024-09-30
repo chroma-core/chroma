@@ -70,10 +70,18 @@ pub struct SparseIndex {
     pub(super) id: Uuid,
 }
 
+/// The data structures that hold the sparse index
+/// in memory.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct SparseIndexData {
     pub(super) forward: BTreeMap<SparseIndexDelimiter, Uuid>,
     reverse: HashMap<Uuid, SparseIndexDelimiter>,
+}
+
+impl SparseIndexData {
+    pub(super) fn len(&self) -> usize {
+        self.forward.len()
+    }
 }
 
 impl Cacheable for SparseIndex {}
@@ -373,9 +381,8 @@ impl SparseIndex {
         }
     }
 
-    fn correct_start_key(&self) {
-        let mut data = self.data.lock();
-        if self.len() == 0 {
+    fn correct_start_key(&self, data: &mut SparseIndexData) {
+        if data.len() == 0 {
             return;
         }
         let key_copy;
@@ -404,7 +411,7 @@ impl SparseIndex {
         // but this is simpler, easier and less error prone to do.
         let mut data = self.data.lock();
         let mut removed = false;
-        if self.len() > 1 {
+        if data.len() > 1 {
             if let Some(start_key) = data.reverse.remove(block_id) {
                 data.forward.remove(&start_key);
             }
@@ -417,7 +424,7 @@ impl SparseIndex {
         // If we delete block_id1 from the sparse index then it becomes
         // {some_key: block_id2, some_other_key: block_id3}
         // This should be changed to {start_key: block_id2, some_other_key: block_id3}
-        self.correct_start_key();
+        self.correct_start_key(&mut data);
         removed
     }
 

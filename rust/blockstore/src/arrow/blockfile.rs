@@ -375,7 +375,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<(&'me str, K, V), Box<dyn ChromaError>> {
         let mut block_offset = 0;
         let mut block = None;
-        let sparse_index_len = self.sparse_index.len();
+        let sparse_index_len = self.sparse_index.data.lock().len();
         for i in 0..sparse_index_len {
             let uuid = {
                 let data = self.sparse_index.data.lock();
