@@ -94,8 +94,8 @@ impl ConsumableJoinHandle {
     }
 
     async fn consume(&mut self) -> Result<(), JoinError> {
-        // NOTE(rescrv):  Do not clean this up by silencing the warning; refactor.
-        match self.handle.lock().take() {
+        let handle = { self.handle.lock().take() };
+        match handle {
             Some(handle) => {
                 handle.await?;
                 Ok(())

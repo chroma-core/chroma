@@ -162,10 +162,6 @@ impl S3Storage {
                                  tracing::error!("invalid object state: {}", msg);
                                 Err(S3GetError::S3GetError(msg.to_string()))
                             }
-                            aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) =>  {
-                                 tracing::error!("unhandled error");
-                                Err(S3GetError::S3GetError("unhandled error".to_string()))
-                            }
                             _ => {
                                  tracing::error!("error: {}", inner.to_string());
                                 Err(S3GetError::S3GetError(inner.to_string()))
@@ -242,9 +238,6 @@ impl S3Storage {
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
                                 Err(S3GetError::S3GetError(msg.to_string()))
-                            }
-                            aws_sdk_s3::operation::get_object::GetObjectError::Unhandled(_) => {
-                                Err(S3GetError::S3GetError("unhandled error".to_string()))
                             }
                             _ => {
                                 Err(S3GetError::S3GetError(inner.to_string()))
