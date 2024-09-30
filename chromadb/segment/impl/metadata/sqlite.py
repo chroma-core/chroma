@@ -163,9 +163,9 @@ class SqliteMetadataSegment(MetadataReader):
         if where is not None or where_document is not None:
             metadata_q = (
                 self._db.querybuilder()
-                .from_(metadata_t)
-                .select(metadata_t.id)
-                .join(embeddings_t)
+                .from_(embeddings_t)
+                .select(embeddings_t.id)
+                .left_join(metadata_t)
                 .on(embeddings_t.id == metadata_t.id)
                 .orderby(embeddings_t.id)
                 .where(
@@ -540,7 +540,7 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(reduce(lambda x, y: x | y, criteria))
             else:
                 expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
-                clause.append(_where_clause(k, expr, metadata_t))
+                clause.append(_where_clause(k, expr, q, metadata_t, embeddings_t))
         return reduce(lambda x, y: x & y, clause)
 
     @trace_method(
@@ -582,9 +582,9 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
                 return (
-                    metadata_t.id.isin(sq)
+                    embeddings_t.id.isin(sq)
                     if k == "$contains"
-                    else metadata_t.id.notin(sq)
+                    else embeddings_t.id.notin(sq)
                 )
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
@@ -654,35 +654,45 @@ def _where_clause(
         Dict[WhereOperator, LiteralValue],
         Dict[InclusionExclusionOperator, List[LiteralValue]],
     ],
-    table: Table,
+    metadata_q: QueryBuilder,
+    metadata_t: Table,
+    embeddings_t: Table,
 ) -> Criterion:
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
     if isinstance(expr, (str, int, float, bool)):
-        return _where_clause(key, {cast(WhereOperator, "$eq"): expr}, table)
+        return _where_clause(
+            key,
+            {cast(WhereOperator, "$eq"): expr},
+            metadata_q,
+            metadata_t,
+            embeddings_t,
+        )
 
     # Operator dict case
     operator, value = next(iter(expr.items()))
-    return _value_criterion(key, value, operator, table)
+    return _value_criterion(key, value, operator, metadata_q, metadata_t, embeddings_t)
 
 
 def _value_criterion(
     key: str,
     value: Union[LiteralValue, List[LiteralValue]],
     op: Union[WhereOperator, InclusionExclusionOperator],
-    table: Table,
+    metadata_q: QueryBuilder,
+    metadata_t: Table,
+    embeddings_t: Table,
 ) -> Criterion:
     """Creates the filter for a single operator"""
 
     def is_numeric(obj: object) -> bool:
         return (not isinstance(obj, bool)) and isinstance(obj, (int, float))
 
-    sub_q = table.select(table.id).where(table.key == ParameterValue(key))
+    sub_q = metadata_q.where(metadata_t.key == ParameterValue(key))
     p_val = ParameterValue(value)
 
     if is_numeric(value) or (isinstance(value, list) and is_numeric(value[0])):
-        int_col, float_col = table.int_value, table.float_value
+        int_col, float_col = metadata_t.int_value, metadata_t.float_value
         if op in ("$eq", "$ne"):
             expr = (int_col == p_val) | (float_col == p_val)
         elif op == "$gt":
@@ -699,15 +709,15 @@ def _value_criterion(
         if isinstance(value, bool) or (
             isinstance(value, list) and isinstance(value[0], bool)
         ):
-            col = table.bool_value
+            col = metadata_t.bool_value
         else:
-            col = table.string_value
+            col = metadata_t.string_value
         if op in ("$eq", "$ne"):
             expr = col == p_val
         else:
             expr = col.isin(p_val)
 
     if op in ("$ne", "$nin"):
-        return table.id.notin(sub_q.where(expr))
+        return embeddings_t.id.notin(sub_q.where(expr))
     else:
-        return table.id.isin(sub_q.where(expr))
+        return embeddings_t.id.isin(sub_q.where(expr))
