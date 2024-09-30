@@ -17,7 +17,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/rust
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
       - name: Build
         run: cargo build --verbose
       - name: Test
