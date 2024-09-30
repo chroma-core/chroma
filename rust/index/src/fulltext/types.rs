@@ -4,8 +4,10 @@ use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction}
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{BooleanOperator, WhereDocument, WhereDocumentOperator};
+use futures::StreamExt;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tantivy::tokenizer::Token;
 use thiserror::Error;
@@ -392,100 +394,105 @@ impl<'me> FullTextIndexReader<'me> {
         let binding = self.encode_tokens(query);
         let tokens = binding.get_tokens();
 
-        // Get query tokens sorted by frequency.
-        let mut token_frequencies: Vec<(String, u32)> = vec![];
-        for token in tokens {
-            // TODO better error matching (NotFoundError should return Ok(vec![])) but some others should error.
-            let res = self
-                .frequencies_blockfile_reader
-                .get_by_prefix(token.text.as_str())
-                .await?;
-            if res.is_empty() {
-                return Ok(vec![]);
-            }
-            if res.len() > 1 {
-                panic!("Invariant violation. Multiple frequency values found for a token.");
-            }
-            let res = res[0];
-            if res.1 == 0 {
-                panic!("Invariant violation. Zero frequency token found.");
-            }
-            // Throw away the "value" since we store frequencies in the keys.
-            token_frequencies.push((token.text.to_string(), res.1));
-        }
-
-        if token_frequencies.is_empty() {
+        if tokens.is_empty() {
             return Ok(vec![]);
         }
-        // TODO sort by frequency. This adds an additional layer of complexity
-        // with repeat characters where we need to keep track of which positions
-        // for the character have been seen/used in the matching algorithm. By
-        // leaving them ordered per the query, we can stick to the more straightforward
-        // but less efficient matching algorithm.
-        // token_frequencies.sort_by(|a, b| a.1.cmp(&b.1));
 
-        // Populate initial candidates with the least-frequent token's posting list.
-        // doc ID -> possible starting locations for the query.
-        let mut candidates: HashMap<u32, Vec<u32>> = HashMap::new();
-        let first_token = token_frequencies[0].0.as_str();
-        let first_token_positional_posting_list = self
-            .posting_lists_blockfile_reader
-            .get_by_prefix(first_token)
+        // Retrieve posting lists for each token.
+        let posting_lists = futures::stream::iter(tokens)
+            .then(|token| async {
+                let positional_posting_list = self
+                    .posting_lists_blockfile_reader
+                    .get_by_prefix(token.text.as_str())
+                    .await?;
+                Ok::<_, FullTextIndexError>(positional_posting_list)
+            })
+            .collect::<Vec<_>>()
             .await
-            .unwrap();
-        for (_, doc_id, positions) in first_token_positional_posting_list.iter() {
-            candidates.insert(*doc_id, positions.to_vec());
-        }
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
 
-        // Iterate through the rest of the tokens, intersecting the posting lists with the candidates.
-        let mut token_offset = 0;
-        for (token, _) in token_frequencies[1..].iter() {
-            token_offset += 1;
-            let positional_posting_list = self
-                .posting_lists_blockfile_reader
-                .get_by_prefix(token.as_str())
-                .await
-                .unwrap();
-            // TODO once we sort by frequency, we need to find the token position
-            // here, taking into account which positions for repeats of the same
-            // token have already been used up.
-            // let token_offset = tokens
-            //     .iter()
-            //     .find(|t| t.text == *token)
-            //     .unwrap()
-            //     .offset_from as i32;
-            let mut new_candidates: HashMap<u32, Vec<u32>> = HashMap::new();
-            for (doc_id, positions) in candidates.iter() {
-                let mut new_positions = vec![];
-                for position in positions {
-                    if let Some(positions) =
-                        // Find the positional posting list with second item = to doc_id
-                        positional_posting_list
-                            .iter()
-                            .find(|x| x.1 == *doc_id)
-                            .map(|x| &x.2)
-                    {
-                        for pos in positions.iter() {
-                            if *pos == position + token_offset {
-                                new_positions.push(*position);
-                            }
+        let num_tokens = posting_lists.len();
+        let mut pointers = vec![0; num_tokens];
+        let mut results = Vec::new();
+
+        loop {
+            // Get current doc_ids from each posting list (aka for each token).
+            let current_doc_ids: Vec<Option<u32>> = posting_lists
+                .iter()
+                .enumerate()
+                .map(|(i, posting_list)| {
+                    if pointers[i] < posting_list.len() {
+                        Some(posting_list[pointers[i]].1)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // If any list is exhausted, we're done.
+            if current_doc_ids.contains(&None) {
+                break;
+            }
+
+            // Check if all doc_ids are the same.
+            let min_doc_id = current_doc_ids.iter().filter_map(|&id| id).min().unwrap();
+            let max_doc_id = current_doc_ids.iter().filter_map(|&id| id).max().unwrap();
+
+            if min_doc_id == max_doc_id {
+                // All tokens appear in the same document, so check positional alignment.
+                let mut positions_per_posting_list = Vec::with_capacity(num_tokens);
+                for (i, posting_list) in posting_lists.iter().enumerate() {
+                    let (_, _, positions) = posting_list[pointers[i]];
+                    positions_per_posting_list.push(positions);
+                }
+
+                // Adjust positions and check for sequential alignment.
+                // Imagine you're searching for "brown fox" over the document "the quick brown fox".
+                // The positions for "brown" are {2} and for "fox" are {3}. The adjusted positions after subtracting the token's position in the query are {2} for "brown" and 3 - 1 = {2} for "fox".
+                // The intersection of these two sets is non-empty, so we know that the two tokens are adjacent.
+
+                // Seed with the positions of the first token.
+                let mut adjusted_positions = positions_per_posting_list[0]
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>();
+
+                for (offset, positions_set) in positions_per_posting_list.iter().enumerate().skip(1)
+                {
+                    let positions_set = positions_set
+                        .iter()
+                        // (We can discard any positions that the token appears at before the current offset)
+                        .filter_map(|&p| p.checked_sub(offset as u32))
+                        .collect::<HashSet<_>>();
+                    adjusted_positions = &adjusted_positions & &positions_set;
+
+                    if adjusted_positions.is_empty() {
+                        break;
+                    }
+                }
+
+                // All tokens are sequential
+                if !adjusted_positions.is_empty() {
+                    results.push(min_doc_id as i32);
+                }
+
+                // Advance all pointers.
+                for pointer in pointers.iter_mut() {
+                    *pointer += 1;
+                }
+            } else {
+                // Advance pointers of lists with the minimum doc_id.
+                for i in 0..num_tokens {
+                    if let Some(doc_id) = current_doc_ids[i] {
+                        if doc_id == min_doc_id {
+                            pointers[i] += 1;
                         }
                     }
                 }
-                if !new_positions.is_empty() {
-                    new_candidates.insert(*doc_id, new_positions);
-                }
             }
-            if new_candidates.is_empty() {
-                return Ok(vec![]);
-            }
-            candidates = new_candidates;
         }
 
-        let mut results = vec![];
-        for (doc_id, _) in candidates.drain() {
-            results.push(doc_id as i32);
-        }
         Ok(results)
     }
 
