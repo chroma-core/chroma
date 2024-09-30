@@ -21,9 +21,12 @@ pub(crate) fn materialize_update_metadata(
     let mut metadata = Metadata::new();
     let mut deleted_metadata = DeletedMetadata::new();
     for (key, value) in update_metdata {
-        if let UpdateMetadataValue::None = value {
-            deleted_metadata.insert(key.clone());
-            continue;
+        match value {
+            UpdateMetadataValue::None => {
+                deleted_metadata.insert(key.clone());
+                continue;
+            }
+            _ => {}
         }
         // Should be a valid conversion for not None values.
         let res = value.try_into();
@@ -86,35 +89,37 @@ pub(crate) fn merge_update_metadata(
         }
         None => (),
     }
-    let final_mt = if merged_metadata.is_empty() {
-        None
+    let mut final_mt;
+    if merged_metadata.is_empty() {
+        final_mt = None;
     } else {
-        Some(merged_metadata)
-    };
-    let final_deleted = if deleted_metadata.is_empty() {
-        None
+        final_mt = Some(merged_metadata);
+    }
+    let mut final_deleted;
+    if deleted_metadata.is_empty() {
+        final_deleted = None;
     } else {
-        Some(deleted_metadata)
-    };
+        final_deleted = Some(deleted_metadata);
+    }
     Ok((final_mt, final_deleted))
 }
 
 #[derive(Error, Debug)]
 pub enum LogMaterializerError {
     #[error("Error materializing document metadata {0}")]
-    MetadataMaterialization(#[from] MetadataValueConversionError),
+    MetadataMaterializationError(#[from] MetadataValueConversionError),
     #[error("Error materializing document embedding")]
-    EmbeddingMaterialization,
+    EmbeddingMaterializationError,
     #[error("Error reading record segment {0}")]
-    RecordSegment(#[from] Box<dyn ChromaError>),
+    RecordSegmentError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for LogMaterializerError {
     fn code(&self) -> ErrorCodes {
         match self {
-            LogMaterializerError::MetadataMaterialization(e) => e.code(),
-            LogMaterializerError::EmbeddingMaterialization => ErrorCodes::Internal,
-            LogMaterializerError::RecordSegment(e) => e.code(),
+            LogMaterializerError::MetadataMaterializationError(e) => e.code(),
+            LogMaterializerError::EmbeddingMaterializationError => ErrorCodes::Internal,
+            LogMaterializerError::RecordSegmentError(e) => e.code(),
         }
     }
 }
@@ -172,12 +177,18 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         if self.final_operation == MaterializedLogOperation::OverwriteExisting
             || self.final_operation == MaterializedLogOperation::AddNew
         {
-            return self.final_document.map(|doc| doc.to_string());
+            return match self.final_document {
+                Some(doc) => Some(doc.to_string()),
+                None => None,
+            };
         }
         return match self.final_document {
             Some(doc) => Some(doc.to_string()),
             None => match self.data_record.as_ref() {
-                Some(data_record) => data_record.document.map(|doc| doc.to_string()),
+                Some(data_record) => match data_record.document {
+                    Some(doc) => Some(doc.to_string()),
+                    None => None,
+                },
                 None => None,
             },
         };
@@ -207,23 +218,23 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // Performs a deep copy of the user id so only use it if really
     // needed. If you only need reference then use merged_user_id_ref below.
     pub(crate) fn merged_user_id(&self) -> String {
-        match self.user_id {
+        return match self.user_id {
             Some(id) => id.to_string(),
             None => match &self.data_record {
                 Some(data_record) => data_record.id.to_string(),
                 None => panic!("Expected at least one user id to be set"),
             },
-        }
+        };
     }
 
     pub(crate) fn merged_user_id_ref(&self) -> &str {
-        match self.user_id {
+        return match self.user_id {
             Some(id) => id,
             None => match &self.data_record {
                 Some(data_record) => data_record.id,
                 None => panic!("Expected at least one user id to be set"),
             },
-        }
+        };
     }
 
     // Performs a deep copy of the metadata so only use it if really
@@ -243,15 +254,21 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
                 None => HashMap::new(),
             };
         }
-        if let Some(metadata) = self.metadata_to_be_merged.as_ref() {
-            for (key, value) in metadata {
-                final_metadata.insert(key.clone(), value.clone());
+        match self.metadata_to_be_merged.as_ref() {
+            Some(metadata) => {
+                for (key, value) in metadata {
+                    final_metadata.insert(key.clone(), value.clone());
+                }
             }
+            None => {}
         }
-        if let Some(metadata) = self.metadata_to_be_deleted.as_ref() {
-            for key in metadata {
-                final_metadata.remove(key);
+        match self.metadata_to_be_deleted.as_ref() {
+            Some(metadata) => {
+                for key in metadata {
+                    final_metadata.remove(key);
+                }
             }
+            None => {}
         }
         final_metadata
     }
@@ -294,10 +311,13 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         match &self.metadata_to_be_deleted {
             Some(meta) => {
                 for key in meta {
-                    if let Some(old_value) = base_metadata.get(key.as_str()) {
-                        metadata_delta
-                            .metadata_to_delete
-                            .insert(key.as_str(), old_value);
+                    match base_metadata.get(key.as_str()) {
+                        Some(old_value) => {
+                            metadata_delta
+                                .metadata_to_delete
+                                .insert(key.as_str(), old_value);
+                        }
+                        None => {}
                     }
                 }
             }
@@ -405,7 +425,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
                     deleted_metadata = Some(m.1);
                 }
                 Err(e) => {
-                    return Err(LogMaterializerError::MetadataMaterialization(e));
+                    return Err(LogMaterializerError::MetadataMaterializationError(e));
                 }
             },
             None => {
@@ -414,12 +434,15 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
             }
         };
 
-        let document = log_record.document.as_deref();
+        let document = match &log_record.document {
+            Some(doc) => Some(doc.as_str()),
+            None => None,
+        };
 
         let embedding = match &log_record.embedding {
             Some(embedding) => Some(embedding.as_slice()),
             None => {
-                return Err(LogMaterializerError::EmbeddingMaterialization);
+                return Err(LogMaterializerError::EmbeddingMaterializationError);
             }
         };
 
@@ -501,7 +524,7 @@ impl<'me> LogMaterializer<'me> {
                         {
                             Ok(res) => res,
                             Err(e) => {
-                                return Err(LogMaterializerError::RecordSegment(e));
+                                return Err(LogMaterializerError::RecordSegmentError(e));
                             }
                         };
                         if exists {
@@ -516,7 +539,7 @@ impl<'me> LogMaterializer<'me> {
                                     );
                                 }
                                 Err(e) => {
-                                    return Err(LogMaterializerError::RecordSegment(e));
+                                    return Err(LogMaterializerError::RecordSegmentError(e));
                                 }
                             }
                         }
@@ -650,14 +673,20 @@ impl<'me> LogMaterializer<'me> {
                                 record_from_map.metadata_to_be_deleted = meta.1;
                             }
                             Err(e) => {
-                                return Err(LogMaterializerError::MetadataMaterialization(e));
+                                return Err(LogMaterializerError::MetadataMaterializationError(e));
                             }
                         };
-                        if let Some(doc) = log_record.record.document.as_ref() {
-                            record_from_map.final_document = Some(doc);
+                        match log_record.record.document.as_ref() {
+                            Some(doc) => {
+                                record_from_map.final_document = Some(doc);
+                            }
+                            None => {}
                         }
-                        if let Some(emb) = log_record.record.embedding.as_ref() {
-                            record_from_map.final_embedding = Some(emb.as_slice());
+                        match log_record.record.embedding.as_ref() {
+                            Some(emb) => {
+                                record_from_map.final_embedding = Some(emb.as_slice());
+                            }
+                            None => {}
                         }
                         match record_from_map.final_operation {
                             MaterializedLogOperation::Initial => {
@@ -713,14 +742,20 @@ impl<'me> LogMaterializer<'me> {
                                             record_from_map.metadata_to_be_deleted = meta.1;
                                         }
                                         Err(e) => {
-                                            return Err(LogMaterializerError::MetadataMaterialization(e));
+                                            return Err(LogMaterializerError::MetadataMaterializationError(e));
                                         }
                                     };
-                                    if let Some(doc) = log_record.record.document.as_ref() {
-                                        record_from_map.final_document = Some(doc);
+                                    match log_record.record.document.as_ref() {
+                                        Some(doc) => {
+                                            record_from_map.final_document = Some(doc);
+                                        }
+                                        None => {}
                                     }
-                                    if let Some(emb) = log_record.record.embedding.as_ref() {
-                                        record_from_map.final_embedding = Some(emb.as_slice());
+                                    match log_record.record.embedding.as_ref() {
+                                        Some(emb) => {
+                                            record_from_map.final_embedding = Some(emb.as_slice());
+                                        }
+                                        None => {}
                                     }
                                     match record_from_map.final_operation {
                                         MaterializedLogOperation::Initial => {
@@ -755,14 +790,20 @@ impl<'me> LogMaterializer<'me> {
                                     record_from_map.metadata_to_be_deleted = meta.1;
                                 }
                                 Err(e) => {
-                                    return Err(LogMaterializerError::MetadataMaterialization(e));
+                                    return Err(LogMaterializerError::MetadataMaterializationError(e));
                                 }
                             };
-                            if let Some(doc) = log_record.record.document.as_ref() {
-                                record_from_map.final_document = Some(doc);
+                            match log_record.record.document.as_ref() {
+                                Some(doc) => {
+                                    record_from_map.final_document = Some(doc);
+                                }
+                                None => {}
                             }
-                            if let Some(emb) = log_record.record.embedding.as_ref() {
-                                record_from_map.final_embedding = Some(emb.as_slice());
+                            match log_record.record.embedding.as_ref() {
+                                Some(emb) => {
+                                    record_from_map.final_embedding = Some(emb.as_slice());
+                                }
+                                None => {}
                             }
                             // This record is not present on storage yet hence final operation is
                             // AddNew and not UpdateExisting.
@@ -835,7 +876,7 @@ mod tests {
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        DirectComparison, DirectDocumentComparison, Where, WhereComparison, WhereDocument,
+        DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator, Where, WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -902,24 +943,27 @@ mod tests {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1064,11 +1108,11 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new_world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new_world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1077,12 +1121,12 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1091,11 +1135,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1105,9 +1149,9 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1115,11 +1159,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1191,24 +1235,27 @@ mod tests {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1344,11 +1391,11 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new_world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new_world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1357,12 +1404,12 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1371,11 +1418,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1384,11 +1431,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc1"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1396,11 +1443,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1472,24 +1519,27 @@ mod tests {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1645,11 +1695,11 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("new_world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("new_world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1658,12 +1708,12 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        assert_eq!(res.get(0), Some(&(1 as usize)));
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1672,11 +1722,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectComparison {
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("bye"),
-            comparison: WhereComparison::SingleStringComparison(
-                String::from("world"),
-                chroma_types::WhereClauseComparator::Equal,
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(String::from("world")),
             ),
         });
         let res = metadata_segment_reader
@@ -1686,9 +1736,9 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("number"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1696,11 +1746,11 @@ mod tests {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.get(0), Some(&(1 as usize)));
         let where_document_clause =
-            WhereDocument::DirectWhereDocumentComparison(DirectDocumentComparison {
+            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
                 document: String::from("doc1"),
-                operator: chroma_types::WhereDocumentOperator::Contains,
+                operator: chroma_types::DocumentOperator::Contains,
             });
         let res = metadata_segment_reader
             .query(None, Some(&where_document_clause), None, 0, 0)
@@ -1772,24 +1822,27 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> =
-                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
-                {
-                    Ok(reader) => Some(reader),
-                    Err(e) => {
-                        match *e {
-                            // Uninitialized segment is fine and means that the record
-                            // segment is not yet initialized in storage.
-                            RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
+            let mut record_segment_reader: Option<RecordSegmentReader> = None;
+            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
+                Ok(reader) => {
+                    record_segment_reader = Some(reader);
+                }
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderCreationError::UninitializedSegment => {
+                            record_segment_reader = None;
                         }
-                    }
-                };
+                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                            assert!(1 == 1, "Error creating record segment reader");
+                        }
+                    };
+                }
+            };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1870,7 +1923,7 @@ mod tests {
             if log.user_id.is_some() {
                 id3_found += 1;
                 assert_eq!("embedding_id_3", log.user_id.unwrap());
-                assert!(log.data_record.is_none());
+                assert_eq!(true, log.data_record.is_none());
                 assert_eq!("doc3", log.final_document.unwrap());
                 assert_eq!(vec![7.0, 8.0, 9.0], log.final_embedding.unwrap());
                 assert_eq!(3, log.offset_id);
@@ -1885,7 +1938,7 @@ mod tests {
                         assert_eq!(MetadataValue::Str(String::from("new_world")), *value);
                         hello_again_found += 1;
                     } else {
-                        panic!("Not expecting any other key");
+                        assert!(1 == 1, "Not expecting any other key");
                     }
                 }
                 assert_eq!(hello_found, 1);
@@ -1901,7 +1954,7 @@ mod tests {
                 assert_eq!(None, log.final_embedding);
                 assert_eq!(None, log.user_id);
                 assert_eq!(None, log.metadata_to_be_merged);
-                assert!(log.data_record.is_some());
+                assert_eq!(true, log.data_record.is_some());
             } else if log.data_record.as_ref().unwrap().id == "embedding_id_1" {
                 id1_found += 1;
                 assert_eq!(
@@ -1922,12 +1975,12 @@ mod tests {
                         assert_eq!(MetadataValue::Str(String::from("new_world")), *value);
                         hello_again_found += 1;
                     } else {
-                        panic!("Not expecting any other key");
+                        assert!(1 == 1, "Not expecting any other key");
                     }
                 }
                 assert_eq!(hello_found, 1);
                 assert_eq!(hello_again_found, 1);
-                assert!(log.data_record.is_some());
+                assert_eq!(true, log.data_record.is_some());
                 assert_eq!(log.data_record.as_ref().unwrap().document, Some("doc1"));
                 assert_eq!(
                     log.data_record.as_ref().unwrap().embedding,
@@ -1943,13 +1996,13 @@ mod tests {
                         assert_eq!(MetadataValue::Str(String::from("world")), *value);
                         bye_found += 1;
                     } else {
-                        panic!("Not expecting any other key");
+                        assert!(1 == 1, "Not expecting any other key");
                     }
                 }
                 assert_eq!(hello_found, 1);
                 assert_eq!(bye_found, 1);
             } else {
-                panic!("Not expecting any other materialized record");
+                assert!(1 == 1, "Not expecting any other materialized record");
             }
         }
         assert_eq!(1, id1_found);
@@ -1980,11 +2033,13 @@ mod tests {
         for data in all_data {
             assert_ne!(data.id, "embedding_id_2");
             if data.id == "embedding_id_1" {
-                assert!(data
-                    .metadata
-                    .clone()
-                    .expect("Metadata is empty")
-                    .contains_key("hello"));
+                assert_eq!(
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .contains_key("hello"),
+                    true
+                );
                 assert_eq!(
                     data.metadata
                         .clone()
@@ -1992,20 +2047,24 @@ mod tests {
                         .get("hello"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
-                assert!(data
-                    .metadata
-                    .clone()
-                    .expect("Metadata is empty")
-                    .contains_key("bye"));
+                assert_eq!(
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .contains_key("bye"),
+                    true
+                );
                 assert_eq!(
                     data.metadata.clone().expect("Metadata is empty").get("bye"),
                     Some(&MetadataValue::Str(String::from("world")))
                 );
-                assert!(data
-                    .metadata
-                    .clone()
-                    .expect("Metadata is empty")
-                    .contains_key("hello_again"));
+                assert_eq!(
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .contains_key("hello_again"),
+                    true
+                );
                 assert_eq!(
                     data.metadata
                         .clone()
@@ -2016,11 +2075,13 @@ mod tests {
                 assert_eq!(data.document.expect("Non empty document"), "doc1");
                 assert_eq!(data.embedding, vec![1.0, 2.0, 3.0]);
             } else if data.id == "embedding_id_3" {
-                assert!(data
-                    .metadata
-                    .clone()
-                    .expect("Metadata is empty")
-                    .contains_key("hello"));
+                assert_eq!(
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .contains_key("hello"),
+                    true
+                );
                 assert_eq!(
                     data.metadata
                         .clone()
@@ -2028,11 +2089,13 @@ mod tests {
                         .get("hello"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
-                assert!(data
-                    .metadata
-                    .clone()
-                    .expect("Metadata is empty")
-                    .contains_key("hello_again"));
+                assert_eq!(
+                    data.metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .contains_key("hello_again"),
+                    true
+                );
                 assert_eq!(
                     data.metadata
                         .clone()

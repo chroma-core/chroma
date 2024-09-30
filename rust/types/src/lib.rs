@@ -10,6 +10,7 @@ mod record;
 mod scalar_encoding;
 mod segment;
 mod segment_scope;
+mod signed_rbm;
 mod tenant;
 
 // Re-export the types module, so that we can use it as a single import in other modules.
@@ -23,6 +24,7 @@ pub use record::*;
 pub use scalar_encoding::*;
 pub use segment::*;
 pub use segment_scope::*;
+pub use signed_rbm::*;
 pub use tenant::*;
 pub use types::*;
 

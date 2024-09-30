@@ -1,9 +1,7 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use roaring::RoaringBitmap;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    ops::{BitAnd, BitOr},
 };
 use thiserror::Error;
 
@@ -62,9 +60,7 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
             },
             UpdateMetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::IntValue(
-                    value as i64,
-                )),
+                value: Some(chroma_proto::update_metadata_value::Value::IntValue(value)),
             },
             UpdateMetadataValue::Float(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
@@ -111,8 +107,9 @@ pub enum MetadataValue {
 
 impl Eq for MetadataValue {}
 
-#[allow(clippy::derive_ord_xor_partial_ord)]
-impl Ord for MetadataValue {
+/// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
+/// We are not planning to support `f64::NaN`s anyway, so the `PartialOrd` and `Ord` should be identical
+impl Ord for &MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap_or(Ordering::Equal)
     }
@@ -201,13 +198,8 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
 impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
     fn from(value: MetadataValue) -> Self {
         match value {
-            MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
-            },
             MetadataValue::Int(value) => chroma_proto::UpdateMetadataValue {
-                value: Some(chroma_proto::update_metadata_value::Value::IntValue(
-                    value as i64,
-                )),
+                value: Some(chroma_proto::update_metadata_value::Value::IntValue(value)),
             },
             MetadataValue::Float(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::FloatValue(
@@ -325,6 +317,13 @@ Metadata queries
 ===========================================
 */
 
+/// This `Where` enum serves as an unified representation for the `where` and `where_document` clauses.
+/// Although this is not unified in the API level due to legacy design choices, in the future we will be
+/// unifying them together, and the structure of the unified AST should be identical to the one here.
+/// Currently both `where` and `where_document` clauses will be translated into `Where`, and if both are
+/// present we simply create a conjunction of both clauses as the actual filter. This is consistent with
+/// the semantics we used to have when the `where` and `where_document` clauses are treated seperately.
+/// TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Where {
     DirectWhereComparison(DirectWhereComparison),
@@ -350,7 +349,7 @@ impl Where {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DirectWhereComparison {
     pub key: String,
-    pub comp: WhereComparison,
+    pub comparison: WhereComparison,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -381,18 +380,6 @@ pub enum MetadataSetValue {
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
-}
-
-impl MetadataSetValue {
-    pub fn into_vec(&self) -> Vec<MetadataValue> {
-        use MetadataSetValue::*;
-        match self {
-            Bool(vec) => vec.iter().map(|b| MetadataValue::Bool(*b)).collect(),
-            Int(vec) => vec.iter().map(|i| MetadataValue::Int(*i)).collect(),
-            Float(vec) => vec.iter().map(|f| MetadataValue::Float(*f)).collect(),
-            Str(vec) => vec.iter().map(|s| MetadataValue::Str(s.clone())).collect(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -434,7 +421,7 @@ impl TryFrom<chroma_proto::Where> for Where {
             Some(chroma_proto::r#where::Where::DirectComparison(proto_comparison)) => {
                 let comparison = DirectWhereComparison {
                     key: proto_comparison.key.clone(),
-                    comp: proto_comparison.try_into()?,
+                    comparison: proto_comparison.try_into()?,
                 };
                 Ok(Where::DirectWhereComparison(comparison))
             }
@@ -660,58 +647,6 @@ impl TryFrom<chroma_proto::WhereDocumentOperator> for DocumentOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum SignedRoaringBitmap {
-    Include(RoaringBitmap),
-    Exclude(RoaringBitmap),
-}
-
-impl SignedRoaringBitmap {
-    pub fn empty() -> Self {
-        Self::Include(RoaringBitmap::new())
-    }
-
-    pub fn full() -> Self {
-        Self::Exclude(RoaringBitmap::new())
-    }
-
-    pub fn flip(self) -> Self {
-        use SignedRoaringBitmap::*;
-        match self {
-            Include(rbm) => Exclude(rbm),
-            Exclude(rbm) => Include(rbm),
-        }
-    }
-}
-
-impl BitAnd for SignedRoaringBitmap {
-    type Output = Self;
-
-    fn bitand(self, rhs: Self) -> Self {
-        use SignedRoaringBitmap::*;
-        match (self, rhs) {
-            (Include(lhs), Include(rhs)) => Include(lhs & rhs),
-            (Include(lhs), Exclude(rhs)) => Include(lhs - rhs),
-            (Exclude(lhs), Include(rhs)) => Include(rhs - lhs),
-            (Exclude(lhs), Exclude(rhs)) => Exclude(lhs | rhs),
-        }
-    }
-}
-
-impl BitOr for SignedRoaringBitmap {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        use SignedRoaringBitmap::*;
-        match (self, rhs) {
-            (Include(lhs), Include(rhs)) => Include(lhs | rhs),
-            (Include(lhs), Exclude(rhs)) => Exclude(rhs - lhs),
-            (Exclude(lhs), Include(rhs)) => Exclude(lhs - rhs),
-            (Exclude(lhs), Exclude(rhs)) => Exclude(lhs & rhs),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -819,7 +754,7 @@ mod tests {
         match where_clause {
             Where::DirectWhereComparison(comparison) => {
                 assert_eq!(comparison.key, "foo");
-                match comparison.comp {
+                match comparison.comparison {
                     WhereComparison::Primitive(_, value) => {
                         assert_eq!(value, MetadataValue::Int(42));
                     }

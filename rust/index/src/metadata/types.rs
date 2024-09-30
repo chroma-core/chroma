@@ -1,8 +1,6 @@
 use crate::fulltext::types::FullTextIndexError;
-use crate::utils::{merge_sorted_vecs_conjunction, merge_sorted_vecs_disjunction};
 use chroma_blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{BooleanOperator, MetadataType, Where, WhereClauseComparator, WhereComparison};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -61,7 +59,6 @@ pub enum MetadataIndexWriter<'me> {
     // about NaN values, but Hash is harder.
     // Linear scanning is fine since we will only ever have 2^16 values
     // and the expected case is much less than that.
-    #[allow(clippy::type_complexity)]
     F32MetadataIndexWriter(
         BlockfileWriter,
         // We use this to implement updates which require read-then-write semantics.
@@ -74,226 +71,6 @@ pub enum MetadataIndexWriter<'me> {
         Option<MetadataIndexReader<'me>>,
         Arc<tokio::sync::Mutex<HashMap<String, HashMap<bool, RoaringBitmap>>>>,
     ),
-}
-
-pub fn process_where_clause_with_callback<
-    F: Fn(&str, &KeyWrapper, MetadataType, WhereClauseComparator) -> RoaringBitmap,
->(
-    where_clause: &Where,
-    callback: &F,
-) -> Result<Vec<usize>, MetadataIndexError> {
-    let mut results = vec![];
-    // TOOD(rescrv):  Collapse to a method on Where.
-    match where_clause {
-        Where::DirectWhereComparison(direct_where_comparison) => {
-            match &direct_where_comparison.comparison {
-                WhereComparison::SingleStringComparison(operand, comparator) => {
-                    match comparator {
-                        WhereClauseComparator::Equal => {
-                            let keywrapper: KeyWrapper = (*operand).as_str().into();
-                            let result = callback(
-                                &direct_where_comparison.key,
-                                &keywrapper,
-                                MetadataType::StringType,
-                                WhereClauseComparator::Equal,
-                            );
-                            results = result.iter().map(|x| x as usize).collect();
-                        }
-                        WhereClauseComparator::NotEqual => {
-                            todo!();
-                        }
-                        // We don't allow these comparators for strings.
-                        WhereClauseComparator::LessThan => {
-                            unimplemented!();
-                        }
-                        WhereClauseComparator::LessThanOrEqual => {
-                            unimplemented!();
-                        }
-                        WhereClauseComparator::GreaterThan => {
-                            unimplemented!();
-                        }
-                        WhereClauseComparator::GreaterThanOrEqual => {
-                            unimplemented!();
-                        }
-                    }
-                }
-                WhereComparison::SingleBoolComparison(operand, comparator) => {
-                    match comparator {
-                        WhereClauseComparator::Equal => {
-                            let keywrapper: KeyWrapper = (*operand).into();
-                            let result = callback(
-                                &direct_where_comparison.key,
-                                &keywrapper,
-                                MetadataType::BoolType,
-                                WhereClauseComparator::Equal,
-                            );
-                            results = result.iter().map(|x| x as usize).collect();
-                        }
-                        WhereClauseComparator::NotEqual => {
-                            todo!();
-                        }
-                        // We don't allow these comparators for booleans.
-                        WhereClauseComparator::LessThan => {
-                            unimplemented!();
-                        }
-                        WhereClauseComparator::LessThanOrEqual => {
-                            unimplemented!();
-                        }
-                        WhereClauseComparator::GreaterThan => {
-                            unimplemented!();
-                        }
-                        WhereClauseComparator::GreaterThanOrEqual => {
-                            unimplemented!();
-                        }
-                    }
-                }
-                WhereComparison::SingleIntComparison(operand, comparator) => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let keywrapper: KeyWrapper = (*operand).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::IntType,
-                            WhereClauseComparator::Equal,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    WhereClauseComparator::LessThan => {
-                        let keywrapper: KeyWrapper = (*operand).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::IntType,
-                            WhereClauseComparator::LessThan,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        let keywrapper: KeyWrapper = (*operand).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::IntType,
-                            WhereClauseComparator::LessThanOrEqual,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        let keywrapper: KeyWrapper = (*operand).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::IntType,
-                            WhereClauseComparator::GreaterThan,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        let keywrapper: KeyWrapper = (*operand).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::IntType,
-                            WhereClauseComparator::GreaterThanOrEqual,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                },
-                WhereComparison::SingleDoubleComparison(operand, comparator) => match comparator {
-                    WhereClauseComparator::Equal => {
-                        let keywrapper: KeyWrapper = (*operand as f32).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::DoubleType,
-                            WhereClauseComparator::Equal,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::NotEqual => {
-                        todo!();
-                    }
-                    WhereClauseComparator::LessThan => {
-                        let keywrapper: KeyWrapper = (*operand as f32).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::DoubleType,
-                            WhereClauseComparator::LessThan,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::LessThanOrEqual => {
-                        let keywrapper: KeyWrapper = (*operand as f32).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::DoubleType,
-                            WhereClauseComparator::LessThanOrEqual,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::GreaterThan => {
-                        let keywrapper: KeyWrapper = (*operand as f32).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::DoubleType,
-                            WhereClauseComparator::GreaterThan,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                    WhereClauseComparator::GreaterThanOrEqual => {
-                        let keywrapper: KeyWrapper = (*operand as f32).into();
-                        let result = callback(
-                            &direct_where_comparison.key,
-                            &keywrapper,
-                            MetadataType::DoubleType,
-                            WhereClauseComparator::GreaterThanOrEqual,
-                        );
-                        results = result.iter().map(|x| x as usize).collect();
-                    }
-                },
-                WhereComparison::StringListComparison(_operand, _list_operator) => {
-                    todo!();
-                }
-                WhereComparison::IntListComparison(..) => {
-                    todo!();
-                }
-                WhereComparison::DoubleListComparison(..) => {
-                    todo!();
-                }
-                WhereComparison::BoolListComparison(..) => {
-                    todo!();
-                }
-            }
-        }
-        Where::WhereChildren(where_children) => {
-            let mut first_iteration = true;
-            for child in where_children.children.iter() {
-                let child_results: Vec<usize> =
-                    process_where_clause_with_callback(child, callback).unwrap_or_default();
-                if first_iteration {
-                    results = child_results;
-                    first_iteration = false;
-                } else {
-                    match where_children.operator {
-                        BooleanOperator::And => {
-                            results = merge_sorted_vecs_conjunction(&results, &child_results);
-                        }
-                        BooleanOperator::Or => {
-                            results = merge_sorted_vecs_disjunction(&results, &child_results);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    results.sort();
-    Ok(results)
 }
 
 impl<'me> MetadataIndexWriter<'me> {
@@ -730,7 +507,7 @@ impl<'me> MetadataIndexReader<'me> {
                             Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => Err(MetadataIndexError::InvalidKeyType),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
@@ -744,7 +521,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -757,7 +534,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::BoolMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
@@ -771,7 +548,7 @@ impl<'me> MetadataIndexReader<'me> {
                             Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => Err(MetadataIndexError::InvalidKeyType),
+                    _ => return Err(MetadataIndexError::InvalidKeyType),
                 }
             }
         }
@@ -797,7 +574,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -813,9 +590,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => Err(MetadataIndexError::InvalidKeyType),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -839,7 +616,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -855,9 +632,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => Err(MetadataIndexError::InvalidKeyType),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -881,7 +658,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -897,9 +674,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => Err(MetadataIndexError::InvalidKeyType),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -923,7 +700,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -939,9 +716,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => Err(MetadataIndexError::InvalidKeyType),
+                _ => return Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => Err(MetadataIndexError::InvalidKeyType),
+            _ => return Err(MetadataIndexError::InvalidKeyType),
         }
     }
 }

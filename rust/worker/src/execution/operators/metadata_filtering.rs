@@ -65,6 +65,7 @@ pub(crate) struct MetadataFilteringInput {
 }
 
 impl MetadataFilteringInput {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         blockfile_provider: BlockfileProvider,
         record_segment: Segment,
@@ -236,7 +237,7 @@ impl<'me> MetadataProvider<'me> {
                     Ok(reader
                         .search(query)
                         .await
-                        .map_err(|e| MetadataIndexError::FullTextError(e))?)
+                        .map_err(MetadataIndexError::FullTextError)?)
                 } else {
                     Ok(RoaringBitmap::new())
                 }
@@ -477,7 +478,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
         let metadata_segement_reader =
             MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
                 .await
-                .map_err(|e| MetadataFilteringError::MetadataSegmentReaderError(e))?;
+                .map_err(MetadataFilteringError::MetadataSegmentReaderError)?;
         let compact_metadata_provider =
             MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
 
@@ -529,7 +530,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             Include(rbm) => rbm,
             Exclude(rbm) => {
                 if let Some(reader) = record_segment_reader.as_ref() {
-                    // TODO: Optimize offset limit performance
+                    // TODO: Optimize for offset limit performance
                     reader
                         .get_all_offset_ids()
                         .await
