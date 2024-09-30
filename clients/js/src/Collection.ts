@@ -367,16 +367,18 @@ export class Collection {
    * });
    * ```
    */
-  async delete({ ids, where, whereDocument }: DeleteParams = {}): Promise<
-    string[]
-  > {
+  async delete({
+    ids,
+    where,
+    whereDocument,
+  }: DeleteParams = {}): Promise<void> {
     await this.client.init();
     let idsArray = undefined;
     if (ids !== undefined) idsArray = toArray(ids);
-    return (await this.client.api.aDelete(
+    await this.client.api.aDelete(
       this.id,
       { ids: idsArray, where: where, where_document: whereDocument },
       this.client.api.options,
-    )) as string[];
+    );
   }
 }

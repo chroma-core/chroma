@@ -245,7 +245,7 @@ class AsyncBaseAPI(ABC):
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> IDs:
+    ) -> None:
         """[Internal] Deletes entries from a collection specified by UUID.
 
         Args:
