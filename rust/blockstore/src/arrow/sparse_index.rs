@@ -679,4 +679,28 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         assert!(blocks.contains(&block_id_3));
     }
+
+    #[test]
+    fn test_serde() {
+        let sparse_index_id = uuid::Uuid::new_v4();
+        let block_id_1 = uuid::Uuid::new_v4();
+        let sparse_index = SparseIndex::new(sparse_index_id);
+        sparse_index.add_initial_block(block_id_1);
+        let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
+        sparse_index.add_block(blockfile_key.clone(), block_id_1);
+
+        // Split the range into two blocks (start, c), and (c, end)
+        let block_id_2 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("prefix".to_string(), "c");
+        sparse_index.add_block(blockfile_key.clone(), block_id_2);
+
+        let serialized = bincode::serialize(&sparse_index).unwrap();
+        let deserialized: SparseIndex = bincode::deserialize(&serialized).unwrap();
+
+        let old_data = sparse_index.data.lock();
+        let new_data = deserialized.data.lock();
+        for (key, block_id) in old_data.forward.iter() {
+            assert_eq!(new_data.forward.get(key).unwrap(), block_id);
+        }
+    }
 }

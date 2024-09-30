@@ -1153,6 +1153,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
+ "bincode",
  "chroma-cache",
  "chroma-config",
  "chroma-error",

@@ -55,6 +55,7 @@ tempfile = "3.8.1"
 shuttle = "0.7.1"
 proptest = "1.4.0"
 proptest-state-machine = "0.1.0"
+bincode = "1.3.3"
 
 [profile.release]
 debug = 2
