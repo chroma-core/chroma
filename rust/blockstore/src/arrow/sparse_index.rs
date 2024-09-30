@@ -3,6 +3,7 @@ use chroma_cache::cache::Cacheable;
 use chroma_error::ChromaError;
 use core::panic;
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use super::types::{ArrowReadableKey, ArrowWriteableKey};
 /// The start key is used to represent the first block in the sparse index, this makes
 /// it easier to handle the case where the first block is split into two and also makes
 /// determining the target block for a given key easier
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) enum SparseIndexDelimiter {
     Start,
     Key(CompositeKey),
@@ -63,39 +64,46 @@ impl Ord for SparseIndexDelimiter {
 /// - `replace_block` - Replace an existing block with a new one
 /// - `len` - Get the number of blocks in the sparse index
 /// - `is_valid` - Check if the sparse index is valid, useful for debugging and testing
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SparseIndex {
-    pub(super) forward: Arc<Mutex<BTreeMap<SparseIndexDelimiter, Uuid>>>,
-    reverse: Arc<Mutex<HashMap<Uuid, SparseIndexDelimiter>>>,
+    pub(super) data: Arc<Mutex<SparseIndexData>>,
     pub(super) id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct SparseIndexData {
+    pub(super) forward: BTreeMap<SparseIndexDelimiter, Uuid>,
+    reverse: HashMap<Uuid, SparseIndexDelimiter>,
 }
 
 impl Cacheable for SparseIndex {}
 
 impl SparseIndex {
     pub(super) fn new(id: Uuid) -> Self {
-        let forward = Arc::new(Mutex::new(BTreeMap::new()));
-        let reverse = Arc::new(Mutex::new(HashMap::new()));
+        let forward = BTreeMap::new();
+        let reverse = HashMap::new();
+        let data = SparseIndexData { forward, reverse };
         Self {
-            forward,
-            reverse,
+            data: Arc::new(Mutex::new(data)),
             id,
         }
     }
 
     // TOOD: Add state to ensure that we add this first and only once
     pub(super) fn add_initial_block(&self, block_id: Uuid) {
-        let mut forward = self.forward.lock();
+        let mut data = self.data.lock();
+        let forward = &mut data.forward;
         forward.insert(SparseIndexDelimiter::Start, block_id);
-        let mut reverse = self.reverse.lock();
+        let reverse = &mut data.reverse;
         reverse.insert(block_id, SparseIndexDelimiter::Start);
     }
 
     pub(super) fn get_all_target_block_ids(&self, mut search_keys: Vec<CompositeKey>) -> Vec<Uuid> {
         // Sort so that we can search in one iteration.
+        let data = self.data.lock();
+        let forward = &data.forward;
         search_keys.sort();
         let mut result_uuids = Vec::new();
-        let forward = self.forward.lock();
         let curr_iter = forward.iter();
         let mut next_iter = forward.iter().skip(1);
         let mut search_iter = search_keys.iter().peekable();
@@ -130,7 +138,8 @@ impl SparseIndex {
     }
 
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
-        let forward = self.forward.lock();
+        let data = self.data.lock();
+        let forward = &data.forward;
 
         match forward
             .range(..=SparseIndexDelimiter::Key(search_key.clone()))
@@ -144,9 +153,10 @@ impl SparseIndex {
     }
 
     pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
-        let lock_guard = self.forward.lock();
-        let curr_iter = lock_guard.iter();
-        let mut next_iter = lock_guard.iter().skip(1);
+        let data = self.data.lock();
+        let forward = &data.forward;
+        let curr_iter = forward.iter();
+        let mut next_iter = forward.iter().skip(1);
         let mut block_ids = vec![];
         for (curr_key, curr_uuid) in curr_iter {
             let non_start_curr_key: Option<&CompositeKey> = match curr_key {
@@ -193,9 +203,10 @@ impl SparseIndex {
         prefix: &str,
         key: K,
     ) -> Vec<Uuid> {
-        let lock_guard = self.forward.lock();
-        let curr_iter = lock_guard.iter();
-        let mut next_iter = lock_guard.iter().skip(1);
+        let data = self.data.lock();
+        let forward = &data.forward;
+        let curr_iter = forward.iter();
+        let mut next_iter = forward.iter().skip(1);
         let mut block_ids = vec![];
         for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
@@ -233,9 +244,10 @@ impl SparseIndex {
         prefix: &str,
         key: K,
     ) -> Vec<Uuid> {
-        let lock_guard = self.forward.lock();
-        let curr_iter = lock_guard.iter();
-        let mut next_iter = lock_guard.iter().skip(1);
+        let data = self.data.lock();
+        let forward = &data.forward;
+        let curr_iter = forward.iter();
+        let mut next_iter = forward.iter().skip(1);
         let mut block_ids = vec![];
         for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
@@ -270,9 +282,10 @@ impl SparseIndex {
         prefix: &str,
         key: K,
     ) -> Vec<Uuid> {
-        let lock_guard = self.forward.lock();
-        let curr_iter = lock_guard.iter();
-        let mut next_iter = lock_guard.iter().skip(1);
+        let data = self.data.lock();
+        let forward = &data.forward;
+        let curr_iter = forward.iter();
+        let mut next_iter = forward.iter().skip(1);
         let mut block_ids = vec![];
         for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
@@ -310,9 +323,10 @@ impl SparseIndex {
         prefix: &str,
         key: K,
     ) -> Vec<Uuid> {
-        let lock_guard = self.forward.lock();
-        let curr_iter = lock_guard.iter();
-        let mut next_iter = lock_guard.iter().skip(1);
+        let data = self.data.lock();
+        let forward = &data.forward;
+        let curr_iter = forward.iter();
+        let mut next_iter = forward.iter().skip(1);
         let mut block_ids = vec![];
         for (curr_delim, curr_uuid) in curr_iter {
             let curr_key = match curr_delim {
@@ -343,32 +357,30 @@ impl SparseIndex {
     }
 
     pub(super) fn add_block(&self, start_key: CompositeKey, block_id: Uuid) {
-        self.forward
-            .lock()
+        let mut data = self.data.lock();
+        data.forward
             .insert(SparseIndexDelimiter::Key(start_key.clone()), block_id);
-        self.reverse
-            .lock()
+        data.reverse
             .insert(block_id, SparseIndexDelimiter::Key(start_key));
     }
 
     pub(super) fn replace_block(&self, old_block_id: Uuid, new_block_id: Uuid) {
-        let mut forward = self.forward.lock();
-        let mut reverse = self.reverse.lock();
-        if let Some(old_start_key) = reverse.remove(&old_block_id) {
-            forward.remove(&old_start_key);
-            forward.insert(old_start_key.clone(), new_block_id);
-            reverse.insert(new_block_id, old_start_key);
+        let mut data = self.data.lock();
+        if let Some(old_start_key) = data.reverse.remove(&old_block_id) {
+            data.forward.remove(&old_start_key);
+            data.forward.insert(old_start_key.clone(), new_block_id);
+            data.reverse.insert(new_block_id, old_start_key);
         }
     }
 
     fn correct_start_key(&self) {
+        let mut data = self.data.lock();
         if self.len() == 0 {
             return;
         }
         let key_copy;
         {
-            let lock_guard = self.forward.lock();
-            let mut curr_iter = lock_guard.iter();
+            let mut curr_iter = data.forward.iter();
             let (key, _) = curr_iter.nth(0).unwrap();
             if key == &SparseIndexDelimiter::Start {
                 return;
@@ -376,12 +388,10 @@ impl SparseIndex {
             key_copy = key.clone();
         }
         tracing::info!("Correcting start key of sparse index {:?}", self.id);
-        let mut forward = self.forward.lock();
-        let mut reverse = self.reverse.lock();
-        if let Some(id) = forward.remove(&key_copy) {
-            reverse.remove(&id);
-            forward.insert(SparseIndexDelimiter::Start, id);
-            reverse.insert(id, SparseIndexDelimiter::Start);
+        if let Some(id) = data.forward.remove(&key_copy) {
+            data.reverse.remove(&id);
+            data.forward.insert(SparseIndexDelimiter::Start, id);
+            data.reverse.insert(id, SparseIndexDelimiter::Start);
         }
     }
 
@@ -392,12 +402,11 @@ impl SparseIndex {
         // all indexes initialized or none at all but not other combinations.
         // We could argue that we should fix the readers to handle these cases
         // but this is simpler, easier and less error prone to do.
+        let mut data = self.data.lock();
         let mut removed = false;
         if self.len() > 1 {
-            let mut forward = self.forward.lock();
-            let mut reverse = self.reverse.lock();
-            if let Some(start_key) = reverse.remove(block_id) {
-                forward.remove(&start_key);
+            if let Some(start_key) = data.reverse.remove(block_id) {
+                data.forward.remove(&start_key);
             }
             removed = true;
         }
@@ -413,20 +422,24 @@ impl SparseIndex {
     }
 
     pub(super) fn len(&self) -> usize {
-        self.forward.lock().len()
+        let data = self.data.lock();
+        data.forward.len()
     }
 
     pub(super) fn fork(&self, new_id: Uuid) -> Self {
         let mut new_forward = BTreeMap::new();
         let mut new_reverse = HashMap::new();
-        let old_forward = self.forward.lock();
+        let old_data = self.data.lock();
+        let old_forward = &old_data.forward;
         for (key, block_id) in old_forward.iter() {
             new_forward.insert(key.clone(), *block_id);
             new_reverse.insert(*block_id, key.clone());
         }
         Self {
-            forward: Arc::new(Mutex::new(new_forward)),
-            reverse: Arc::new(Mutex::new(new_reverse)),
+            data: Arc::new(Mutex::new(SparseIndexData {
+                forward: new_forward,
+                reverse: new_reverse,
+            })),
             id: new_id,
         }
     }
@@ -434,11 +447,11 @@ impl SparseIndex {
     #[cfg(test)]
     /// Check if the sparse index is valid by ensuring that the keys are in order
     pub(super) fn is_valid(&self) -> bool {
-        let forward = self.forward.lock();
+        let data = self.data.lock();
         let mut first = true;
         // Two pointer traversal to check if the keys are in order and that the start key is first
-        let iter_slow = forward.iter();
-        let mut iter_fast = forward.iter().skip(1);
+        let iter_slow = data.forward.iter();
+        let mut iter_fast = data.forward.iter().skip(1);
         for (curr_key, _) in iter_slow {
             if first {
                 if curr_key != &SparseIndexDelimiter::Start {
@@ -456,15 +469,15 @@ impl SparseIndex {
     }
 
     pub(super) fn to_block<K: ArrowWriteableKey>(&self) -> Result<Block, Box<dyn ChromaError>> {
-        let forward = self.forward.lock();
-        if forward.is_empty() {
+        let data = self.data.lock();
+        if data.forward.is_empty() {
             panic!("Invariant violation. No blocks in the sparse index");
         }
 
         // TODO: we could save the uuid not as a string to be more space efficient
         // but given the scale is relatively small, this is fine for now
         let delta = BlockDelta::new::<K, String>(self.id);
-        for (key, block_id) in forward.iter() {
+        for (key, block_id) in data.forward.iter() {
             match key {
                 SparseIndexDelimiter::Start => {
                     delta.add("START", K::default(), block_id.to_string());
@@ -524,8 +537,7 @@ impl SparseIndex {
             i += 1;
         }
         Ok(Self {
-            forward: Arc::new(Mutex::new(forward)),
-            reverse: Arc::new(Mutex::new(reverse)),
+            data: Arc::new(Mutex::new(SparseIndexData { forward, reverse })),
             id,
         })
     }
@@ -533,12 +545,10 @@ impl SparseIndex {
 
 impl Debug for SparseIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let forward = self.forward.lock();
-        let reverse = self.reverse.lock();
+        let data = self.data.lock();
         f.debug_struct("SparseIndex")
             .field("id", &self.id)
-            .field("forward", &forward)
-            .field("reverse", &reverse)
+            .field("data", &data)
             .finish()
     }
 }
@@ -606,21 +616,20 @@ mod tests {
         let block = sparse_index.to_block::<&str>().unwrap();
         let new_sparse_index = SparseIndex::from_block::<&str>(&block).unwrap();
 
-        let old_forward = sparse_index.forward.lock();
-        let new_forward = new_sparse_index.forward.lock();
+        let old_data = sparse_index.data.lock();
 
-        assert_eq!(old_forward.len(), new_forward.len());
-        for (old_key, old_block_id) in old_forward.iter() {
-            let new_block_id = new_forward.get(old_key).unwrap();
+        assert_eq!(old_data.forward.len(), old_data.reverse.len());
+        for (old_key, old_block_id) in old_data.forward.iter() {
+            let new_block_id = old_data.forward.get(old_key).unwrap();
             assert_eq!(old_block_id, new_block_id);
         }
 
-        let old_reverse = sparse_index.reverse.lock();
-        let new_reverse = new_sparse_index.reverse.lock();
+        let old_reverse = &old_data.reverse;
+        let new_data = new_sparse_index.data.lock();
 
-        assert_eq!(old_reverse.len(), new_reverse.len());
+        assert_eq!(old_reverse.len(), new_data.reverse.len());
         for (old_block_id, old_key) in old_reverse.iter() {
-            let new_key = new_reverse.get(old_block_id).unwrap();
+            let new_key = new_data.reverse.get(old_block_id).unwrap();
             assert_eq!(old_key, new_key);
         }
     }

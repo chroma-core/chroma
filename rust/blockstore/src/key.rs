@@ -1,8 +1,7 @@
-use std::hash::{Hash, Hasher};
-
-use chroma_error::{ChromaError, ErrorCodes};
-
 use super::Key;
+use chroma_error::{ChromaError, ErrorCodes};
+use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
 
 // TODO(rescrv):  This used to be a panic/unwrap, but could be a nicer type.
 #[derive(thiserror::Error, Debug)]
@@ -15,7 +14,7 @@ impl ChromaError for InvalidKeyConversion {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Debug)]
+#[derive(Clone, PartialEq, PartialOrd, Debug, Serialize, Deserialize)]
 pub enum KeyWrapper {
     String(String),
     Float32(f32),
@@ -103,7 +102,7 @@ impl TryFrom<&KeyWrapper> for u32 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompositeKey {
     pub(super) prefix: String,
     pub(super) key: KeyWrapper,
