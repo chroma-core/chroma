@@ -19,7 +19,7 @@ struct SciDocsCorpusLine {
     text: String,
 }
 
-/// Dataset from https://huggingface.co/datasets/BeIR/scidocs.
+/// Dataset from <https://huggingface.co/datasets/BeIR/scidocs>.
 /// Metadata:
 /// - id: The record ID.
 /// - title: The title of the record.

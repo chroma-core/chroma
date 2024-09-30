@@ -11,7 +11,7 @@ use tokio::{fs::File, io::AsyncBufReadExt};
 use tokio_stream::{wrappers::LinesStream, Stream, StreamExt};
 use tokio_util::io::StreamReader;
 
-/// Dataset from https://github.com/microsoft/MS-MARCO-Web-Search.
+/// Dataset from <https://github.com/microsoft/MS-MARCO-Web-Search>.
 /// Metadata:
 /// - id: The query ID.
 /// - language_codes: The language codes of the query (e.g. en-US).

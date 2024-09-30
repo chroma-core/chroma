@@ -128,14 +128,18 @@ impl Scheduler {
     pub(crate) async fn join(&self) {
         // NOTE(rescrv):  Leaving this clippy in place until we can re-arch our way out.
         // Do NOT simply silence this warning.
-        let mut handles = self.handles.write();
-        for handle in handles.iter_mut() {
-            if let Some(join_handle) = handle.join_handle.take() {
-                match join_handle.await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("Error: {:?}", e);
-                    }
+        let mut handles = {
+            let mut handles = self.handles.write();
+            handles
+                .iter_mut()
+                .flat_map(|h| h.join_handle.take())
+                .collect::<Vec<_>>()
+        };
+        for join_handle in handles.iter_mut() {
+            match join_handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error: {:?}", e);
                 }
             }
         }
