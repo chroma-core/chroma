@@ -317,6 +317,13 @@ Metadata queries
 ===========================================
 */
 
+/// This `Where` enum serves as an unified representation for the `where` and `where_document` clauses.
+/// Although this is not unified in the API level due to legacy design choices, in the future we will be
+/// unifying them together, and the structure of the unified AST should be identical to the one here.
+/// Currently both `where` and `where_document` clauses will be translated into `Where`, and if both are
+/// present we simply create a conjunction of both clauses as the actual filter. This is consistent with
+/// the semantics we used to have when the `where` and `where_document` clauses are treated seperately.
+/// TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Where {
     DirectWhereComparison(DirectWhereComparison),

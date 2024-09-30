@@ -137,7 +137,8 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                 HydrateMetadataResultsOperatorError::LogMaterialization(e)
             })?;
 
-        // A hash map that map an offset id to the corresponding log
+        // Create a hash map that maps an offset id to the corresponding log
+        // It contains all records from the logs that should be present in the final result
         let oid_to_log_record: HashMap<_, _> = mat_records
             .iter()
             .flat_map(|(log, _)| {

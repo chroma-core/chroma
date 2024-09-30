@@ -530,7 +530,7 @@ impl Operator<MetadataFilteringInput, MetadataFilteringOutput> for MetadataFilte
             Include(rbm) => rbm,
             Exclude(rbm) => {
                 if let Some(reader) = record_segment_reader.as_ref() {
-                    // TODO: Optimize offset limit performance
+                    // TODO: Optimize for offset limit performance
                     reader
                         .get_all_offset_ids()
                         .await
