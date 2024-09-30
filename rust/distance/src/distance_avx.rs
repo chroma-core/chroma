@@ -202,6 +202,7 @@ copyright Qdrant, licensed under the Apache 2.0 license.
 #![allow(clippy::missing_safety_doc)]
 
 #[cfg(target_arch = "x86_64")]
+#[allow(unused_imports)]
 use std::arch::x86_64::*;
 
 #[cfg(all(target_feature = "avx", target_feature = "fma"))]
