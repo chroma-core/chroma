@@ -94,7 +94,7 @@ def sample_embeddings() -> Iterator[OperationRecord]:
 
         record = OperationRecord(
             id=f"embedding_{i}",
-            embedding=vector,
+            embedding=vector,  # type: ignore[typeddict-item]
             encoding=ScalarEncoding.FLOAT32,
             metadata=metadata,
             operation=Operation.ADD,
@@ -339,12 +339,12 @@ def test_get(
     assert len(result) == 4
 
     # Get with $ne
-    # Returns metadata that has an int_key, but not equal to 5
+    # Returns metadata that has an int_key but not equal to 5, or without an int_key
     result = segment.get_metadata(
         where={"int_key": {"$ne": 5}},  # type:ignore[dict-item]
         request_version_context=request_version_context,
     )
-    assert len(result) == 8
+    assert len(result) == 9
 
     # get with multiple heterogenous conditions
     result = segment.get_metadata(
@@ -420,13 +420,15 @@ def test_fulltext(
     assert len(result) == 1
 
     # Test not_contains
+    # Returns records without documents or with documents not containing the searched text.
     result = segment.get_metadata(
         where_document={"$not_contains": "four two"},
         request_version_context=request_version_context,
     )
-    assert len(result) == len(
-        [i for i in range(1, 100) if "four two" not in _build_document(i)]
-    )
+    assert (
+        len(result)
+        == len([i for i in range(1, 100) if "four two" not in _build_document(i)]) + 1
+    )  # The first record does not have a document, which should be included in the result
 
     # Test many results
     result = segment.get_metadata(
@@ -440,9 +442,10 @@ def test_fulltext(
         where_document={"$not_contains": "zero"},
         request_version_context=request_version_context,
     )
-    assert len(result) == len(
-        [i for i in range(1, 100) if "zero" not in _build_document(i)]
-    )
+    assert (
+        len(result)
+        == len([i for i in range(1, 100) if "zero" not in _build_document(i)]) + 1
+    )  # The first record does not have a document, which should be included in the result
 
     # test $and
     result = segment.get_metadata(
@@ -456,13 +459,17 @@ def test_fulltext(
         where_document={"$and": [{"$not_contains": "four"}, {"$not_contains": "two"}]},
         request_version_context=request_version_context,
     )
-    assert len(result) == len(
-        [
-            i
-            for i in range(1, 100)
-            if "four" not in _build_document(i) and "two" not in _build_document(i)
-        ]
-    )
+    assert (
+        len(result)
+        == len(
+            [
+                i
+                for i in range(1, 100)
+                if "four" not in _build_document(i) and "two" not in _build_document(i)
+            ]
+        )
+        + 1
+    )  # The first record does not have a document, which should be included in the result
 
     # test $or
     result = segment.get_metadata(
@@ -478,13 +485,17 @@ def test_fulltext(
         where_document={"$or": [{"$not_contains": "zero"}, {"$not_contains": "one"}]},
         request_version_context=request_version_context,
     )
-    assert len(result) == len(
-        [
-            i
-            for i in range(1, 100)
-            if "zero" not in _build_document(i) or "one" not in _build_document(i)
-        ]
-    )
+    assert (
+        len(result)
+        == len(
+            [
+                i
+                for i in range(1, 100)
+                if "zero" not in _build_document(i) or "one" not in _build_document(i)
+            ]
+        )
+        + 1
+    )  # The first record does not have a document, which should be included in the result
 
     # test combo with where clause (negative case)
     result = segment.get_metadata(

@@ -163,9 +163,9 @@ class SqliteMetadataSegment(MetadataReader):
         if where is not None or where_document is not None:
             metadata_q = (
                 self._db.querybuilder()
-                .from_(metadata_t)
-                .select(metadata_t.id)
-                .join(embeddings_t)
+                .from_(embeddings_t)
+                .select(embeddings_t.id)
+                .left_join(metadata_t)
                 .on(embeddings_t.id == metadata_t.id)
                 .orderby(embeddings_t.id)
                 .where(
@@ -540,14 +540,7 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(reduce(lambda x, y: x | y, criteria))
             else:
                 expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key == ParameterValue(k))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(metadata_t.id.isin(sq))
+                clause.append(_where_clause(k, expr, q, metadata_t, embeddings_t))
         return reduce(lambda x, y: x & y, clause)
 
     @trace_method(
@@ -578,7 +571,7 @@ class SqliteMetadataSegment(MetadataReader):
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x | y, criteria)
-            elif k == "$contains":
+            elif k in ("$contains", "$not_contains"):
                 v = cast(str, v)
                 search_term = f"%{v}%"
 
@@ -588,20 +581,11 @@ class SqliteMetadataSegment(MetadataReader):
                     .select(fulltext_t.rowid)
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
-                return metadata_t.id.isin(sq)
-            elif k == "$not_contains":
-                v = cast(str, v)
-                search_term = f"%{v}%"
-
-                sq = (
-                    self._db.querybuilder()
-                    .from_(fulltext_t)
-                    .select(fulltext_t.rowid)
-                    .where(
-                        fulltext_t.string_value.not_like(ParameterValue(search_term))
-                    )
+                return (
+                    embeddings_t.id.isin(sq)
+                    if k == "$contains"
+                    else embeddings_t.id.notin(sq)
                 )
-                return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
@@ -664,94 +648,76 @@ class SqliteMetadataSegment(MetadataReader):
 
 
 def _where_clause(
+    key: str,
     expr: Union[
         LiteralValue,
         Dict[WhereOperator, LiteralValue],
         Dict[InclusionExclusionOperator, List[LiteralValue]],
     ],
-    table: Table,
+    metadata_q: QueryBuilder,
+    metadata_t: Table,
+    embeddings_t: Table,
 ) -> Criterion:
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
     if isinstance(expr, (str, int, float, bool)):
-        return _where_clause({cast(WhereOperator, "$eq"): expr}, table)
+        return _where_clause(
+            key,
+            {cast(WhereOperator, "$eq"): expr},
+            metadata_q,
+            metadata_t,
+            embeddings_t,
+        )
 
     # Operator dict case
     operator, value = next(iter(expr.items()))
-    return _value_criterion(value, operator, table)
+    return _value_criterion(key, value, operator, metadata_q, metadata_t, embeddings_t)
 
 
 def _value_criterion(
+    key: str,
     value: Union[LiteralValue, List[LiteralValue]],
     op: Union[WhereOperator, InclusionExclusionOperator],
-    table: Table,
+    metadata_q: QueryBuilder,
+    metadata_t: Table,
+    embeddings_t: Table,
 ) -> Criterion:
-    """Return a criterion to compare a value with the appropriate columns given its type
-    and the operation type."""
-    if isinstance(value, str):
-        cols = [table.string_value]
-    # isinstance(True, int) evaluates to True, so we need to check for bools separately
-    elif isinstance(value, bool) and op in ("$eq", "$ne"):
-        cols = [table.bool_value]
-    elif isinstance(value, int) and op in ("$eq", "$ne"):
-        cols = [table.int_value]
-    elif isinstance(value, float) and op in ("$eq", "$ne"):
-        cols = [table.float_value]
-    elif isinstance(value, list) and op in ("$in", "$nin"):
-        _v = value
-        if len(_v) == 0:
-            raise ValueError(f"Empty list for {op} operator")
-        if isinstance(value[0], str):
-            col_exprs = [
-                table.string_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.string_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], bool):
-            col_exprs = [
-                table.bool_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.bool_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], int):
-            col_exprs = [
-                table.int_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.int_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], float):
-            col_exprs = [
-                table.float_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.float_value.notin(ParameterValue(_v))
-            ]
-    elif isinstance(value, list) and op in ("$in", "$nin"):
-        col_exprs = [
-            table.int_value.isin(ParameterValue(value))
-            if op == "$in"
-            else table.int_value.notin(ParameterValue(value)),
-            table.float_value.isin(ParameterValue(value))
-            if op == "$in"
-            else table.float_value.notin(ParameterValue(value)),
-        ]
-    else:
-        cols = [table.int_value, table.float_value]
+    """Creates the filter for a single operator"""
 
-    if op == "$eq":
-        col_exprs = [col == ParameterValue(value) for col in cols]
-    elif op == "$ne":
-        col_exprs = [col != ParameterValue(value) for col in cols]
-    elif op == "$gt":
-        col_exprs = [col > ParameterValue(value) for col in cols]
-    elif op == "$gte":
-        col_exprs = [col >= ParameterValue(value) for col in cols]
-    elif op == "$lt":
-        col_exprs = [col < ParameterValue(value) for col in cols]
-    elif op == "$lte":
-        col_exprs = [col <= ParameterValue(value) for col in cols]
+    def is_numeric(obj: object) -> bool:
+        return (not isinstance(obj, bool)) and isinstance(obj, (int, float))
 
-    if op == "$ne":
-        return reduce(lambda x, y: x & y, col_exprs)
+    sub_q = metadata_q.where(metadata_t.key == ParameterValue(key))
+    p_val = ParameterValue(value)
+
+    if is_numeric(value) or (isinstance(value, list) and is_numeric(value[0])):
+        int_col, float_col = metadata_t.int_value, metadata_t.float_value
+        if op in ("$eq", "$ne"):
+            expr = (int_col == p_val) | (float_col == p_val)
+        elif op == "$gt":
+            expr = (int_col > p_val) | (float_col > p_val)
+        elif op == "$gte":
+            expr = (int_col >= p_val) | (float_col >= p_val)
+        elif op == "$lt":
+            expr = (int_col < p_val) | (float_col < p_val)
+        elif op == "$lte":
+            expr = (int_col <= p_val) | (float_col <= p_val)
+        else:
+            expr = int_col.isin(p_val) | float_col.isin(p_val)
     else:
-        return reduce(lambda x, y: x | y, col_exprs)
+        if isinstance(value, bool) or (
+            isinstance(value, list) and isinstance(value[0], bool)
+        ):
+            col = metadata_t.bool_value
+        else:
+            col = metadata_t.string_value
+        if op in ("$eq", "$ne"):
+            expr = col == p_val
+        else:
+            expr = col.isin(p_val)
+
+    if op in ("$ne", "$nin"):
+        return embeddings_t.id.notin(sub_q.where(expr))
+    else:
+        return embeddings_t.id.isin(sub_q.where(expr))
