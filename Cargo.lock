@@ -1051,20 +1051,6 @@ name = "bytemuck"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d6d68c57235a3a081186990eca2867354726650f42f7516ca50c28d6281fd15"
-dependencies = [
- "bytemuck_derive",
-]
-
-[[package]]
-name = "bytemuck_derive"
-version = "1.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cc8b54b395f2fcfbb3d90c47b01c7f444d94d05bdeb775811dec868ac3bbc26"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.52",
-]
 
 [[package]]
 name = "byteorder"
@@ -1188,7 +1174,6 @@ dependencies = [
  "chroma-error",
  "chroma-storage",
  "chroma-types",
- "clap",
  "flatbuffers",
  "futures",
  "num_cpus",
@@ -1200,7 +1185,6 @@ dependencies = [
  "rand",
  "roaring",
  "serde",
- "serde_arrow",
  "serde_json",
  "shuttle",
  "tempfile",
@@ -2345,7 +2329,6 @@ version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dd08c532ae367adf81c312a4580bc67f1d0fe8bc9c460520283f4c0ff277888"
 dependencies = [
- "bytemuck",
  "cfg-if",
  "crunchy",
  "num-traits",
@@ -4647,18 +4630,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float",
- "serde",
-]
-
-[[package]]
-name = "serde_arrow"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "688271d89ff473740fe2e7cffc19613cb63cdb467c1748e2e7d041fd6f590cd3"
-dependencies = [
- "bytemuck",
- "chrono",
- "half",
  "serde",
 ]
 
