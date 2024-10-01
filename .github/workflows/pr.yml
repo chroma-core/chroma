@@ -132,9 +132,13 @@ jobs:
           pre-commit run --all-files flake8
           pre-commit run --all-files prettier
           pre-commit run --all-files check-yaml
+      - name: Setup
+        uses: ./.github/actions/rust
       - name: Cargo fmt check
         shell: bash
         run: cargo fmt -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
 
   # This job exists for our branch protection rule.
   # We want to require status checks to pass before merging, but the set of
