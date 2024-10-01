@@ -1125,29 +1125,6 @@ name = "chroma"
 version = "0.1.0"
 
 [[package]]
-name = "chroma-benchmark-datasets"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-compression",
- "async-tempfile",
- "bincode",
- "bloom",
- "chroma-types",
- "clap",
- "dirs",
- "futures",
- "rand",
- "reqwest",
- "serde",
- "serde_json",
- "tantivy",
- "tokio",
- "tokio-stream",
- "tokio-util",
-]
-
-[[package]]
 name = "chroma-blockstore"
 version = "0.1.0"
 dependencies = [
@@ -1226,13 +1203,13 @@ dependencies = [
  "arrow",
  "async-trait",
  "cc",
- "chroma-benchmark-datasets",
  "chroma-blockstore",
  "chroma-cache",
  "chroma-config",
  "chroma-distance",
  "chroma-error",
  "chroma-storage",
+ "chroma-test",
  "chroma-types",
  "criterion",
  "futures",
@@ -1271,6 +1248,29 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "chroma-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-tempfile",
+ "bincode",
+ "bloom",
+ "chroma-types",
+ "clap",
+ "dirs",
+ "futures",
+ "rand",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tantivy",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
 ]
 
 [[package]]
@@ -6062,6 +6062,7 @@ dependencies = [
  "chroma-error",
  "chroma-index",
  "chroma-storage",
+ "chroma-test",
  "chroma-types",
  "criterion",
  "figment",

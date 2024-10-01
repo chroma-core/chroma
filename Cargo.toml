@@ -2,7 +2,6 @@
 resolver = "2"
 
 members = [
-   "rust/benchmark-datasets",
    "rust/blockstore",
    "rust/cache",
    "rust/chroma",
@@ -13,6 +12,7 @@ members = [
    "rust/storage",
    "rust/types",
    "rust/worker",
+   "rust/test",
 ]
 
 [workspace.dependencies]
@@ -44,7 +44,7 @@ chroma-cache = { path = "rust/cache" }
 chroma-types = { path = "rust/types" }
 chroma-index = { path = "rust/index" }
 chroma-distance = { path = "rust/distance" }
-chroma-benchmark-datasets = { path = "rust/benchmark-datasets" }
+chroma-test = { path = "rust/test" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies

@@ -1,5 +1,5 @@
 [package]
-name = "chroma-benchmark-datasets"
+name = "chroma-test"
 version = "0.1.0"
 edition = "2021"
 
