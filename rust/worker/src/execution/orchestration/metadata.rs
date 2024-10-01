@@ -265,8 +265,8 @@ impl MetadataQueryOrchestrator {
             logs,
             self.query_ids.clone(),
             self.where_clause.clone(),
-            self.offset.clone(),
-            self.limit.clone(),
+            self.offset,
+            self.limit,
         );
 
         let op = MetadataFilteringOperator::new();

@@ -63,6 +63,7 @@ pub enum MetadataIndexWriter<'me> {
         BlockfileWriter,
         // We use this to implement updates which require read-then-write semantics.
         Option<MetadataIndexReader<'me>>,
+        #[allow(clippy::type_complexity)]
         Arc<tokio::sync::Mutex<HashMap<String, Vec<(f32, RoaringBitmap)>>>>,
     ),
     BoolMetadataIndexWriter(
@@ -507,7 +508,7 @@ impl<'me> MetadataIndexReader<'me> {
                             Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => return Err(MetadataIndexError::InvalidKeyType),
+                    _ => Err(MetadataIndexError::InvalidKeyType),
                 }
             }
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
@@ -521,7 +522,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -534,7 +535,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::BoolMetadataIndexReader(blockfile_reader) => {
                 match metadata_value {
@@ -548,7 +549,7 @@ impl<'me> MetadataIndexReader<'me> {
                             Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
-                    _ => return Err(MetadataIndexError::InvalidKeyType),
+                    _ => Err(MetadataIndexError::InvalidKeyType),
                 }
             }
         }
@@ -574,7 +575,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -590,9 +591,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(MetadataIndexError::InvalidKeyType),
+            _ => Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -616,7 +617,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -632,9 +633,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(MetadataIndexError::InvalidKeyType),
+            _ => Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -658,7 +659,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -674,9 +675,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(MetadataIndexError::InvalidKeyType),
+            _ => Err(MetadataIndexError::InvalidKeyType),
         }
     }
 
@@ -700,7 +701,7 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
@@ -716,9 +717,9 @@ impl<'me> MetadataIndexReader<'me> {
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
-                _ => return Err(MetadataIndexError::InvalidKeyType),
+                _ => Err(MetadataIndexError::InvalidKeyType),
             },
-            _ => return Err(MetadataIndexError::InvalidKeyType),
+            _ => Err(MetadataIndexError::InvalidKeyType),
         }
     }
 }

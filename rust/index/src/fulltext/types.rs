@@ -3,7 +3,6 @@ use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
 use roaring::RoaringBitmap;
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tantivy::tokenizer::Token;
@@ -34,6 +33,12 @@ pub struct UncommittedPostings {
     positional_postings: HashMap<String, HashMap<u32, Vec<u32>>>,
     // (token, doc) pairs that should be deleted from storage.
     deleted_token_doc_pairs: HashSet<(String, i32)>,
+}
+
+impl Default for UncommittedPostings {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UncommittedPostings {
@@ -101,11 +106,7 @@ impl<'me> FullTextIndexWriter<'me> {
                     // so there is a case when this is none hence not an error.
                     None => 0,
                     Some(reader) => {
-                        match reader.get_frequencies_for_token(token.text.as_str()).await {
-                            Ok(frequency) => frequency,
-                            // New token so start with frequency of 0.
-                            Err(_) => 0,
-                        }
+                        (reader.get_frequencies_for_token(token.text.as_str()).await).unwrap_or(0)
                     }
                 };
                 uncommitted_frequencies
@@ -126,11 +127,10 @@ impl<'me> FullTextIndexWriter<'me> {
                 // Readers are uninitialized until the first compaction finishes
                 // so there is a case when this is none hence not an error.
                 None => vec![],
-                Some(reader) => match reader.get_all_results_for_token(&token.text).await {
-                    Ok(results) => results,
-                    // New token so start with empty postings list.
-                    Err(_) => vec![],
-                },
+                Some(reader) => reader
+                    .get_all_results_for_token(&token.text)
+                    .await
+                    .unwrap_or_default(),
             };
             let mut doc_and_positions = HashMap::new();
             for result in results {
@@ -164,7 +164,7 @@ impl<'me> FullTextIndexWriter<'me> {
             // will have created it if this token is new to the system.
             uncommitted_frequencies
                 .entry(token.text.clone())
-                .and_modify(|e| (*e).0 += 1);
+                .and_modify(|e| e.0 += 1);
 
             // For a new token, the uncommitted list will not contain any entry so insert
             // an empty builder in that case.
@@ -178,9 +178,9 @@ impl<'me> FullTextIndexWriter<'me> {
             // check full string match.
             //
             // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
-            if !builder.contains_key(&offset_id) {
+            if let std::collections::hash_map::Entry::Vacant(e) = builder.entry(offset_id) {
                 // Casting to i32 is safe since we limit the size of the document.
-                builder.insert(offset_id, vec![token.offset_from as u32]);
+                e.insert(vec![token.offset_from as u32]);
             } else {
                 // unwrap() is safe since we already verified that the key exists.
                 builder
@@ -208,7 +208,7 @@ impl<'me> FullTextIndexWriter<'me> {
         for token in tokens {
             match uncommitted_frequencies.get_mut(token.text.as_str()) {
                 Some(frequency) => {
-                    (*frequency).0 -= 1;
+                    frequency.0 -= 1;
                 }
                 None => {
                     // Invariant violation -- we just populated this.
@@ -216,27 +216,21 @@ impl<'me> FullTextIndexWriter<'me> {
                     return Err(FullTextIndexError::InvariantViolation);
                 }
             }
-            match uncommitted_postings
+            if let Some(builder) = uncommitted_postings
                 .positional_postings
                 .get_mut(token.text.as_str())
             {
-                Some(builder) => {
-                    builder.remove(&offset_id);
-                    if builder.is_empty() {
-                        uncommitted_postings
-                            .positional_postings
-                            .remove(token.text.as_str());
-                    }
-                    // Track all the deleted (token, doc) pairs. This is needed
-                    // to remove the old postings list for this pair from storage.
+                builder.remove(&offset_id);
+                if builder.is_empty() {
                     uncommitted_postings
-                        .deleted_token_doc_pairs
-                        .insert((token.text.clone(), offset_id as i32));
+                        .positional_postings
+                        .remove(token.text.as_str());
                 }
-                // This is fine since we delete all the positions of a token
-                // of a document at once so the next time we encounter this token
-                // (at a different position) the map could be empty.
-                None => {}
+                // Track all the deleted (token, doc) pairs. This is needed
+                // to remove the old postings list for this pair from storage.
+                uncommitted_postings
+                    .deleted_token_doc_pairs
+                    .insert((token.text.clone(), offset_id as i32));
             }
         }
         Ok(())
@@ -275,7 +269,7 @@ impl<'me> FullTextIndexWriter<'me> {
             for (doc_id, positions) in value.drain() {
                 // Don't add if postings list is empty for this (token, doc) combo.
                 // This can happen with deletes.
-                if positions.len() > 0 {
+                if !positions.is_empty() {
                     match self
                         .posting_lists_blockfile_writer
                         .set(key.as_str(), doc_id, positions)
@@ -533,7 +527,7 @@ impl<'me> FullTextIndexReader<'me> {
             .frequencies_blockfile_reader
             .get_by_prefix(token)
             .await?;
-        if res.len() == 0 {
+        if res.is_empty() {
             return Ok(0);
         }
         if res.len() > 1 {

@@ -24,7 +24,8 @@ use roaring::RoaringBitmap;
 /// In summary, this enum distinguishes the results that depends on the domain and those that do not:
 /// - `Include(...)` does not depend on the domain
 /// - `Exclude(...)` depends on the domain
-/// We only need to figure out the domain (i.e. the set of ids for existing records) when it is necessary to do so.
+///    We only need to figure out the domain (i.e. the set of ids for existing records) when it is
+///    necessary to do so.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SignedRoaringBitmap {
     Include(RoaringBitmap),

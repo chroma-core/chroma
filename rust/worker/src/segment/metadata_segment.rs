@@ -124,7 +124,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             ));
         }
         let (pls_writer, pls_reader) = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => match pls_path.get(0) {
+            Some(pls_path) => match pls_path.first() {
                 Some(pls_uuid) => {
                     let pls_uuid = match Uuid::parse_str(pls_uuid) {
                         Ok(uuid) => uuid,
@@ -151,7 +151,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             },
         };
         let (freqs_writer, freqs_reader) = match segment.file_path.get(FULL_TEXT_FREQS) {
-            Some(freqs_path) => match freqs_path.get(0) {
+            Some(freqs_path) => match freqs_path.first() {
                 Some(freqs_uuid) => {
                     let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
                         Ok(uuid) => uuid,
@@ -207,7 +207,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (string_metadata_writer, string_metadata_index_reader) =
             match segment.file_path.get(STRING_METADATA) {
-                Some(string_metadata_path) => match string_metadata_path.get(0) {
+                Some(string_metadata_path) => match string_metadata_path.first() {
                     Some(string_metadata_uuid) => {
                         let string_metadata_uuid = match Uuid::parse_str(string_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -245,7 +245,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (bool_metadata_writer, bool_metadata_index_reader) =
             match segment.file_path.get(BOOL_METADATA) {
-                Some(bool_metadata_path) => match bool_metadata_path.get(0) {
+                Some(bool_metadata_path) => match bool_metadata_path.first() {
                     Some(bool_metadata_uuid) => {
                         let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -283,7 +283,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (f32_metadata_writer, f32_metadata_index_reader) =
             match segment.file_path.get(F32_METADATA) {
-                Some(f32_metadata_path) => match f32_metadata_path.get(0) {
+                Some(f32_metadata_path) => match f32_metadata_path.first() {
                     Some(f32_metadata_uuid) => {
                         let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -321,7 +321,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (u32_metadata_writer, u32_metadata_index_reader) =
             match segment.file_path.get(U32_METADATA) {
-                Some(u32_metadata_path) => match u32_metadata_path.get(0) {
+                Some(u32_metadata_path) => match u32_metadata_path.first() {
                     Some(u32_metadata_uuid) => {
                         let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_uuid) {
                             Ok(uuid) => uuid,
@@ -440,7 +440,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into str metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -454,7 +454,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -468,7 +468,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -482,7 +482,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error inserting into bool metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -506,7 +506,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from str metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -520,7 +520,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -534,7 +534,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -548,7 +548,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(()) => Ok(()),
                             Err(e) => {
                                 tracing::error!("Error deleting from bool metadata index writer {:?}", e);
-                                return Err(e);
+                                Err(e)
                             }
                         }
                     }
@@ -695,13 +695,13 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         }
                     }
                     // Update the document if present.
-                    match record.0.final_document {
-                        Some(doc) => match &self.full_text_index_writer {
+                    if let Some(doc) = record.0.final_document {
+                        match &self.full_text_index_writer {
                             Some(writer) => match &record.0.data_record {
                                 Some(record) => match record.document {
                                     Some(old_doc) => {
                                         match writer
-                                            .update_document(&old_doc, doc, segment_offset_id)
+                                            .update_document(old_doc, doc, segment_offset_id)
                                             .await
                                         {
                                             Ok(_) => {}
@@ -736,9 +736,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 None => panic!("Invariant violation. Record should be set by materializer for an update")
                             },
                             None => panic!("Invariant violation. FTS index writer should be set"),
-                        },
-                        // Ok to not have any update for the document. Do not error.
-                        None => {}
+                        }
                     }
                 }
                 MaterializedLogOperation::OverwriteExisting => {
@@ -894,7 +892,7 @@ impl SegmentFlusher for MetadataSegmentFlusher {
 
         let mut flushed = HashMap::new();
 
-        match self.full_text_index_flusher.flush().await.map_err(|e| e) {
+        match self.full_text_index_flusher.flush().await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -916,13 +914,13 @@ impl SegmentFlusher for MetadataSegmentFlusher {
             vec![bool_metadata_id.to_string()],
         );
 
-        match self.f32_metadata_index_flusher.flush().await.map_err(|e| e) {
+        match self.f32_metadata_index_flusher.flush().await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
         flushed.insert(F32_METADATA.to_string(), vec![f32_metadata_id.to_string()]);
 
-        match self.u32_metadata_index_flusher.flush().await.map_err(|e| e) {
+        match self.u32_metadata_index_flusher.flush().await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -972,7 +970,7 @@ impl MetadataSegmentReader<'_> {
             ));
         }
         let pls_reader = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => match pls_path.get(0) {
+            Some(pls_path) => match pls_path.first() {
                 Some(pls_uuid) => {
                     let pls_uuid = match Uuid::parse_str(pls_uuid) {
                         Ok(uuid) => uuid,
@@ -991,7 +989,7 @@ impl MetadataSegmentReader<'_> {
             None => None,
         };
         let freqs_reader = match segment.file_path.get(FULL_TEXT_FREQS) {
-            Some(freqs_path) => match freqs_path.get(0) {
+            Some(freqs_path) => match freqs_path.first() {
                 Some(freqs_uuid) => {
                     let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
                         Ok(uuid) => uuid,
@@ -1001,12 +999,10 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-                    let freqs_reader = match blockfile_provider.open::<u32, u32>(&freqs_uuid).await
-                    {
+                    match blockfile_provider.open::<u32, u32>(&freqs_uuid).await {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    freqs_reader
+                    }
                 }
                 None => None,
             },
@@ -1029,7 +1025,7 @@ impl MetadataSegmentReader<'_> {
         };
 
         let string_metadata_reader = match segment.file_path.get(STRING_METADATA) {
-            Some(string_metadata_path) => match string_metadata_path.get(0) {
+            Some(string_metadata_path) => match string_metadata_path.first() {
                 Some(string_metadata_uuid) => {
                     let string_metadata_uuid = match Uuid::parse_str(string_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1039,26 +1035,23 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-                    let string_metadata_reader = match blockfile_provider
+                    match blockfile_provider
                         .open::<&str, RoaringBitmap>(&string_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    string_metadata_reader
+                    }
                 }
                 None => None,
             },
             None => None,
         };
-        let string_metadata_index_reader = match string_metadata_reader {
-            Some(reader) => Some(MetadataIndexReader::new_string(reader)),
-            None => None,
-        };
+        let string_metadata_index_reader =
+            string_metadata_reader.map(MetadataIndexReader::new_string);
 
         let bool_metadata_reader = match segment.file_path.get(BOOL_METADATA) {
-            Some(bool_metadata_path) => match bool_metadata_path.get(0) {
+            Some(bool_metadata_path) => match bool_metadata_path.first() {
                 Some(bool_metadata_uuid) => {
                     let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1068,26 +1061,21 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-                    let bool_metadata_reader = match blockfile_provider
+                    match blockfile_provider
                         .open::<bool, RoaringBitmap>(&bool_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    bool_metadata_reader
+                    }
                 }
                 None => None,
             },
             None => None,
         };
-        let bool_metadata_index_reader = match bool_metadata_reader {
-            Some(reader) => Some(MetadataIndexReader::new_bool(reader)),
-            None => None,
-        };
-
+        let bool_metadata_index_reader = bool_metadata_reader.map(MetadataIndexReader::new_bool);
         let u32_metadata_reader = match segment.file_path.get(U32_METADATA) {
-            Some(u32_metadata_path) => match u32_metadata_path.get(0) {
+            Some(u32_metadata_path) => match u32_metadata_path.first() {
                 Some(u32_metadata_uuid) => {
                     let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1097,26 +1085,21 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-                    let u32_metadata_reader = match blockfile_provider
+                    match blockfile_provider
                         .open::<u32, RoaringBitmap>(&u32_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    u32_metadata_reader
+                    }
                 }
                 None => None,
             },
             None => None,
         };
-        let u32_metadata_index_reader = match u32_metadata_reader {
-            Some(reader) => Some(MetadataIndexReader::new_u32(reader)),
-            None => None,
-        };
-
+        let u32_metadata_index_reader = u32_metadata_reader.map(MetadataIndexReader::new_u32);
         let f32_metadata_reader = match segment.file_path.get(F32_METADATA) {
-            Some(f32_metadata_path) => match f32_metadata_path.get(0) {
+            Some(f32_metadata_path) => match f32_metadata_path.first() {
                 Some(f32_metadata_uuid) => {
                     let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_uuid) {
                         Ok(uuid) => uuid,
@@ -1126,14 +1109,13 @@ impl MetadataSegmentReader<'_> {
                             ))
                         }
                     };
-                    let f32_metadata_reader = match blockfile_provider
+                    match blockfile_provider
                         .open::<f32, RoaringBitmap>(&f32_metadata_uuid)
                         .await
                     {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    f32_metadata_reader
+                    }
                 }
                 None => None,
             },
@@ -1151,6 +1133,10 @@ impl MetadataSegmentReader<'_> {
     }
 
     // DEPRECATED: This exists only for the legacy testing. Please checkout `MetadataFilteringOperator` for the up to date implementation.
+    #[deprecated(
+        note = "This function is only used for legacy testing. Please use `MetadataFilteringOperator` for the up to date implementation."
+    )]
+    #[allow(dead_code)]
     pub async fn query(
         &self,
         where_clause: Option<&Where>,
@@ -1165,24 +1151,23 @@ impl MetadataSegmentReader<'_> {
         // TODO we can do lots of clever query planning here. For now, just
         // run through the Where and WhereDocument clauses sequentially.
         let where_results = match where_clause {
-            Some(where_clause) => {
-                match self.process_where_clause(where_clause).await.map_err(|e| e) {
-                    Ok(results) => {
-                        tracing::info!(
-                            "Filtered {} records from metadata segment based on where clause",
-                            results.len()
-                        );
-                        Some(results)
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Error fetching results from metadata segment based on where clause {:?}",
-                            e
-                        );
-                        return Err(MetadataSegmentError::MetadataIndexQueryError(e));
-                    }
+            #[allow(deprecated)]
+            Some(where_clause) => match self.process_where_clause(where_clause).await {
+                Ok(results) => {
+                    tracing::info!(
+                        "Filtered {} records from metadata segment based on where clause",
+                        results.len()
+                    );
+                    Some(results)
                 }
-            }
+                Err(e) => {
+                    tracing::error!(
+                        "Error fetching results from metadata segment based on where clause {:?}",
+                        e
+                    );
+                    return Err(MetadataSegmentError::MetadataIndexQueryError(e));
+                }
+            },
             None => {
                 tracing::info!("No where clause to filter anything from metadata segment");
                 None
@@ -1200,6 +1185,7 @@ impl MetadataSegmentReader<'_> {
         };
         let where_document_results = match where_document_clause {
             Some(where_document_clause) => {
+                #[allow(deprecated)]
                 match self.process_where_clause(where_document_clause).await {
                     Ok(results) => {
                         tracing::info!(
@@ -1241,12 +1227,16 @@ impl MetadataSegmentReader<'_> {
     }
 
     // DEPRECATED: This exists only for the legacy testing. Please checkout `MetadataFilteringOperator` for the up to date implementation.
+    #[deprecated(
+        note = "This function is only used for legacy testing. Please use `MetadataFilteringOperator` for the up to date implementation."
+    )]
+    #[allow(dead_code)]
     fn process_where_clause<'me>(
         &'me self,
         where_clause: &'me Where,
     ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
         async move {
-            let provider = MetadataProvider::from_metadata_segment_reader(&self);
+            let provider = MetadataProvider::from_metadata_segment_reader(self);
             let result = where_clause
                 .eval(&provider)
                 .await
@@ -1266,6 +1256,8 @@ impl MetadataSegmentReader<'_> {
 
 #[cfg(test)]
 mod test {
+    #![allow(deprecated)]
+
     use crate::segment::{
         metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
         record_segment::{
@@ -1364,27 +1356,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1649,27 +1638,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -1796,7 +1782,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(2 as usize)));
+        assert_eq!(res.first(), Some(&(2_usize)));
         let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
             key: String::from("hello"),
             comparison: WhereComparison::Primitive(
@@ -1810,7 +1796,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(1 as usize)));
+        assert_eq!(res.first(), Some(&(1_usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -1827,7 +1813,7 @@ mod test {
             String::from("hello"),
             MetadataValue::Str(String::from("new world")),
         );
-        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
         let mut id2_mt = HashMap::new();
         id2_mt.insert(String::from("hello"), MetadataValue::Float(1.0));
         assert_eq!(res.get(1).as_ref().unwrap().metadata, Some(id2_mt));
@@ -1895,27 +1881,24 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2037,7 +2020,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(1 as usize)));
+        assert_eq!(res.first(), Some(&(1_usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2054,7 +2037,7 @@ mod test {
             String::from("bye"),
             MetadataValue::Str(String::from("world")),
         );
-        assert_eq!(res.get(0).as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
     }
 
     #[tokio::test]
@@ -2110,27 +2093,24 @@ mod test {
                 },
             }];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -2247,7 +2227,7 @@ mod test {
             .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.get(0), Some(&(1 as usize)));
+        assert_eq!(res.first(), Some(&(1_usize)));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2260,7 +2240,7 @@ mod test {
         assert_eq!(res.len(), 1);
         res.sort_by(|x, y| x.id.cmp(y.id));
         assert_eq!(
-            res.get(0).as_ref().unwrap().document,
+            res.first().as_ref().unwrap().document,
             Some(String::from("bye").as_str())
         );
     }

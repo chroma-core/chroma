@@ -313,27 +313,24 @@ mod test {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let mut record_segment_reader: Option<RecordSegmentReader> = None;
-            match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await {
-                Ok(reader) => {
-                    record_segment_reader = Some(reader);
-                }
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => {
-                            record_segment_reader = None;
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                    };
-                }
-            };
+                    }
+                };
             let materializer = LogMaterializer::new(record_segment_reader, data, None);
             let mat_records = materializer
                 .materialize()
@@ -410,6 +407,7 @@ mod test {
         );
         let output = op.run(&input).await.expect("Error running operator");
         assert_eq!(3, output.ids.len());
+        #[allow(clippy::type_complexity)]
         let mut id_to_data: HashMap<
             &String,
             (
@@ -418,10 +416,10 @@ mod test {
             ),
         > = HashMap::new();
         id_to_data.insert(
-            output.ids.get(0).expect("Not none key"),
+            output.ids.first().expect("Not none key"),
             (
-                output.documents.get(0).expect("Not none value"),
-                output.metadata.get(0).expect("Not none value"),
+                output.documents.first().expect("Not none value"),
+                output.metadata.first().expect("Not none value"),
             ),
         );
         id_to_data.insert(
@@ -441,7 +439,7 @@ mod test {
         let mut ids_sorted = output.ids.clone();
         ids_sorted.sort();
         assert_eq!(
-            *ids_sorted.get(0).expect("Expected not none id"),
+            *ids_sorted.first().expect("Expected not none id"),
             String::from("embedding_id_1")
         );
         assert_eq!(
@@ -452,18 +450,9 @@ mod test {
             *ids_sorted.get(2).expect("Expected not none id"),
             String::from("embedding_id_3")
         );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_1")),
-            true
-        );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_2")),
-            true
-        );
-        assert_eq!(
-            id_to_data.contains_key(&String::from("embedding_id_3")),
-            true
-        );
+        assert!(id_to_data.contains_key(&String::from("embedding_id_1")),);
+        assert!(id_to_data.contains_key(&String::from("embedding_id_2")),);
+        assert!(id_to_data.contains_key(&String::from("embedding_id_3")),);
         assert_eq!(
             id_to_data
                 .get(&String::from("embedding_id_1"))
