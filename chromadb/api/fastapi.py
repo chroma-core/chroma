@@ -365,9 +365,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> None:
+    ) -> IDs:
         """Deletes embeddings from the database"""
-        self._make_request(
+        resp_json = self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/delete",
             json={
@@ -376,7 +376,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 "where_document": where_document,
             },
         )
-        return None
+        return cast(IDs, resp_json)
 
     @trace_method("FastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     def _submit_batch(

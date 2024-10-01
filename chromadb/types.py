@@ -175,6 +175,7 @@ class Segment(TypedDict):
     type: NamespacedName
     scope: SegmentScope
     collection: UUID
+    configuration: Optional[ConfigurationInternal]
     metadata: Optional[Metadata]
 
 

@@ -254,7 +254,7 @@ class BaseAPI(ABC):
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> None:
+    ) -> IDs:
         """[Internal] Deletes entries from a collection specified by UUID.
 
         Args:

@@ -102,7 +102,7 @@ class DB(Component):
         collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         where_document: WhereDocument = {},
-    ) -> None:
+    ) -> List[str]:
         pass
 
     @abstractmethod

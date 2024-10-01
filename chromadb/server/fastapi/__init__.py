@@ -3,6 +3,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    List,
     Sequence,
     Optional,
     Tuple,
@@ -20,6 +21,7 @@ from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
+from uuid import UUID
 
 from chromadb.api.configuration import CollectionConfigurationInternal
 from pydantic import BaseModel
@@ -903,8 +905,8 @@ class FastAPI(Server):
     @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
     async def delete(
         self, collection_id: str, request: Request, body: DeleteEmbedding = Body(...)
-    ) -> None:
-        def process_delete(request: Request, raw_body: bytes) -> None:
+    ) -> List[UUID]:
+        def process_delete(request: Request, raw_body: bytes) -> List[str]:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
             self.auth_and_get_tenant_and_database_for_request(
                 request.headers,
@@ -920,11 +922,14 @@ class FastAPI(Server):
                 where_document=delete.where_document,
             )
 
-        await to_thread.run_sync(
-            process_delete,
-            request,
-            await request.body(),
-            limiter=self._capacity_limiter,
+        return cast(
+            List[UUID],
+            await to_thread.run_sync(
+                process_delete,
+                request,
+                await request.body(),
+                limiter=self._capacity_limiter,
+            ),
         )
 
     @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)

@@ -263,4 +263,5 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
         scope=scope,
         collection=collection.id,
         metadata=metadata,
+        configuration=collection.get_configuration(),
     )

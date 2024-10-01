@@ -11,6 +11,7 @@ from typing import (
     Union,
     TypeVar,
     cast,
+    Type,
 )
 from typing_extensions import Self
 from multiprocessing import cpu_count
@@ -158,6 +159,10 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
         param_value = cast(ConfigurationParameter, self.parameter_map.get(name))
         return param_value
 
+    def get_parameter_value(self, name: str) -> ParameterValue:
+        """Returns the parameter's value for the given parameter, or except if it doesn't exist.'"""
+        return self.get_parameter(name).value
+
     def set_parameter(self, name: str, value: Union[str, int, float, bool]) -> None:
         """Sets the parameter with the given name to the given value."""
         if name not in self.definitions:
@@ -215,6 +220,30 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
                 continue
             parameters.append(ConfigurationParameter(name=name, value=value))
         return cls(parameters=parameters)
+
+    @staticmethod
+    def type_from_json(json_map: Dict[str, Any]) -> Type["ConfigurationInternal"]:
+        """Returns a configuration type from the given JSON."""
+        type_key = json_map.get("_type", None)
+
+        if type_key is None:
+            raise ValueError("_type key is None is JSON map")
+
+        config_type = globals().get(type_key)
+        if type is None or not issubclass(type, ConfigurationInternal):
+            raise ValueError("Invalid configuration type")
+        return config_type
+
+    @staticmethod
+    def type_from_json_str(json_str: str) -> Type["ConfigurationInternal"]:
+        """Returns a configuration type from the given JSON string."""
+        try:
+            json_map = json.loads(json_str)
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"Unable to decode configuration from JSON string: {json_str}"
+            )
+        return ConfigurationInternal.type_from_json(json_map)
 
 
 class HNSWConfigurationInternal(ConfigurationInternal):

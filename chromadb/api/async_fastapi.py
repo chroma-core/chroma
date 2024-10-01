@@ -404,13 +404,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> None:
-        await self._make_request(
+    ) -> IDs:
+        resp_json = await self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/delete",
             json={"where": where, "ids": ids, "where_document": where_document},
         )
-        return None
+
+        return cast(IDs, resp_json)
 
     @trace_method("AsyncFastAPI._submit_batch", OpenTelemetryGranularity.ALL)
     async def _submit_batch(

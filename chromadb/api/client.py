@@ -308,8 +308,8 @@ class Client(SharedSystemClient, ClientAPI):
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> None:
-        self._server._delete(
+    ) -> IDs:
+        return self._server._delete(
             collection_id=collection_id,
             ids=ids,
             where=where,
