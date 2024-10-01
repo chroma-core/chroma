@@ -70,6 +70,7 @@ from chromadb.telemetry.product import ServerContext, ProductTelemetryClient
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    add_attributes_to_current_span,
     trace_method,
 )
 from chromadb.types import Collection as CollectionModel
@@ -383,6 +384,13 @@ class FastAPI(Server):
         - The user has access to a single tenant and/or single database.
         """
         if not self.authn_provider:
+            add_attributes_to_current_span(
+                {
+                    "tenant": tenant,
+                    "database": database,
+                    "collection": collection,
+                }
+            )
             return (tenant, database)
 
         user_identity = self.authn_provider.authenticate_or_raise(dict(headers))
@@ -407,6 +415,13 @@ class FastAPI(Server):
         )
 
         self.authz_provider.authorize_or_raise(user_identity, action, authz_resource)
+        add_attributes_to_current_span(
+            {
+                "tenant": tenant,
+                "database": database,
+                "collection": collection,
+            }
+        )
         return (tenant, database)
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
