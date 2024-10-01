@@ -283,7 +283,7 @@ class AdmissionControllerImpl(AdmissionController):
 global_admitted = 0
 global_denied = 0
 lock = threading.Lock()
-ac = AdmissionControllerImpl(parallelism=10)
+ac = AdmissionControllerImpl(parallelism=10)  # Number of workers
 
 NUM_REQUESTS = 100
 
@@ -301,7 +301,7 @@ def increment_denied() -> None:
 
 
 def stream_requests(n: int) -> tuple[Optional[Ticket], int]:
-    delay = 0.001
+    delay = 0.001  # Seconds per request: 1/N to calculate throughput
     time.sleep(delay)
     ticket = ac.admit_one()
     if ticket:
@@ -320,7 +320,7 @@ def process_responses(
         ticket, n = response
 
         if ticket:
-            time.sleep(0.05)
+            time.sleep(0.05)  # Simulate request latency
             ticket.release()
             increment_admitted()
         else:
@@ -332,6 +332,7 @@ def process_responses(
 
 def main() -> None:
     response_queue: queue.Queue[tuple[Optional[Ticket], int]] = queue.Queue()
+    # Number of workers
     processing_thread = concurrent.futures.ThreadPoolExecutor(max_workers=10).submit(
         process_responses, response_queue
     )
