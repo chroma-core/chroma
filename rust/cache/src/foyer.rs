@@ -239,12 +239,17 @@ where
             "fifo" => builder.with_eviction_config(FifoConfig::default()),
             "s3fifo" => builder.with_eviction_config(S3FifoConfig::default()),
             _ => {
-                return Err(Box::new(CacheError::InvalidCacheConfig));
+                return Err(Box::new(CacheError::InvalidCacheConfig(format!(
+                    "eviction: {}",
+                    config.eviction
+                ))));
             }
         };
 
         let Some(dir) = config.dir.as_ref() else {
-            return Err(Box::new(CacheError::InvalidCacheConfig));
+            return Err(Box::new(CacheError::InvalidCacheConfig(
+                "missing dir".to_string(),
+            )));
         };
 
         let mut builder = builder
@@ -270,10 +275,12 @@ where
                 config.admission_rate_limit * MIB,
             )));
         }
-        let cache = builder
-            .build()
-            .await
-            .map_err(|_| Box::new(CacheError::InvalidCacheConfig) as _)?;
+        let cache = builder.build().await.map_err(|e| {
+            Box::new(CacheError::InvalidCacheConfig(format!(
+                "builder failed: {:?}",
+                e
+            ))) as _
+        })?;
         Ok(Box::new(FoyerHybridCache { cache }))
     }
 }

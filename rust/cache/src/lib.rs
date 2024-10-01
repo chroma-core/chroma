@@ -20,7 +20,7 @@ pub use unbounded::UnboundedCacheConfig;
 #[derive(Error, Debug)]
 pub enum CacheError {
     #[error("Invalid cache config")]
-    InvalidCacheConfig,
+    InvalidCacheConfig(String),
     #[error("I/O error when serving from cache")]
     DiskError(#[from] anyhow::Error),
 }
@@ -28,7 +28,7 @@ pub enum CacheError {
 impl ChromaError for CacheError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CacheError::InvalidCacheConfig => ErrorCodes::InvalidArgument,
+            CacheError::InvalidCacheConfig(_) => ErrorCodes::InvalidArgument,
             CacheError::DiskError(_) => ErrorCodes::Unavailable,
         }
     }
@@ -87,8 +87,12 @@ where
         CacheConfig::Unbounded(unbounded_config) => {
             Ok(Box::new(UnboundedCache::new(unbounded_config)))
         }
-        CacheConfig::Disk(_) => Err(Box::new(CacheError::InvalidCacheConfig)),
-        CacheConfig::Memory(_) => Err(Box::new(CacheError::InvalidCacheConfig)),
+        CacheConfig::Disk(_) => Err(Box::new(CacheError::InvalidCacheConfig(
+            "from_config was called with disk".to_string(),
+        ))),
+        CacheConfig::Memory(_) => Err(Box::new(CacheError::InvalidCacheConfig(
+            "from_config was called with memory".to_string(),
+        ))),
     }
 }
 
