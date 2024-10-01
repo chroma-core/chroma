@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod foyer;
+mod nop;
 mod unbounded;
 
+use crate::nop::NopCache;
 use crate::unbounded::UnboundedCache;
 
 pub use foyer::FoyerCacheConfig;
@@ -47,6 +49,11 @@ pub enum CacheConfig {
     Disk(FoyerCacheConfig),
     #[serde(rename = "memory")]
     Memory(FoyerCacheConfig),
+    #[serde(rename = "nop")]
+    #[serde(alias = "lru")]
+    #[serde(alias = "lfu")]
+    #[serde(alias = "weighted_lru")]
+    Nop,
 }
 
 /// A cache offers async access.  It's unspecified whether this cache is persistent or not.
@@ -93,6 +100,7 @@ where
         CacheConfig::Memory(_) => Err(Box::new(CacheError::InvalidCacheConfig(
             "from_config was called with memory".to_string(),
         ))),
+        CacheConfig::Nop => Ok(Box::new(NopCache)),
     }
 }
 
