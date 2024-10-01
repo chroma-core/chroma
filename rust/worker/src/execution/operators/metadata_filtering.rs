@@ -201,7 +201,7 @@ impl<'me> MetadataLogReader<'me> {
         }
     }
 
-    pub(crate) fn search_user_ids(&self, uids: &Vec<String>) -> RoaringBitmap {
+    pub(crate) fn search_user_ids(&self, uids: &[String]) -> RoaringBitmap {
         uids.iter()
             .filter_map(|uid| self.uid_to_oid.get(uid.as_str()))
             .collect()
@@ -1384,7 +1384,7 @@ mod test {
             .expect("Error during running of operator");
         assert_eq!(
             res.offset_ids,
-            existing.clone().filter(|i| &31 <= i && i <= &90).collect()
+            existing.clone().filter(|i| (31..=90).contains(i)).collect()
         );
 
         // A $eq check on metadata should yield matching records
@@ -1764,8 +1764,7 @@ mod test {
             res.offset_ids,
             existing
                 .filter(|i| i % 3 == 0
-                    && i >= &12
-                    && i <= &90
+                    && (12..=90).contains(i)
                     && i % 5 != 0
                     && i % 5 != 3
                     && (i % 10 != 6 || i % 4 == 0))
