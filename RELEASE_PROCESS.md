@@ -18,3 +18,6 @@ git tag A.B.C <SHA>
 git push origin A.B.C
 ```
 6. On the right panel on Github, click on "Releases", and the new release should appear first. Edit it, and mark it as "latest".
+
+#### Troubleshooting
+If you run into any issues with PyPi uploads, look at the logs from these failed jobs. Use the `Manual Release to Test PyPI` Github Action to further debug after any changes made before attempting a full release again. It can be run on a branch of your choosing. 
