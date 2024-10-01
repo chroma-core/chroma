@@ -1,4 +1,4 @@
-use chroma_cache::config::CacheConfig;
+use chroma_cache::CacheConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]

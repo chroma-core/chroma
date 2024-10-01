@@ -1,4 +1,6 @@
-use super::delta::BlockDelta;
+use std::cmp::Ordering::{Equal, Greater, Less};
+use std::io::SeekFrom;
+
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
 use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
@@ -9,14 +11,45 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
-use chroma_cache::cache::Cacheable;
 use chroma_error::{ChromaError, ErrorCodes};
-use std::cmp::Ordering::{Equal, Greater, Less};
-use std::io::SeekFrom;
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::delta::BlockDelta;
+
 const ARROW_ALIGNMENT: usize = 64;
+
+/// A cached block is what sits in the cache.  We can create a Block from a cached block.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct CachedBlock {
+    pub id: Uuid,
+    pub data: Vec<u8>,
+}
+
+impl TryFrom<&Block> for CachedBlock {
+    type Error = crate::arrow::block::types::BlockToBytesError;
+
+    fn try_from(b: &Block) -> Result<Self, Self::Error> {
+        Ok(CachedBlock {
+            id: b.id,
+            data: b.to_bytes()?,
+        })
+    }
+}
+
+impl TryFrom<&CachedBlock> for Block {
+    type Error = crate::arrow::block::types::BlockLoadError;
+
+    fn try_from(cb: &CachedBlock) -> Result<Self, Self::Error> {
+        Block::from_bytes(&cb.data, cb.id)
+    }
+}
+
+impl chroma_cache::Weighted for CachedBlock {
+    fn weight(&self) -> usize {
+        1
+    }
+}
 
 /// A block in a blockfile. A block is a sorted collection of data that is immutable once it has been committed.
 /// Blocks are the fundamental unit of storage in the blockstore and are used to store data in the form of (key, value) pairs.
@@ -36,8 +69,6 @@ pub struct Block {
     pub data: RecordBatch,
     pub id: Uuid,
 }
-
-impl Cacheable for Block {}
 
 impl Block {
     /// Create a concrete block from an id and the underlying record batch of data
@@ -550,6 +581,10 @@ pub enum BlockLoadError {
     ArrowLayoutVerificationError(#[from] ArrowLayoutVerificationError),
     #[error("No record batches in IPC file")]
     NoRecordBatches,
+    #[error(transparent)]
+    BlockToBytesError(#[from] crate::arrow::block::types::BlockToBytesError),
+    #[error(transparent)]
+    CacheError(#[from] chroma_cache::CacheError),
 }
 
 impl ChromaError for BlockLoadError {
@@ -559,6 +594,8 @@ impl ChromaError for BlockLoadError {
             BlockLoadError::ArrowError(_) => ErrorCodes::Internal,
             BlockLoadError::ArrowLayoutVerificationError(_) => ErrorCodes::Internal,
             BlockLoadError::NoRecordBatches => ErrorCodes::Internal,
+            BlockLoadError::BlockToBytesError(_) => ErrorCodes::Internal,
+            BlockLoadError::CacheError(_) => ErrorCodes::Internal,
         }
     }
 }

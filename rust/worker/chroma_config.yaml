@@ -49,17 +49,18 @@ query_service:
             block_manager_config:
                 max_block_size_bytes: 16384
                 block_cache_config:
-                    lru:
+                    memory:
                         capacity: 1000
             sparse_index_manager_config:
                 sparse_index_cache_config:
-                    lru:
+                    memory:
                         capacity: 1000
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
-            weighted_lru:
+            disk:
                 capacity: 8589934592 # 8GB
+                eviction: lru
 
 compaction_service:
     service_name: "compaction-service"
@@ -114,14 +115,14 @@ compaction_service:
             block_manager_config:
                 max_block_size_bytes: 16384
                 block_cache_config:
-                    lru:
+                    memory:
                         capacity: 1000
             sparse_index_manager_config:
                 sparse_index_cache_config:
-                    lru:
+                    memory:
                         capacity: 1000
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
-            weighted_lru:
+            memory:
                 capacity: 8589934592 # 8GB

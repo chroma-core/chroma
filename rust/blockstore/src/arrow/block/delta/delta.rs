@@ -127,10 +127,8 @@ impl BlockDelta {
 #[cfg(test)]
 mod test {
     use crate::arrow::{block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager};
-    use chroma_cache::{
-        cache::Cache,
-        config::{CacheConfig, UnboundedCacheConfig},
-    };
+    #[cfg(test)]
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
     use rand::{random, Rng};
@@ -157,7 +155,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, Vec<u32>>();
 
@@ -199,7 +197,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, String>();
         let delta_id = delta.id;
@@ -260,7 +258,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<f32, String>();
 
@@ -299,7 +297,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, RoaringBitmap>();
 
@@ -335,7 +333,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let ids = ["embedding_id_2", "embedding_id_0", "embedding_id_1"];
         let embeddings = [
@@ -399,7 +397,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(path));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<u32, String>();
 
@@ -427,7 +425,7 @@ mod test {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<u32, u32>();
         let delta_id = delta.id;

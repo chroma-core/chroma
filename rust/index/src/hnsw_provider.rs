@@ -7,7 +7,7 @@ use super::{
 };
 
 use async_trait::async_trait;
-use chroma_cache::cache::{Cache, Cacheable};
+use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
@@ -47,7 +47,7 @@ const FILES: [&str; 4] = [
 // their ref count goes to 0.
 #[derive(Clone)]
 pub struct HnswIndexProvider {
-    cache: Cache<Uuid, HnswIndexRef>,
+    cache: Arc<dyn Cache<Uuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -56,16 +56,6 @@ pub struct HnswIndexProvider {
 #[derive(Clone)]
 pub struct HnswIndexRef {
     pub inner: Arc<RwLock<HnswIndex>>,
-}
-
-impl Cacheable for HnswIndexRef {
-    fn weight(&self) -> usize {
-        let index = self.inner.read();
-        if index.len() == 0 {
-            return 1;
-        }
-        index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize
-    }
 }
 
 impl Debug for HnswIndexProvider {
@@ -83,6 +73,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
         let cache = chroma_cache::from_config(&hnsw_config.hnsw_cache_config).await?;
+        let cache: Arc<dyn Cache<_, _>> = cache.into();
         Ok(Self {
             cache,
             storage: storage.clone(),
@@ -92,8 +83,23 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
     }
 }
 
+impl chroma_cache::Weighted for HnswIndexRef {
+    fn weight(&self) -> usize {
+        let index = self.inner.read();
+        if index.len() == 0 {
+            return 1;
+        }
+        index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize
+    }
+}
+
 impl HnswIndexProvider {
-    pub fn new(storage: Storage, storage_path: PathBuf, cache: Cache<Uuid, HnswIndexRef>) -> Self {
+    pub fn new(
+        storage: Storage,
+        storage_path: PathBuf,
+        cache: Box<dyn Cache<Uuid, HnswIndexRef>>,
+    ) -> Self {
+        let cache: Arc<dyn Cache<Uuid, HnswIndexRef>> = cache.into();
         Self {
             cache,
             storage,
@@ -102,8 +108,8 @@ impl HnswIndexProvider {
         }
     }
 
-    pub fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<HnswIndexRef> {
-        match self.cache.get(collection_id) {
+    pub async fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<HnswIndexRef> {
+        match self.cache.get(collection_id).await.ok().flatten() {
             Some(index) => {
                 let index_with_lock = index.inner.read();
                 if index_with_lock.id == *index_id {
@@ -177,13 +183,13 @@ impl HnswIndexProvider {
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.get(&new_id, &segment.collection) {
+                match self.get(&new_id, &segment.collection).await {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
-                        self.cache.insert(segment.collection, index.clone());
+                        self.cache.insert(segment.collection, index.clone()).await;
                         Ok(index)
                     }
                 }
@@ -310,13 +316,13 @@ impl HnswIndexProvider {
         match HnswIndex::load(index_storage_path_str, &index_config, *id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.get(id, &segment.collection) {
+                match self.get(id, &segment.collection).await {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
-                        self.cache.insert(segment.collection, index.clone());
+                        self.cache.insert(segment.collection, index.clone()).await;
                         Ok(index)
                     }
                 }
@@ -369,13 +375,13 @@ impl HnswIndexProvider {
             .map_err(|e| Box::new(HnswIndexProviderCreateError::IndexInitError(e)))?;
 
         let _guard = self.write_mutex.lock().await;
-        match self.get(&id, &segment.collection) {
+        match self.get(&id, &segment.collection).await {
             Some(index) => Ok(index.clone()),
             None => {
                 let index = HnswIndexRef {
                     inner: Arc::new(RwLock::new(index)),
                 };
-                self.cache.insert(segment.collection, index.clone());
+                self.cache.insert(segment.collection, index.clone()).await;
                 Ok(index)
             }
         }
@@ -562,7 +568,7 @@ pub enum HnswIndexProviderFileError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_cache::config::{CacheConfig, UnboundedCacheConfig};
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::local::LocalStorage;
     use chroma_types::SegmentType;
     use std::collections::HashMap;
@@ -576,7 +582,7 @@ mod tests {
         tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
-        let cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let cache = new_cache_for_test();
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache);
         let segment = Segment {
             id: Uuid::new_v4(),

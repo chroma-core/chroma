@@ -318,7 +318,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // We do not dispatch if block is present in the block manager's cache
             // but not present in the reader's cache (i.e. loaded_blocks). The
             // next read for this block using this reader instance will populate it.
-            if !self.block_manager.cached(block_id)
+            if !self.block_manager.cached(block_id).await
                 && !self.loaded_blocks.lock().contains_key(block_id)
             {
                 futures.push(self.get_block(*block_id));
@@ -671,10 +671,7 @@ mod tests {
     use crate::{
         arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, arrow::provider::ArrowBlockfileProvider,
     };
-    use chroma_cache::{
-        cache::Cache,
-        config::{CacheConfig, UnboundedCacheConfig},
-    };
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
     use proptest::prelude::*;
@@ -687,8 +684,8 @@ mod tests {
     async fn test_count() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -724,8 +721,8 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-            let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-            let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let block_cache = new_cache_for_test();
+            let sparse_index_cache = new_cache_for_test();
             let blockfile_provider = ArrowBlockfileProvider::new(
                 storage,
                 TEST_MAX_BLOCK_SIZE_BYTES,
@@ -786,8 +783,8 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-            let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-            let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+            let block_cache = new_cache_for_test();
+            let sparse_index_cache = new_cache_for_test();
             let blockfile_provider = ArrowBlockfileProvider::new(
                 storage,
                 TEST_MAX_BLOCK_SIZE_BYTES,
@@ -894,8 +891,8 @@ mod tests {
     async fn test_blockfile() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -931,8 +928,8 @@ mod tests {
     async fn test_splitting() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1045,8 +1042,8 @@ mod tests {
     async fn test_splitting_boundary() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1087,8 +1084,8 @@ mod tests {
     async fn test_string_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1124,8 +1121,8 @@ mod tests {
     async fn test_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1158,8 +1155,8 @@ mod tests {
     async fn test_roaring_bitmap_value() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1204,8 +1201,8 @@ mod tests {
     async fn test_uint_key_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1238,8 +1235,8 @@ mod tests {
     async fn test_data_record_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1290,8 +1287,8 @@ mod tests {
         // Tests the case where a value is larger than half the block size
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1328,8 +1325,8 @@ mod tests {
     async fn test_delete() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1392,8 +1389,8 @@ mod tests {
     async fn test_get_at_index() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1431,8 +1428,8 @@ mod tests {
     async fn test_first_block_removal() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,
@@ -1523,8 +1520,8 @@ mod tests {
     async fn test_write_to_same_key_many_times() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,

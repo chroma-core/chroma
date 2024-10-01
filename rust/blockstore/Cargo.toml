@@ -7,6 +7,9 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
+clap = "4.0"
+serde_arrow = "0.12"
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 arrow = { workspace = true }

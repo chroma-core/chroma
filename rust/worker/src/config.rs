@@ -193,17 +193,18 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
-                                capacity: 1073741824
+                            disk:
+                                capacity: 8589934592 # 8GB
+                                eviction: lru
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -258,17 +259,18 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
-                                capacity: 1073741824
+                            disk:
+                                capacity: 8589934592 # 8GB
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load();
@@ -337,17 +339,18 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
+                            disk:
                                 capacity: 1073741824
+                                eviction: lru
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -402,17 +405,18 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
+                            disk:
                                 capacity: 1073741824
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -499,17 +503,18 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
+                            disk:
                                 capacity: 1073741824
+                                eviction: lru
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -564,17 +569,18 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
+                            disk:
                                 capacity: 1073741824
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load();
@@ -663,16 +669,16 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
+                            memory:
                                 capacity: 1073741824
 
                 compaction_service:
@@ -714,17 +720,18 @@ mod tests {
                             block_manager_config:
                                 max_block_size_bytes: 16384
                                 block_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                             sparse_index_manager_config:
                                 sparse_index_cache_config:
-                                    lru:
+                                    memory:
                                         capacity: 1000
                     hnsw_provider:
                         hnsw_temporary_path: "~/tmp"
                         hnsw_cache_config:
-                            weighted_lru:
+                            disk:
                                 capacity: 1073741824
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load();

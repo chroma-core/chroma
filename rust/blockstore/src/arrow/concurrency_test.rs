@@ -1,28 +1,21 @@
 #[cfg(test)]
 mod tests {
     use crate::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider};
-    use chroma_cache::{
-        cache::Cache,
-        config::{CacheConfig, LruConfig},
-    };
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use rand::Rng;
     use shuttle::{future, thread};
 
     #[test]
     fn test_blockfile_shuttle() {
-        const BLOCK_CACHE_CAPACITY: usize = 1000;
-        const SPARSE_INDEX_CACHE_CAPACITY: usize = 1000;
         shuttle::check_random(
             || {
                 let tmp_dir = tempfile::tempdir().unwrap();
                 let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-                let block_cache = Cache::new(&CacheConfig::Lru(LruConfig {
-                    capacity: BLOCK_CACHE_CAPACITY,
-                }));
-                let sparse_index_cache = Cache::new(&CacheConfig::Lru(LruConfig {
-                    capacity: SPARSE_INDEX_CACHE_CAPACITY,
-                }));
+                // NOTE(rescrv):  I chose to use non-persistent caches here to maximize chance of a
+                // race condition outside the cache.
+                let block_cache = new_cache_for_test();
+                let sparse_index_cache = new_cache_for_test();
                 let blockfile_provider = ArrowBlockfileProvider::new(
                     storage,
                     TEST_MAX_BLOCK_SIZE_BYTES,
