@@ -94,11 +94,9 @@ where
         CacheConfig::Unbounded(unbounded_config) => {
             Ok(Box::new(UnboundedCache::new(unbounded_config)))
         }
+        CacheConfig::Memory(c) => Ok(c.build_memory().await? as _),
         CacheConfig::Disk(_) => Err(Box::new(CacheError::InvalidCacheConfig(
             "from_config was called with disk".to_string(),
-        ))),
-        CacheConfig::Memory(_) => Err(Box::new(CacheError::InvalidCacheConfig(
-            "from_config was called with memory".to_string(),
         ))),
         CacheConfig::Nop => Ok(Box::new(NopCache)),
     }
