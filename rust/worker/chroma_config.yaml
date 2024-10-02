@@ -58,7 +58,7 @@ query_service:
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
-            disk:
+            memory:
                 capacity: 8589934592 # 8GB
                 eviction: lru
 
