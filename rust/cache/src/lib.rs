@@ -48,11 +48,11 @@ pub enum CacheConfig {
     #[serde(rename = "disk")]
     Disk(FoyerCacheConfig),
     #[serde(rename = "memory")]
-    Memory(FoyerCacheConfig),
-    #[serde(rename = "nop")]
     #[serde(alias = "lru")]
     #[serde(alias = "lfu")]
     #[serde(alias = "weighted_lru")]
+    Memory(FoyerCacheConfig),
+    #[serde(rename = "nop")]
     Nop,
 }
 
