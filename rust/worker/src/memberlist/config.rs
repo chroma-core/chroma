@@ -16,6 +16,16 @@ pub(crate) enum MemberlistProviderConfig {
     CustomResource(CustomResourceMemberlistProviderConfig),
 }
 
+impl Default for MemberlistProviderConfig {
+    fn default() -> Self {
+        MemberlistProviderConfig::CustomResource(CustomResourceMemberlistProviderConfig {
+            kube_namespace: "default".to_string(),
+            memberlist_name: "memberlist".to_string(),
+            queue_size: 100,
+        })
+    }
+}
+
 /// The configuration for the custom resource memberlist provider.
 /// # Fields
 /// - kube_namespace: The namespace to use for the custom resource.
