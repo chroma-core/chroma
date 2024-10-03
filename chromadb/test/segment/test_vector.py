@@ -1,5 +1,7 @@
 import pytest
 from typing import Generator, List, Callable, Iterator, Type, cast
+
+from chromadb.api import CollectionConfigurationInternal
 from chromadb.config import System, Settings
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
@@ -26,7 +28,6 @@ from chromadb.segment.impl.vector.local_persistent_hnsw import (
     PersistentLocalHnswSegment,
 )
 
-from chromadb.test.property.strategies import test_hnsw_config
 from pytest import FixtureRequest
 from itertools import count
 import tempfile
@@ -114,7 +115,8 @@ def create_random_segment_definition() -> Segment:
         type="test_type",
         scope=SegmentScope.VECTOR,
         collection=uuid.UUID(int=0),
-        metadata=test_hnsw_config,
+        metadata=None,
+        configuration=CollectionConfigurationInternal(),
     )
 
 

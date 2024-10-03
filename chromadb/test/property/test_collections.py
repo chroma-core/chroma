@@ -2,7 +2,7 @@ import pytest
 import logging
 import hypothesis.strategies as st
 import chromadb.test.property.strategies as strategies
-from chromadb.api import ClientAPI
+from chromadb.api import ClientAPI, CollectionConfiguration
 import chromadb.api.types as types
 from hypothesis.stateful import (
     Bundle,
@@ -47,6 +47,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
                 c = self.client.create_collection(
                     name=coll.name,
                     metadata=coll.metadata,  # type: ignore[arg-type]
+                    configuration=coll.configuration,
                     embedding_function=coll.embedding_function,
                 )
             return multiple()
@@ -54,6 +55,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         c = self.client.create_collection(
             name=coll.name,
             metadata=coll.metadata,  # type: ignore[arg-type]
+            configuration=coll.configuration,
             embedding_function=coll.embedding_function,
         )
         self.set_model(coll.name, coll.metadata)  # type: ignore[arg-type]
@@ -147,6 +149,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
                 c = self.client.get_or_create_collection(
                     name=coll.name,
                     metadata=new_metadata,  # type: ignore[arg-type]
+                    configuration=coll.configuration,
                     embedding_function=coll.embedding_function,
                 )
             return multiple()
@@ -161,6 +164,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         c = self.client.get_or_create_collection(
             name=coll.name,
             metadata=new_metadata,  # type: ignore[arg-type]
+            configuration=coll.configuration,
             embedding_function=coll.embedding_function,
         )
 
@@ -258,6 +262,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
             name="jjn2yjLW1zp2T\n",
             metadata=None,
             embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
+            configuration=CollectionConfiguration(),
         ),
         new_metadata=None,
     )
@@ -266,6 +271,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
             name="jjn2yjLW1zp2T\n",
             metadata=None,
             embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
+            configuration=CollectionConfiguration(),
         ),
         new_metadata=None,
     )
@@ -284,6 +290,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
             name="C1030",
             metadata={},
             embedding_function=hashing_embedding_function(dim=2, dtype=numpy.float32),  # type: ignore[arg-type]
+            configuration=CollectionConfiguration(),
         ),
         new_metadata=None,
     )
@@ -312,6 +319,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
             embedding_function=hashing_embedding_function(  # type: ignore[arg-type]
                 dim=1915, dtype=numpy.float32
             ),
+            configuration=CollectionConfiguration(),
         ),
         new_metadata={
             "xVW09xUpDZA": 31734,
@@ -330,6 +338,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
             name="VS0QGh",
             metadata=None,
             embedding_function=hashing_embedding_function(dim=326, dtype=numpy.float16),  # type: ignore[arg-type]
+            configuration=CollectionConfiguration(),
         ),
         new_metadata=None,
     )

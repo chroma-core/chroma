@@ -1,7 +1,8 @@
 from typing import List
 import numpy as np
 
-from chromadb.api import ServerAPI
+from chromadb.api import ServerAPI, CollectionConfiguration
+from chromadb.api.configuration import HNSWConfiguration
 from chromadb.api.models.Collection import Collection
 
 
@@ -14,8 +15,11 @@ def test_many_collections(client: ServerAPI) -> None:
     D = 10
 
     metadata = None
+    configuration = None
     if client.get_settings().is_persistent:
-        metadata = {"hnsw:batch_size": 3, "hnsw:sync_threshold": 3}
+        configuration = CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(batch_size=3, sync_threshold=3)
+        )
     else:
         # We only want to test persistent configurations in this way, since the main
         # point is to test the file handle limit
@@ -27,6 +31,7 @@ def test_many_collections(client: ServerAPI) -> None:
         new_collection = client.create_collection(
             f"test_collection_{i}",
             metadata=metadata,
+            configuration=configuration,
         )
         collections.append(new_collection)
 

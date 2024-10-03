@@ -1,5 +1,8 @@
 from typing import Optional, Sequence, TypeVar, Type
 from abc import abstractmethod
+
+from chromadb.api import CollectionConfigurationInternal
+from chromadb.api.configuration import ConfigurationInternal
 from chromadb.types import (
     Collection,
     MetadataEmbeddingRecord,
@@ -48,6 +51,13 @@ class SegmentImplementation(Component):
         """Given an arbitrary metadata map (e.g, from a collection), validate it and
         return metadata (if any) that is applicable and should be applied to the
         segment. Validation errors will be reported to the user."""
+        return None
+
+    @staticmethod
+    def get_configuration(
+        collection_configuration: CollectionConfigurationInternal,
+    ) -> Optional[ConfigurationInternal]:
+        """Given an arbitrary collection configuration, return a relevant nested configuration of the collection"""
         return None
 
     @abstractmethod

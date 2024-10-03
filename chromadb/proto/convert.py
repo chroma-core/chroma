@@ -1,6 +1,8 @@
 from uuid import UUID
 from typing import Dict, Optional, Tuple, Union, cast
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.configuration import (
+    CollectionConfigurationInternal,
+)
 from chromadb.api.types import Embedding
 import chromadb.proto.chroma_pb2 as proto
 from chromadb.types import (
@@ -138,6 +140,11 @@ def from_proto_segment(segment: proto.Segment) -> Segment:
         metadata=from_proto_metadata(segment.metadata)
         if segment.HasField("metadata")
         else None,
+        configuration=CollectionConfigurationInternal.from_json_str(
+            segment.configuration_json_str
+        )
+        if segment.HasField("configuration_json_str")
+        else None,
     )
 
 
@@ -150,6 +157,9 @@ def to_proto_segment(segment: Segment) -> proto.Segment:
         metadata=None
         if segment["metadata"] is None
         else to_proto_update_metadata(segment["metadata"]),
+        configuration_json_str=segment["configuration"].to_json_str()
+        if segment["configuration"] is not None
+        else None,
     )
 
 

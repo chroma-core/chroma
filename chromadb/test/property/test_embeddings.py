@@ -8,10 +8,12 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
+
+from chromadb.api.configuration import HNSWConfiguration
 from chromadb.api.types import ID, Embeddings, Include, IDs, validate_embeddings
 from chromadb.config import System
 import chromadb.errors as errors
-from chromadb.api import ClientAPI
+from chromadb.api import ClientAPI, CollectionConfiguration
 from chromadb.api.models.Collection import Collection
 import chromadb.test.property.strategies as strategies
 from hypothesis.stateful import (
@@ -88,6 +90,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         self.collection = self.client.create_collection(
             name=collection.name,
             metadata=collection.metadata,  # type: ignore[arg-type]
+            configuration=collection.configuration,
             embedding_function=collection.embedding_function,
         )
         self.embedding_function = collection.embedding_function
@@ -455,11 +458,12 @@ def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
     state.initialize(
         collection=strategies.Collection(
             name="A00",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-            },
+            metadata=None,
+            configuration=CollectionConfiguration(
+                hnsw_configuration=HNSWConfiguration(
+                    ef_construction=128, ef_search=128, M=128
+                )
+            ),
             embedding_function=None,
             id=uuid.uuid4(),
             dimension=2,
@@ -508,11 +512,12 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
     state.initialize(
         collection=strategies.Collection(
             name="A00",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-            },
+            metadata=None,
+            configuration=CollectionConfiguration(
+                hnsw_configuration=HNSWConfiguration(
+                    ef_construction=128, ef_search=128, M=128
+                )
+            ),
             embedding_function=None,
             id=uuid.UUID("2fb0c945-b877-42ab-9417-bfe0f6b172af"),
             dimension=2,
@@ -576,10 +581,12 @@ def test_add_delete_add(client: ClientAPI) -> None:
                 "R0ZiZ": True,
                 "m": True,
                 "IOw": -25725,
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
             },
+            configuration=CollectionConfiguration(
+                hnsw_configuration=HNSWConfiguration(
+                    ef_construction=128, ef_search=128, M=128
+                )
+            ),
             embedding_function=None,
             id=uuid.UUID("284b6e99-b19e-49b2-96a4-a2a93a95447d"),
             dimension=3,

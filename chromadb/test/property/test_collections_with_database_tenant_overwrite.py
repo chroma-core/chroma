@@ -10,7 +10,7 @@ from hypothesis.stateful import (
 import uuid
 import logging
 import pytest
-from chromadb.api import AdminAPI
+from chromadb.api import AdminAPI, CollectionConfiguration
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import Settings, System
 from chromadb.test.conftest import (
@@ -199,6 +199,7 @@ def test_repeat_failure(
         coll=strategies.Collection(
             name="A00",
             metadata=None,
+            configuration=CollectionConfiguration(),
             embedding_function=strategies.hashing_embedding_function(
                 dim=2, dtype=numpy.float16  # type: ignore
             ),

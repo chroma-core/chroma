@@ -176,6 +176,7 @@ class Segment(TypedDict):
     scope: SegmentScope
     collection: UUID
     metadata: Optional[Metadata]
+    configuration: Optional[CollectionConfigurationInternal]
 
 
 # SeqID can be one of three types of value in our current and future plans:

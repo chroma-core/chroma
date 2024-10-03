@@ -9,7 +9,8 @@ from hypothesis import given
 import hypothesis.strategies as st
 import pytest
 import chromadb
-from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api import ClientAPI, ServerAPI, CollectionConfiguration
+from chromadb.api.configuration import HNSWConfiguration
 from chromadb.config import Settings, System
 from chromadb.segment import SegmentManager, VectorReader
 import chromadb.test.property.strategies as strategies
@@ -138,7 +139,10 @@ def test_sync_threshold(settings: Settings) -> None:
     client = ClientCreator.from_system(system)
 
     collection = client.create_collection(
-        name="test", metadata={"hnsw:batch_size": 3, "hnsw:sync_threshold": 3}
+        name="test",
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(batch_size=3, sync_threshold=3)
+        ),
     )
 
     manager = system.instance(SegmentManager)
@@ -253,6 +257,7 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         self.collection = self.client.create_collection(
             name=collection.name,
             metadata=collection.metadata,  # type: ignore[arg-type]
+            configuration=collection.configuration,
             embedding_function=collection.embedding_function,
         )
         self.embedding_function = collection.embedding_function
@@ -317,13 +322,16 @@ def test_delete_less_than_k(
     state.initialize(
         collection=strategies.Collection(
             name="A00",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-                "hnsw:sync_threshold": 3,
-                "hnsw:batch_size": 3,
-            },
+            metadata=None,
+            configuration=CollectionConfiguration(
+                hnsw_configuration=HNSWConfiguration(
+                    ef_construction=128,
+                    ef_search=128,
+                    M=128,
+                    sync_threshold=3,
+                    batch_size=3,
+                )
+            ),
             embedding_function=None,
             id=UUID("2d3eddc7-2314-45f4-a951-47a9a8e099d2"),
             dimension=2,
@@ -366,14 +374,16 @@ def test_delete_add_after_persist(settings: Settings) -> None:
     state.initialize(
         collection=strategies.Collection(
             name="A00",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-                # Important: both batch_size and sync_threshold are 3
-                "hnsw:batch_size": 3,
-                "hnsw:sync_threshold": 3,
-            },
+            metadata=None,
+            configuration=CollectionConfiguration(
+                hnsw_configuration=HNSWConfiguration(
+                    ef_construction=128,
+                    ef_search=128,
+                    M=128,
+                    sync_threshold=3,
+                    batch_size=3,
+                )
+            ),
             embedding_function=DefaultEmbeddingFunction(),  # type: ignore[arg-type]
             id=UUID("0851f751-2f11-4424-ab23-4ae97074887a"),
             dimension=2,

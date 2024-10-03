@@ -21,6 +21,7 @@ from chromadb.db.base import (
 )
 from chromadb.db.system import SysDB
 from chromadb.errors import NotFoundError
+from chromadb.segment import SegmentType
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -165,12 +166,18 @@ class SqlSysDB(SqlDB, SysDB):
                     segments.type,
                     segments.scope,
                     segments.collection,
+                    segments.config_json_str,
                 )
                 .insert(
                     ParameterValue(self.uuid_to_db(segment["id"])),
                     ParameterValue(segment["type"]),
                     ParameterValue(segment["scope"].value),
                     ParameterValue(self.uuid_to_db(segment["collection"])),
+                    ParameterValue(
+                        segment["configuration"].to_json_str()
+                        if segment["configuration"]
+                        else None,
+                    ),
                 )
             )
             sql, params = get_sql(insert_segment, self.parameter_format())
@@ -309,6 +316,7 @@ class SqlSysDB(SqlDB, SysDB):
                 segments_t.type,
                 segments_t.scope,
                 segments_t.collection,
+                segments_t.config_json_str,
                 metadata_t.key,
                 metadata_t.str_value,
                 metadata_t.int_value,
@@ -342,6 +350,21 @@ class SqlSysDB(SqlDB, SysDB):
                 scope = SegmentScope(str(rows[0][2]))
                 collection = self.uuid_from_db(rows[0][3])  # type: ignore[assignment]
                 metadata = self._metadata_from_rows(rows)
+
+                if rows[0][4] is not None:
+                    configuration = CollectionConfigurationInternal.from_json_str(
+                        rows[0][4]
+                    )
+                elif (
+                    rows[0][4] is None
+                    and type == SegmentType.HNSW_LOCAL_PERSISTED.value
+                ):
+                    configuration = self._insert_config_from_legacy_params(
+                        segment_id, metadata
+                    )
+                else:
+                    configuration = None
+
                 segments.append(
                     Segment(
                         id=cast(UUID, id),
@@ -349,6 +372,7 @@ class SqlSysDB(SqlDB, SysDB):
                         scope=scope,
                         collection=collection,
                         metadata=metadata,
+                        configuration=configuration,
                     )
                 )
 

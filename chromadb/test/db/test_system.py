@@ -4,6 +4,7 @@ import tempfile
 import pytest
 from typing import Generator, List, Callable, Dict, Union
 
+from chromadb.api import CollectionConfiguration
 from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
 from chromadb.errors import NotFoundError
@@ -20,7 +21,10 @@ from chromadb.db.system import SysDB
 from chromadb.db.base import UniqueConstraintError
 from pytest import FixtureRequest
 import uuid
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.configuration import (
+    CollectionConfigurationInternal,
+    HNSWConfiguration,
+)
 
 TENANT = "default"
 NAMESPACE = "default"
@@ -618,6 +622,7 @@ sample_segments = [
         scope=SegmentScope.VECTOR,
         collection=sample_collections[0].id,
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+        configuration=None,
     ),
     Segment(
         id=uuid.UUID("11111111-d7d7-413b-92e1-731098a6e492"),
@@ -625,6 +630,7 @@ sample_segments = [
         scope=SegmentScope.VECTOR,
         collection=sample_collections[1].id,
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
+        configuration=CollectionConfiguration(hnsw_configuration=HNSWConfiguration()),
     ),
 ]
 
@@ -707,6 +713,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         scope=SegmentScope.VECTOR,
         collection=sample_collections[0].id,
         metadata=metadata,
+        configuration=None,
     )
 
     sysdb.reset_state()

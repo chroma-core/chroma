@@ -1,4 +1,6 @@
+from chromadb.api import CollectionConfiguration
 from chromadb.api.client import Client
+from chromadb.api.configuration import HNSWConfiguration
 from chromadb.config import System
 from chromadb.test.property import invariants
 
@@ -7,10 +9,16 @@ def test_log_purge(sqlite_persistent: System) -> None:
     client = Client.from_system(sqlite_persistent)
 
     first_collection = client.create_collection(
-        "first_collection", metadata={"hnsw:sync_threshold": 10, "hnsw:batch_size": 10}
+        "first_collection",
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(sync_threshold=10, batch_size=10)
+        ),
     )
     second_collection = client.create_collection(
-        "second_collection", metadata={"hnsw:sync_threshold": 10, "hnsw:batch_size": 10}
+        "second_collection",
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(sync_threshold=10, batch_size=10)
+        ),
     )
     collections = [first_collection, second_collection]
 

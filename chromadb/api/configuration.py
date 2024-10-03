@@ -273,6 +273,38 @@ class HNSWConfigurationInternal(ConfigurationInternal):
         ),
     }
 
+    @property
+    def space(self) -> str:
+        return cast(str, self.get_parameter("space").value)
+
+    @property
+    def ef_construction(self) -> int:
+        return cast(int, self.get_parameter("ef_construction").value)
+
+    @property
+    def ef_search(self) -> int:
+        return cast(int, self.get_parameter("ef_search").value)
+
+    @property
+    def num_threads(self) -> int:
+        return cast(int, self.get_parameter("num_threads").value)
+
+    @property
+    def m(self) -> int:
+        return cast(int, self.get_parameter("M").value)
+
+    @property
+    def resize_factor(self) -> float:
+        return cast(float, self.get_parameter("resize_factor").value)
+
+    @property
+    def batch_size(self) -> int:
+        return cast(int, self.get_parameter("batch_size").value)
+
+    @property
+    def sync_threshold(self) -> int:
+        return cast(int, self.get_parameter("sync_threshold").value)
+
     @override
     def configuration_validator(self) -> None:
         batch_size = self.parameter_map.get("batch_size")
@@ -348,6 +380,17 @@ class HNSWConfigurationInterface(HNSWConfigurationInternal):
 
         super().__init__(parameters=parameters)
 
+    @override
+    def to_json(self) -> Dict[str, Any]:
+        json_map = HNSWConfigurationInternal.to_json(self)
+        json_map["_type"] = HNSWConfigurationInternal.__name__
+        return json_map
+
+    @classmethod
+    @override
+    def from_json(cls, json_map: Dict[str, Any]) -> Self:
+        return HNSWConfigurationInternal.from_json(json_map)
+
 
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'
 HNSWConfiguration = HNSWConfigurationInterface
@@ -378,7 +421,7 @@ class CollectionConfigurationInternal(ConfigurationInternal):
 class CollectionConfigurationInterface(CollectionConfigurationInternal):
     """Configuration parameters for creating a collection."""
 
-    def __init__(self, hnsw_configuration: Optional[HNSWConfigurationInternal]):
+    def __init__(self, hnsw_configuration: Optional[HNSWConfigurationInternal] = None):
         """Initializes a new instance of the CollectionConfiguration class.
         Args:
             hnsw_configuration: The HNSW configuration to use for the collection.
@@ -389,6 +432,17 @@ class CollectionConfigurationInterface(CollectionConfigurationInternal):
             ConfigurationParameter(name="hnsw_configuration", value=hnsw_configuration)
         ]
         super().__init__(parameters=parameters)
+
+    @classmethod
+    @override
+    def from_json(cls, json_map: Dict[str, Any]) -> Self:
+        return CollectionConfigurationInternal.from_json(json_map)
+
+    @override
+    def to_json(self) -> Dict[str, Any]:
+        json_map = CollectionConfigurationInternal.to_json(self)
+        json_map["_type"] = CollectionConfigurationInternal.__name__
+        return json_map
 
 
 # Alias for user convenience - the user doesn't need to know this is an 'Interface'.
