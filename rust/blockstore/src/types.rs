@@ -279,7 +279,7 @@ impl<
     pub async fn get_by_prefix(
         &'referred_data self,
         prefix: &str,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get_by_prefix(prefix).await,
@@ -290,7 +290,7 @@ impl<
         &'referred_data self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gt(prefix, key).await,
@@ -301,7 +301,7 @@ impl<
         &'referred_data self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lt(prefix, key).await,
@@ -312,7 +312,7 @@ impl<
         &'referred_data self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gte(prefix, key).await,
@@ -323,7 +323,7 @@ impl<
         &'referred_data self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lte(prefix, key).await,
