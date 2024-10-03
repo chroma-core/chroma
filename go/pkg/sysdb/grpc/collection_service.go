@@ -3,7 +3,7 @@ package grpc
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"strconv"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -16,19 +16,14 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-const errorCode = 500
-const successCode = 200
-const success = "ok"
-
 func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.ResetStateResponse, error) {
 	log.Info("reset state")
 	res := &coordinatorpb.ResetStateResponse{}
 	err := s.coordinator.ResetState(context.Background())
 	if err != nil {
-		res.Status = failResponseWithError(err, errorCode)
-		return res, err
+		log.Error("error resetting state", zap.Error(err))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	setResponseStatus(successCode)
 	return res, nil
 }
 
@@ -58,7 +53,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	res := &coordinatorpb.CreateCollectionResponse{}
 	createCollection, err := convertToCreateCollectionModel(req)
 	if err != nil {
-		log.Error("error converting to create collection model", zap.Error(err))
+		log.Error("CreateCollection failed. error converting to create collection model", zap.Error(err), zap.String("collection_id", req.Id))
 		res.Collection = &coordinatorpb.Collection{
 			Id:                   req.Id,
 			Name:                 req.Name,
@@ -69,12 +64,11 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 			Database:             req.Database,
 		}
 		res.Created = false
-		res.Status = failResponseWithError(err, successCode)
-		return res, nil
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	collection, created, err := s.coordinator.CreateCollection(ctx, createCollection)
 	if err != nil {
-		log.Error("error creating collection", zap.Error(err))
+		log.Error("CreateCollection failed. error creating collection", zap.Error(err), zap.String("collection_id", req.Id))
 		res.Collection = &coordinatorpb.Collection{
 			Id:                   req.Id,
 			Name:                 req.Name,
@@ -86,15 +80,13 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		}
 		res.Created = false
 		if err == common.ErrCollectionUniqueConstraintViolation {
-			res.Status = failResponseWithError(err, 409)
-		} else {
-			res.Status = failResponseWithError(err, errorCode)
+			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
-		return res, nil
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Collection = convertCollectionToProto(collection)
-	res.Status = setResponseStatus(successCode)
 	res.Created = created
+	log.Info("CreateCollection finished.", zap.String("collection_id", res.Collection.Id), zap.String("created", strconv.FormatBool(res.Created)))
 	return res, nil
 }
 
@@ -110,24 +102,21 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 
 	parsedCollectionID, err := types.ToUniqueID(collectionID)
 	if err != nil {
-		log.Error("collection id format error", zap.String("collectionpd.id", *collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
-		return res, nil
+		log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.String("collection_id", *collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
 	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName, limit, offset)
 	if err != nil {
-		log.Error("error getting collections", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
-		return res, nil
+		log.Error("GetCollections failed ", zap.Error(err), zap.String("collection_id", *collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Collections = make([]*coordinatorpb.Collection, 0, len(collections))
 	for _, collection := range collections {
 		collectionpb := convertCollectionToProto(collection)
 		res.Collections = append(res.Collections, collectionpb)
 	}
-	log.Info("collection service collections", zap.Any("collections", res.Collections))
-	res.Status = setResponseStatus(successCode)
+	log.Info("GetCollections succeeded", zap.String("collection_id", *collectionID), zap.Any("response", res.Collections), zap.String("parsed_collection_id", parsedCollectionID.String()))
 	return res, nil
 }
 
@@ -136,9 +125,8 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 	res := &coordinatorpb.DeleteCollectionResponse{}
 	parsedCollectionID, err := types.Parse(collectionID)
 	if err != nil {
-		log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
-		return res, nil
+		log.Error("DeleteCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	deleteCollection := &model.DeleteCollection{
 		ID:           parsedCollectionID,
@@ -147,16 +135,13 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 	}
 	err = s.coordinator.DeleteCollection(ctx, deleteCollection)
 	if err != nil {
-		if errors.Is(err, common.ErrCollectionDeleteNonExistingCollection) {
-			log.Error("ErrCollectionDeleteNonExistingCollection", zap.String("collectionpd.id", collectionID))
-			res.Status = failResponseWithError(err, 404)
-		} else {
-			log.Error(err.Error(), zap.String("collectionpd.id", collectionID))
-			res.Status = failResponseWithError(err, errorCode)
+		log.Error("DeleteCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
+		if err == common.ErrCollectionDeleteNonExistingCollection {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
-		return res, nil
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	res.Status = setResponseStatus(successCode)
+	log.Info("DeleteCollection succeeded", zap.String("collection_id", collectionID))
 	return res, nil
 }
 
@@ -166,9 +151,8 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	collectionID := req.Id
 	parsedCollectionID, err := types.ToUniqueID(&collectionID)
 	if err != nil {
-		log.Error("collection id format error", zap.String("collectionpd.id", collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
-		return res, nil
+		log.Error("UpdateCollection failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
 	updateCollection := &model.UpdateCollection{
@@ -186,9 +170,8 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	// Case 4: if resetMetadata is false and metadata is nil, then leave the metadata as is
 	if resetMetadata {
 		if metadata != nil {
-			log.Error("reset metadata is true and metadata is not nil", zap.Any("metadata", metadata))
-			res.Status = failResponseWithError(common.ErrInvalidMetadataUpdate, errorCode)
-			return res, nil
+			log.Error("UpdateCollection failed. reset metadata is true and metadata is not nil", zap.Any("metadata", metadata), zap.String("collection_id", collectionID))
+			return res, grpcutils.BuildInternalGrpcError(common.ErrInvalidMetadataUpdate.Error())
 		} else {
 			updateCollection.Metadata = nil
 		}
@@ -196,9 +179,8 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 		if metadata != nil {
 			modelMetadata, err := convertCollectionMetadataToModel(metadata)
 			if err != nil {
-				log.Error("error converting collection metadata to model", zap.Error(err))
-				res.Status = failResponseWithError(err, errorCode)
-				return res, nil
+				log.Error("UpdateCollection failed. error converting collection metadata to model", zap.Error(err), zap.String("collection_id", collectionID))
+				return res, grpcutils.BuildInternalGrpcError(err.Error())
 			}
 			updateCollection.Metadata = modelMetadata
 		} else {
@@ -209,36 +191,36 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	_, err = s.coordinator.UpdateCollection(ctx, updateCollection)
 
 	if err != nil {
-		log.Error("error updating collection", zap.Error(err))
+		log.Error("UpdateCollection failed. error updating collection", zap.Error(err), zap.String("collection_id", collectionID))
 		if err == common.ErrCollectionUniqueConstraintViolation {
-			res.Status = failResponseWithError(err, 409)
-		} else {
-			res.Status = failResponseWithError(err, errorCode)
+			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
-		return res, nil
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	res.Status = setResponseStatus(successCode)
+	log.Info("UpdateCollection succeeded", zap.String("collection_id", collectionID))
 	return res, nil
 }
 
 func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
 	blob, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		log.Error("FlushCollectionCompaction failed. error marshalling request", zap.Error(err), zap.String("request", string(blob)))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	log.Info("flush collection compaction", zap.String("request", string(blob)))
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
 	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
-		return nil, err
+		log.Error("FlushCollectionCompaction failed. error parsing collection id", zap.Error(err), zap.String("request", string(blob)))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(req.SegmentCompactionInfo))
 	for _, flushSegmentCompaction := range req.SegmentCompactionInfo {
 		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
 		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
 		if err != nil {
-			return nil, err
+			log.Error("FlushCollectionCompaction failed. error parsing segment id", zap.Error(err), zap.String("request", string(blob)))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
 		}
 		filePaths := make(map[string][]string)
 		for key, filePath := range flushSegmentCompaction.FilePaths {
@@ -258,7 +240,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
-		log.Error("error FlushCollectionCompaction", zap.Error(err))
+		log.Error("FlushCollectionCompaction failed", zap.Error(err), zap.String("request", string(blob)))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res := &coordinatorpb.FlushCollectionCompactionResponse{
@@ -266,19 +248,6 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		CollectionVersion:  flushCollectionInfo.CollectionVersion,
 		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
 	}
+	log.Info("FlushCollectionCompaction succeeded", zap.String("request", string(blob)))
 	return res, nil
-}
-
-func failResponseWithError(err error, code int32) *coordinatorpb.Status {
-	return &coordinatorpb.Status{
-		Reason: err.Error(),
-		Code:   code,
-	}
-}
-
-func setResponseStatus(code int32) *coordinatorpb.Status {
-	return &coordinatorpb.Status{
-		Reason: success,
-		Code:   code,
-	}
 }
