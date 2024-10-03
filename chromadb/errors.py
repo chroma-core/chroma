@@ -136,6 +136,17 @@ class VersionMismatchError(ChromaError):
         return "VersionMismatchError"
 
 
+class RateLimitError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 429
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "RateLimitError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
@@ -147,4 +158,5 @@ error_types: Dict[str, Type[ChromaError]] = {
     "NotFoundError": NotFoundError,
     "BatchSizeExceededError": BatchSizeExceededError,
     "VersionMismatchError": VersionMismatchError,
+    "RateLimitError": RateLimitError,
 }
