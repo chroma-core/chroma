@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	log "github.com/chroma-core/chroma/go/database/log/db"
+	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
 	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
