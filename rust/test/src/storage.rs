@@ -1,16 +1,14 @@
-use chroma_blockstore::{
-    arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
-    provider::BlockfileProvider,
-};
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_cache::{
     cache::{Cache, Cacheable},
     config::{CacheConfig, UnboundedCacheConfig},
 };
 use chroma_storage::{local::LocalStorage, Storage};
-use chroma_types::{Segment, SegmentScope, SegmentType};
-use std::{collections::HashMap, hash::Hash};
+use std::hash::Hash;
 use tempfile::TempDir;
-use uuid::Uuid;
+
+// 8MB block size, in case roaring bitmap has more values within.
+const MAX_BLOCK_SIZE: usize = 2 << 23;
 
 pub fn tmp_dir() -> TempDir {
     TempDir::new().expect("Should be able to create a temporary directory.")
@@ -31,28 +29,10 @@ where
 }
 
 pub fn arrow_blockfile_provider() -> BlockfileProvider {
-    BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
+    BlockfileProvider::new_arrow(
         storage(),
-        TEST_MAX_BLOCK_SIZE_BYTES,
+        MAX_BLOCK_SIZE,
         unbounded_cache(),
         unbounded_cache(),
-    ))
-}
-
-pub fn segment(scope: SegmentScope) -> Segment {
-    use SegmentScope::*;
-    use SegmentType::*;
-    let r#type = match scope {
-        METADATA => BlockfileMetadata,
-        RECORD => BlockfileRecord,
-        SQLITE | VECTOR => panic!("Unsupported segment scope in testing."),
-    };
-    Segment {
-        id: Uuid::new_v4(),
-        r#type,
-        scope,
-        collection: Uuid::new_v4(),
-        metadata: None,
-        file_path: HashMap::new(),
-    }
+    )
 }

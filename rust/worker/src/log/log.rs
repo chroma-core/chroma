@@ -266,7 +266,7 @@ impl GrpcLog {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum PullLogsError {
+pub enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to convert proto embedding record into EmbeddingRecord")]

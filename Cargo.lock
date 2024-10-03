@@ -1287,6 +1287,7 @@ dependencies = [
  "criterion",
  "dirs",
  "futures",
+ "indicatif",
  "rand",
  "reqwest",
  "serde",
@@ -1297,6 +1298,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "uuid",
+ "worker",
 ]
 
 [[package]]

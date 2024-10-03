@@ -120,7 +120,7 @@ impl ChromaError for LogMaterializerError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MaterializedLogRecord<'referred_data> {
+pub struct MaterializedLogRecord<'referred_data> {
     // This is the data record read from the record segment for this id.
     // None if the record exists only in the log.
     pub(crate) data_record: Option<DataRecord<'referred_data>>,
@@ -435,7 +435,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
     }
 }
 
-pub(crate) struct LogMaterializer<'me> {
+pub struct LogMaterializer<'me> {
     // Is None when record segment is uninitialized.
     pub(crate) record_segment_reader: Option<RecordSegmentReader<'me>>,
     pub(crate) logs: Chunk<LogRecord>,
@@ -447,7 +447,7 @@ pub(crate) struct LogMaterializer<'me> {
 }
 
 impl<'me> LogMaterializer<'me> {
-    pub(crate) fn new(
+    pub fn new(
         record_segment_reader: Option<RecordSegmentReader<'me>>,
         logs: Chunk<LogRecord>,
         curr_offset_id: Option<Arc<AtomicU32>>,
@@ -458,7 +458,7 @@ impl<'me> LogMaterializer<'me> {
             curr_offset_id,
         }
     }
-    pub(crate) async fn materialize(
+    pub async fn materialize(
         &'me self,
     ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
         // Trace the total_len since len() iterates over the entire chunk
@@ -804,7 +804,9 @@ impl<'me> LogMaterializer<'me> {
     }
 }
 
-pub(crate) trait SegmentWriter<'a> {
+// This needs to be public for testing
+#[allow(async_fn_in_trait)]
+pub trait SegmentWriter<'a> {
     async fn apply_materialized_log_chunk(
         &self,
         records: Chunk<MaterializedLogRecord<'a>>,
@@ -812,8 +814,9 @@ pub(crate) trait SegmentWriter<'a> {
     fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
 }
 
+// This needs to be public for testing
 #[async_trait]
-pub(crate) trait SegmentFlusher {
+pub trait SegmentFlusher {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>>;
 }
 
