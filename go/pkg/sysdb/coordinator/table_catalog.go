@@ -276,6 +276,13 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 				return err
 			}
 		}
+		// get collection
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, tenantID, databaseName, nil, nil)
+		if err != nil {
+			log.Error("error getting collection", zap.Error(err))
+			return err
+		}
+		result = convertCollectionToModel(collectionList)[0]
 		return nil
 	})
 	if err != nil {
