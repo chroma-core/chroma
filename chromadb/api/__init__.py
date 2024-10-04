@@ -252,8 +252,8 @@ class BaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
     ) -> None:
         """[Internal] Deletes entries from a collection specified by UUID.
 
@@ -274,8 +274,8 @@ class BaseAPI(ABC):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         include: Include = IncludeMetadataDocumentsEmbeddingsDistances,
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.

@@ -197,7 +197,7 @@ class Operation(Enum):
 
 
 PyVector = Union[Sequence[float], Sequence[int]]
-Vector = NDArray[Union[np.int32, np.float32]]
+Vector = NDArray[Union[np.int32, np.float32]]  # TODO: Specify that the vector is 1D
 
 
 class VectorEmbeddingRecord(TypedDict):
