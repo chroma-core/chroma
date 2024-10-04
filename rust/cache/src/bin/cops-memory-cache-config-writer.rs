@@ -1,3 +1,5 @@
+//! Writes a memory cache config to stdout.
+
 use clap::Parser;
 
 use chroma_cache::{CacheConfig, FoyerCacheConfig};
