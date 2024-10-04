@@ -68,14 +68,14 @@ class DB(Component):
     @abstractmethod
     def get(
         self,
-        where: Where = {},
+        where: Optional[Where] = None,
         collection_name: Optional[str] = None,
         collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        where_document: WhereDocument = {},
+        where_document: Optional[WhereDocument] = None,
         columns: Optional[List[str]] = None,
     ) -> Sequence:  # type: ignore
         pass
@@ -98,10 +98,10 @@ class DB(Component):
     @abstractmethod
     def delete(
         self,
-        where: Where = {},
+        where: Optional[Where] = None,
         collection_uuid: Optional[UUID] = None,
         ids: Optional[IDs] = None,
-        where_document: WhereDocument = {},
+        where_document: Optional[WhereDocument] = None,
     ) -> None:
         pass
 
@@ -109,10 +109,10 @@ class DB(Component):
     def get_nearest_neighbors(
         self,
         collection_uuid: UUID,
-        where: Where = {},
+        where: Optional[Where] = None,
         embeddings: Optional[Embeddings] = None,
         n_results: int = 10,
-        where_document: WhereDocument = {},
+        where_document: Optional[WhereDocument] = None,
     ) -> Tuple[List[List[UUID]], List[List[float]]]:
         pass
 
