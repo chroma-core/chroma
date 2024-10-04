@@ -435,7 +435,7 @@ impl Block {
                     return Err(BlockToBytesError::ArrowError(e));
                 }
             };
-            match writer.write(&rb) {
+            match writer.write(rb) {
                 Ok(_) => {}
                 Err(e) => {
                     return Err(BlockToBytesError::ArrowError(e));
