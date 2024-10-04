@@ -650,11 +650,13 @@ mod tests {
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     #[cfg(test)]
     use chroma_cache::new_cache_for_test;
+    #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_storage::{local::LocalStorage, Storage};
     use tempfile::tempdir;
 
     #[tokio::test]
+    #[cfg(debug_assertions)]
     async fn gracefully_handles_panics() {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
