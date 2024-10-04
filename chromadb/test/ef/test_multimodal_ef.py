@@ -24,7 +24,7 @@ class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
         embeddings = np.array(self._hef(to_texts))
         # Normalize the embeddings
         # This is so we can generate random unit vectors and have them be close to the embeddings
-        embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)  # type: ignore[misc]
         return cast(Embeddings, embeddings.tolist())
 
 
@@ -69,7 +69,9 @@ def test_multimodal(
 
     # Trying to add a document and an image at the same time should fail
     with pytest.raises(
-        ValueError, match="You can only provide documents or images, not both."
+        ValueError,
+        # This error string may be in any order
+        match=r"Exactly one of (images|documents|uris)(?:, (images|documents|uris))?(?:, (images|documents|uris))? must be provided in add\.",
     ):
         multimodal_collection.add(
             ids=image_ids[0], documents=documents[0], images=images[0]
