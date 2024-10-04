@@ -12,7 +12,7 @@ use crate::{
     BlockfileReader, BlockfileWriter, Key, Value,
 };
 use async_trait::async_trait;
-use chroma_cache::cache::Cache;
+use chroma_cache::{Cache, CacheError};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -34,8 +34,8 @@ impl ArrowBlockfileProvider {
     pub fn new(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Cache<Uuid, Block>,
-        sparse_index_cache: Cache<Uuid, SparseIndex>,
+        block_cache: Box<dyn Cache<Uuid, Block>>,
+        sparse_index_cache: Box<dyn Cache<Uuid, SparseIndex>>,
     ) -> Self {
         Self {
             block_manager: BlockManager::new(storage.clone(), max_block_size_bytes, block_cache),
@@ -78,9 +78,10 @@ impl ArrowBlockfileProvider {
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 
-    pub fn clear(&self) {
-        self.block_manager.block_cache.clear();
-        self.sparse_index_manager.cache.clear();
+    pub async fn clear(&self) -> Result<(), CacheError> {
+        self.block_manager.block_cache.clear().await?;
+        self.sparse_index_manager.cache.clear().await?;
+        Ok(())
     }
 
     pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
@@ -186,7 +187,7 @@ impl ChromaError for ForkError {
 /// is a placeholder for that.
 #[derive(Clone)]
 pub(super) struct BlockManager {
-    block_cache: Cache<Uuid, Block>,
+    block_cache: Arc<dyn Cache<Uuid, Block>>,
     storage: Storage,
     max_block_size_bytes: usize,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -196,8 +197,9 @@ impl BlockManager {
     pub(super) fn new(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Cache<Uuid, Block>,
+        block_cache: Box<dyn Cache<Uuid, Block>>,
     ) -> Self {
+        let block_cache: Arc<dyn Cache<Uuid, Block>> = block_cache.into();
         Self {
             block_cache,
             storage,
@@ -252,14 +254,14 @@ impl BlockManager {
         Block::from_record_batch(delta_id, record_batch)
     }
 
-    pub(super) fn cached(&self, id: &Uuid) -> bool {
-        self.block_cache.get(id).is_some()
+    pub(super) async fn cached(&self, id: &Uuid) -> bool {
+        self.block_cache.get(id).await.ok().is_some()
     }
 
     pub(super) async fn get(&self, id: &Uuid) -> Result<Option<Block>, GetError> {
-        let block = self.block_cache.get(id);
+        let block = self.block_cache.get(id).await.ok().flatten();
         match block {
-            Some(block) => Ok(Some(block.clone())),
+            Some(block) => Ok(Some(block)),
             None => async {
                 let key = format!("block/{}", id);
                 let bytes_res = self
@@ -277,13 +279,17 @@ impl BlockManager {
                         match block {
                             Ok(block) => {
                                 let _guard = self.write_mutex.lock().await;
-                                match self.block_cache.get(id) {
-                                    Some(b) => {
+                                match self.block_cache.get(id).await {
+                                    Ok(Some(b)) => {
                                         Ok(Some(b))
                                     }
-                                    None => {
-                                        self.block_cache.insert(*id, block.clone());
+                                    Ok(None) => {
+                                        self.block_cache.insert(*id, block.clone()).await;
                                         Ok(Some(block))
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Error getting block from cache {:?}", e);
+                                        Err(GetError::BlockLoadError(e.into()))
                                     }
                                 }
                             }
@@ -372,12 +378,13 @@ impl ChromaError for SparseIndexManagerError {
 
 #[derive(Clone)]
 pub(super) struct SparseIndexManager {
-    cache: Cache<Uuid, SparseIndex>,
+    cache: Arc<dyn Cache<Uuid, SparseIndex>>,
     storage: Storage,
 }
 
 impl SparseIndexManager {
-    pub fn new(storage: Storage, cache: Cache<Uuid, SparseIndex>) -> Self {
+    pub fn new(storage: Storage, cache: Box<dyn Cache<Uuid, SparseIndex>>) -> Self {
+        let cache: Arc<dyn Cache<Uuid, SparseIndex>> = cache.into();
         Self { cache, storage }
     }
 
@@ -385,7 +392,7 @@ impl SparseIndexManager {
         &self,
         id: &Uuid,
     ) -> Result<Option<SparseIndex>, SparseIndexManagerError> {
-        let index = self.cache.get(id);
+        let index = self.cache.get(id).await.ok().flatten();
         match index {
             Some(index) => Ok(Some(index)),
             None => {
@@ -423,7 +430,7 @@ impl SparseIndexManager {
                                 let index = SparseIndex::from_block::<K>(promoted_block);
                                 match index {
                                     Ok(index) => {
-                                        self.cache.insert(*id, index.clone());
+                                        self.cache.insert(*id, index.clone()).await;
                                         Ok(Some(index))
                                     }
                                     Err(e) => {

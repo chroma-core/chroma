@@ -229,7 +229,7 @@ mod test {
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
         provider::BlockfileProvider,
     };
-    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue,
@@ -242,8 +242,8 @@ mod test {
     async fn test_merge_and_hydrate() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(
             storage,
             TEST_MAX_BLOCK_SIZE_BYTES,

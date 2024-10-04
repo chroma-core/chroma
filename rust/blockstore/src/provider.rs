@@ -11,7 +11,7 @@ use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
 use async_trait::async_trait;
-use chroma_cache::cache::Cache;
+use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -47,8 +47,8 @@ impl BlockfileProvider {
     pub fn new_arrow(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Cache<Uuid, Block>,
-        sparse_index_cache: Cache<Uuid, SparseIndex>,
+        block_cache: Box<dyn Cache<Uuid, Block>>,
+        sparse_index_cache: Box<dyn Cache<Uuid, SparseIndex>>,
     ) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
             storage,
@@ -89,11 +89,14 @@ impl BlockfileProvider {
         }
     }
 
-    pub fn clear(&self) {
+    pub async fn clear(&self) -> Result<(), Box<dyn ChromaError>> {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => provider.clear(),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.clear(),
-        }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider.clear().await.map_err(|e| Box::new(e) as _)?
+            }
+        };
+        Ok(())
     }
 
     pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
@@ -119,7 +122,7 @@ impl Configurable<(BlockfileProviderConfig, Storage)> for BlockfileProvider {
             BlockfileProviderConfig::Arrow(blockfile_config) => {
                 Ok(BlockfileProvider::ArrowBlockfileProvider(
                     ArrowBlockfileProvider::try_from_config(&(
-                        blockfile_config.clone(),
+                        *blockfile_config.clone(),
                         storage.clone(),
                     ))
                     .await?,

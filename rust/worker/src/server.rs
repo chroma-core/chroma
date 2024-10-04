@@ -648,7 +648,8 @@ mod tests {
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
-    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
+    #[cfg(test)]
+    use chroma_cache::new_cache_for_test;
     use chroma_proto::debug_client::DebugClient;
     use chroma_storage::{local::LocalStorage, Storage};
     use tempfile::tempdir;
@@ -659,9 +660,9 @@ mod tests {
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let hnsw_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_index_cache = new_cache_for_test();
         let port = random_port::PortPicker::new().pick().unwrap();
         let mut server = WorkerServer {
             dispatcher: None,

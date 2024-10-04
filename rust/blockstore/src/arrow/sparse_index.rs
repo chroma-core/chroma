@@ -1,5 +1,4 @@
 use crate::key::{CompositeKey, KeyWrapper};
-use chroma_cache::cache::Cacheable;
 use chroma_error::ChromaError;
 use core::panic;
 use parking_lot::Mutex;
@@ -83,8 +82,6 @@ impl SparseIndexData {
         self.forward.len()
     }
 }
-
-impl Cacheable for SparseIndex {}
 
 impl SparseIndex {
     pub(super) fn new(id: Uuid) -> Self {
@@ -557,6 +554,12 @@ impl Debug for SparseIndex {
             .field("id", &self.id)
             .field("data", &data)
             .finish()
+    }
+}
+
+impl chroma_cache::Weighted for SparseIndex {
+    fn weight(&self) -> usize {
+        1
     }
 }
 

@@ -307,7 +307,9 @@ impl Handler<ScheduleMessage> for CompactionManager {
         self.compact_batch(&mut ids).await;
 
         self.hnsw_index_provider.purge_by_id(&ids).await;
-        self.blockfile_provider.clear();
+        if let Err(err) = self.blockfile_provider.clear().await {
+            tracing::error!("Failed to clear blockfile provider: {:?}", err);
+        }
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler
@@ -336,7 +338,7 @@ mod tests {
     use crate::log::log::InternalLogRecord;
     use crate::sysdb::test_sysdb::TestSysDb;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
-    use chroma_cache::{cache::Cache, config::CacheConfig, config::UnboundedCacheConfig};
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::local::LocalStorage;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
@@ -523,9 +525,9 @@ mod tests {
         // Set memberlist
         scheduler.set_memberlist(vec![my_member_id.clone()]);
 
-        let block_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let sparse_index_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
-        let hnsw_cache = Cache::new(&CacheConfig::Unbounded(UnboundedCacheConfig {}));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         let mut manager = CompactionManager::new(
             scheduler,
             log,

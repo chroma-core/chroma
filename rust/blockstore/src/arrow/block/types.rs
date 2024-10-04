@@ -1,4 +1,6 @@
-use super::delta::BlockDelta;
+use std::cmp::Ordering::{Equal, Greater, Less};
+use std::io::SeekFrom;
+
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
 use arrow::array::ArrayData;
 use arrow::buffer::Buffer;
@@ -9,14 +11,64 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
-use chroma_cache::cache::Cacheable;
 use chroma_error::{ChromaError, ErrorCodes};
-use std::cmp::Ordering::{Equal, Greater, Less};
-use std::io::SeekFrom;
+use serde::de::Error as DeError;
+use serde::ser::Error as SerError;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::delta::BlockDelta;
+
 const ARROW_ALIGNMENT: usize = 64;
+
+/// A RecordBatchWrapper looks like a record batch, but also implements serde's Serialize and
+/// Deserialize.
+#[derive(Clone, Debug)]
+#[repr(transparent)]
+pub struct RecordBatchWrapper(pub RecordBatch);
+
+impl std::ops::Deref for RecordBatchWrapper {
+    type Target = RecordBatch;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for RecordBatchWrapper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<RecordBatch> for RecordBatchWrapper {
+    fn from(rb: RecordBatch) -> Self {
+        Self(rb)
+    }
+}
+
+impl Serialize for RecordBatchWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let data = Block::record_batch_to_bytes(self).map_err(S::Error::custom)?;
+        serializer.serialize_bytes(&data)
+    }
+}
+
+impl<'de> Deserialize<'de> for RecordBatchWrapper {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let data = Vec::<u8>::deserialize(deserializer)?;
+        let reader = std::io::Cursor::new(data);
+        let rb = Block::load_record_batch(reader, false).map_err(D::Error::custom)?;
+        Ok(RecordBatchWrapper(rb))
+    }
+}
 
 /// A block in a blockfile. A block is a sorted collection of data that is immutable once it has been committed.
 /// Blocks are the fundamental unit of storage in the blockstore and are used to store data in the form of (key, value) pairs.
@@ -29,19 +81,18 @@ const ARROW_ALIGNMENT: usize = 64;
 /// A Block holds BlockData via its Inner. Conceptually, the BlockData being loaded into memory is an optimization. The Block interface
 /// could also support out of core operations where the BlockData is loaded from disk on demand. Currently we force operations to be in-core
 /// but could expand to out-of-core in the future.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Block {
     // The data is stored in an Arrow record batch with the column schema (prefix, key, value).
     // These are stored in sorted order by prefix and key for efficient lookups.
-    pub data: RecordBatch,
+    pub data: RecordBatchWrapper,
     pub id: Uuid,
 }
-
-impl Cacheable for Block {}
 
 impl Block {
     /// Create a concrete block from an id and the underlying record batch of data
     pub fn from_record_batch(id: Uuid, data: RecordBatch) -> Self {
+        let data = data.into();
         Self { id, data }
     }
 
@@ -369,17 +420,22 @@ impl Block {
 
     /// Convert the block to bytes in Arrow IPC format
     pub fn to_bytes(&self) -> Result<Vec<u8>, BlockToBytesError> {
+        Self::record_batch_to_bytes(&self.data)
+    }
+
+    /// Convert the record batch to bytes in Arrow IPC format
+    fn record_batch_to_bytes(rb: &RecordBatch) -> Result<Vec<u8>, BlockToBytesError> {
         let mut bytes = Vec::new();
         // Scope the writer so that it is dropped before we return the bytes
         {
-            let mut writer =
-                match arrow::ipc::writer::FileWriter::try_new(&mut bytes, &self.data.schema()) {
-                    Ok(writer) => writer,
-                    Err(e) => {
-                        return Err(BlockToBytesError::ArrowError(e));
-                    }
-                };
-            match writer.write(&self.data) {
+            let mut writer = match arrow::ipc::writer::FileWriter::try_new(&mut bytes, &rb.schema())
+            {
+                Ok(writer) => writer,
+                Err(e) => {
+                    return Err(BlockToBytesError::ArrowError(e));
+                }
+            };
+            match writer.write(rb) {
                 Ok(_) => {}
                 Err(e) => {
                     return Err(BlockToBytesError::ArrowError(e));
@@ -438,7 +494,16 @@ impl Block {
         Self::load_with_reader(reader, id, validate)
     }
 
-    fn load_with_reader<R>(mut reader: R, id: Uuid, validate: bool) -> Result<Self, BlockLoadError>
+    fn load_with_reader<R>(reader: R, id: Uuid, validate: bool) -> Result<Self, BlockLoadError>
+    where
+        R: std::io::Read + std::io::Seek,
+    {
+        let batch = Self::load_record_batch(reader, validate)?;
+        // TODO: how to store / hydrate id?
+        Ok(Self::from_record_batch(id, batch))
+    }
+
+    fn load_record_batch<R>(mut reader: R, validate: bool) -> Result<RecordBatch, BlockLoadError>
     where
         R: std::io::Read + std::io::Seek,
     {
@@ -459,9 +524,13 @@ impl Block {
                 return Err(BlockLoadError::NoRecordBatches);
             }
         };
+        Ok(batch)
+    }
+}
 
-        // TODO: how to store / hydrate id?
-        Ok(Self::from_record_batch(id, batch))
+impl chroma_cache::Weighted for Block {
+    fn weight(&self) -> usize {
+        1
     }
 }
 
@@ -550,6 +619,10 @@ pub enum BlockLoadError {
     ArrowLayoutVerificationError(#[from] ArrowLayoutVerificationError),
     #[error("No record batches in IPC file")]
     NoRecordBatches,
+    #[error(transparent)]
+    BlockToBytesError(#[from] crate::arrow::block::types::BlockToBytesError),
+    #[error(transparent)]
+    CacheError(#[from] chroma_cache::CacheError),
 }
 
 impl ChromaError for BlockLoadError {
@@ -559,6 +632,8 @@ impl ChromaError for BlockLoadError {
             BlockLoadError::ArrowError(_) => ErrorCodes::Internal,
             BlockLoadError::ArrowLayoutVerificationError(_) => ErrorCodes::Internal,
             BlockLoadError::NoRecordBatches => ErrorCodes::Internal,
+            BlockLoadError::BlockToBytesError(_) => ErrorCodes::Internal,
+            BlockLoadError::CacheError(_) => ErrorCodes::Internal,
         }
     }
 }

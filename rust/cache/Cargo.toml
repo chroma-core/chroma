@@ -7,12 +7,18 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-foyer = "0.8"
+clap = { version = "4", features = ["derive"] }
+foyer = "0.10"
+anyhow = "1.0"
+# TODO(rescrv):  Deprecated.  Find a suitable replacement for such things.
+serde_yaml = "0.9"
 
 thiserror = { workspace = true }
 serde = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
