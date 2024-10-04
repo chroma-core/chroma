@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::{
+use super::{
     types::{Record, RecordDataset},
     util::get_or_populate_cached_dataset_file,
 };

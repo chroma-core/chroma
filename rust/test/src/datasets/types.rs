@@ -13,7 +13,7 @@ use tantivy::{
 use tokio::io::AsyncWriteExt;
 use tokio_stream::{Stream, StreamExt};
 
-use crate::util::{get_dir_for_persistent_dataset_files, get_or_populate_cached_dataset_file};
+use super::util::{get_dir_for_persistent_dataset_files, get_or_populate_cached_dataset_file};
 
 #[derive(Debug, Clone)]
 pub struct Record {

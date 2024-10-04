@@ -8,7 +8,7 @@ use tokio::{fs::File, io::AsyncBufReadExt};
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 
-use crate::{
+use super::{
     types::{Record, RecordDataset},
     util::get_or_populate_cached_dataset_file,
 };
