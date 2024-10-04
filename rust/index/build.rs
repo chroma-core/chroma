@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flag("-std=c++11")
         .flag("-Ofast")
         .flag("-DHAVE_CXX0X")
-        .flag("-fpic")
+        .flag("-fPIC")
         .flag("-ftree-vectorize")
         .flag("-w")
         .compile("bindings");

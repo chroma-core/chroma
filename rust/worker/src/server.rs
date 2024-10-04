@@ -649,8 +649,8 @@ mod tests {
     use crate::system;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     #[cfg(test)]
-    use chroma_cache::new_cache_for_test;
     #[cfg(debug_assertions)]
+    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_proto::debug_client::DebugClient;
     use chroma_storage::{local::LocalStorage, Storage};
     use tempfile::tempdir;
@@ -664,7 +664,7 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
-        let hnsw_index_cache = new_cache_for_test();
+        let hnsw_index_cache = new_non_persistent_cache_for_test();
         let port = random_port::PortPicker::new().pick().unwrap();
         let mut server = WorkerServer {
             dispatcher: None,

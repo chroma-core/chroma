@@ -11,7 +11,7 @@ use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
 use async_trait::async_trait;
-use chroma_cache::Cache;
+use chroma_cache::PersistentCache;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -47,8 +47,8 @@ impl BlockfileProvider {
     pub fn new_arrow(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Box<dyn Cache<Uuid, Block>>,
-        sparse_index_cache: Box<dyn Cache<Uuid, SparseIndex>>,
+        block_cache: Box<dyn PersistentCache<Uuid, Block>>,
+        sparse_index_cache: Box<dyn PersistentCache<Uuid, SparseIndex>>,
     ) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
             storage,

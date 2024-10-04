@@ -338,7 +338,7 @@ mod tests {
     use crate::log::log::InternalLogRecord;
     use crate::sysdb::test_sysdb::TestSysDb;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
-    use chroma_cache::new_cache_for_test;
+    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_storage::local::LocalStorage;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
@@ -527,7 +527,7 @@ mod tests {
 
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
-        let hnsw_cache = new_cache_for_test();
+        let hnsw_cache = new_non_persistent_cache_for_test();
         let mut manager = CompactionManager::new(
             scheduler,
             log,

@@ -82,8 +82,8 @@ const BLOCK_SIZE: usize = 8 * 1024 * 1024; // 8MB
 
 fn create_blockfile_provider(storage_dir: &str) -> BlockfileProvider {
     let storage = Storage::Local(LocalStorage::new(storage_dir));
-    let block_cache = UnboundedCacheConfig {}.build();
-    let sparse_index_cache = UnboundedCacheConfig {}.build();
+    let block_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
+    let sparse_index_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
     let arrow_blockfile_provider =
         ArrowBlockfileProvider::new(storage.clone(), BLOCK_SIZE, block_cache, sparse_index_cache);
     BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)

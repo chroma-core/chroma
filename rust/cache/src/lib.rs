@@ -82,7 +82,8 @@ pub trait Weighted {
     fn weight(&self) -> usize;
 }
 
-/// Create a new cache from the provided config.
+/// Create a new cache from the provided config.  This is solely for caches that cannot implement
+/// the persistent cache trait.  Attempts to construct a disk-based cache will return an error.
 pub async fn from_config<K, V>(
     config: &CacheConfig,
 ) -> Result<Box<dyn Cache<K, V>>, Box<dyn ChromaError>>
@@ -102,8 +103,35 @@ where
     }
 }
 
+/// Create a new cache from the provided config.
+pub async fn from_config_persistent<K, V>(
+    config: &CacheConfig,
+) -> Result<Box<dyn PersistentCache<K, V>>, Box<dyn ChromaError>>
+where
+    K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
+    V: Clone + Send + Sync + StorageValue + Weighted + 'static,
+{
+    match config {
+        CacheConfig::Unbounded(unbounded_config) => {
+            Ok(Box::new(UnboundedCache::new(unbounded_config)))
+        }
+        CacheConfig::Memory(c) => Ok(c.build_memory_persistent().await?),
+        CacheConfig::Disk(c) => Ok(c.build_hybrid().await? as _),
+        CacheConfig::Nop => Ok(Box::new(NopCache)),
+    }
+}
+
 /// Create a new cache for testing purposes.
-pub fn new_cache_for_test<K, V>() -> Box<dyn Cache<K, V>>
+pub fn new_cache_for_test<K, V>() -> Box<dyn PersistentCache<K, V>>
+where
+    K: Send + Sync + Clone + Eq + PartialEq + Hash + StorageKey + 'static,
+    V: Send + Sync + Clone + Weighted + StorageValue + 'static,
+{
+    Box::new(UnboundedCache::new(&UnboundedCacheConfig::default()))
+}
+
+/// Create a new cache for testing purposes.
+pub fn new_non_persistent_cache_for_test<K, V>() -> Box<dyn Cache<K, V>>
 where
     K: Send + Sync + Clone + Eq + PartialEq + Hash + 'static,
     V: Send + Sync + Clone + Weighted + 'static,
