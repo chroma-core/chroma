@@ -481,12 +481,15 @@ class SegmentAPI(ServerAPI):
             log_position=coll.log_position,
         )
 
-        where = validate_where(where) if where is not None and len(where) > 0 else None
-        where_document = (
+        if where is not None and len(where) > 0:
+            validate_where(where)
+        else:
+            where = None
+
+        if where_document is not None and len(where_document) > 0:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else None
-        )
+        else:
+            where_document = None
 
         metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
 
@@ -580,12 +583,16 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        where = validate_where(where) if where is not None and len(where) > 0 else None
-        where_document = (
+        if where is not None and len(where) > 0:
+            validate_where(where)
+        else:
+            # TODO: Do we still need empty ( {} ) where?
+            where = None
+
+        if where_document is not None and len(where_document) > 0:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else None
-        )
+        else:
+            where_document = None
 
         # You must have at least one of non-empty ids, where, or where_document.
         if (
@@ -707,12 +714,10 @@ class SegmentAPI(ServerAPI):
             )
         )
 
-        where = validate_where(where) if where is not None and len(where) > 0 else where
-        where_document = (
+        if where is not None and len(where) > 0:
+            validate_where(where)
+        if where_document is not None and len(where_document) > 0:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else where_document
-        )
 
         allowed_ids = None
 
