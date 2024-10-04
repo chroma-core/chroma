@@ -1,4 +1,4 @@
-use super::arrow::block::CachedBlock;
+use super::arrow::block::Block;
 use super::arrow::provider::ArrowBlockfileProvider;
 use super::arrow::sparse_index::SparseIndex;
 use super::arrow::types::{
@@ -47,7 +47,7 @@ impl BlockfileProvider {
     pub fn new_arrow(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Box<dyn Cache<Uuid, CachedBlock>>,
+        block_cache: Box<dyn Cache<Uuid, Block>>,
         sparse_index_cache: Box<dyn Cache<Uuid, SparseIndex>>,
     ) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(

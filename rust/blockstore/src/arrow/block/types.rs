@@ -496,6 +496,12 @@ impl Block {
     }
 }
 
+impl chroma_cache::Weighted for Block {
+    fn weight(&self) -> usize {
+        1
+    }
+}
+
 fn get_size_of_array_data(array_data: &ArrayData) -> usize {
     let mut total_size = 0;
     for buffer in array_data.buffers() {

@@ -1,5 +1,5 @@
 use super::{
-    block::{delta::BlockDelta, Block, BlockLoadError, CachedBlock},
+    block::{delta::BlockDelta, Block, BlockLoadError},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
     sparse_index::SparseIndex,
@@ -34,7 +34,7 @@ impl ArrowBlockfileProvider {
     pub fn new(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Box<dyn Cache<Uuid, CachedBlock>>,
+        block_cache: Box<dyn Cache<Uuid, Block>>,
         sparse_index_cache: Box<dyn Cache<Uuid, SparseIndex>>,
     ) -> Self {
         Self {
@@ -187,7 +187,7 @@ impl ChromaError for ForkError {
 /// is a placeholder for that.
 #[derive(Clone)]
 pub(super) struct BlockManager {
-    block_cache: Arc<dyn Cache<Uuid, CachedBlock>>,
+    block_cache: Arc<dyn Cache<Uuid, Block>>,
     storage: Storage,
     max_block_size_bytes: usize,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -197,9 +197,9 @@ impl BlockManager {
     pub(super) fn new(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Box<dyn Cache<Uuid, CachedBlock>>,
+        block_cache: Box<dyn Cache<Uuid, Block>>,
     ) -> Self {
-        let block_cache: Arc<dyn Cache<Uuid, CachedBlock>> = block_cache.into();
+        let block_cache: Arc<dyn Cache<Uuid, Block>> = block_cache.into();
         Self {
             block_cache,
             storage,
@@ -261,7 +261,7 @@ impl BlockManager {
     pub(super) async fn get(&self, id: &Uuid) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.get(id).await.ok().flatten();
         match block {
-            Some(block) => Ok(Some(Block::try_from(&block)?)),
+            Some(block) => Ok(Some(block)),
             None => async {
                 let key = format!("block/{}", id);
                 let bytes_res = self
@@ -281,10 +281,10 @@ impl BlockManager {
                                 let _guard = self.write_mutex.lock().await;
                                 match self.block_cache.get(id).await {
                                     Ok(Some(b)) => {
-                                        Ok(Some(Block::try_from(&b)?))
+                                        Ok(Some(b))
                                     }
                                     Ok(None) => {
-                                        self.block_cache.insert(*id, CachedBlock::try_from(&block).map_err(|e| GetError::BlockLoadError(e.into()))?).await;
+                                        self.block_cache.insert(*id, block.clone()).await;
                                         Ok(Some(block))
                                     }
                                     Err(e) => {
