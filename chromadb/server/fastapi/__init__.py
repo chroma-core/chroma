@@ -44,9 +44,9 @@ from chromadb.errors import (
     ChromaError,
     InvalidDimensionException,
     InvalidHTTPVersion,
+    RateLimitError,
 )
 from chromadb.quota import QuotaError
-from chromadb.rate_limiting import RateLimitError
 from chromadb.server import Server
 from chromadb.server.fastapi.types import (
     AddEmbedding,
@@ -332,9 +332,7 @@ class FastAPI(Server):
     ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
-            content={
-                "message": f"rate limit. resource: {exc.resource} quota: {exc.quota}"
-            },
+            content={"message": "Rate limit exceeded."},
         )
 
     def root(self) -> Dict[str, int]:

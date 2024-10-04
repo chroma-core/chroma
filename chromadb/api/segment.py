@@ -3,8 +3,8 @@ from chromadb.api import ServerAPI
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
-from chromadb.quota import QuotaEnforcer, Resource
-from chromadb.rate_limiting import rate_limit
+from chromadb.quota import QuotaEnforcer
+from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
@@ -52,12 +52,25 @@ from chromadb.telemetry.product.events import (
 )
 
 import chromadb.types as t
-from typing import Optional, Sequence, Generator, List, cast, Set
+from typing import (
+    Optional,
+    Sequence,
+    Generator,
+    List,
+    cast,
+    Set,
+    Any,
+    Callable,
+    TypeVar,
+)
 from overrides import override
 from uuid import UUID, uuid4
+from functools import wraps
 import time
 import logging
 import re
+
+T = TypeVar("T", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +96,15 @@ def check_index_name(index_name: str) -> None:
         raise ValueError(msg)
 
 
+def rate_limit(func: T) -> T:
+    @wraps(func)
+    def wrapper(*args, **kwargs):  # type: ignore
+        self = args[0]
+        return self.rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
+
+    return wrapper  # type: ignore
+
+
 class SegmentAPI(ServerAPI):
     """API implementation utilizing the new segment-based internal architecture"""
 
@@ -104,6 +126,9 @@ class SegmentAPI(ServerAPI):
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
+
+        if self._settings.chroma_rate_limit_enforcer_impl:
+            self.rate_limit_enforcer = self._system.require(RateLimitEnforcer)
 
     @override
     def heartbeat(self) -> int:
@@ -327,7 +352,6 @@ class SegmentAPI(ServerAPI):
             raise ValueError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
-    @rate_limit(subject="collection_id", resource=Resource.ADD_PER_MINUTE)
     @override
     def _add(
         self,
@@ -453,7 +477,6 @@ class SegmentAPI(ServerAPI):
         stop=stop_after_attempt(5),
         reraise=True,
     )
-    @rate_limit(subject="collection_id", resource=Resource.GET_PER_MINUTE)
     @override
     def _get(
         self,
@@ -673,7 +696,6 @@ class SegmentAPI(ServerAPI):
         stop=stop_after_attempt(5),
         reraise=True,
     )
-    @rate_limit(subject="collection_id", resource=Resource.QUERY_PER_MINUTE)
     @override
     def _query(
         self,
