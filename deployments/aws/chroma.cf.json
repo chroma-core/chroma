@@ -1,0 +1,247 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Create a stack that runs Chroma hosted on a single instance",
+  "Parameters": {
+    "KeyName": {
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+      "Type": "String",
+      "ConstraintDescription": "If present, must be the name of an existing EC2 KeyPair.",
+      "Default": ""
+    },
+    "InstanceType": {
+      "Description": "EC2 instance type",
+      "Type": "String",
+      "Default": "t3.small"
+    },
+    "ChromaVersion": {
+      "Description": "Chroma version to install",
+      "Type": "String",
+      "Default": "0.5.11"
+    },
+    "ChromaServerAuthCredentials": {
+      "Description": "Chroma authentication credentials",
+      "Type": "String",
+      "Default": ""
+    },
+    "ChromaServerAuthProvider" : {
+      "Description": "Chroma authentication provider",
+      "Type": "String",
+      "Default": "",
+      "AllowedValues": [
+        "",
+        "chromadb.auth.token_authn.TokenAuthenticationServerProvider",
+        "chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
+      ]
+    },
+    "ChromaAuthTokenTransportHeader": {
+      "Description": "Chroma authentication custom token header",
+      "Type": "String",
+      "Default": ""
+    }
+  },
+  "Conditions": {
+    "HasKeyName": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Ref": "KeyName"
+            },
+            ""
+          ]
+        }
+      ]
+    }
+  },
+  "Resources": {
+    "ChromaInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {
+          "Fn::FindInMap": [
+            "Region2AMI",
+            {
+              "Ref": "AWS::Region"
+            },
+            "AMI"
+          ]
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash\n",
+                "amazon-linux-extras install docker -y\n",
+                "usermod -a -G docker ec2-user\n",
+                "curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose\n",
+                "chmod +x /usr/local/bin/docker-compose\n",
+                "ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose\n",
+                "systemctl enable docker\n",
+                "systemctl start docker\n",
+                "\n",
+                "mkdir -p /home/ec2-user/config\n",
+                "curl -o /home/ec2-user/docker-compose.yml https://s3.amazonaws.com/public.trychroma.com/cloudformation/assets/docker-compose.yml\n",
+                {
+                  "Fn::Sub": "sed -i 's/CHROMA_VERSION/${ChromaVersion}/g' /home/ec2-user/docker-compose.yml\n"
+                },
+                "chown ec2-user:ec2-user /home/ec2-user/docker-compose.yml\n",
+                "# Create .env file\n",
+                {
+                  "Fn::Sub": "echo 'CHROMA_SERVER_AUTHN_CREDENTIALS=${ChromaServerAuthCredentials}' >> /home/ec2-user/.env\n"
+                },
+                {
+                  "Fn::Sub": "echo 'CHROMA_SERVER_AUTHN_PROVIDER=${ChromaServerAuthProvider}' >> /home/ec2-user/.env\n"
+                },
+                {
+                  "Fn::Sub": "echo 'CHROMA_AUTH_TOKEN_TRANSPORT_HEADER=${ChromaAuthTokenTransportHeader}' >> /home/ec2-user/.env\n"
+                },
+                "chown ec2-user:ec2-user /home/ec2-user/.env\n",
+                "cd /home/ec2-user\n",
+                "sudo -u ec2-user docker-compose up -d\n"
+              ]
+            ]
+          }
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "ChromaInstanceSecurityGroup"
+          }
+        ],
+        "KeyName": {
+          "Fn::If": [
+            "HasKeyName",
+            {
+              "Ref": "KeyName"
+            },
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": {
+              "Fn::FindInMap": [
+                "Region2AMI",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "RootDeviceName"
+              ]
+            },
+            "Ebs": {
+              "VolumeSize": 24
+            }
+          }
+        ]
+      }
+    },
+    "ChromaInstanceSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Chroma Instance Security Group",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "22",
+            "ToPort": "22",
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "8000",
+            "ToPort": "8000",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ServerIp": {
+      "Description": "IP address of the Chroma server",
+      "Value": {
+        "Fn::GetAtt": [
+          "ChromaInstance",
+          "PublicIp"
+        ]
+      }
+    }
+  },
+  "Mappings": {
+    "Region2AMI": {
+      "ap-south-1": {
+        "AMI": "ami-0700df939e7249d03",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "eu-north-1": {
+        "AMI": "ami-040bf52c6d056e2e8",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "eu-west-3": {
+        "AMI": "ami-04e3030019c3f0f44",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "eu-west-2": {
+        "AMI": "ami-0d729d2846a86a9e7",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "eu-west-1": {
+        "AMI": "ami-0ea0f26a6d50850c5",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "ap-northeast-3": {
+        "AMI": "ami-0f8a30a8b49a72ed4",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "ap-northeast-2": {
+        "AMI": "ami-00a5b84c0873f8c3f",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "ap-northeast-1": {
+        "AMI": "ami-072bfb8ae2c884cc4",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "ca-central-1": {
+        "AMI": "ami-0843f7c45354d48b5",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "sa-east-1": {
+        "AMI": "ami-0555c5c3b52744258",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "ap-southeast-1": {
+        "AMI": "ami-05bf0125f616dc488",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "ap-southeast-2": {
+        "AMI": "ami-06fdec94cc3067ad1",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "eu-central-1": {
+        "AMI": "ami-0e2031728ef69a466",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "us-east-1": {
+        "AMI": "ami-026b57f3c383c2eec",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "us-east-2": {
+        "AMI": "ami-089a545a9ed9893b6",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "us-west-1": {
+        "AMI": "ami-0e0ece251c1638797",
+        "RootDeviceName": "/dev/xvda"
+      },
+      "us-west-2": {
+        "AMI": "ami-0b71e9be6a79aec29",
+        "RootDeviceName": "/dev/xvda"
+      }
+    }
+  }
+}

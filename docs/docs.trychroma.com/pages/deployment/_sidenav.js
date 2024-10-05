@@ -9,6 +9,12 @@ export const items = [
     //     ]
     // },
     {
+        title: 'Local Development',
+        links: [
+            { href: '/deployment/docker', children: 'Docker' },
+        ]
+    },
+    {
         title: 'Cloud Providers',
         links: [
           { href: '/deployment/aws', children: 'AWS' },

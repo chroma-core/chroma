@@ -4,6 +4,13 @@ title: ☁️ Deployment
 
 ***
 
+### Local Environment
+
+Chroma is easy to set up in local development environments. Use these guides to run Chroma locally for testing or development, ensuring your system is ready for production deployment.
+
+* 🐳  [Docker](/deployment/docker)
+* 🚧 *More Coming Soon*
+
 ### Cloud Providers
 
 Chroma single-node is easy to deploy to a variety of cloud providers. Please use these guides to get started.
