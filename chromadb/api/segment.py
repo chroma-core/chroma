@@ -552,7 +552,7 @@ class SegmentAPI(ServerAPI):
 
         return GetResult(
             ids=[r["id"] for r in records],
-            embeddings=[r["embedding"] for r in vectors]
+            embeddings=[r["embedding"] if r is not None else None for r in vectors]
             if "embeddings" in include
             else None,
             metadatas=_clean_metadatas(metadatas)

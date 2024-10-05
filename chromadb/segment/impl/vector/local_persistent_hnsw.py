@@ -383,6 +383,12 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         hnsw_labels = []
 
         results: List[Optional[VectorEmbeddingRecord]] = []
+
+        
+        if len(target_ids) > 0:
+        # initializes the results list, making sure it is large enough to hold any value of id_to_index[id]
+            results: List[Optional[VectorEmbeddingRecord]] = [None] * len(target_ids)  # Fill with None, assuming that VectorEmbeddingRecord can be replaced by None
+
         id_to_index: Dict[str, int] = {}
         for i, id in enumerate(target_ids):
             if id in ids_bf:
@@ -401,9 +407,13 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
             for label, vector in zip(hnsw_labels, vectors):
                 id = self._label_to_id[label]
-                results[id_to_index[id]] = VectorEmbeddingRecord(
-                    id=id, embedding=vector
-                )
+                if id_to_index[id] < len(results):  # 确保索引在范围内
+                    results[id_to_index[id]] = VectorEmbeddingRecord(
+                        id=id, embedding=vector
+                    )
+                else:
+                    # 这里可以添加日志或异常处理，如果id_to_index[id]超出预期范围
+                    pass
 
         return results  # type: ignore ## Python can't cast List with Optional to List with VectorEmbeddingRecord
 
