@@ -1279,8 +1279,12 @@ dependencies = [
  "async-tempfile",
  "bincode",
  "bloom",
+ "chroma-blockstore",
+ "chroma-cache",
+ "chroma-storage",
  "chroma-types",
  "clap",
+ "criterion",
  "dirs",
  "futures",
  "rand",
@@ -1288,9 +1292,11 @@ dependencies = [
  "serde",
  "serde_json",
  "tantivy",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "uuid",
 ]
 
 [[package]]
