@@ -98,9 +98,9 @@ def check_index_name(index_name: str) -> None:
 
 def rate_limit(func: T) -> T:
     @wraps(func)
-    def wrapper(*args, **kwargs):  # type: ignore
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         self = args[0]
-        return self.rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
+        return self._rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
 
     return wrapper  # type: ignore
 
@@ -126,9 +126,7 @@ class SegmentAPI(ServerAPI):
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
-
-        if self._settings.chroma_rate_limit_enforcer_impl:
-            self.rate_limit_enforcer = self._system.require(RateLimitEnforcer)
+        self._rate_limit_enforcer = self._system.require(RateLimitEnforcer)
 
     @override
     def heartbeat(self) -> int:

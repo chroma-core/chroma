@@ -10,7 +10,7 @@ T = TypeVar("T", bound=Callable[..., Any])
 
 class SimpleRateLimitEnforcer(RateLimitEnforcer):
     """
-    A naive implementation of the rate limit enforcer that allows all requests.
+    A naive implementation of a rate limit enforcer that allows all requests.
     """
 
     def __init__(self, system: System) -> None:
@@ -19,7 +19,7 @@ class SimpleRateLimitEnforcer(RateLimitEnforcer):
     @override
     def rate_limit(self, func: T) -> T:
         @wraps(func)
-        def wrapper(*args, **kwargs) -> Any:  # type: ignore
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             return func(*args, **kwargs)
 
         return wrapper  # type: ignore

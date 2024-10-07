@@ -237,7 +237,10 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
-    chroma_rate_limit_enforcer_impl: Optional[str] = None
+
+    chroma_rate_limit_enforcer_impl: str = (
+        "chromadb.rate_limit.simple_rate_limit.SimpleRateLimitEnforcer"
+    )
 
     # ==========
     # gRPC service config
