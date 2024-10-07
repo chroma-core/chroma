@@ -6167,7 +6167,6 @@ dependencies = [
  "chroma-error",
  "chroma-index",
  "chroma-storage",
- "chroma-test",
  "chroma-types",
  "criterion",
  "figment",
