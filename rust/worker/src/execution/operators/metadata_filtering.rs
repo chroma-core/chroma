@@ -44,16 +44,16 @@ use tracing::{trace, Instrument, Span};
 /// - In the output, `log_mask` should be a subset of `offset_ids`
 
 #[derive(Debug)]
-pub(crate) struct MetadataFilteringOperator {}
+pub struct MetadataFilteringOperator {}
 
 impl MetadataFilteringOperator {
-    pub(crate) fn new() -> Box<Self> {
+    pub fn new() -> Box<Self> {
         Box::new(MetadataFilteringOperator {})
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct MetadataFilteringInput {
+pub struct MetadataFilteringInput {
     blockfile_provider: BlockfileProvider,
     record_segment: Segment,
     metadata_segment: Segment,
@@ -66,7 +66,7 @@ pub(crate) struct MetadataFilteringInput {
 
 impl MetadataFilteringInput {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub fn new(
         blockfile_provider: BlockfileProvider,
         record_segment: Segment,
         metadata_segment: Segment,
@@ -90,13 +90,13 @@ impl MetadataFilteringInput {
 }
 
 #[derive(Debug)]
-pub(crate) struct MetadataFilteringOutput {
-    pub(crate) log_records: Chunk<LogRecord>,
-    pub(crate) offset_ids: RoaringBitmap,
+pub struct MetadataFilteringOutput {
+    pub log_records: Chunk<LogRecord>,
+    pub offset_ids: RoaringBitmap,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum MetadataFilteringError {
+pub enum MetadataFilteringError {
     #[error("Error creating record segment reader {0}")]
     RecordSegmentReaderCreationError(#[from] RecordSegmentReaderCreationError),
     #[error("Error materializing logs {0}")]

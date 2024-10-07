@@ -6,7 +6,7 @@ use std::{fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(crate) enum OperatorType {
+pub enum OperatorType {
     IO,
     Other,
 }
@@ -14,7 +14,7 @@ pub(crate) enum OperatorType {
 /// An operator takes a generic input and returns a generic output.
 /// It is a definition of a function.
 #[async_trait]
-pub(super) trait Operator<I, O>: Send + Sync + Debug
+pub trait Operator<I, O>: Send + Sync + Debug
 where
     I: Send + Sync,
     O: Send + Sync,

@@ -63,7 +63,7 @@ chroma-distance = { workspace = true }
 random-port = "0.1.1"
 serial_test = "3.1.1"
 
-"rand" = { workspace = true }
+rand = { workspace = true }
 rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
 shuttle = { workspace = true }

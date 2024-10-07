@@ -18,6 +18,7 @@ async-compression = { version = "0.4.12", features = [
 bincode = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
+indicatif = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -37,3 +38,4 @@ chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-types = { workspace = true }
+worker = { workspace = true }

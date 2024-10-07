@@ -1,6 +1,6 @@
-use std::{fmt::Debug, future::Future};
+use std::future::Future;
 
-use criterion::{BenchmarkId, Criterion};
+use criterion::Criterion;
 use tokio::runtime::Runtime;
 
 pub fn tokio_multi_thread() -> Runtime {
@@ -10,32 +10,18 @@ pub fn tokio_multi_thread() -> Runtime {
         .expect("Tokio runtime should be set up correctly.")
 }
 
-pub fn bench_group<'t, Arg, Fut>(
+pub fn bench<'t, Arg, Fut>(
     name: &'t str,
     criterion: &'t mut Criterion,
     runtime: &'t Runtime,
-    inputs: &'t [Arg],
-    routine: impl Fn(&'t Arg) -> Fut,
+    setup: impl Fn() -> Arg,
+    routine: impl Fn(Arg) -> Fut,
 ) where
-    Arg: Clone + Debug,
     Fut: Future<Output = ()>,
 {
-    let mut input_cycle = inputs.iter().cycle();
-    let mut group = criterion.benchmark_group(name);
-    group.throughput(criterion::Throughput::Elements(1));
-    group.bench_function(
-        BenchmarkId::from_parameter(format!("{:#?}", inputs)),
-        |bencher| {
-            bencher.to_async(runtime).iter_batched(
-                || {
-                    input_cycle
-                        .next()
-                        .expect("Cycled inputs should be endless.")
-                },
-                &routine,
-                criterion::BatchSize::SmallInput,
-            );
-        },
-    );
-    group.finish();
+    criterion.bench_function(name, |bencher| {
+        bencher
+            .to_async(runtime)
+            .iter_batched(&setup, &routine, criterion::BatchSize::SmallInput);
+    });
 }

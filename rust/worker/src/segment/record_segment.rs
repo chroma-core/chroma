@@ -19,7 +19,7 @@ const OFFSET_ID_TO_DATA: &str = "offset_id_to_data";
 const MAX_OFFSET_ID: &str = "max_offset_id";
 
 #[derive(Clone)]
-pub(crate) struct RecordSegmentWriter {
+pub struct RecordSegmentWriter {
     // These are Option<> so that we can take() them when we commit
     user_id_to_id: Option<BlockfileWriter>,
     id_to_user_id: Option<BlockfileWriter>,
@@ -91,7 +91,7 @@ impl RecordSegmentWriter {
         Ok(())
     }
 
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, RecordSegmentWriterCreationError> {
@@ -586,7 +586,7 @@ impl SegmentFlusher for RecordSegmentFlusher {
 }
 
 #[derive(Clone)]
-pub(crate) struct RecordSegmentReader<'me> {
+pub struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
