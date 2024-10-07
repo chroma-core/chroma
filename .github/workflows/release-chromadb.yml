@@ -239,7 +239,8 @@ jobs:
           artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
           allowUpdates: true
           removeArtifacts: true
-          prerelease: true
+          prerelease: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
+          makeLatest: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
 
   release-docs:
     name: Deploy docs to Vercel

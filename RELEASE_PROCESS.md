@@ -17,4 +17,4 @@ git tag A.B.C <SHA>
 ```
 git push origin A.B.C
 ```
-6. On the right panel on Github, click on "Releases", and the new release should appear first. Edit it, and mark it as "latest".
+6. On the right panel on Github, click on "Releases", and the new release should appear first. Make sure it is marked as "latest".
