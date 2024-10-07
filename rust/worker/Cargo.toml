@@ -70,3 +70,9 @@ shuttle = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 criterion = { workspace = true }
+
+chroma-test = { workspace = true }
+
+[[bench]]
+name = "metadata_filtering"
+harness = false

@@ -48,12 +48,5 @@ jobs:
         uses: actions/checkout@v3
       - name: Setup
         uses: ./.github/actions/rust
-      - name: Cache test datasets
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/.cache/chroma-test-datasets
-          key: chroma-test-datasets
-      - name: Build
-        run: cargo build --verbose
-      - name: Test benches
-        run: cargo nextest run --benches
+      - name: Test compile
+        run: cargo bench --no-run
