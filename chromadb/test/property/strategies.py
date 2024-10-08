@@ -554,10 +554,7 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     # need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $in and $nin
     legal_ops: List[Optional[str]]
-    if not NOT_CLUSTER_ONLY:
-        legal_ops = [None, "$eq"]
-    else:
-        legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
+    legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
 
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
@@ -603,10 +600,7 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     # This is hacky, but the distributed system does not support $not_contains
     # so we need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $not_contains
-    if not NOT_CLUSTER_ONLY:
-        op = draw(st.sampled_from(["$contains"]))
-    else:
-        op = draw(st.sampled_from(["$contains", "$not_contains"]))
+    op = draw(st.sampled_from(["$contains", "$not_contains"]))
 
     if op == "$contains":
         return {"$contains": word}
