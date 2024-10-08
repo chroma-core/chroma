@@ -642,17 +642,23 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    #[cfg(debug_assertions)]
     use crate::execution::dispatcher;
+    #[cfg(debug_assertions)]
     use crate::log::log::InMemoryLog;
+    #[cfg(debug_assertions)]
     use crate::sysdb::test_sysdb::TestSysDb;
+    #[cfg(debug_assertions)]
     use crate::system;
+    #[cfg(debug_assertions)]
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
-    #[cfg(test)]
     #[cfg(debug_assertions)]
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
+    #[cfg(debug_assertions)]
     use chroma_storage::{local::LocalStorage, Storage};
+    #[cfg(debug_assertions)]
     use tempfile::tempdir;
 
     #[tokio::test]
