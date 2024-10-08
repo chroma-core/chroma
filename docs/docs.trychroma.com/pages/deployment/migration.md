@@ -20,6 +20,21 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.5.12
+
+The operators `$ne` (not equal) and `$nin` (not in) in `where` clauses have been updated:
+* Previously: They only matched records that had the specified key. 
+* Now: They also match records that don't have the specified key at all.
+
+In other words, `$ne` and `$nin` now match the complement set of records (the exact opposite) that `$eq` (equals) and `$in` (in) would match, respectively.
+
+The `$not_contains` operator in the `where_document` clause has also been updated:
+* Previously: It only matched records that had a document field.
+* Now: It also matches records that don't have a document field at all.
+
+In other words, `$not_contains` now matches the exact opposite set of records that `$contains` would match.
+
+`RateLimitingProvider` is now deprecated and replaced by `RateLimitEnforcer`. This new interface allows you to wrap server calls with rate limiting logic. The default `SimpleRateLimitEnforcer` implementation allows all requests, but you can create custom implementations for more advanced rate limiting strategies.
 ### v0.5.11
 
 The results returned by `collection.get()` is now ordered by internal ids. Whereas previously, the results were ordered by user provided ids, although this behavior was not explicitly documented. We would like to make the change because using user provided ids may not be ideal for performance in hosted Chroma, and we hope to propagate the change to local Chroma for consistency of behavior. In general, newer documents in Chroma has larger internal ids.
