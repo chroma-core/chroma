@@ -117,8 +117,6 @@ chromaClient.heartbeat()
 
 We recommend setting the environment variable `CHROMA_CLIENT_AUTH_CREDENTIALS` instead of specifying the credentials in code.
 
-Try changing the user-password combination to be incorrect. The Chroma server will a 403 response.
-
 ### Static API Token Authentication
 
 #### Server Set-Up
