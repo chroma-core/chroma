@@ -241,6 +241,31 @@ jobs:
           removeArtifacts: true
           prerelease: true
 
+  release-cloudformation:
+    name: Release CloudFormation
+    runs-on: ubuntu-latest
+    needs: release-github  # Ensure it runs after the GitHub release
+    if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}  # Only run if tag matches
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set Version
+        run: |
+          sed -i "s/LATEST_VERSION/${{ needs.get-version.outputs.version }}/g" ./deployments/aws/chroma.cf.json
+          cat ./deployments/aws/chroma.cf.json  # Optional: output the modified file for verification
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::369178033109:role/github-action-generate-cf-template
+          aws-region: us-east-1
+
+      - name: Upload CloudFormation Template to S3
+        run: |
+          aws s3 cp ./deployments/aws/chroma.cf.json s3://public.trychroma.com/cloudformation/latest/chroma.cf.json --acl public-read
+
+
   release-docs:
     name: Deploy docs to Vercel
     runs-on: ubuntu-latest
