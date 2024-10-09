@@ -643,6 +643,8 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 #[cfg(test)]
 mod tests {
     #[cfg(debug_assertions)]
+    use super::*;
+    #[cfg(debug_assertions)]
     use crate::execution::dispatcher;
     #[cfg(debug_assertions)]
     use crate::log::log::InMemoryLog;
