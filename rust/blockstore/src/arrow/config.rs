@@ -7,7 +7,8 @@ pub const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 #[derive(Deserialize, Debug, Clone)]
 pub struct ArrowBlockfileProviderConfig {
     pub block_manager_config: BlockManagerConfig,
-    pub sparse_index_manager_config: SparseIndexManagerConfig,
+    #[serde(alias = "sparse_index_manager_config")]
+    pub root_manager_config: RootManagerConfig,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -17,6 +18,7 @@ pub struct BlockManagerConfig {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct SparseIndexManagerConfig {
-    pub sparse_index_cache_config: CacheConfig,
+pub struct RootManagerConfig {
+    #[serde(alias = "sparse_index_cache_config")]
+    pub root_cache_config: CacheConfig,
 }
