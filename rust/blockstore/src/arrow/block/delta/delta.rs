@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::storage::BlockStorage;
 use crate::{
     arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
@@ -66,9 +68,17 @@ impl BlockDelta {
         self.builder.get_size::<K>()
     }
 
+    /// Finishes the block delta and converts it into a record batch.
+    /// # Arguments
+    /// - metadata: the metadata to attach to the record batch.
+    /// # Returns
+    /// A record batch with the key value pairs in the block delta.
     #[allow(clippy::extra_unused_type_parameters)]
-    pub fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(self) -> RecordBatch {
-        self.builder.into_record_batch::<K>()
+    pub fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        self,
+        metadata: Option<HashMap<String, String>>,
+    ) -> RecordBatch {
+        self.builder.into_record_batch::<K>(metadata)
     }
 
     /// Splits the block delta into two block deltas. The split point is the last key
