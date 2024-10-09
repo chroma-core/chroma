@@ -1,7 +1,7 @@
 use super::{
     block::Block,
-    provider::{BlockManager, SparseIndexManager},
-    sparse_index::SparseIndex,
+    provider::{BlockManager, RootManager},
+    root::RootWriter,
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 use chroma_error::ChromaError;
@@ -9,25 +9,25 @@ use uuid::Uuid;
 
 pub struct ArrowBlockfileFlusher {
     block_manager: BlockManager,
-    sparse_index_manager: SparseIndexManager,
+    root_manager: RootManager,
     blocks: Vec<Block>,
-    sparse_index: SparseIndex,
+    root: RootWriter,
     id: Uuid,
 }
 
 impl ArrowBlockfileFlusher {
     pub(in crate::arrow) fn new(
         block_manager: BlockManager,
-        sparse_index_manager: SparseIndexManager,
+        root_manager: RootManager,
         blocks: Vec<Block>,
-        sparse_index: SparseIndex,
+        root: RootWriter,
         id: Uuid,
     ) -> Self {
         Self {
             block_manager,
-            sparse_index_manager,
+            root_manager,
             blocks,
-            sparse_index,
+            root,
             id,
         }
     }
@@ -36,16 +36,14 @@ impl ArrowBlockfileFlusher {
     pub(crate) async fn flush<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         self,
     ) -> Result<(), Box<dyn ChromaError>> {
-        if self.sparse_index.len() == 0 {
+        if self.root.sparse_index.len() == 0 {
             panic!("Invariant violation. Sparse index should be not empty during flush.");
         }
         // TODO: We could flush in parallel
         for block in &self.blocks {
             self.block_manager.flush(block).await?;
         }
-        self.sparse_index_manager
-            .flush::<K>(&self.sparse_index)
-            .await?;
+        self.root_manager.flush::<K>(&self.root).await?;
         Ok(())
     }
 
