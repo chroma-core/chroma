@@ -1,6 +1,6 @@
 use super::{
     block::Block,
-    sparse_index::SparseIndex,
+    sparse_index::{SparseIndexReader, SparseIndexWriter},
     types::{ArrowReadableKey, ArrowWriteableKey},
 };
 use chroma_error::ChromaError;
@@ -51,15 +51,14 @@ impl TryFrom<&str> for Version {
 
 #[derive(Debug, Clone)]
 pub(super) struct RootWriter {
-    // TODO: Replace with writer
-    pub(super) sparse_index: SparseIndex,
+    pub(super) sparse_index: SparseIndexWriter,
     // Metadata
     pub(super) id: Uuid,
     version: Version,
 }
 
 impl RootWriter {
-    pub(super) fn new(version: Version, id: Uuid, sparse_index: SparseIndex) -> Self {
+    pub(super) fn new(version: Version, id: Uuid, sparse_index: SparseIndexWriter) -> Self {
         Self {
             version,
             sparse_index,
@@ -80,8 +79,7 @@ impl RootWriter {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RootReader {
-    // TODO: Replace with reader
-    pub(super) sparse_index: SparseIndex,
+    pub(super) sparse_index: SparseIndexReader,
     // Metadata
     pub(super) id: Uuid,
     version: Version,
@@ -135,7 +133,7 @@ impl RootReader {
             (None, None) => (Version::V1, block.id),
         };
 
-        let sparse_index = match SparseIndex::from_block::<K>(block) {
+        let sparse_index = match SparseIndexReader::from_block::<K>(block) {
             Ok(sparse_index) => sparse_index,
             Err(e) => return Err(FromBlockError::UuidParseError(e)),
         };
