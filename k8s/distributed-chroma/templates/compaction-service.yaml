@@ -38,7 +38,7 @@ spec:
         {{if .Values.compactionService.cache}}
         - name: compaction-service-cache
           hostPath:
-            path: {{ .Values.queryService.cache.hostPath }}
+            path: {{ .Values.compactionService.cache.hostPath }}
             type: DirectoryOrCreate
         {{ end }}
       containers:
@@ -63,7 +63,7 @@ spec:
             {{ end }}
             {{if .Values.compactionService.cache}}
             - name: CACHE_PATH
-              value: /cache/
+              value: {{ .Values.compactionService.cache.mountPath }}
             {{ end }}
             {{ range .Values.compactionService.env }}
             - name: {{ .name }}
