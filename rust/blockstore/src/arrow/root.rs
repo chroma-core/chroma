@@ -1,17 +1,18 @@
 use super::{
-    block::{delta::BlockDelta, Block},
-    sparse_index::{SparseIndex, SparseIndexDelimiter},
-    types::ArrowWriteableKey,
+    block::Block,
+    sparse_index::SparseIndex,
+    types::{ArrowReadableKey, ArrowWriteableKey},
 };
-use crate::key::KeyWrapper;
 use chroma_error::ChromaError;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
+use thiserror::Error;
 use uuid::Uuid;
 
-const CURRENT_VERSION: Version = Version::V1_1;
+pub(super) const CURRENT_VERSION: Version = Version::V1_1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Version {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(super) enum Version {
     V1,
     V1_1,
 }
@@ -25,6 +26,7 @@ impl Display for Version {
     }
 }
 
+// TODO: TRY_FROM
 impl From<&str> for Version {
     fn from(s: &str) -> Self {
         match s {
@@ -38,68 +40,102 @@ impl From<&str> for Version {
 #[derive(Debug, Clone)]
 pub(super) struct RootWriter {
     // TODO: Replace with writer
-    sparse_index: SparseIndex,
+    pub(super) sparse_index: SparseIndex,
     // Metadata
-    id: Uuid,
-    version: Version,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct RootReader {
-    // TODO: Replace with reader
-    sparse_index: SparseIndex,
-    // Metadata
-    id: Uuid,
+    pub(super) id: Uuid,
     version: Version,
 }
 
 impl RootWriter {
-    pub(super) fn new(id: Uuid, sparse_index: SparseIndex) -> Self {
+    pub(super) fn new(version: Version, id: Uuid, sparse_index: SparseIndex) -> Self {
         Self {
-            version: CURRENT_VERSION,
+            version,
             sparse_index,
             id,
         }
     }
 
-    fn to_block<K: ArrowWriteableKey>(&self) -> Result<Block, Box<dyn ChromaError>> {
-        let data = self.sparse_index.data.lock();
-        if data.forward.is_empty() {
-            panic!("Invariant violation. No blocks in the sparse index");
-        }
-
-        // TODO: we could save the uuid not as a string to be more space efficient
-        // but given the scale is relatively small, this is fine for now
-        let delta = BlockDelta::new::<K, String>(self.id);
-        for (key, block_id) in data.forward.iter() {
-            match key {
-                SparseIndexDelimiter::Start => {
-                    delta.add("START", K::default(), block_id.to_string());
-                }
-                SparseIndexDelimiter::Key(k) => match &k.key {
-                    KeyWrapper::String(s) => {
-                        delta.add(&k.prefix, s.as_str(), block_id.to_string());
-                    }
-                    KeyWrapper::Float32(f) => {
-                        delta.add(&k.prefix, *f, block_id.to_string());
-                    }
-                    KeyWrapper::Bool(_b) => {
-                        unimplemented!();
-                        // delta.add("KEY", b, block_id.to_string().as_str());
-                    }
-                    KeyWrapper::Uint32(u) => {
-                        delta.add(&k.prefix, *u, block_id.to_string());
-                    }
-                },
-            }
-        }
-
-        let delta_id = delta.id;
+    pub(super) fn to_block<K: ArrowWriteableKey>(&self) -> Result<Block, Box<dyn ChromaError>> {
+        let delta = self.sparse_index.to_delta::<K>()?;
         let metadata = HashMap::from_iter(vec![
             ("version".to_string(), self.version.to_string()),
             ("id".to_string(), self.id.to_string()),
         ]);
         let record_batch = delta.finish::<K, String>(Some(metadata));
-        Ok(Block::from_record_batch(delta_id, record_batch))
+        Ok(Block::from_record_batch(self.id, record_batch))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RootReader {
+    // TODO: Replace with reader
+    pub(super) sparse_index: SparseIndex,
+    // Metadata
+    pub(super) id: Uuid,
+    version: Version,
+}
+
+impl chroma_cache::Weighted for RootReader {
+    fn weight(&self) -> usize {
+        1
+    }
+}
+
+#[derive(Error, Debug)]
+pub(super) enum FromBlockError {
+    #[error("Error parsing UUID: {0}")]
+    UuidParseError(#[from] uuid::Error),
+    #[error("Error parsing version: {0}")]
+    VersionParseError(#[from] std::fmt::Error),
+    #[error("Missing metadata: {0}")]
+    MissingMetadata(String),
+}
+
+impl ChromaError for FromBlockError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            FromBlockError::UuidParseError(_) => chroma_error::ErrorCodes::InvalidArgument,
+            FromBlockError::VersionParseError(_) => chroma_error::ErrorCodes::InvalidArgument,
+            FromBlockError::MissingMetadata(_) => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+impl RootReader {
+    pub(super) fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
+        block: &'block Block,
+    ) -> Result<Self, FromBlockError> {
+        // Parse metadata
+        let block_metadata = block.metadata();
+        let (version, id) = match (block_metadata.get("version"), block_metadata.get("id")) {
+            (Some(version), Some(id)) => (Version::from(version.as_str()), Uuid::parse_str(id)?),
+            (Some(_), None) => return Err(FromBlockError::MissingMetadata("id".to_string())),
+            (None, Some(_)) => {
+                return Err(FromBlockError::MissingMetadata("version".to_string()));
+            }
+            // We default to the current version in the absence of metadata for these fields for
+            // backwards compatibility
+            (None, None) => (Version::V1, block.id),
+        };
+
+        let sparse_index = match SparseIndex::from_block::<K>(block) {
+            Ok(sparse_index) => sparse_index,
+            Err(e) => return Err(FromBlockError::UuidParseError(e)),
+        };
+
+        Ok(Self {
+            version,
+            sparse_index,
+            id,
+        })
+    }
+
+    pub(super) fn fork(&self, new_id: Uuid) -> RootWriter {
+        let new_sparse_index = self.sparse_index.fork(new_id);
+        RootWriter {
+            version: self.version,
+            sparse_index: new_sparse_index,
+            id: new_id,
+        }
     }
 }

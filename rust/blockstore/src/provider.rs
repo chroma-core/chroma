@@ -1,6 +1,7 @@
+use crate::arrow::root::RootReader;
+
 use super::arrow::block::Block;
 use super::arrow::provider::ArrowBlockfileProvider;
-use super::arrow::sparse_index::SparseIndex;
 use super::arrow::types::{
     ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
 };
@@ -48,13 +49,13 @@ impl BlockfileProvider {
         storage: Storage,
         max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
-        sparse_index_cache: Box<dyn PersistentCache<Uuid, SparseIndex>>,
+        root_cache: Box<dyn PersistentCache<Uuid, RootReader>>,
     ) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
             storage,
             max_block_size_bytes,
             block_cache,
-            sparse_index_cache,
+            root_cache,
         ))
     }
 
