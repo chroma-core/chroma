@@ -120,16 +120,17 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
                 return Err(e);
             }
         };
-        let sparse_index_cache: Box<dyn Cache<_, _>> = match chroma_cache::from_config_persistent(
-            &blockfile_config.root_manager_config.root_cache_config,
-        )
-        .await
-        {
-            Ok(cache) => cache,
-            Err(e) => {
-                return Err(e);
-            }
-        };
+        let sparse_index_cache: Box<dyn PersistentCache<_, _>> =
+            match chroma_cache::from_config_persistent(
+                &blockfile_config.root_manager_config.root_cache_config,
+            )
+            .await
+            {
+                Ok(cache) => cache,
+                Err(e) => {
+                    return Err(e);
+                }
+            };
         Ok(ArrowBlockfileProvider::new(
             storage.clone(),
             blockfile_config.block_manager_config.max_block_size_bytes,

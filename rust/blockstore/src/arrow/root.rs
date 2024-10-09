@@ -4,13 +4,14 @@ use super::{
     types::{ArrowReadableKey, ArrowWriteableKey},
 };
 use chroma_error::ChromaError;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 use thiserror::Error;
 use uuid::Uuid;
 
 pub(super) const CURRENT_VERSION: Version = Version::V1_1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum Version {
     V1,
     V1_1,
@@ -64,7 +65,7 @@ impl RootWriter {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RootReader {
     pub(super) sparse_index: SparseIndexReader,
     // Metadata
