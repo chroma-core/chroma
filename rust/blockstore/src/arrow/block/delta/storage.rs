@@ -11,8 +11,8 @@ use arrow::{
 };
 use roaring::RoaringBitmap;
 use std::{
-    fmt,
-    fmt::{Debug, Formatter},
+    collections::HashMap,
+    fmt::{self, Debug, Formatter},
 };
 
 #[derive(Clone)]
@@ -220,17 +220,22 @@ impl BlockStorage {
         }
     }
 
-    pub fn into_record_batch<K: ArrowWriteableKey>(self) -> RecordBatch {
+    pub fn into_record_batch<K: ArrowWriteableKey>(
+        self,
+        metadata: Option<HashMap<String, String>>,
+    ) -> RecordBatch {
         let key_builder =
             K::get_arrow_builder(self.len(), self.get_prefix_size(), self.get_key_size());
         match self {
             BlockStorage::String(builder) => {
                 // TODO: handle error
-                builder.into_arrow(key_builder).unwrap()
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
             }
             BlockStorage::UInt32(builder) => {
                 // TODO: handle error
-                builder.into_arrow(key_builder).unwrap()
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
             }
             BlockStorage::DataRecord(builder) => {
                 // TODO: handle error
@@ -238,11 +243,13 @@ impl BlockStorage {
             }
             BlockStorage::VecUInt32(builder) => {
                 // TODO: handle error
-                builder.into_arrow(key_builder).unwrap()
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
             }
             BlockStorage::RoaringBitmap(builder) => {
                 // TODO: handle error
-                builder.into_arrow(key_builder).unwrap()
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
             }
         }
     }

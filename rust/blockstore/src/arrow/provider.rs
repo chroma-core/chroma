@@ -250,7 +250,7 @@ impl BlockManager {
         delta: BlockDelta,
     ) -> Block {
         let delta_id = delta.id;
-        let record_batch = delta.finish::<K, V>();
+        let record_batch = delta.finish::<K, V>(None);
         Block::from_record_batch(delta_id, record_batch)
     }
 

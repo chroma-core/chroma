@@ -505,7 +505,7 @@ impl SparseIndex {
         }
 
         let delta_id = delta.id;
-        let record_batch = delta.finish::<K, String>();
+        let record_batch = delta.finish::<K, String>(None);
         Ok(Block::from_record_batch(delta_id, record_batch))
     }
 
