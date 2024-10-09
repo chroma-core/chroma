@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 pub(super) const CURRENT_VERSION: Version = Version::V1_1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum Version {
     V1,
     V1_1,
