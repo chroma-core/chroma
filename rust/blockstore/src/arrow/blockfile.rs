@@ -1,4 +1,5 @@
 use super::provider::GetError;
+use super::root::{RootReader, RootWriter};
 use super::{block::delta::BlockDelta, provider::BlockManager};
 use super::{
     block::Block,
@@ -25,6 +26,7 @@ pub struct ArrowBlockfileWriter {
     sparse_index_manager: SparseIndexManager,
     block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
     sparse_index: SparseIndex,
+    root: RootWriter,
     id: Uuid,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
@@ -54,6 +56,10 @@ impl ArrowBlockfileWriter {
         // TODO: we can update the constructor to take the initial block instead of having a seperate method
         let sparse_index = SparseIndex::new(id);
         sparse_index.add_initial_block(initial_block.id);
+
+        // TODO: remove clone and make this authorative source for sparse index
+        let root_writer = RootWriter::new(id, sparse_index.clone());
+
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
         {
             let mut block_deltas_map = block_deltas.lock();
@@ -68,27 +74,33 @@ impl ArrowBlockfileWriter {
             sparse_index_manager,
             block_deltas,
             sparse_index,
+            root: root_writer,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
+    // TODO: rename to fork_root and use root to/from instead of sparse index
     pub(super) fn from_sparse_index(
         id: Uuid,
         block_manager: BlockManager,
         sparse_index_manager: SparseIndexManager,
         new_sparse_index: SparseIndex,
     ) -> Self {
-        let block_deltas = Arc::new(Mutex::new(HashMap::new()));
         tracing::debug!(
             "Constructed blockfile writer from existing sparse index id {:?}",
             id
         );
+        let block_deltas = Arc::new(Mutex::new(HashMap::new()));
+        // TODO: remove clone and make this authorative source for sparse index
+        let root_writer = RootWriter::new(id, new_sparse_index.clone());
+
         Self {
             block_manager,
             sparse_index_manager,
             block_deltas,
             sparse_index: new_sparse_index,
+            root: root_writer,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -252,6 +264,7 @@ pub struct ArrowBlockfileReader<
 > {
     block_manager: BlockManager,
     pub(super) sparse_index: SparseIndex,
+    // root: RootReader,
     loaded_blocks: Arc<Mutex<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
     id: Uuid,
