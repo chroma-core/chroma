@@ -197,6 +197,19 @@ impl FoyerCacheConfig {
         Ok(Box::new(FoyerPlainCache::memory(self).await?))
     }
 
+    pub async fn build_memory_with_event_listener<K, V>(
+        &self,
+        tx: tokio::sync::mpsc::Sender<K>,
+    ) -> Result<Box<dyn super::Cache<K, V>>, Box<dyn ChromaError>>
+    where
+        K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+        V: Clone + Send + Sync + Weighted + 'static,
+    {
+        Ok(Box::new(
+            FoyerPlainCache::memory_with_event_listener(self, tx).await?,
+        ))
+    }
+
     /// Build an in-memory-only cache.
     pub async fn build_memory_persistent<K, V>(
         &self,
@@ -358,6 +371,53 @@ where
 
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
+            .build();
+        Ok(FoyerPlainCache { cache })
+    }
+
+    /// Build an in-memory cache that emits keys that get evicted to a channel.
+    pub async fn memory_with_event_listener(
+        config: &FoyerCacheConfig,
+        tx: tokio::sync::mpsc::Sender<K>,
+    ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
+        struct TokioEventListener<K, V>(tokio::sync::mpsc::Sender<K>, std::marker::PhantomData<V>)
+        where
+            K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+            V: Clone + Send + Sync + Weighted + 'static;
+        impl<K, V> foyer::EventListener for TokioEventListener<K, V>
+        where
+            K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+            V: Clone + Send + Sync + Weighted + 'static,
+        {
+            type Key = K;
+            type Value = V;
+
+            fn on_memory_release(&self, key: Self::Key, _: Self::Value)
+            where
+                K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+            {
+                // NOTE(rescrv):  There's no mechanism by which we can error.  We could log a
+                // metric, but this should really never happen.
+                let _ = self.0.blocking_send(key.clone());
+            }
+        }
+        let evl = TokioEventListener(tx, std::marker::PhantomData);
+
+        let tracing_config = TracingConfig::default();
+        tracing_config
+            .set_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _));
+        tracing_config
+            .set_record_hybrid_get_threshold(Duration::from_micros(config.trace_get_us as _));
+        tracing_config
+            .set_record_hybrid_obtain_threshold(Duration::from_micros(config.trace_obtain_us as _));
+        tracing_config
+            .set_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _));
+        tracing_config
+            .set_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
+
+        let cache = CacheBuilder::new(config.capacity)
+            .with_shards(config.shards)
+            .with_event_listener(Arc::new(evl))
             .build();
         Ok(FoyerPlainCache { cache })
     }
