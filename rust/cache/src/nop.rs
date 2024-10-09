@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use super::{CacheError, Weighted};
+use super::{CacheError, StorageKey, StorageValue, Weighted};
 
 /// A zero-configuration cache that doesn't evict.
 pub struct NopCache;
@@ -22,4 +22,11 @@ where
     async fn clear(&self) -> Result<(), CacheError> {
         Ok(())
     }
+}
+
+impl<K, V> super::PersistentCache<K, V> for NopCache
+where
+    K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
+    V: Clone + Send + Sync + Weighted + StorageValue + 'static,
+{
 }

@@ -12,7 +12,7 @@ use crate::{
     BlockfileReader, BlockfileWriter, Key, Value,
 };
 use async_trait::async_trait;
-use chroma_cache::{Cache, CacheError};
+use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -34,8 +34,8 @@ impl ArrowBlockfileProvider {
     pub fn new(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Box<dyn Cache<Uuid, Block>>,
-        sparse_index_cache: Box<dyn Cache<Uuid, SparseIndex>>,
+        block_cache: Box<dyn PersistentCache<Uuid, Block>>,
+        sparse_index_cache: Box<dyn PersistentCache<Uuid, SparseIndex>>,
     ) -> Self {
         Self {
             block_manager: BlockManager::new(storage.clone(), max_block_size_bytes, block_cache),
@@ -114,7 +114,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
         config: &(ArrowBlockfileProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
-        let block_cache = match chroma_cache::from_config(
+        let block_cache = match chroma_cache::from_config_persistent(
             &blockfile_config.block_manager_config.block_cache_config,
         )
         .await
@@ -124,7 +124,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
                 return Err(e);
             }
         };
-        let sparse_index_cache = match chroma_cache::from_config(
+        let sparse_index_cache = match chroma_cache::from_config_persistent(
             &blockfile_config
                 .sparse_index_manager_config
                 .sparse_index_cache_config,
@@ -187,7 +187,7 @@ impl ChromaError for ForkError {
 /// is a placeholder for that.
 #[derive(Clone)]
 pub(super) struct BlockManager {
-    block_cache: Arc<dyn Cache<Uuid, Block>>,
+    block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
     storage: Storage,
     max_block_size_bytes: usize,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -197,9 +197,9 @@ impl BlockManager {
     pub(super) fn new(
         storage: Storage,
         max_block_size_bytes: usize,
-        block_cache: Box<dyn Cache<Uuid, Block>>,
+        block_cache: Box<dyn PersistentCache<Uuid, Block>>,
     ) -> Self {
-        let block_cache: Arc<dyn Cache<Uuid, Block>> = block_cache.into();
+        let block_cache: Arc<dyn PersistentCache<Uuid, Block>> = block_cache.into();
         Self {
             block_cache,
             storage,
@@ -378,13 +378,13 @@ impl ChromaError for SparseIndexManagerError {
 
 #[derive(Clone)]
 pub(super) struct SparseIndexManager {
-    cache: Arc<dyn Cache<Uuid, SparseIndex>>,
+    cache: Arc<dyn PersistentCache<Uuid, SparseIndex>>,
     storage: Storage,
 }
 
 impl SparseIndexManager {
-    pub fn new(storage: Storage, cache: Box<dyn Cache<Uuid, SparseIndex>>) -> Self {
-        let cache: Arc<dyn Cache<Uuid, SparseIndex>> = cache.into();
+    pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, SparseIndex>>) -> Self {
+        let cache: Arc<dyn PersistentCache<Uuid, SparseIndex>> = cache.into();
         Self { cache, storage }
     }
 

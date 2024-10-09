@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use super::{CacheError, Weighted};
+use super::{CacheError, StorageKey, StorageValue, Weighted};
 
 /// A zero-configuration cache that doesn't evict.
 /// Mostly useful for testing.
@@ -12,12 +12,12 @@ use super::{CacheError, Weighted};
 pub struct UnboundedCacheConfig {}
 
 impl UnboundedCacheConfig {
-    pub fn build<K, V>(&self) -> Box<dyn super::Cache<K, V>>
+    pub fn build<K, V>(&self) -> UnboundedCache<K, V>
     where
         K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
         V: Clone + Send + Sync + Clone + Weighted + 'static,
     {
-        Box::new(UnboundedCache::new(self))
+        UnboundedCache::new(self)
     }
 }
 
@@ -66,4 +66,11 @@ where
         self.cache.write().clear();
         Ok(())
     }
+}
+
+impl<K, V> super::PersistentCache<K, V> for UnboundedCache<K, V>
+where
+    K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
+    V: Clone + Send + Sync + Weighted + StorageValue + 'static,
+{
 }

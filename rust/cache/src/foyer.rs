@@ -183,7 +183,7 @@ impl FoyerCacheConfig {
         K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
         V: Clone + Send + Sync + StorageValue + Weighted + 'static,
     {
-        FoyerHybridCache::hybrid(self).await
+        Ok(Box::new(FoyerHybridCache::hybrid(self).await?))
     }
 
     /// Build an in-memory-only cache.
@@ -194,7 +194,18 @@ impl FoyerCacheConfig {
         K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
         V: Clone + Send + Sync + Weighted + 'static,
     {
-        FoyerPlainCache::memory(self).await
+        Ok(Box::new(FoyerPlainCache::memory(self).await?))
+    }
+
+    /// Build an in-memory-only cache.
+    pub async fn build_memory_persistent<K, V>(
+        &self,
+    ) -> Result<Box<dyn super::PersistentCache<K, V>>, Box<dyn ChromaError>>
+    where
+        K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
+        V: Clone + Send + Sync + Weighted + StorageValue + 'static,
+    {
+        Ok(Box::new(FoyerPlainCache::memory(self).await?))
     }
 }
 
@@ -215,7 +226,7 @@ where
     /// Build a hybrid disk and memory cache.
     pub async fn hybrid(
         config: &FoyerCacheConfig,
-    ) -> Result<Box<dyn super::PersistentCache<K, V>>, Box<dyn ChromaError>> {
+    ) -> Result<FoyerHybridCache<K, V>, Box<dyn ChromaError>> {
         let tracing_config = TracingConfig::default();
         tracing_config
             .set_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _));
@@ -281,7 +292,7 @@ where
                 e
             ))) as _
         })?;
-        Ok(Box::new(FoyerHybridCache { cache }))
+        Ok(FoyerHybridCache { cache })
     }
 }
 
@@ -332,7 +343,7 @@ where
     /// Build an in-memory cache.
     pub async fn memory(
         config: &FoyerCacheConfig,
-    ) -> Result<Box<dyn super::Cache<K, V>>, Box<dyn ChromaError>> {
+    ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
         let tracing_config = TracingConfig::default();
         tracing_config
             .set_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _));
@@ -348,7 +359,7 @@ where
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
             .build();
-        Ok(Box::new(FoyerPlainCache { cache }))
+        Ok(FoyerPlainCache { cache })
     }
 }
 
@@ -374,4 +385,11 @@ where
         self.cache.clear();
         Ok(())
     }
+}
+
+impl<K, V> super::PersistentCache<K, V> for FoyerPlainCache<K, V>
+where
+    K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
+    V: Clone + Send + Sync + Weighted + StorageValue + 'static,
+{
 }
