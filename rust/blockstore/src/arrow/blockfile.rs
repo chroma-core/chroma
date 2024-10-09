@@ -615,7 +615,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix: &str,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        let block_ids = self.root.sparse_index.get_block_ids_prefix(prefix);
+        let block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_range::<K, _, _>(prefix.to_string()..=prefix.to_string(), ..);
         let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
