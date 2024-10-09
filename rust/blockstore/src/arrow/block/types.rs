@@ -121,9 +121,12 @@ impl Block {
     /// The implementation is based on [`std::slice::partition_point`].
     ///
     /// `(prefix, key)` serves as the search key, and it is sorted in ascending order.
-    /// The partition is defined by: `|x| x < (prefix, key)`.
+    /// The partition predicate is defined by: `|x| x < (prefix, key)`.
+    /// The partition point is the first index where the partition precidate evaluates to `false`
     /// The code is a result of inlining this predicate in [`std::slice::partition_point`].
-    /// If the key is unspecified (i.e. [`None`]), we find the first index of the prefix.
+    /// If the key is unspecified (i.e. `None`), we find the first index of the prefix.
+    ///
+    /// [`std::slice::partition_point`]: std::slice::partition_point
     #[inline]
     fn binary_search_index<'me, K: ArrowReadableKey<'me>>(
         &'me self,
@@ -159,6 +162,8 @@ impl Block {
             // Continue to compare the key if prefix matches
             if let (Equal, Some(k)) = (cmp, key) {
                 cmp = K::get(self.data.column(1), mid)
+                    // Key type do not have total order because of floating point values
+                    // But in our case NaN should not be allowed so we should always have total order
                     .partial_cmp(k)
                     .expect("Array values should be comparable.");
             }
@@ -173,6 +178,8 @@ impl Block {
         match prefix_array.value(base).cmp(prefix) {
             Less => base + 1,
             Equal => match key {
+                // Key type do not have total order because of floating point values
+                // But in our case NaN should not be allowed so we should always have total order
                 Some(k) => match K::get(self.data.column(1), base).partial_cmp(k) {
                     Some(Less) => base + 1,
                     _ => base,
