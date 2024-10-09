@@ -1,11 +1,11 @@
 use super::types::ArrowReadableKey;
 use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
-use core::panic;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -361,51 +361,98 @@ impl SparseIndexReader {
         result_uuids
     }
 
-    /// Get all block ids that have keys with the given prefix
-    pub(super) fn get_block_ids_prefix(&self, prefix: &str) -> Vec<Uuid> {
-        let data = &self.data;
-        let forward = &data.forward;
-        let curr_iter = forward.iter();
-        let mut next_iter = forward.iter().skip(1);
-        let mut block_ids = vec![];
-        for (curr_key, curr_block_value) in curr_iter {
-            let non_start_curr_key: Option<&CompositeKey> = match curr_key {
-                SparseIndexDelimiter::Start => None,
-                SparseIndexDelimiter::Key(k) => Some(k),
-            };
-            if let Some((next_key, _)) = next_iter.next() {
-                // This can't be a start key but we still need to extract it.
-                let non_start_next_key: Option<&CompositeKey> = match next_key {
-                    SparseIndexDelimiter::Start => {
-                        panic!("Invariant violation. Sparse index is not valid.");
-                    }
-                    SparseIndexDelimiter::Key(k) => Some(k),
+    pub(super) fn get_block_ids_range<
+        'a,
+        K: ArrowReadableKey<'a> + Into<KeyWrapper>,
+        PrefixRange,
+        KeyRange,
+    >(
+        &self,
+        // These key ranges are flattened instead of using a single RangeBounds<CompositeKey> because not all keys have a well-defined min and max value. E.x. if the key is a string, there would be no way to get the range for all keys within a specific prefix.
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> Vec<Uuid>
+    where
+        PrefixRange: RangeBounds<String>,
+        KeyRange: RangeBounds<K>,
+    {
+        let forward = &self.data.forward;
+
+        // We do not materialize the last key of each block, so we must check the next block's start key to determine if the current block's end key is within the query range.
+        forward
+            .iter()
+            .zip(
+                forward
+                    .iter()
+                    .skip(1)
+                    .map(|(k, _)| match k {
+                        SparseIndexDelimiter::Start => {
+                            panic!("Invariant violation. Sparse index is not valid.");
+                        }
+                        SparseIndexDelimiter::Key(k) => Some(k),
+                    })
+                    .chain(std::iter::once(None)),
+            )
+            .map(|((start_key, block_uuid), end_key)| (block_uuid, start_key, end_key))
+            .filter(|(_, start_key, end_key)| {
+                let prefix_start_valid = match start_key {
+                    SparseIndexDelimiter::Start => true,
+                    SparseIndexDelimiter::Key(start_key) => match prefix_range.start_bound() {
+                        Bound::Included(prefix_start) => *prefix_start >= start_key.prefix,
+                        Bound::Excluded(prefix_start) => *prefix_start > start_key.prefix,
+                        Bound::Unbounded => true,
+                    },
                 };
-                // If delimeter starts with the same prefix then there will be keys inside the
-                // block with this prefix.
-                if non_start_curr_key.is_some()
-                    && prefix == non_start_curr_key.unwrap().prefix.as_str()
-                {
-                    block_ids.push(curr_block_value.id);
+
+                if !prefix_start_valid {
+                    return false;
                 }
-                // If prefix is between the current delim and next delim then there could
-                // be keys in this block that have this prefix.
-                if (non_start_curr_key.is_none()
-                    || prefix > non_start_curr_key.unwrap().prefix.as_str())
-                    && (prefix <= non_start_next_key.unwrap().prefix.as_str())
-                {
-                    block_ids.push(curr_block_value.id);
+
+                let prefix_end_valid = match prefix_range.end_bound() {
+                    Bound::Included(prefix_end) => match end_key {
+                        Some(end_key) => *prefix_end <= end_key.prefix,
+                        None => true,
+                    },
+                    Bound::Excluded(prefix_end) => match end_key {
+                        Some(end_key) => *prefix_end < end_key.prefix,
+                        None => true,
+                    },
+                    Bound::Unbounded => true,
+                };
+
+                if !prefix_end_valid {
+                    return false;
                 }
-            } else {
-                // Last block.
-                if non_start_curr_key.is_none()
-                    || prefix >= non_start_curr_key.unwrap().prefix.as_str()
-                {
-                    block_ids.push(curr_block_value.id);
+
+                let key_start_valid = match start_key {
+                    SparseIndexDelimiter::Start => true,
+                    SparseIndexDelimiter::Key(start_key) => match key_range.start_bound() {
+                        Bound::Included(key_start) => start_key.key >= key_start.clone().into(),
+                        Bound::Excluded(key_start) => start_key.key > key_start.clone().into(),
+                        Bound::Unbounded => true,
+                    },
+                };
+
+                if !key_start_valid {
+                    return false;
                 }
-            }
-        }
-        block_ids
+
+                let key_end_valid = match key_range.end_bound() {
+                    Bound::Included(key_end) => match end_key {
+                        Some(end_key) => end_key.key <= key_end.clone().into(),
+                        None => false,
+                    },
+                    Bound::Excluded(key_end) => match end_key {
+                        Some(end_key) => end_key.key < key_end.clone().into(),
+                        None => false,
+                    },
+                    Bound::Unbounded => true,
+                };
+
+                key_end_valid
+            })
+            .map(|(sparse_index_value, _, _)| sparse_index_value.id)
+            .collect()
     }
 
     /// Get all block ids that have keys with the given prefix and key greater than the given key
