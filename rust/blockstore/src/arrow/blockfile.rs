@@ -423,10 +423,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys > key from sparse index for this prefix.
         let block_ids = self.sparse_index.get_block_ids_gt(prefix, key.clone());
-        let mut result: Vec<(&str, K, V)> = vec![];
+        let mut result: Vec<(K, V)> = vec![];
         // Read all the blocks individually to get keys > key.
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
@@ -445,14 +445,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            match block.get_gt(prefix, key.clone()) {
-                Some(data) => {
-                    result.extend(data);
-                }
-                None => {
-                    return Err(Box::new(BlockfileError::NotFoundError));
-                }
-            };
+            result.extend(block.get_gt(prefix, key.clone()));
         }
         Ok(result)
     }
@@ -462,10 +455,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys < key from sparse index.
         let block_ids = self.sparse_index.get_block_ids_lt(prefix, key.clone());
-        let mut result: Vec<(&str, K, V)> = vec![];
+        let mut result: Vec<(K, V)> = vec![];
         // Read all the blocks individually to get keys < key.
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
@@ -484,14 +477,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            match block.get_lt(prefix, key.clone()) {
-                Some(data) => {
-                    result.extend(data);
-                }
-                None => {
-                    return Err(Box::new(BlockfileError::NotFoundError));
-                }
-            };
+            result.extend(block.get_lt(prefix, key.clone()));
         }
         Ok(result)
     }
@@ -501,10 +487,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys >= key from sparse index.
         let block_ids = self.sparse_index.get_block_ids_gte(prefix, key.clone());
-        let mut result: Vec<(&str, K, V)> = vec![];
+        let mut result: Vec<(K, V)> = vec![];
         // Read all the blocks individually to get keys >= key.
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
@@ -523,14 +509,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            match block.get_gte(prefix, key.clone()) {
-                Some(data) => {
-                    result.extend(data);
-                }
-                None => {
-                    return Err(Box::new(BlockfileError::NotFoundError));
-                }
-            };
+            result.extend(block.get_gte(prefix, key.clone()));
         }
         Ok(result)
     }
@@ -540,10 +519,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys <= key from sparse index.
         let block_ids = self.sparse_index.get_block_ids_lte(prefix, key.clone());
-        let mut result: Vec<(&str, K, V)> = vec![];
+        let mut result: Vec<(K, V)> = vec![];
         // Read all the blocks individually to get keys <= key.
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
@@ -562,14 +541,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            match block.get_lte(prefix, key.clone()) {
-                Some(data) => {
-                    result.extend(data);
-                }
-                None => {
-                    return Err(Box::new(BlockfileError::NotFoundError));
-                }
-            };
+            result.extend(block.get_lte(prefix, key.clone()));
         }
         Ok(result)
     }
@@ -578,9 +550,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub(crate) async fn get_by_prefix(
         &'me self,
         prefix: &str,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         let block_ids = self.sparse_index.get_block_ids_prefix(prefix);
-        let mut result: Vec<(&str, K, V)> = vec![];
+        let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
                 Ok(Some(block)) => Some(block),
@@ -598,14 +570,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            match block.get_prefix(prefix) {
-                Some(data) => {
-                    result.extend(data);
-                }
-                None => {
-                    return Err(Box::new(BlockfileError::NotFoundError));
-                }
-            };
+
+            result.extend(block.get_prefix(prefix));
         }
         Ok(result)
     }
@@ -751,7 +717,7 @@ mod tests {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
                     for entry in c {
-                        kv_map.insert(format!("{}/{}", entry.0, entry.1), entry.2);
+                        kv_map.insert(format!("{}/{}", prefix_query, entry.0), entry.1);
                     }
                     for j in 1..=5 {
                         let prefix = format!("{}/{}", "prefix", j);
@@ -821,7 +787,7 @@ mod tests {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
                     for entry in c {
-                        kv_map.insert(entry.1, entry.2);
+                        kv_map.insert(entry.0, entry.1);
                     }
                     for i in 1..num_keys {
                         let key = format!("{}/{}", "key", i);
