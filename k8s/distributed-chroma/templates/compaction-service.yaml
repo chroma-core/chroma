@@ -43,6 +43,8 @@ spec:
           volumeMounts:
             - name: compaction-service-config
               mountPath: /config/
+            - name: compaction-service-cache
+              mountPath: /cache
           {{ end }}
           ports:
             - containerPort: 50051
@@ -50,6 +52,8 @@ spec:
             {{if .Values.compactionService.configuration}}
             - name: CONFIG_PATH
               value: /config/config.yaml
+            - name: CACHE_PATH
+              value: /cache/
             {{ end }}
             {{ range .Values.compactionService.env }}
             - name: {{ .name }}
