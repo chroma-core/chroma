@@ -95,7 +95,7 @@ where
         CacheConfig::Unbounded(unbounded_config) => {
             Ok(Box::new(UnboundedCache::new(unbounded_config)))
         }
-        CacheConfig::Memory(c) => Ok(c.build_memory().await? as _),
+        CacheConfig::Memory(c) => Ok(c.build_memory().await?),
         CacheConfig::Disk(_) => Err(Box::new(CacheError::InvalidCacheConfig(
             "from_config was called with disk".to_string(),
         ))),
@@ -116,7 +116,7 @@ where
             Ok(Box::new(UnboundedCache::new(unbounded_config)))
         }
         CacheConfig::Memory(c) => Ok(c.build_memory_persistent().await?),
-        CacheConfig::Disk(c) => Ok(c.build_hybrid().await? as _),
+        CacheConfig::Disk(c) => Ok(c.build_hybrid().await?),
         CacheConfig::Nop => Ok(Box::new(NopCache)),
     }
 }
