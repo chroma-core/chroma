@@ -48,31 +48,41 @@ spec:
         member-type: query-service
     spec:
       serviceAccountName: query-service-serviceaccount
-      {{if .Values.queryService.configuration}}
       volumes:
+        {{if .Values.queryService.configuration}}
         - name: query-service-config
           configMap:
             name: query-service-config
-      {{ end }}
+        {{ end }}
+        {{if .Values.queryService.cache}}
+        - name: query-service-cache
+          hostPath:
+            path: {{ .Values.queryService.cache.hostPath }}
+            type: DirectoryOrCreate
+        {{ end }}
       containers:
         - name: query-service
           image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          {{if .Values.queryService.configuration}}
           volumeMounts:
+            {{if .Values.queryService.configuration}}
             - name: query-service-config
               mountPath: /config/
+            {{ end }}
+            {{if .Values.queryService.cache}}
             - name: query-service-cache
-              mountPath: /cache/
-          {{ end }}
+              mountPath: {{ .Values.queryService.cache.mountPath }}
+            {{ end }}
           ports:
             - containerPort: 50051
           env:
             {{if .Values.queryService.configuration}}
             - name: CONFIG_PATH
               value: /config/config.yaml
+            {{ end }}
+            {{if .Values.queryService.cache}}
             - name: CACHE_PATH
-              value: /cache/
+              value: {{ .Values.queryService.cache.mountPath }}
             {{ end }}
             {{ range .Values.queryService.env }}
             - name: {{ .name }}
