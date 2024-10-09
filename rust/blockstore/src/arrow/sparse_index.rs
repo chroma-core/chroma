@@ -472,7 +472,9 @@ impl SparseIndex {
         true
     }
 
-    pub(super) fn to_block<K: ArrowWriteableKey>(&self) -> Result<Block, Box<dyn ChromaError>> {
+    pub(super) fn to_delta<K: ArrowWriteableKey>(
+        &self,
+    ) -> Result<BlockDelta, Box<dyn ChromaError>> {
         let data = self.data.lock();
         if data.forward.is_empty() {
             panic!("Invariant violation. No blocks in the sparse index");
@@ -493,9 +495,8 @@ impl SparseIndex {
                     KeyWrapper::Float32(f) => {
                         delta.add(&k.prefix, *f, block_id.to_string());
                     }
-                    KeyWrapper::Bool(_b) => {
-                        unimplemented!();
-                        // delta.add("KEY", b, block_id.to_string().as_str());
+                    KeyWrapper::Bool(b) => {
+                        delta.add(&k.prefix, *b, block_id.to_string());
                     }
                     KeyWrapper::Uint32(u) => {
                         delta.add(&k.prefix, *u, block_id.to_string());
@@ -503,10 +504,7 @@ impl SparseIndex {
                 },
             }
         }
-
-        let delta_id = delta.id;
-        let record_batch = delta.finish::<K, String>(None);
-        Ok(Block::from_record_batch(delta_id, record_batch))
+        Ok(delta)
     }
 
     pub(super) fn from_block<'block, K: ArrowReadableKey<'block> + 'block>(
@@ -623,7 +621,9 @@ mod tests {
         let block_id_2 = uuid::Uuid::new_v4();
         sparse_index.add_block(blockfile_key.clone(), block_id_2);
 
-        let block = sparse_index.to_block::<&str>().unwrap();
+        let block_delta = sparse_index.to_delta::<&str>().unwrap();
+        let block =
+            Block::from_record_batch(block_delta.id, block_delta.finish::<&str, String>(None));
         let new_sparse_index = SparseIndex::from_block::<&str>(&block).unwrap();
 
         let old_data = sparse_index.data.lock();
