@@ -84,7 +84,7 @@ await client.reset() # Empties and completely resets the database. ⚠️ This i
 
 Chroma can also be configured to run in client/server mode. In this mode, the Chroma client connects to a Chroma server running in a separate process.
 
-To start the Chroma server, run the following command:
+To start the Chroma server locally, run the following command:
 
 ```bash
 chroma run --path /db_path
@@ -165,7 +165,7 @@ To run Chroma in client server mode, first install the chroma library and CLI vi
 pip install chromadb
 ```
 
-Then start the Chroma server:
+Then start the Chroma server locally:
 
 ```bash
 chroma run --path /db_path
@@ -183,7 +183,7 @@ import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 ```
 
-You can also run the Chroma server in a docker container, or deployed to a cloud provider. See the [deployment docs](./deployment.md) for more information.
+You can also run the Chroma server in a docker container, or deployed to a cloud provider. See the [deployment docs](./deployment/docker) for more information.
 
 {% /tab %}
 

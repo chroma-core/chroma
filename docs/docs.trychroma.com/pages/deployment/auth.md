@@ -37,22 +37,24 @@ chroma run --path <DB path>
 
 We also have dedicated auth guides for various deployments:
 * [Docker](/deployment/docker#authentication-with-docker)
-* More coming soon!
+* [AWS](/deployment/aws#authentication-with-AWS)
+* GCP - Coming Soon!
+* Azure - Coming Soon!
 
-### Basic Authentication
+### Encrypted User:Password Authentication
 
 #### Server Set-Up
 
 ##### Generate Server-Side Credentials
 
 {% note type="note" title="Security Practices" %}
-A good security practice is to store the password securely. In the example below we use [bcrypt](https://en.wikipedia.org/wiki/Bcrypt) (currently the only supported hash in Chroma server side auth) to hash the plaintext password.
+A good security practice is to store the password securely. In the example below we use [bcrypt](https://en.wikipedia.org/wiki/Bcrypt) (currently the only supported hash in Chroma server side auth) to hash the plaintext password.  If you'd like to see support for additional hash functions, feel free to [contribute](../contributing) new ones!
 {% /note %}
 
-To generate the password hash, run the following command:
+To generate the password hash, run the following command (you may need to install `httpasswd`):
 
 ```bash
-docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
+htpasswd -Bbn admin admin > server.htpasswd
 ```
 
 This creates the bcrypt password hash for the password `admin`, for the `admin` user, and puts it into `server.htpasswd` in your current working directory. It will look like `admin:<password hash>`.
@@ -77,7 +79,7 @@ chroma run --path <DB path>
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-We will use Chroma's `Setting` object to define the authentication method on the client.
+We will use Chroma's `Settings` object to define the authentication method on the client.
 
 ```python
 import chromadb
@@ -101,8 +103,8 @@ chroma_client.heartbeat()
 ```javascript
 import { ChromaClient } from "chromadb";
 
-const chromaClient = new ChromaClient({ 
-    path: "http://localhost:8000", 
+const chromaClient = new ChromaClient({
+    path: "http://localhost:8000",
     auth: {
         provider: "basic",
         credentials: "admin:admin"
@@ -160,7 +162,7 @@ export CHROMA_SERVER_AUTHZ_PROVIDER="chromadb.auth.simple_rbac_authz.SimpleRBACA
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-We will use Chroma's `Setting` object to define the authentication method on the client.
+We will use Chroma's `Settings` object to define the authentication method on the client.
 
 ```python
 import chromadb
@@ -190,8 +192,8 @@ chroma_auth_token_transport_header="X-Chroma-Token"
 ```javascript
 import { ChromaClient } from "chromadb";
 
-const chromaClient = new ChromaClient({ 
-    path: "http://localhost:8000", 
+const chromaClient = new ChromaClient({
+    path: "http://localhost:8000",
     auth: {
         provider: "token",
         credentials: "test-token",

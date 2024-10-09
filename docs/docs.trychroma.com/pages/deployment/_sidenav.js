@@ -9,7 +9,14 @@ export const items = [
     //     ]
     // },
     {
-        title: 'Local Development',
+        title: "Chroma Server",
+        links: [
+            { href: '/deployment/client-server-mode', children: "Client/Server Mode"},
+            { href: '/deployment/thin-client', children: "Python Thin-Client"},
+        ]
+    },
+    {
+        title: 'Containers',
         links: [
             { href: '/deployment/docker', children: 'Docker' },
         ]
@@ -25,6 +32,7 @@ export const items = [
     {
       title: 'Administration',
       links: [
+          { href: '/deployment/performance', children: "🚀 Performance"},
         // { href: '/deployment/logging', children: 'Logging' },
         { href: '/deployment/observability', children: '👀 Observability' },
         { href: '/deployment/migration', children: '✈️ Migration' },

@@ -13,17 +13,14 @@ title: "☁️ AWS Deployment"
 {% /tabs %}
 
 {% note type="tip" title="Hosted Chroma" %}
-We want to offer hosted Chroma, and we need your help.
-
-Fill out the survey to jump the wait-list. Coming Q1 2025.
+Chroma Cloud, our fully managed hosted service, is in early access. Fill out the survey to jump the waitlist and get the best retrieval experience. Full access coming Q1 2025.
 
 [📝 30 second survey](https://airtable.com/shrOAiDUtS2ILy5vZ)
 
 {% /note %}
 
 {% note type="tip" title="" %}
-If you are using Chroma in production, join our [#chroma-production](https://discord.com/channels/1073293645303795742/1292554909694300211) channel on Discord!
-
+If you are using Chroma in production, please fill out [this form](https://airtable.com/appqd02UuQXCK5AuY/pagr1D0NFQoNpUpNZ/form), and we will add you to a dedicated Slack workspace for supporting production users. We would love to help you think through the design of your system, or if you would be a good fit for our upcoming distributed cloud service. You can also join the [#production-chroma](https://discord.com/channels/1073293645303795742/1292554909694300211) channel on Discord to join our community!
 This is the best place to
 1. Get support with building with Chroma in prod.
 2. Stay up-to-date with exciting new features.
@@ -40,20 +37,20 @@ provided a very simple AWS CloudFormation template to experiment with
 deploying Chroma to EC2 on AWS.
 
 {% note type="warning" title="" %}
-Chroma and its underlying database need at least 2gb of RAM,
+Chroma and its underlying database [need at least 2GB of RAM](./performance#results-summary),
 which means it won't fit on the 1gb instances provided as part of the
-AWS Free Tier. This template uses a `t3.small` EC2 instance, which
-costs about two cents an hour, or $15 for a full month. If you follow these
+AWS Free Tier. This template uses a [`t3.small`](https://aws.amazon.com/ec2/instance-types/t3/#Product%20Details) EC2 instance, which
+costs about two cents an hour, or $15 for a full month, and gives you 2GiB of memory. If you follow these
 instructions, AWS will bill you accordingly.
 {% /note %}
 
 {% note type="warning" title="" %}
-This basic stack doesn't support any kind of authentication;
-anyone who knows your server IP will be able to add and query for
-embeddings. In this guide we show you how to secure your endpoint using [Chroma's
-native authentication support](http://localhost:3000/deployment/aws#authentication-with-aws:~:text=Authentication%20with%20AWS-,%23,-By%20default%2C%20the). Alternatively, you can put it behind
+In this guide we show you how to secure your endpoint using [Chroma's
+native authentication support](./aws#authentication-with-aws). Alternatively, you can put it behind
 [AWS API Gateway](https://aws.amazon.com/api-gateway/) or add your own
-authenticating proxy.
+authenticating proxy. This basic stack doesn't support any kind of authentication;
+anyone who knows your server IP will be able to add and query for
+embeddings.
 {% /note %}
 
 {% note type="warning" title="" %}
@@ -141,7 +138,7 @@ aws cloudformation create-stack --stack-name my-chroma-stack --template-url http
 
 Once your EC2 instance is up and running with Chroma, all
 you need to do is configure your `HttpClient` to use the server's IP address and port
-`8000`.
+`8000`. Since you are running a Chroma server on AWS, our [thin-client package](./thin-client.md) may be enough for your application.
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
@@ -150,7 +147,7 @@ you need to do is configure your `HttpClient` to use the server's IP address and
 import chromadb
 
 chroma_client = chromadb.HttpClient(
-    host="<Your Chroma instance IP>", 
+    host="<Your Chroma instance IP>",
     port=8000
 )
 chroma_client.heartbeat()
@@ -162,7 +159,7 @@ chroma_client.heartbeat()
 ```javascript
 import { ChromaClient } from "chromadb";
 
-const chromaClient = new ChromaClient({ 
+const chromaClient = new ChromaClient({
     path: "<Your Chroma instance IP>",
     port: 8000
 })
@@ -187,7 +184,7 @@ aws cloudformation delete-stack --stack-name my-chroma-stack
 
 ## Authentication with AWS
 
-By default, the EC2 instance created by our CloudFormation template will run with no authentication. There are many ways to secure your Chroma instance on AWS. In this guide we will use a simple set-up using Chroma's native authentication support. 
+By default, the EC2 instance created by our CloudFormation template will run with no authentication. There are many ways to secure your Chroma instance on AWS. In this guide we will use a simple set-up using Chroma's native authentication support.
 
 You can learn more about authentication with Chroma in the [Auth Guide](/deployment/auth).
 
@@ -227,7 +224,7 @@ export CHROMA_CLIENT_AUTH_CREDENTIALS="test-token"
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
-We will use Chroma's `Setting` object to define the authentication method on the client.
+We will use Chroma's `Settings` object to define the authentication method on the client.
 
 ```python
 import os
@@ -261,8 +258,8 @@ chroma_auth_token_transport_header=os.getenv("CHROMA_AUTH_TOKEN_TRANSPORT_HEADER
 ```javascript
 import { ChromaClient } from "chromadb";
 
-const chromaClient = new ChromaClient({ 
-    path: "<Your Chroma Instance IP>", 
+const chromaClient = new ChromaClient({
+    path: "<Your Chroma Instance IP>",
     auth: {
         provider: "token",
         credentials: process.env.CHROMA_CLIENT_AUTH_CREDENTIALS,

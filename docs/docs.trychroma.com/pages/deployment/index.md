@@ -4,24 +4,26 @@ title: ☁️ Deployment
 
 ***
 
-### Local Environment
+{% note type="tip" title="Hosted Chroma" %}
+Chroma Cloud, our fully managed hosted service, is in early access. Fill out the survey to jump the waitlist and get the best retrieval experience. Full access coming Q1 2025.
 
-Chroma is easy to set up in local development environments. Use these guides to run Chroma locally for testing or development, ensuring your system is ready for production deployment.
+[📝 30 second survey](https://airtable.com/shrOAiDUtS2ILy5vZ)
 
+{% /note %}
+
+You can run Chroma single-node in [client/server mode](/deployment/client-server-mode), and easily deploy it. In this section, we also show you how to make sure your Chroma server is secure and reliable, and how to understand its performance at scale.
+
+If you are using Chroma in production, please fill out [this form](https://airtable.com/appqd02UuQXCK5AuY/pagr1D0NFQoNpUpNZ/form), and we will add you to a dedicated Slack workspace for supporting production users. We would love to help you think through the design of your system, or if you would be a good fit for our upcoming distributed cloud service. You can also join the [#production-chroma](https://discord.com/channels/1073293645303795742/1292554909694300211) channel on Discord to join our community!
+
+### Containers
 * 🐳  [Docker](/deployment/docker)
-* 🚧 *More Coming Soon*
+* Kubernetes - Coming Soon!
 
 ### Cloud Providers
 
-Chroma single-node is easy to deploy to a variety of cloud providers. Please use these guides to get started.
-
-{% special_table %}
-{% /special_table %}
-
-|      Provider        |
-|--------------|
-| [AWS](/deployment/aws)  |
-| 🚧 *More Coming Soon* |
+* [AWS](/deployment/aws)
+* GCP - Coming Soon!
+* Azure - Coming Soon!
 
 ***
 
@@ -29,12 +31,7 @@ Chroma single-node is easy to deploy to a variety of cloud providers. Please use
 
 Running a server in production requires a few additional steps to ensure the server is secure and reliable.
 
-{% special_table %}
-{% /special_table %}
-
-|              |
-|--------------|
-| [👀 Observability](/deployment/observability) |
-| [✈️ Migration](/deployment/migration) |
-| [🔒 Auth](/deployment/auth) |
-| 🚧 *More Coming Soon* |
+* [🚀 Performance](/deployment/performance)
+* [👀 Observability](/deployment/observability)
+* [✈️ Migration](/deployment/migration)
+* [🔒 Auth](/deployment/auth)                   |

@@ -12,9 +12,20 @@ title: Docker
 
 {% /tabs %}
 
+{% note type="tip" title="Hosted Chroma" %}
+Chroma Cloud, our fully managed hosted service, is in early access. Fill out the survey to jump the waitlist and get the best retrieval experience. Full access coming Q1 2025.
+
+[📝 30 second survey](https://airtable.com/shrOAiDUtS2ILy5vZ)
+
+{% /note %}
+
 ## Run Chroma in a Docker Container
 
-You can run a Chroma server in a Docker container.
+You can run a Chroma server in a Docker container, and access it using the `HttpClient`.
+
+If you are using Chroma in production, please fill out [this form](https://airtable.com/appqd02UuQXCK5AuY/pagr1D0NFQoNpUpNZ/form), and we will add you to a dedicated Slack workspace for supporting production users. We would love to help you think through the design of your system, or if you would be a good fit for our upcoming distributed cloud service. You can also join the [#production-chroma](https://discord.com/channels/1073293645303795742/1292554909694300211) channel on Discord to join our community!
+
+If you are using a client in a separate container from the one running your Chroma server, you may only need the [thin-client package](./thin-client)
 
 You can get the Chroma Docker image from [Docker Hub](https://hub.docker.com/r/chromadb/chroma), or from the [Chroma GitHub Container Registry](https://github.com/chroma-core/chroma/pkgs/container/chroma)
 
@@ -60,23 +71,17 @@ chromaClient.heartbeat()
 By default, the Docker image will run with no authentication. In client/server mode, Chroma supports the following authentication methods:
 * [RFC 7617](https://www.rfc-editor.org/rfc/rfc7617) Basic Auth with `user:password` base64-encoded `Authorization` header.
 * Static auth token in `Authorization: Bearer <token>` or in `X-Chroma-Token: <token>` headers.
-  
+
 You can learn more about authentication with Chroma in the [Auth Guide](/deployment/auth).
 
-Start by creating a `.chroma_env` file. We will store in it various environment variables Chroma will need to enable authentication, and pass it to your container using the `--env-file` flag:
-
-```sh
-docker run --env-file ./.chroma_env -p 8000:8000 chromadb/chroma
-```
-
-### Basic Authentication
+### Encrypted User:Password Authentication
 
 #### Server Set-Up
 
 ##### Generate Server-Side Credentials
 
 {% note type="note" title="Security Practices" %}
-A good security practice is to store the password securely. In the example below we use [bcrypt](https://en.wikipedia.org/wiki/Bcrypt) (currently the only supported hash in Chroma server side auth) to hash the plaintext password.
+A good security practice is to store the password securely. In the example below we use [bcrypt](https://en.wikipedia.org/wiki/Bcrypt) (currently the only supported hash in Chroma server side auth) to hash the plaintext password.  If you'd like to see support for additional hash functions, feel free to [contribute](../contributing) new ones!
 {% /note %}
 
 To generate the password hash, run the following command:
@@ -89,14 +94,14 @@ This creates the bcrypt password hash for the password `admin`, for the `admin` 
 
 ##### Running the Server
 
-Set the following environment variables in `.chroma_env`:
+Create a `.chroma_env` file, and set in it the following environment variables:
 
 ```text
 CHROMA_SERVER_AUTHN_CREDENTIALS=<contents of server.htpasswd>
 CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.basic_authn.BasicAuthenticationServerProvider
 ```
 
-And run the Chroma container:
+Then, run the Chroma container, and pass it your `.chroma_env` using the `--env-file` flag:
 
 ```bash
 docker run --env-file ./.chroma_env -p 8000:8000 chromadb/chroma
@@ -104,10 +109,10 @@ docker run --env-file ./.chroma_env -p 8000:8000 chromadb/chroma
 
 #### Client Set-Up
 
-Add the `CHROMA_CLIENT_AUTH_CREDENTIALS` environment variable to your `.chroma_en`, and set it to the user:password combination (`admin:admin` in this example):
+In your client environment, set the `CHROMA_CLIENT_AUTH_CREDENTIALS` variable to the user:password combination (`admin:admin` in this example):
 
-```text
-CHROMA_CLIENT_AUTH_CREDENTIALS=admin:admin
+```shell
+export CHROMA_CLIENT_AUTH_CREDENTIALS="admin:admin"
 ```
 
 {% tabs group="code-lang" hideTabs=true %}
@@ -119,7 +124,7 @@ Install `python-dotenv`. This will allow us to read the environment variables fr
 pip install python-dotenv
 ```
 
-We will use Chroma's `Setting` object to define the authentication method on the client.
+We will use Chroma's `Settings` object to define the authentication method on the client.
 
 ```python
 import os
@@ -147,8 +152,8 @@ chroma_client.heartbeat()
 ```javascript
 import { ChromaClient } from "chromadb";
 
-const chromaClient = new ChromaClient({ 
-    path: "http://localhost:8000", 
+const chromaClient = new ChromaClient({
+    path: "http://localhost:8000",
     auth: {
         provider: "basic",
         credentials: process.env.CHROMA_CLIENT_AUTH_CREDENTIALS
@@ -160,8 +165,6 @@ chromaClient.heartbeat()
 
 {% /tab %}
 {% /tabs %}
-
-Try changing the user-password combination to be incorrect. The Chroma server will respond with a 403.
 
 ### Static API Token Authentication
 
@@ -178,7 +181,7 @@ CHROMA_SERVER_AUTHN_CREDENTIALS=test-token
 CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider
 ```
 
-To use `X-Chroma-Token: test-token` type of authentication header you can set the `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER` environment variable:
+If instead of the default `Authorization: Bearer <token>` header, you want to use a custom one like `X-Chroma-Token: test-token`, you can set the `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER` environment variable:
 
 ```text
 CHROMA_SERVER_AUTHN_CREDENTIALS=test-token
@@ -218,7 +221,7 @@ Install `python-dotenv`. This will allow us to read the environment variables fr
 pip install python-dotenv
 ```
 
-We will use Chroma's `Setting` object to define the authentication method on the client.
+We will use Chroma's `Settings` object to define the authentication method on the client.
 
 ```python
 import os
@@ -252,8 +255,8 @@ chroma_auth_token_transport_header=os.getenv("CHROMA_AUTH_TOKEN_TRANSPORT_HEADER
 ```javascript
 import { ChromaClient } from "chromadb";
 
-const chromaClient = new ChromaClient({ 
-    path: "http://localhost:8000", 
+const chromaClient = new ChromaClient({
+    path: "http://localhost:8000",
     auth: {
         provider: "token",
         credentials: process.env.CHROMA_CLIENT_AUTH_CREDENTIALS,
