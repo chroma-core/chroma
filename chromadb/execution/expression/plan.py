@@ -6,9 +6,6 @@ from chromadb.execution.expression.operator import Filter, KNN, Limit, Project, 
 @dataclass
 class CountPlan:
     scan: Scan
-    filter: Filter = Filter()
-    limit: Limit = Limit()
-    project: Project = Project()
 
 
 @dataclass
