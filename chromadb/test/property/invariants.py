@@ -1,12 +1,16 @@
 import gc
 import math
+from uuid import UUID
+
+from chromadb.ingest.impl.utils import create_topic_name
+
 from chromadb.config import System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from time import sleep
 import psutil
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Any
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Any, Dict
 from typing_extensions import Literal
 import numpy as np
 import numpy.typing as npt
@@ -393,5 +397,63 @@ def log_size_below_max(
             _total_embedding_queue_log_size(sqlite) - 1
             <= sync_threshold_sum + batch_size_sum
         )
+    else:
+        assert _total_embedding_queue_log_size(sqlite) == 0
+
+
+def _total_embedding_queue_log_size_per_collection(
+    system: System,
+    collections: List[Collection],
+) -> Dict[UUID, int]:
+    sqlite = system.instance(SqliteDB)
+    t = Table("embeddings_queue")
+    q = sqlite.querybuilder().from_(t)
+    _tenant = system.settings.require("tenant_id")
+    _topic_namespace = system.settings.require("topic_namespace")
+    topic_mappings = {
+        create_topic_name(_tenant, _topic_namespace, collection.id): collection
+        for collection in collections
+    }
+    with sqlite.tx() as cur:
+        sql, params = get_sql(
+            q.select(t.topic, functions.Count(t.seq_id)).groupby("topic"),
+            sqlite.parameter_format(),
+        )
+        result = cur.execute(sql, params)
+        out = {}
+        for res in result.fetchall():
+            out[topic_mappings[res[0]].id] = res[1]
+        return out
+
+
+def log_size_for_collections_match_expected(
+    system: System, collections: List[Collection], has_collection_mutated: bool
+) -> None:
+    sqlite = system.instance(SqliteDB)
+
+    if has_collection_mutated:
+        # Must always keep one entry to avoid reusing seq_ids
+        assert _total_embedding_queue_log_size(sqlite) >= 1
+
+        batch_size_sum = {
+            collection.id: collection.metadata.get("hnsw:batch_size", 100)
+            if collection.metadata is not None
+            else 100
+            for collection in collections
+        }
+        expected_sizes = {
+            collection.id: collection.count() % batch_size_sum[collection.id] + 1
+            for collection in collections
+        }
+
+        actual_sizes = _total_embedding_queue_log_size_per_collection(
+            system, collections
+        )
+        assert set(actual_sizes.keys()) == set(expected_sizes.keys())
+        assert all(
+            actual_sizes[collection.id] == expected_sizes[collection.id]
+            for collection in collections
+        )
+
     else:
         assert _total_embedding_queue_log_size(sqlite) == 0

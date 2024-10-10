@@ -150,6 +150,9 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
             .on(segments_t.id == Table("max_seq_id").segment_id)
         )
 
+        topic_name = create_topic_name(
+            self._tenant, self._topic_namespace, collection_id
+        )
         with self.tx() as cur:
             sql, params = get_sql(segment_ids_q, self.parameter_format())
             cur.execute(sql, params)
@@ -164,6 +167,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
                 self.querybuilder()
                 .from_(t)
                 .where(t.seq_id < ParameterValue(min_seq_id))
+                .where(t.topic == ParameterValue(topic_name))
                 .delete()
             )
 
