@@ -729,6 +729,7 @@ mod tests {
 
         let sparse_index = SparseIndexWriter::new(ids[0]);
         // sparse_index.add_block(keys[0].clone(), ids[0]);
+        // TODO: WHY THE FUCK IS THIS BUGGING!? IF UNCOMMENT LINE ABOVE
         sparse_index.set_count(ids[0], counts[0]);
 
         // Split the range into two blocks (start, c), and (c, end)
