@@ -1,0 +1,530 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Create a stack that runs Chroma hosted on a single instance backed by an FSx ONTAP volume",
+    "Parameters": {
+        "KeyName": {
+            "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+            "Type": "String",
+            "ConstraintDescription": "If present, must be the name of an existing EC2 KeyPair.",
+            "Default": ""
+        },
+        "InstanceType": {
+            "Description": "EC2 instance type",
+            "Type": "String",
+            "Default": "t3.small"
+        },
+        "ChromaVersion": {
+            "Description": "Chroma version to install",
+            "Type": "String",
+            "Default": "0.5.12"
+        },
+        "FSxStorageCapacity": {
+            "Description": "The storage capacity of the FSx for ONTAP file system (in GiB)",
+            "Type": "Number",
+            "Default": 4096
+        },
+        "FSxThroughputCapacity": {
+            "Description": "The throughput capacity of the FSx for ONTAP file system (in MBps)",
+            "Type": "Number",
+            "Default": 2048
+        },
+        "FSxChromaVolSize": {
+            "Description": "The FSx volume size for the Chroma instance (in MB)",
+            "Type": "Number",
+            "Default": 24576
+        }
+    },
+    "Conditions": {
+        "HasKeyName": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "KeyName"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        }
+    },
+    "Resources": {
+        "ChromaFSxVPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": "10.255.0.0/16",
+                "EnableDnsSupport": "true",
+                "EnableDnsHostnames": "true"
+            }
+        },
+        "ChromaSubnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "CidrBlock": "10.255.0.0/24",
+                "VpcId": {
+                    "Ref": "ChromaFSxVPC"
+                }
+            }
+        },
+        "FSxSubnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "CidrBlock": "10.255.1.0/24",
+                "VpcId": {
+                    "Ref": "ChromaFSxVPC"
+                }
+            }
+        },
+        "ChromaFSxInternetGateway": {
+            "Type": "AWS::EC2::InternetGateway",
+            "DependsOn": "ChromaFSxVPC"
+        },
+        "ChromaFSxVPCGatewayAttachment": {
+            "Type": "AWS::EC2::VPCGatewayAttachment",
+            "Properties": {
+                "InternetGatewayId": {
+                    "Ref": "ChromaFSxInternetGateway"
+                },
+                "VpcId": {
+                    "Ref": "ChromaFSxVPC"
+                }
+            }
+        },
+        "ChromaFSxRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "ChromaFSxVPC"
+                }
+            }
+        },
+        "ChromaFSxRouteToIGW": {
+            "Type": "AWS::EC2::Route",
+            "DependsOn": [
+                "ChromaFSxVPCGatewayAttachment",
+                "ChromaFSxInternetGateway"
+            ],
+            "Properties": {
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "GatewayId": {
+                    "Ref": "ChromaFSxInternetGateway"
+                },
+                "RouteTableId": {
+                    "Ref": "ChromaFSxRouteTable"
+                }
+            }
+        },
+        "ChromaSubnetRouteTableAssociation": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "ChromaFSxRouteTable"
+                },
+                "SubnetId": {
+                    "Ref": "ChromaSubnet"
+                }
+            }
+        },
+        "FSxSubnetRouteTableAssociation": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "ChromaFSxRouteTable"
+                },
+                "SubnetId": {
+                    "Ref": "FSxSubnet"
+                }
+            }
+        },
+        "FsxAdminPassword": {
+            "Type": "AWS::SecretsManager::Secret",
+            "Properties": {
+                "Description": "FSx ONTAP Admin (fsxadmin) Password",
+                "GenerateSecretString": {
+                    "SecretStringTemplate": "{\"username\":\"fsxadmin\"}",
+                    "GenerateStringKey": "password",
+                    "PasswordLength": 16
+                },
+                "Name": "ChromaFSx-fsxadmin"
+            }
+        },
+        "FsxSvmPassword": {
+            "Type": "AWS::SecretsManager::Secret",
+            "Properties": {
+                "Description": "FSx SVM Admin (vsadmin) Password",
+                "GenerateSecretString": {
+                    "SecretStringTemplate": "{\"username\":\"vsadmin\"}",
+                    "GenerateStringKey": "password",
+                    "PasswordLength": 16
+                },
+                "Name": "ChromaFSx-vsadmin"
+            }
+        },
+        "FSxONTAP": {
+            "Type": "AWS::FSx::FileSystem",
+            "Properties": {
+                "FileSystemType": "ONTAP",
+                "StorageCapacity": {
+                    "Ref": "FSxStorageCapacity"
+                },
+                "SecurityGroupIds": [
+                    {
+                        "Ref": "FSxSecurityGroup"
+                    }
+                ],
+                "SubnetIds": [
+                    {
+                        "Ref": "FSxSubnet"
+                    }
+                ],
+                "OntapConfiguration": {
+                    "DeploymentType": "SINGLE_AZ_1",
+                    "FsxAdminPassword": "{{resolve:secretsmanager:ChromaFSx-fsxadmin:SecretString:password}}",
+                    "ThroughputCapacity": {
+                        "Ref": "FSxThroughputCapacity"
+                    }
+                }
+            }
+        },
+        "FSxSVM": {
+            "Type": "AWS::FSx::StorageVirtualMachine",
+            "Properties": {
+                "FileSystemId": {
+                    "Ref": "FSxONTAP"
+                },
+                "Name": "SVM1",
+                "SvmAdminPassword": "{{resolve:secretsmanager:ChromaFSx-vsadmin:SecretString:password}}"
+            }
+        },
+        "ChromaFSxVolume": {
+            "Type": "AWS::FSx::Volume",
+            "Properties": {
+                "Name": "chroma_instance_vol",
+                "OntapConfiguration": {
+                    "JunctionPath": "/chroma-data",
+                    "SecurityStyle": "UNIX",
+                    "SizeInMegabytes": {
+                        "Ref": "FSxChromaVolSize"
+                    },
+                    "StorageEfficiencyEnabled": "True",
+                    "StorageVirtualMachineId": {
+                        "Ref": "FSxSVM"
+                    }
+                },
+                "VolumeType": "ONTAP"
+            }
+        },
+        "ChromaInstance": {
+            "Type": "AWS::EC2::Instance",
+            "DependsOn": "ChromaFSxVolume",
+            "Properties": {
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "Region2AMI",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        "AMI"
+                    ]
+                },
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "NetworkInterfaces": [
+                    {
+                        "AssociatePublicIpAddress": "true",
+                        "DeviceIndex": "0",
+                        "GroupSet": [
+                            {
+                                "Ref": "ChromaSecurityGroup"
+                            }
+                        ],
+                        "SubnetId": {
+                            "Ref": "ChromaSubnet"
+                        }
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "Content-Type: multipart/mixed; boundary=\"//\"\n",
+                                "MIME-Version: 1.0\n",
+                                "\n",
+                                "--//\n",
+                                "Content-Type: text/cloud-config; charset=\"us-ascii\"\n",
+                                "MIME-Version: 1.0\n",
+                                "Content-Transfer-Encoding: 7bit\n",
+                                "Content-Disposition: attachment; filename=\"cloud-config.txt\"\n",
+                                "\n",
+                                "\n",
+                                "#cloud-config\n",
+                                "mounts:\n",
+                                "- ['",
+                                {
+                                    "Fn::Join" : [
+                                        ".",
+                                        [
+                                            {
+                                                "Fn::GetAtt": [
+                                                    "FSxSVM",
+                                                    "StorageVirtualMachineId"
+                                                ]
+                                            },
+                                            {
+                                                "Fn::Select": [
+                                                    "1",
+                                                    {
+                                                        "Fn::Split": [
+                                                            "/",
+                                                            {
+                                                                "Fn::GetAtt": [
+                                                                    "FSxSVM",
+                                                                    "ResourceARN"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "fsx",
+                                            {
+                                                "Fn::Select": [
+                                                    "3",
+                                                    {
+                                                        "Fn::Split": [
+                                                            ":",
+                                                            {
+                                                                "Fn::GetAtt": [
+                                                                    "FSxSVM",
+                                                                    "ResourceARN"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "amazonaws.com"
+                                        ]
+                                    ]
+                                },
+                                ":/chroma-data', /chroma-data, nfs]\n",
+                                "cloud_final_modules:\n",
+                                "- [scripts-user, always]\n",
+                                "\n",
+                                "\n",
+                                "--//\n",
+                                "Content-Type: text/x-shellscript; charset=\"us-ascii\"\n",
+                                "MIME-Version: 1.0\n",
+                                "Content-Transfer-Encoding: 7bit\n",
+                                "Content-Disposition: attachment; filename=\"userdata.txt\"\n",
+                                "\n",
+                                "#!/bin/bash\n",
+                                "yum install -y docker\n",
+                                "usermod -a -G docker ec2-user\n",
+                                "curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose\n",
+                                "chmod +x /usr/local/bin/docker-compose\n",
+                                "ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose\n",
+                                "systemctl enable docker\n",
+                                "systemctl start docker\n",
+                                "\n",
+                                "cat << EOF > /home/ec2-user/docker-compose.yml\n",
+                                "version: '3.9'\n",
+                                "\n",
+                                "networks:\n",
+                                "  net:\n",
+                                "    driver: bridge\n",
+                                "\n",
+                                "services:\n",
+                                "  server:\n",
+                                {
+                                    "Fn::Sub": "    image: ghcr.io/chroma-core/chroma:${ChromaVersion}\n"
+                                },
+                                "    environment:\n",
+                                "      - IS_PERSISTENT=TRUE\n",
+                                "    volumes:\n",
+                                "      - /chroma-data:/chroma/chroma/\n",
+                                "    ports:\n",
+                                "      - 8000:8000\n",
+                                "    networks:\n",
+                                "      - net\n",
+                                "\n",
+                                "volumes:\n",
+                                "  chroma-data:\n",
+                                "    driver: local\n",
+                                "EOF\n",
+                                "\n",
+                                "mkdir /home/ec2-user/config\n",
+                                "\n",
+                                "docker-compose -f /home/ec2-user/docker-compose.yml up -d\n",
+                                "\n",
+                                "--//--\n"
+                            ]
+                        ]
+                    }
+                },
+                "KeyName": {
+                    "Fn::If": [
+                        "HasKeyName",
+                        {
+                            "Ref": "KeyName"
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "BlockDeviceMappings": [
+                    {
+                        "DeviceName": {
+                            "Fn::FindInMap": [
+                                "Region2AMI",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                "RootDeviceName"
+                            ]
+                        },
+                        "Ebs": {
+                            "VolumeSize": 24
+                        }
+                    }
+                ]
+            }
+        },
+        "ChromaSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Chroma Instance Security Group",
+                "VpcId": {
+                    "Ref": "ChromaFSxVPC"
+                },
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "-1",
+                        "CidrIp": "10.255.0.0/16"
+                    },
+                    {
+                        "IpProtocol": "-1",
+                        "CidrIp": "10.255.0.0/16"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "8000",
+                        "ToPort": "8000",
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ]
+            }
+        },
+        "FSxSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "FSx ONTAP Security Group",
+                "VpcId": {
+                    "Ref": "ChromaFSxVPC"
+                },
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "-1",
+                        "CidrIp": "10.255.0.0/16"
+                    },
+                    {
+                        "IpProtocol": "-1",
+                        "CidrIp": "10.255.0.0/16"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "ServerIp": {
+            "Description": "IP address of the Chroma server",
+            "Value": {
+                "Fn::GetAtt": [
+                    "ChromaInstance",
+                    "PublicIp"
+                ]
+            }
+        }
+    },
+    "Mappings": {
+        "Region2AMI": {
+            "ap-south-1": {
+                "AMI": "ami-078264b8ba71bc45e",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "eu-north-1": {
+                "AMI": "ami-097c5c21a18dc59ea",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "eu-west-3": {
+                "AMI": "ami-0a3598a00eff32f66",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "eu-west-2": {
+                "AMI": "ami-0b4c7755cdf0d9219",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "eu-west-1": {
+                "AMI": "ami-054a53dca63de757b",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "ap-northeast-3": {
+                "AMI": "ami-022b677fdccc634eb",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "ap-northeast-2": {
+                "AMI": "ami-0e18fe6ecdad223e5",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "ap-northeast-1": {
+                "AMI": "ami-0ef29ab52ff72213b",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "ca-central-1": {
+                "AMI": "ami-0d9c7bbbda4b78ffd",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "sa-east-1": {
+                "AMI": "ami-0fd8b11b89c97edaf",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "ap-southeast-1": {
+                "AMI": "ami-0ad522a4a529e7aa8",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "ap-southeast-2": {
+                "AMI": "ami-0cf70e1d861e1dfb8",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "eu-central-1": {
+                "AMI": "ami-0592c673f0b1e7665",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "us-east-1": {
+                "AMI": "ami-0fff1b9a61dec8a5f",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "us-east-2": {
+                "AMI": "ami-09da212cf18033880",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "us-west-1": {
+                "AMI": "ami-09b2477d43bc5d0ac",
+                "RootDeviceName": "/dev/xvda"
+            },
+            "us-west-2": {
+                "AMI": "ami-0d081196e3df05f4d",
+                "RootDeviceName": "/dev/xvda"
+            }
+        }
+    }
+}
