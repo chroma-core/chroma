@@ -515,3 +515,15 @@ pre[class*='language-'] {
   @apply -ml-2 mr-4 inline-block w-4 text-right text-gray-400;
   content: attr(line);
 }*/
+
+blockquote {
+  background-color: #fafafa;
+  border: 1px solid #e0e0e0;
+  margin-bottom: 15px;
+  padding-bottom: 1rem;
+  border-radius: 3px;
+}
+blockquote p {
+  padding: 1rem 1.5rem 0rem 1.5rem;
+  margin: 0;
+}
