@@ -5,15 +5,17 @@ use crate::{
     Value,
 };
 use arrow::{
-    array::{
-        Array, BinaryBuilder, ListBuilder, RecordBatch, StringBuilder, UInt32Array, UInt32Builder,
-    },
-    datatypes::Field,
+    array::{Array, BinaryBuilder, ListBuilder, StringBuilder, UInt32Array, UInt32Builder},
+    datatypes::{Field, Schema},
     util::bit_util,
 };
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    vec,
+};
 
 #[derive(Clone)]
 pub struct SingleColumnStorage<T: ArrowWriteableValue> {
@@ -222,7 +224,8 @@ impl SingleColumnStorage<String> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        metadata: Option<HashMap<String, String>>,
+    ) -> (Arc<Schema>, Vec<Arc<dyn Array>>) {
         // Build key and value.
         let mut key_builder = key_builder;
         let item_capacity = self.len();
@@ -250,12 +253,14 @@ impl SingleColumnStorage<String> {
         let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
         let value_arr = value_builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
+        let schema = arrow::datatypes::Schema::new(vec![prefix_field, key_field, value_field]);
+
+        if let Some(metadata) = metadata {
+            let schema = schema.with_metadata(metadata);
+            return (schema.into(), vec![prefix_arr, key_arr, value_arr]);
+        }
+
+        (schema.into(), vec![prefix_arr, key_arr, value_arr])
     }
 }
 
@@ -263,7 +268,8 @@ impl SingleColumnStorage<Vec<u32>> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        metadata: Option<HashMap<String, String>>,
+    ) -> (Arc<Schema>, Vec<Arc<dyn Array>>) {
         // Build key and value.
         let mut key_builder = key_builder;
         let item_capacity = self.len();
@@ -303,12 +309,14 @@ impl SingleColumnStorage<Vec<u32>> {
         );
         let value_arr = value_builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
+        let schema = arrow::datatypes::Schema::new(vec![prefix_field, key_field, value_field]);
+
+        if let Some(metadata) = metadata {
+            let schema = schema.with_metadata(metadata);
+            return (schema.into(), vec![prefix_arr, key_arr, value_arr]);
+        }
+
+        (schema.into(), vec![prefix_arr, key_arr, value_arr])
     }
 }
 
@@ -316,7 +324,8 @@ impl SingleColumnStorage<u32> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        metadata: Option<HashMap<String, String>>,
+    ) -> (Arc<Schema>, Vec<Arc<dyn Array>>) {
         // Build key and value.
         let mut key_builder = key_builder;
         let mut value_builder;
@@ -343,12 +352,14 @@ impl SingleColumnStorage<u32> {
         let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
         let value_arr = value_builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
+        let schema = arrow::datatypes::Schema::new(vec![prefix_field, key_field, value_field]);
+
+        if let Some(metadata) = metadata {
+            let schema = schema.with_metadata(metadata);
+            return (schema.into(), vec![prefix_arr, key_arr, value_arr]);
+        }
+
+        (schema.into(), vec![prefix_arr, key_arr, value_arr])
     }
 }
 
@@ -356,7 +367,8 @@ impl SingleColumnStorage<RoaringBitmap> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
+        metadata: Option<HashMap<String, String>>,
+    ) -> (Arc<Schema>, Vec<Arc<dyn Array>>) {
         // Build key.
         let mut key_builder = key_builder;
         let item_capacity = self.len();
@@ -394,11 +406,13 @@ impl SingleColumnStorage<RoaringBitmap> {
         let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = value_builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
+        let schema = arrow::datatypes::Schema::new(vec![prefix_field, key_field, value_field]);
+
+        if let Some(metadata) = metadata {
+            let schema = schema.with_metadata(metadata);
+            return (schema.into(), vec![prefix_arr, key_arr, value_arr]);
+        }
+
+        (schema.into(), vec![prefix_arr, key_arr, value_arr])
     }
 }
