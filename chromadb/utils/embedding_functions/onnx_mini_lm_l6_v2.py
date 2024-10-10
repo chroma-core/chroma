@@ -97,7 +97,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         which makes mypy unhappy. If some smart folk knows how to fix this in an
         elegant way, please do so.
         """
-        with httpx.stream("GET", url) as resp:
+        with httpx.stream("GET", url, timeout=None) as resp:
             total = int(resp.headers.get("content-length", 0))
             with open(fname, "wb") as file, self.tqdm(
                 desc=str(fname),
