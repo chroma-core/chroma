@@ -12,15 +12,9 @@ from chromadb.api.configuration import (
     InvalidConfigurationError,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
-from chromadb.db.base import (
-    Cursor,
-    SqlDB,
-    ParameterValue,
-    get_sql,
-    UniqueConstraintError,
-)
+from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
-from chromadb.errors import NotFoundError
+from chromadb.errors import NotFoundError, UniqueConstraintError
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,

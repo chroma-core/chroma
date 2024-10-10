@@ -8,6 +8,7 @@ import {
   ChromaValueError,
   ChromaError,
   createErrorByType,
+  ChromaUniqueError,
 } from "./Errors";
 import { FetchAPI } from "./generated";
 
@@ -71,6 +72,8 @@ export const chromaFetch: FetchAPI = async (
           throw new ChromaNotFoundError(
             `The requested resource could not be found: ${input}`,
           );
+        case 409:
+          throw new ChromaUniqueError("The resource already exists");
         case 500:
           throw parseServerError(respBody?.error);
         case 502:

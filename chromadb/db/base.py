@@ -9,14 +9,7 @@ import pypika.queries
 from chromadb.config import System, Component
 from uuid import UUID
 from itertools import islice, count
-
 from chromadb.types import SeqId
-
-
-class UniqueConstraintError(Exception):
-    """Raised when an insert operation would violate a unique constraint"""
-
-    pass
 
 
 class Cursor(Protocol):
