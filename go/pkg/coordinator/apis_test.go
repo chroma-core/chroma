@@ -273,6 +273,32 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	})
 	suite.Error(err)
 
+	// Create collection with empty name fails
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           suite.sampleCollections[0].ID,
+		Name:         "",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	})
+	suite.Error(err)
+
+	// Create collection with empty tenant id fails
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           suite.sampleCollections[0].ID,
+		Name:         suite.sampleCollections[0].Name,
+		DatabaseName: suite.databaseName,
+	})
+	suite.Error(err)
+
+	// Create collection with random tenant id fails
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           suite.sampleCollections[0].ID,
+		Name:         suite.sampleCollections[0].Name,
+		TenantID:     "random_tenant_id",
+		DatabaseName: suite.databaseName,
+	})
+	suite.Error(err)
+
 	// Find by name
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, suite.tenantName, suite.databaseName, nil, nil)
@@ -384,7 +410,32 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	ctx := context.Background()
 	newDatabaseName := "test_apis_CreateUpdateWithDatabase"
 	newDatabaseId := uuid.New().String()
+	// Create database with empty string in name fails
 	_, err := suite.coordinator.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     newDatabaseId,
+		Name:   "",
+		Tenant: suite.tenantName,
+	})
+	suite.Error(err)
+
+	// Create database with empty string in tenant fails
+	_, err = suite.coordinator.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     newDatabaseId,
+		Name:   newDatabaseName,
+		Tenant: "",
+	})
+	suite.Error(err)
+
+	// Create database with random non-existent tenant id fails
+	_, err = suite.coordinator.CreateDatabase(ctx, &model.CreateDatabase{
+		ID:     newDatabaseId,
+		Name:   newDatabaseName,
+		Tenant: "random_tenant_id",
+	})
+	suite.Error(err)
+
+	// Correct creation
+	_, err = suite.coordinator.CreateDatabase(ctx, &model.CreateDatabase{
 		ID:     newDatabaseId,
 		Name:   newDatabaseName,
 		Tenant: suite.tenantName,
@@ -691,6 +742,27 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 			Metadata:     segment.Metadata,
 		})
 		suite.NoError(errSegmentCreation)
+
+		// Create segment with empty collection id fails
+		errSegmentCreation = c.CreateSegment(ctx, &model.CreateSegment{
+			ID:           segment.ID,
+			Type:         segment.Type,
+			Scope:        segment.Scope,
+			CollectionID: types.NilUniqueID(),
+			Metadata:     segment.Metadata,
+		})
+		suite.Error(errSegmentCreation)
+
+		// Create segment to test unique constraint violation on segment.id.
+		// This should fail because the id is already taken.
+		errSegmentCreation = c.CreateSegment(ctx, &model.CreateSegment{
+			ID:           segment.ID,
+			Type:         segment.Type,
+			Scope:        segment.Scope,
+			CollectionID: types.MustParse("00000000-d7d7-413b-92e1-731098a6e777"),
+			Metadata:     segment.Metadata,
+		})
+		suite.Error(errSegmentCreation)
 	}
 
 	var results []*model.Segment
