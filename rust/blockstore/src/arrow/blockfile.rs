@@ -479,14 +479,14 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 
     /// Returns all arrow records whose key > supplied key.
-    pub(crate) async fn get_gt(
+    pub(crate) async fn get_gt<'a>(
         &'me self,
-        prefix: &str,
+        prefix: &'a str,
         key: K,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys > key from sparse index for this prefix.
         let block_ids = self.root.sparse_index.get_block_ids_range(
-            prefix.to_string()..=prefix.to_string(),
+            prefix..=prefix,
             (
                 std::ops::Bound::Excluded(key.clone()),
                 std::ops::Bound::Unbounded,
@@ -526,7 +526,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix.to_string()..=prefix.to_string(), ..key.clone());
+            .get_block_ids_range(prefix..=prefix, ..key.clone());
         let mut result: Vec<(K, V)> = vec![];
         // Read all the blocks individually to get keys < key.
         for block_id in block_ids {
@@ -561,7 +561,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix.to_string()..=prefix.to_string(), key.clone()..);
+            .get_block_ids_range(prefix..=prefix, key.clone()..);
         let mut result: Vec<(K, V)> = vec![];
         // Read all the blocks individually to get keys >= key.
         for block_id in block_ids {
@@ -596,7 +596,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix.to_string()..=prefix.to_string(), ..=key.clone());
+            .get_block_ids_range(prefix..=prefix, ..=key.clone());
         let mut result: Vec<(K, V)> = vec![];
         // Read all the blocks individually to get keys <= key.
         for block_id in block_ids {
@@ -629,7 +629,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range::<K, _, _>(prefix.to_string()..=prefix.to_string(), ..);
+            .get_block_ids_range::<K, _, _>(prefix..=prefix, ..);
         let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {

@@ -362,6 +362,7 @@ impl SparseIndexReader {
     }
 
     pub(super) fn get_block_ids_range<
+        'prefix,
         'a,
         K: ArrowReadableKey<'a> + Into<KeyWrapper>,
         PrefixRange,
@@ -373,7 +374,7 @@ impl SparseIndexReader {
         key_range: KeyRange,
     ) -> Vec<Uuid>
     where
-        PrefixRange: RangeBounds<String>,
+        PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
     {
         let forward = &self.data.forward;
@@ -398,8 +399,8 @@ impl SparseIndexReader {
                 let prefix_start_valid = match block_start_key {
                     SparseIndexDelimiter::Start => true,
                     SparseIndexDelimiter::Key(start_key) => match prefix_range.start_bound() {
-                        Bound::Included(prefix_start) => *prefix_start >= start_key.prefix,
-                        Bound::Excluded(prefix_start) => *prefix_start > start_key.prefix,
+                        Bound::Included(prefix_start) => *prefix_start >= start_key.prefix.as_str(),
+                        Bound::Excluded(prefix_start) => *prefix_start > start_key.prefix.as_str(),
                         Bound::Unbounded => true,
                     },
                 };
@@ -410,11 +411,11 @@ impl SparseIndexReader {
 
                 let prefix_end_valid = match prefix_range.end_bound() {
                     Bound::Included(prefix_end) => match block_end_key {
-                        Some(end_key) => *prefix_end <= end_key.prefix,
+                        Some(end_key) => *prefix_end <= end_key.prefix.as_str(),
                         None => true,
                     },
                     Bound::Excluded(prefix_end) => match block_end_key {
-                        Some(end_key) => *prefix_end < end_key.prefix,
+                        Some(end_key) => *prefix_end < end_key.prefix.as_str(),
                         None => true,
                     },
                     Bound::Unbounded => true,
