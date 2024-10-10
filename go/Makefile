@@ -18,7 +18,7 @@ docker:
 	docker build -t chroma-coordinator:latest .
 
 ### LOG SERVICE
-DATABABASE_LOG_DIR := database/log
+DATABABASE_LOG_DIR := pkg/log/store
 
 log_db_clean:
 	rm -rf $(DATABABASE_LOG_DIR)/db

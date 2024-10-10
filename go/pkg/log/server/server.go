@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
+	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
