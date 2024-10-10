@@ -847,6 +847,9 @@ type CreateCollectionRequest struct {
 	GetOrCreate          *bool           `protobuf:"varint,6,opt,name=get_or_create,json=getOrCreate,proto3,oneof" json:"get_or_create,omitempty"`
 	Tenant               string          `protobuf:"bytes,7,opt,name=tenant,proto3" json:"tenant,omitempty"`
 	Database             string          `protobuf:"bytes,8,opt,name=database,proto3" json:"database,omitempty"`
+	// When segments are set, then the collection and segments will be created as
+	// a single atomic operation.
+	Segments []*Segment `protobuf:"bytes,9,rep,name=segments,proto3" json:"segments,omitempty"` // Optional.
 }
 
 func (x *CreateCollectionRequest) Reset() {
@@ -937,6 +940,13 @@ func (x *CreateCollectionRequest) GetDatabase() string {
 	return ""
 }
 
+func (x *CreateCollectionRequest) GetSegments() []*Segment {
+	if x != nil {
+		return x.Segments
+	}
+	return nil
+}
+
 type CreateCollectionResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -997,9 +1007,10 @@ type DeleteCollectionRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id       string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Tenant   string `protobuf:"bytes,2,opt,name=tenant,proto3" json:"tenant,omitempty"`
-	Database string `protobuf:"bytes,3,opt,name=database,proto3" json:"database,omitempty"`
+	Id           string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Tenant       string `protobuf:"bytes,2,opt,name=tenant,proto3" json:"tenant,omitempty"`
+	Database     string `protobuf:"bytes,3,opt,name=database,proto3" json:"database,omitempty"`
+	WithSegments *bool  `protobuf:"varint,4,opt,name=with_segments,json=withSegments,proto3,oneof" json:"with_segments,omitempty"`
 }
 
 func (x *DeleteCollectionRequest) Reset() {
@@ -1053,6 +1064,13 @@ func (x *DeleteCollectionRequest) GetDatabase() string {
 		return x.Database
 	}
 	return ""
+}
+
+func (x *DeleteCollectionRequest) GetWithSegments() bool {
+	if x != nil && x.WithSegments != nil {
+		return *x.WithSegments
+	}
+	return false
 }
 
 type DeleteCollectionResponse struct {

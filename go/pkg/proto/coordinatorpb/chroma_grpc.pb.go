@@ -61,16 +61,19 @@ func (c *metadataReaderClient) CountRecords(ctx context.Context, in *CountRecord
 
 // MetadataReaderServer is the server API for MetadataReader service.
 // All implementations must embed UnimplementedMetadataReaderServer
-// for forward compatibility
+// for forward compatibility.
 type MetadataReaderServer interface {
 	QueryMetadata(context.Context, *QueryMetadataRequest) (*QueryMetadataResponse, error)
 	CountRecords(context.Context, *CountRecordsRequest) (*CountRecordsResponse, error)
 	mustEmbedUnimplementedMetadataReaderServer()
 }
 
-// UnimplementedMetadataReaderServer must be embedded to have forward compatible implementations.
-type UnimplementedMetadataReaderServer struct {
-}
+// UnimplementedMetadataReaderServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedMetadataReaderServer struct{}
 
 func (UnimplementedMetadataReaderServer) QueryMetadata(context.Context, *QueryMetadataRequest) (*QueryMetadataResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method QueryMetadata not implemented")
@@ -79,6 +82,7 @@ func (UnimplementedMetadataReaderServer) CountRecords(context.Context, *CountRec
 	return nil, status.Errorf(codes.Unimplemented, "method CountRecords not implemented")
 }
 func (UnimplementedMetadataReaderServer) mustEmbedUnimplementedMetadataReaderServer() {}
+func (UnimplementedMetadataReaderServer) testEmbeddedByValue()                        {}
 
 // UnsafeMetadataReaderServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to MetadataReaderServer will
@@ -88,6 +92,13 @@ type UnsafeMetadataReaderServer interface {
 }
 
 func RegisterMetadataReaderServer(s grpc.ServiceRegistrar, srv MetadataReaderServer) {
+	// If the following call pancis, it indicates UnimplementedMetadataReaderServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
 	s.RegisterService(&MetadataReader_ServiceDesc, srv)
 }
 
@@ -190,16 +201,19 @@ func (c *vectorReaderClient) QueryVectors(ctx context.Context, in *QueryVectorsR
 
 // VectorReaderServer is the server API for VectorReader service.
 // All implementations must embed UnimplementedVectorReaderServer
-// for forward compatibility
+// for forward compatibility.
 type VectorReaderServer interface {
 	GetVectors(context.Context, *GetVectorsRequest) (*GetVectorsResponse, error)
 	QueryVectors(context.Context, *QueryVectorsRequest) (*QueryVectorsResponse, error)
 	mustEmbedUnimplementedVectorReaderServer()
 }
 
-// UnimplementedVectorReaderServer must be embedded to have forward compatible implementations.
-type UnimplementedVectorReaderServer struct {
-}
+// UnimplementedVectorReaderServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedVectorReaderServer struct{}
 
 func (UnimplementedVectorReaderServer) GetVectors(context.Context, *GetVectorsRequest) (*GetVectorsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetVectors not implemented")
@@ -208,6 +222,7 @@ func (UnimplementedVectorReaderServer) QueryVectors(context.Context, *QueryVecto
 	return nil, status.Errorf(codes.Unimplemented, "method QueryVectors not implemented")
 }
 func (UnimplementedVectorReaderServer) mustEmbedUnimplementedVectorReaderServer() {}
+func (UnimplementedVectorReaderServer) testEmbeddedByValue()                      {}
 
 // UnsafeVectorReaderServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to VectorReaderServer will
@@ -217,6 +232,13 @@ type UnsafeVectorReaderServer interface {
 }
 
 func RegisterVectorReaderServer(s grpc.ServiceRegistrar, srv VectorReaderServer) {
+	// If the following call pancis, it indicates UnimplementedVectorReaderServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
 	s.RegisterService(&VectorReader_ServiceDesc, srv)
 }
 
