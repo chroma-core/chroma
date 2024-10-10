@@ -24,11 +24,10 @@ from chromadb.api.configuration import CollectionConfigurationInternal
 import logging
 import time
 
-# Add this at the beginning of the file
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Add a decorator to log the start and end of each test function
+# Decorator to log the start and end of each test function
 def log_test(func):
     @functools.wraps(func)
     def wrapper(sysdb, *args, **kwargs):
@@ -346,23 +345,25 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         dimension=collection["dimension"],
     )
 
-    # result, created = sysdb.create_collection(
-    #     name=collection.name,
-    #     id=uuid.uuid4(),
-    #     configuration=collection.get_configuration(),
-    #     get_or_create=True,
-    #     segments=[
-    #         Segment(
-    #             id=uuid.uuid4(),
-    #             type="test_type_a",
-    #             scope=SegmentScope.VECTOR,
-    #             collection=sample_collections[1].id,
-    #             metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
-    #         )
-    #     ], # This could have been empty - [].
-    #     metadata=collection["metadata"],
-    # )
-    # assert result == collection
+    # Create collection with same name, but different id.
+    # Since get_or_create is true, it should return the existing collection.
+    result, created = sysdb.create_collection(
+        name=collection.name,
+        id=uuid.uuid4(),
+        configuration=collection.get_configuration(),
+        get_or_create=True,
+        segments=[
+            Segment(
+                id=uuid.uuid4(),
+                type="test_type_a",
+                scope=SegmentScope.VECTOR,
+                collection=sample_collections[1].id,
+                metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+            )
+        ], # This could have been empty - [].
+        metadata=collection["metadata"],
+    )
+    assert result == collection
 
     # Only one collection with the same name exists
     get_result = sysdb.get_collections(name=collection["name"])
@@ -640,7 +641,6 @@ def test_get_multiple_with_database(sysdb: SysDB) -> None:
     result = sysdb.get_collections()
     assert len(result) == 0
 
-# TODO(rohit): Put your tests here.
 def test_create_database_with_tenants(sysdb: SysDB) -> None:
     sysdb.reset_state()
 
@@ -781,8 +781,12 @@ sample_segments = [
 def test_create_get_delete_segments(sysdb: SysDB) -> None:
     sysdb.reset_state()
 
+    # Keep track of segments created with a collection.
     segments_created_with_collection = []
+    # Used to toggle between test_type_a and test_type_b
     toggle_type = False
+
+    # Create collections along with segments.
     for collection in sample_collections:
         toggle_type = not toggle_type
         segment = sample_segment(
