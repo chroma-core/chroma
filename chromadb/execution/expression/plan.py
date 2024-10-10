@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from chromadb.execution.expression.operator import Filter, KNN, Limit, Project, Scan
+from chromadb.execution.expression.operator import Filter, KNN, Limit, Projection, Scan
 
 
 @dataclass
@@ -13,12 +13,12 @@ class GetPlan:
     scan: Scan
     filter: Filter = Filter()
     limit: Limit = Limit()
-    project: Project = Project()
+    projection: Projection = Projection()
 
 
 @dataclass
-class KnnPlan:
+class KNNPlan:
     scan: Scan
     knn: KNN
     filter: Filter = Filter()
-    project: Project = Project()
+    projection: Projection = Projection()
