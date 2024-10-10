@@ -1186,6 +1186,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "thiserror",
+ "tokio",
  "tracing",
  "uuid",
 ]

@@ -13,10 +13,11 @@ anyhow = "1.0"
 # TODO(rescrv):  Deprecated.  Find a suitable replacement for such things.
 serde_yaml = "0.9"
 
-thiserror = { workspace = true }
-serde = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
