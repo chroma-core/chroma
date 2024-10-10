@@ -242,7 +242,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		if createCollection.GetOrCreate {
 			collection := convertCollectionToModel(existing)[0]
 			result = collection
-			return nil, false, nil
+			return result, false, nil
 		} else {
 			return nil, false, common.ErrCollectionUniqueConstraintViolation
 		}

@@ -139,8 +139,9 @@ class SqlSysDB(SqlDB, SysDB):
                 raise NotFoundError(f"Tenant {name} not found")
             return Tenant(name=name)
 
-    @override
-    def create_segment(self, segment: Segment) -> None:
+    # Create a segment using the passed cursor, so that the other changes
+    # can be in the same transaction.
+    def create_segment_with_tx(self, cur: Cursor, segment: Segment) -> None:
         add_attributes_to_current_span(
             {
                 "segment_id": str(segment["id"]),
@@ -149,33 +150,36 @@ class SqlSysDB(SqlDB, SysDB):
                 "collection": str(segment["collection"]),
             }
         )
-        with self.tx() as cur:
-            segments = Table("segments")
-            insert_segment = (
-                self.querybuilder()
-                .into(segments)
-                .columns(
-                    segments.id,
-                    segments.type,
-                    segments.scope,
-                    segments.collection,
-                )
-                .insert(
-                    ParameterValue(self.uuid_to_db(segment["id"])),
-                    ParameterValue(segment["type"]),
-                    ParameterValue(segment["scope"].value),
-                    ParameterValue(self.uuid_to_db(segment["collection"])),
-                )
+
+        segments = Table("segments")
+        insert_segment = (
+            self.querybuilder()
+            .into(segments)
+            .columns(
+                segments.id,
+                segments.type,
+                segments.scope,
+                segments.collection,
             )
-            sql, params = get_sql(insert_segment, self.parameter_format())
+            .insert(
+                ParameterValue(self.uuid_to_db(segment["id"])),
+                ParameterValue(segment["type"]),
+                ParameterValue(segment["scope"].value),
+                ParameterValue(self.uuid_to_db(segment["collection"])),
+            )
+        )
+        sql, params = get_sql(insert_segment, parameter_format)
+        try:
+            cur.execute(sql, params)
+        except self.unique_constraint_error() as e:
+            raise UniqueConstraintError(
+                f"Segment {segment['id']} already exists"
+            ) from e
+
+        # Insert segment metadata if it exists
+        metadata_t = Table("segment_metadata")
+        if segment["metadata"]:
             try:
-                cur.execute(sql, params)
-            except self.unique_constraint_error() as e:
-                raise UniqueConstraintError(
-                    f"Segment {segment['id']} already exists"
-                ) from e
-            metadata_t = Table("segment_metadata")
-            if segment["metadata"]:
                 self._insert_metadata(
                     cur,
                     metadata_t,
@@ -183,6 +187,18 @@ class SqlSysDB(SqlDB, SysDB):
                     segment["id"],
                     segment["metadata"],
                 )
+            except Exception as e:
+                logger.error(f"Error inserting segment metadata: {e}")
+                raise
+
+
+    # TODO(rohit): Investigate and remove this method completely.
+    @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
+    @override
+    def create_segment(self, segment: Segment) -> None:
+        with self.tx() as cur:
+            self.create_segment_with_tx(cur, segment)
+
 
     @trace_method("SqlSysDB.create_collection", OpenTelemetryGranularity.ALL)
     @override
@@ -191,6 +207,7 @@ class SqlSysDB(SqlDB, SysDB):
         id: UUID,
         name: str,
         configuration: CollectionConfigurationInternal,
+        segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -274,6 +291,10 @@ class SqlSysDB(SqlDB, SysDB):
                     collection.id,
                     collection["metadata"],
                 )
+
+            for segment in segments:
+                self.create_segment_with_tx(cur, segment)
+
         return collection, True
 
     @trace_method("SqlSysDB.get_segments", OpenTelemetryGranularity.ALL)

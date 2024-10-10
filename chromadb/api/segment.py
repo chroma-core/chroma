@@ -221,11 +221,18 @@ class SegmentAPI(ServerAPI):
             database=database,
             dimension=None,
         )
+
+        # Get the segment related information for the collection.
+        # NOTE: Below call does not actually create segments in sysdb.
+        # TODO: Move this call out of the manager or change name.
+        segments = self._manager.create_segments(model)
+
         # TODO: Let sysdb create the collection directly from the model
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
+            segments=segments,
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -233,12 +240,7 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
-        # TODO: wrap sysdb call in try except and log error if it fails
-        if created:
-            segments = self._manager.create_segments(coll)
-            for segment in segments:
-                self._sysdb.create_segment(segment)
-        else:
+        if not created:
             logger.debug(
                 f"Collection {name} already exists, returning existing collection."
             )
