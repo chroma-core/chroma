@@ -7,7 +7,6 @@ from chromadb.config import System
 from chromadb.db.base import ParameterValue, get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.segment.impl.vector.batch import Batch
-from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.segment.impl.vector.local_hnsw import (
     DEFAULT_CAPACITY,
     LocalHnswSegment,
@@ -20,7 +19,6 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.types import (
     LogRecord,
-    Metadata,
     Operation,
     RequestVersionContext,
     Segment,
@@ -78,19 +76,12 @@ class PersistentData:
 
 class PersistentLocalHnswSegment(LocalHnswSegment):
     METADATA_FILE: str = "index_metadata.pickle"
-    # How many records to add to index at once, we do this because crossing the python/c++ boundary is expensive (for add())
-    # When records are not added to the c++ index, they are buffered in memory and served
-    # via brute force search.
-    _batch_size: int
     _brute_force_index: Optional[BruteForceIndex]
     _index_initialized: bool = False
     _curr_batch: Batch
-    # How many records to add to index before syncing to disk
-    _sync_threshold: int
     _persist_data: PersistentData
     _persist_directory: str
     _allow_reset: bool
-
     _db: SqliteDB
     _opentelemtry_client: OpenTelemetryClient
 
@@ -102,10 +93,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
 
         self._db = system.instance(SqliteDB)
         self._opentelemtry_client = system.require(OpenTelemetryClient)
-
-        self._params = PersistentHnswParams(segment["metadata"] or {})
-        self._batch_size = self._params.batch_size
-        self._sync_threshold = self._params.sync_threshold
         self._allow_reset = system.settings.allow_reset
         self._persist_directory = system.settings.require("persist_directory")
         self._curr_batch = Batch()
@@ -171,13 +158,6 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             else:
                 self._max_seq_id = self._consumer.min_seqid()
 
-    @staticmethod
-    @override
-    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
-        # Extract relevant metadata
-        segment_metadata = PersistentHnswParams.extract(metadata)
-        return segment_metadata
-
     def _index_exists(self) -> bool:
         """Check if the index exists via the metadata file"""
         return os.path.exists(self._get_metadata_file())
@@ -196,11 +176,11 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     )
     @override
     def _init_index(self, dimensionality: int) -> None:
-        index = hnswlib.Index(space=self._params.space, dim=dimensionality)
+        index = hnswlib.Index(space=self._configuration.space, dim=dimensionality)
         self._brute_force_index = BruteForceIndex(
-            size=self._batch_size,
+            size=self._configuration.batch_size,
             dimensionality=dimensionality,
-            space=self._params.space,
+            space=self._configuration.space,
         )
 
         # Check if index exists and load it if it does
@@ -215,7 +195,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                                 collection_version=0, log_position=0
                             )
                         )
-                        * self._params.resize_factor,
+                        * self._configuration.resize_factor,
                         DEFAULT_CAPACITY,
                     )
                 ),
@@ -223,14 +203,14 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         else:
             index.init_index(
                 max_elements=DEFAULT_CAPACITY,
-                ef_construction=self._params.construction_ef,
-                M=self._params.M,
+                ef_construction=self._configuration.ef_construction,
+                M=self._configuration.m,
                 is_persistent_index=True,
                 persistence_location=self._get_storage_folder(),
             )
 
-        index.set_ef(self._params.search_ef)
-        index.set_num_threads(self._params.num_threads)
+        index.set_ef(self._configuration.ef_search)
+        index.set_num_threads(self._configuration.num_threads)
 
         self._index = index
         self._dimensionality = dimensionality
@@ -279,7 +259,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     @override
     def _apply_batch(self, batch: Batch) -> None:
         super()._apply_batch(batch)
-        if self._num_log_records_since_last_persist >= self._sync_threshold:
+        if (
+            self._num_log_records_since_last_persist
+            >= self._configuration.sync_threshold
+        ):
             self._persist()
 
         self._num_log_records_since_last_batch = 0
@@ -345,7 +328,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         self._curr_batch.apply(record, exists_in_index)
                         self._brute_force_index.upsert([record])
 
-                if self._num_log_records_since_last_batch >= self._batch_size:
+                if (
+                    self._num_log_records_since_last_batch
+                    >= self._configuration.batch_size
+                ):
                     self._apply_batch(self._curr_batch)
                     self._curr_batch = Batch()
                     self._brute_force_index.clear()

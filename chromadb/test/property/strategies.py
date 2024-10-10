@@ -9,6 +9,9 @@ import numpy.typing as npt
 import chromadb.api.types as types
 import re
 from hypothesis.strategies._internal.strategies import SearchStrategy
+
+from chromadb.api import CollectionConfiguration
+from chromadb.api.configuration import HNSWConfiguration
 from chromadb.test.conftest import NOT_CLUSTER_ONLY
 from dataclasses import dataclass
 from chromadb.api.types import (
@@ -42,12 +45,6 @@ np.random.seed(0)  # unnecessary, hypothesis does this for us
 
 # Please make changes to these strategies incrementally, testing to make sure they don't
 # start generating unsatisfiable examples.
-
-test_hnsw_config = {
-    "hnsw:construction_ef": 128,
-    "hnsw:search_ef": 128,
-    "hnsw:M": 128,
-}
 
 
 class RecordSet(TypedDict):
@@ -166,7 +163,7 @@ def collection_name(draw: st.DrawFn) -> str:
 
 
 collection_metadata = st.one_of(
-    st.none(), st.dictionaries(safe_text, st.one_of(*safe_values))
+    st.none(), st.dictionaries(safe_text, st.one_of(*safe_values), min_size=1)
 )
 
 
@@ -255,6 +252,7 @@ class ExternalCollection:
 
     name: str
     metadata: Optional[types.Metadata]
+    configuration: CollectionConfiguration
     embedding_function: Optional[types.EmbeddingFunction[Embeddable]]
 
 
@@ -304,27 +302,28 @@ def collections(
             "with_persistent_hnsw_params requires with_hnsw_params to be true"
         )
 
+    hnsw_params: Dict[str, Union[str, int, float]] = {}
+
     if with_hnsw_params:
-        if metadata is None:
-            metadata = {}
-        metadata.update(test_hnsw_config)
         if use_persistent_hnsw_params:
-            metadata["hnsw:sync_threshold"] = draw(
+            hnsw_params["sync_threshold"] = draw(
                 st.integers(min_value=3, max_value=max_hnsw_sync_threshold)
             )
-            metadata["hnsw:batch_size"] = draw(
+            hnsw_params["batch_size"] = draw(
                 st.integers(
                     min_value=3,
-                    max_value=min(
-                        [metadata["hnsw:sync_threshold"], max_hnsw_batch_size]
-                    ),
+                    max_value=min([hnsw_params["sync_threshold"], max_hnsw_batch_size]),
                 )
             )
         # Sometimes, select a space at random
         if draw(st.booleans()):
             # TODO: pull the distance functions from a source of truth that lives not
             # in tests once https://github.com/chroma-core/issues/issues/61 lands
-            metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
+            hnsw_params["space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
+
+    configuration = CollectionConfiguration(
+        hnsw_configuration=HNSWConfiguration(**hnsw_params)
+    )
 
     known_metadata_keys: Dict[str, Union[int, str, float]] = {}
     if add_filterable_data:
@@ -364,6 +363,7 @@ def collections(
         id=uuid.uuid4(),
         name=name,
         metadata=metadata,
+        configuration=configuration,
         dimension=dimension,
         dtype=dtype,
         known_metadata_keys=known_metadata_keys,

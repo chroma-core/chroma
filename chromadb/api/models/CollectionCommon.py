@@ -452,10 +452,6 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_modify_request(self, metadata: Optional[CollectionMetadata]) -> None:
         if metadata is not None:
             validate_metadata(metadata)
-            if "hnsw:space" in metadata:
-                raise ValueError(
-                    "Changing the distance function of a collection once it is created is not supported currently."
-                )
 
     def _update_model_after_modify_success(
         self, name: Optional[str], metadata: Optional[CollectionMetadata]

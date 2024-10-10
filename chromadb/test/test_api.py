@@ -3,6 +3,8 @@ import traceback
 import httpx
 
 import chromadb
+from chromadb.api import CollectionConfiguration
+from chromadb.api.configuration import HNSWConfiguration
 from chromadb.errors import ChromaError
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
@@ -431,15 +433,6 @@ def test_modify_error_on_existing_name(client):
 
     with pytest.raises(Exception):
         c2.modify(name="testspace")
-
-
-def test_modify_warn_on_DF_change(client, caplog):
-    client.reset()
-
-    collection = client.create_collection("testspace")
-
-    with pytest.raises(Exception, match="not supported"):
-        collection.modify(metadata={"hnsw:space": "cosine"})
 
 
 def test_metadata_cru(client):
@@ -1234,7 +1227,11 @@ def test_index_params(client):
     client.reset()
     collection = client.create_collection(
         name="test_index_params",
-        metadata={"hnsw:space": "cosine", "hnsw:construction_ef": 20, "hnsw:M": 5},
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(
+                space="cosine", ef_construction=20, M=5
+            )
+        ),
     )
     collection.add(**records)
     items = collection.query(
@@ -1247,7 +1244,10 @@ def test_index_params(client):
     # ip
     client.reset()
     collection = client.create_collection(
-        name="test_index_params", metadata={"hnsw:space": "ip"}
+        name="test_index_params",
+        configuration=CollectionConfiguration(
+            hnsw_configuration=HNSWConfiguration(space="ip")
+        ),
     )
     collection.add(**records)
     items = collection.query(
@@ -1257,28 +1257,11 @@ def test_index_params(client):
     assert items["distances"][0][0] < -5
 
 
-def test_invalid_index_params(client):
-    client.reset()
-
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
-        )
-        collection.add(**records)
-
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:space": "foobar"}
-        )
-        collection.add(**records)
-
-
 def test_persist_index_loading_params(client, request):
     client = request.getfixturevalue("local_persist_api")
     client.reset()
     collection = client.create_collection(
         "test",
-        metadata={"hnsw:space": "ip"},
     )
     collection.add(ids="id1", documents="hello")
 
@@ -1287,7 +1270,6 @@ def test_persist_index_loading_params(client, request):
         "test",
     )
 
-    assert collection.metadata["hnsw:space"] == "ip"
     includes = ["embeddings", "documents", "metadatas", "distances"]
     nn = collection.query(
         query_texts="hello",

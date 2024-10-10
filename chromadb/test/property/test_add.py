@@ -96,6 +96,7 @@ def _test_add(
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
+        configuration=collection.configuration,
         embedding_function=collection.embedding_function,
     )
     initial_version = cast(int, coll.get_model()["version"])
@@ -181,6 +182,7 @@ def test_add_large(
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
+        configuration=collection.configuration,
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
@@ -223,6 +225,7 @@ def test_add_large_exceeding(
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
+        configuration=collection.configuration,
         embedding_function=collection.embedding_function,
     )
 

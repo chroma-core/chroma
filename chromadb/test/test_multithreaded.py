@@ -9,7 +9,6 @@ from chromadb.api import ClientAPI
 import chromadb.test.property.invariants as invariants
 from chromadb.api.segment import SegmentAPI
 from chromadb.test.property.strategies import RecordSet
-from chromadb.test.property.strategies import test_hnsw_config
 from chromadb.types import Metadata
 
 
@@ -51,7 +50,7 @@ def _test_multithreaded_add(
 
     # TODO: batch_size and sync_threshold should be configurable
     client.reset()
-    coll = client.create_collection(name="test", metadata=test_hnsw_config)
+    coll = client.create_collection(name="test")
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures: List[Future[Any]] = []
         total_sent = -1
@@ -104,7 +103,7 @@ def _test_interleaved_add_query(
     """Test that will use multiple threads to interleave operations on the db and verify they work correctly"""
 
     client.reset()
-    coll = client.create_collection(name="test", metadata=test_hnsw_config)
+    coll = client.create_collection(name="test")
 
     records_set = generate_record_set(N, D)
     ids = cast(List[str], records_set["ids"])

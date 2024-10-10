@@ -1,11 +1,13 @@
 from overrides import override
 from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
+
+from chromadb.api import CollectionConfigurationInternal
+from chromadb.api.configuration import HNSWConfigurationInternal, ConfigurationInternal
 from chromadb.segment import VectorReader
 from chromadb.ingest import Consumer
 from chromadb.config import System, Settings
 from chromadb.segment.impl.vector.batch import Batch
-from chromadb.segment.impl.vector.hnsw_params import HnswParams
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
@@ -19,7 +21,6 @@ from chromadb.types import (
     VectorQueryResult,
     SeqId,
     Segment,
-    Metadata,
     Operation,
     Vector,
 )
@@ -40,7 +41,7 @@ class LocalHnswSegment(VectorReader):
     _collection: Optional[UUID]
     _subscription: Optional[UUID]
     _settings: Settings
-    _params: HnswParams
+    _configuration: HNSWConfigurationInternal
 
     _index: Optional[hnswlib.Index]
     _dimensionality: Optional[int]
@@ -64,7 +65,9 @@ class LocalHnswSegment(VectorReader):
         self._collection = segment["collection"]
         self._subscription = None
         self._settings = system.settings
-        self._params = HnswParams(segment["metadata"] or {})
+        self._configuration = cast(
+            HNSWConfigurationInternal, self.get_configuration(segment["configuration"])
+        )
 
         self._index = None
         self._dimensionality = None
@@ -80,10 +83,13 @@ class LocalHnswSegment(VectorReader):
 
     @staticmethod
     @override
-    def propagate_collection_metadata(metadata: Metadata) -> Optional[Metadata]:
-        # Extract relevant metadata
-        segment_metadata = HnswParams.extract(metadata)
-        return segment_metadata
+    def get_configuration(
+        collection_configuration: CollectionConfigurationInternal,
+    ) -> Optional[ConfigurationInternal]:
+        return cast(
+            ConfigurationInternal,
+            collection_configuration.get_parameter("hnsw_configuration").value,
+        )
 
     @trace_method("LocalHnswSegment.start", OpenTelemetryGranularity.ALL)
     @override
@@ -203,18 +209,16 @@ class LocalHnswSegment(VectorReader):
 
     @trace_method("LocalHnswSegment._init_index", OpenTelemetryGranularity.ALL)
     def _init_index(self, dimensionality: int) -> None:
-        # more comments available at the source: https://github.com/nmslib/hnswlib
-
         index = hnswlib.Index(
-            space=self._params.space, dim=dimensionality
+            space=self._configuration.space, dim=dimensionality
         )  # possible options are l2, cosine or ip
         index.init_index(
             max_elements=DEFAULT_CAPACITY,
-            ef_construction=self._params.construction_ef,
-            M=self._params.M,
+            ef_construction=self._configuration.ef_construction,
+            M=self._configuration.m,
         )
-        index.set_ef(self._params.search_ef)
-        index.set_num_threads(self._params.num_threads)
+        index.set_ef(self._configuration.ef_search)
+        index.set_num_threads(self._configuration.num_threads)
 
         self._index = index
         self._dimensionality = dimensionality
@@ -236,7 +240,7 @@ class LocalHnswSegment(VectorReader):
 
         if (self._total_elements_added + n) > index.get_max_elements():
             new_size = int(
-                (self._total_elements_added + n) * self._params.resize_factor
+                (self._total_elements_added + n) * self._configuration.resize_factor
             )
             index.resize_index(max(new_size, DEFAULT_CAPACITY))
 

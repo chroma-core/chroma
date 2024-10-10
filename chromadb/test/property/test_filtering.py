@@ -244,6 +244,7 @@ def test_filterable_metadata_get_limit_offset(
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
+        configuration=collection.configuration,
         embedding_function=collection.embedding_function,
     )
 
@@ -306,6 +307,7 @@ def test_filterable_metadata_query(
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
+        configuration=collection.configuration,
         embedding_function=collection.embedding_function,
     )
     initial_version = coll.get_model()["version"]
