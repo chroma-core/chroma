@@ -168,7 +168,7 @@ class SqlSysDB(SqlDB, SysDB):
                 ParameterValue(self.uuid_to_db(segment["collection"])),
             )
         )
-        sql, params = get_sql(insert_segment, parameter_format)
+        sql, params = get_sql(insert_segment, self.parameter_format())
         try:
             cur.execute(sql, params)
         except self.unique_constraint_error() as e:
