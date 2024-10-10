@@ -20,7 +20,7 @@ class WordLlamaEmbeddingFunction(EmbeddingFunction[Documents]):
         """Initialize WordLlamaEmbeddingFunction.
 
         Args:
-            config (Literal["l2_supercat", "l3_supercat"]): Identifier of the WordLlama model, defaults to "l2_supercat"
+            config (Literal["l2_supercat", "l3_supercat"]): Identifier of the WordLlama config, defaults to "l2_supercat".
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
             **kwargs: Additional arguments to pass to the WordLlama.load function.
         """
