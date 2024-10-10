@@ -17,7 +17,7 @@ use futures::future::join_all;
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::mem::transmute;
-use std::ops::Bound;
+use std::ops::RangeBounds;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use uuid::Uuid;
@@ -477,161 +477,21 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
-    /// Returns all arrow records whose key > supplied key.
-    pub(crate) async fn get_gt(
+    // Returns all Arrow records in the specified range.
+    pub(crate) async fn get_range<'prefix, PrefixRange, KeyRange>(
         &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        // Get all block ids that contain keys > key from sparse index for this prefix.
-        let block_ids = self.root.sparse_index.get_block_ids_range(
-            prefix..=prefix,
-            (
-                std::ops::Bound::Excluded(key.clone()),
-                std::ops::Bound::Unbounded,
-            ),
-        );
-        let mut result: Vec<(K, V)> = vec![];
-        // Read all the blocks individually to get keys > key.
-        for block_id in block_ids {
-            let block_opt = match self.get_block(block_id).await {
-                Ok(Some(block)) => Some(block),
-                Ok(None) => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
-
-            let block = match block_opt {
-                Some(b) => b,
-                None => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            };
-            result.extend(block.get_range(
-                prefix..=prefix,
-                (Bound::Excluded(key.clone()), Bound::Unbounded),
-            ));
-        }
-        Ok(result)
-    }
-
-    /// Returns all arrow records whose key < supplied key.
-    pub(crate) async fn get_lt(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        // Get all block ids that contain keys < key from sparse index.
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    where
+        PrefixRange: RangeBounds<&'prefix str> + Clone,
+        KeyRange: RangeBounds<K> + Clone,
+    {
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix..=prefix, ..key.clone());
-        let mut result: Vec<(K, V)> = vec![];
-        // Read all the blocks individually to get keys < key.
-        for block_id in block_ids {
-            let block_opt = match self.get_block(block_id).await {
-                Ok(Some(block)) => Some(block),
-                Ok(None) => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
+            .get_block_ids_range(prefix_range.clone(), key_range.clone());
 
-            let block = match block_opt {
-                Some(b) => b,
-                None => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            };
-            result.extend(block.get_range(prefix..=prefix, ..key.clone()));
-        }
-        Ok(result)
-    }
-
-    /// Returns all arrow records whose key >= supplied key.
-    pub(crate) async fn get_gte(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        // Get all block ids that contain keys >= key from sparse index.
-        let block_ids = self
-            .root
-            .sparse_index
-            .get_block_ids_range(prefix..=prefix, key.clone()..);
-        let mut result: Vec<(K, V)> = vec![];
-        // Read all the blocks individually to get keys >= key.
-        for block_id in block_ids {
-            let block_opt = match self.get_block(block_id).await {
-                Ok(Some(block)) => Some(block),
-                Ok(None) => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
-
-            let block = match block_opt {
-                Some(b) => b,
-                None => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            };
-            result.extend(block.get_range(prefix..=prefix, key.clone()..));
-        }
-        Ok(result)
-    }
-
-    /// Returns all arrow records whose key <= supplied key.
-    pub(crate) async fn get_lte(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        // Get all block ids that contain keys <= key from sparse index.
-        let block_ids = self
-            .root
-            .sparse_index
-            .get_block_ids_range(prefix..=prefix, ..=key.clone());
-        let mut result: Vec<(K, V)> = vec![];
-        // Read all the blocks individually to get keys <= key.
-        for block_id in block_ids {
-            let block_opt = match self.get_block(block_id).await {
-                Ok(Some(block)) => Some(block),
-                Ok(None) => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
-
-            let block = match block_opt {
-                Some(b) => b,
-                None => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            };
-            result.extend(block.get_range(prefix..=prefix, ..=key.clone()));
-        }
-        Ok(result)
-    }
-
-    /// Returns all arrow records whose prefix is same as supplied prefix.
-    pub(crate) async fn get_by_prefix(
-        &'me self,
-        prefix: &str,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        let block_ids = self
-            .root
-            .sparse_index
-            .get_block_ids_range::<K, _, _>(prefix..=prefix, ..);
         let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
@@ -650,9 +510,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-
-            result.extend(block.get_range(prefix..=prefix, ..));
+            result.extend(block.get_range(prefix_range.clone(), key_range.clone()));
         }
+
         Ok(result)
     }
 
