@@ -567,7 +567,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)
@@ -583,7 +583,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)
@@ -609,7 +609,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)
@@ -625,7 +625,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)
@@ -651,7 +651,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)
@@ -667,7 +667,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)
@@ -693,7 +693,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)
@@ -709,7 +709,7 @@ impl<'me> MetadataIndexReader<'me> {
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
-                            for (_, _, rbm) in records {
+                            for (_, rbm) in records {
                                 result = result.bitor(&rbm);
                             }
                             Ok(result)

@@ -568,7 +568,7 @@ pub enum HnswIndexProviderFileError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_cache::new_cache_for_test;
+    use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
     use chroma_types::SegmentType;
     use std::collections::HashMap;
@@ -582,7 +582,7 @@ mod tests {
         tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
-        let cache = new_cache_for_test();
+        let cache = new_non_persistent_cache_for_test();
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache);
         let segment = Segment {
             id: Uuid::new_v4(),

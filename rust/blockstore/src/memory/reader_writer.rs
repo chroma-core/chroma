@@ -99,20 +99,14 @@ impl<
     pub(crate) fn get_by_prefix(
         &'storage self,
         prefix: &str,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         let values = V::get_by_prefix_from_storage(prefix, &self.storage);
         if values.is_empty() {
             return Err(Box::new(BlockfileError::NotFoundError));
         }
         let values = values
             .iter()
-            .map(|(key, value)| {
-                (
-                    key.prefix.as_str(),
-                    K::try_from(&key.key).unwrap(),
-                    value.clone(),
-                )
-            })
+            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
             .collect();
         Ok(values)
     }
@@ -122,7 +116,7 @@ impl<
         &'storage self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
         let values = V::read_gt_from_storage(prefix, key, &self.storage);
         if values.is_empty() {
@@ -130,13 +124,7 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| {
-                (
-                    key.prefix.as_str(),
-                    K::try_from(&key.key).unwrap(),
-                    value.clone(),
-                )
-            })
+            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
             .collect();
         Ok(values)
     }
@@ -146,7 +134,7 @@ impl<
         &'storage self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
         let values = V::read_lt_from_storage(prefix, key, &self.storage);
         if values.is_empty() {
@@ -154,13 +142,7 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| {
-                (
-                    key.prefix.as_str(),
-                    K::try_from(&key.key).unwrap(),
-                    value.clone(),
-                )
-            })
+            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
             .collect();
         Ok(values)
     }
@@ -170,7 +152,7 @@ impl<
         &'storage self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
         let values = V::read_gte_from_storage(prefix, key, &self.storage);
         if values.is_empty() {
@@ -178,13 +160,7 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| {
-                (
-                    key.prefix.as_str(),
-                    K::try_from(&key.key).unwrap(),
-                    value.clone(),
-                )
-            })
+            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
             .collect();
         Ok(values)
     }
@@ -194,7 +170,7 @@ impl<
         &'storage self,
         prefix: &str,
         key: K,
-    ) -> Result<Vec<(&str, K, V)>, Box<dyn ChromaError>> {
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         let key = key.into();
         let values = V::read_lte_from_storage(prefix, key, &self.storage);
         if values.is_empty() {
@@ -202,13 +178,7 @@ impl<
         }
         let values = values
             .iter()
-            .map(|(key, value)| {
-                (
-                    key.prefix.as_str(),
-                    K::try_from(&key.key).unwrap(),
-                    value.clone(),
-                )
-            })
+            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
             .collect();
         Ok(values)
     }
@@ -401,12 +371,12 @@ mod tests {
             MemoryBlockfileReader::open(writer.id, storage_manager);
         let values = reader.get_by_prefix("prefix").unwrap();
         assert_eq!(values.len(), 2);
-        assert!(values.iter().any(|(prefix, key, value)| *prefix == "prefix"
-            && *key == "key1"
-            && *value == "value1"));
-        assert!(values.iter().any(|(prefix, key, value)| *prefix == "prefix"
-            && *key == "key2"
-            && *value == "value2"));
+        assert!(values
+            .iter()
+            .any(|(key, value)| *key == "key1" && *value == "value1"));
+        assert!(values
+            .iter()
+            .any(|(key, value)| *key == "key2" && *value == "value2"));
     }
 
     #[test]
@@ -439,13 +409,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+            .any(|(key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+            .any(|(key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -463,10 +433,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+            .any(|(key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -499,13 +469,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+            .any(|(key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+            .any(|(key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -523,10 +493,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+            .any(|(key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -559,13 +529,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+            .any(|(key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+            .any(|(key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -583,10 +553,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+            .any(|(key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -619,13 +589,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+            .any(|(key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+            .any(|(key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -643,10 +613,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+            .any(|(key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -679,13 +649,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+            .any(|(key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+            .any(|(key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -703,10 +673,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+            .any(|(key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
     }
 
     #[test]
@@ -739,13 +709,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+            .any(|(key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+            .any(|(key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -763,10 +733,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+            .any(|(key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
     }
 
     #[test]
@@ -799,13 +769,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+            .any(|(key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3 && *value == "value3"));
+            .any(|(key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -823,10 +793,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1 && *value == "value1"));
+            .any(|(key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2 && *value == "value2"));
+            .any(|(key, value)| *key == 2 && *value == "value2"));
     }
 
     #[test]
@@ -859,13 +829,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+            .any(|(key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 3.0 && *value == "value3"));
+            .any(|(key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -883,10 +853,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 1.0 && *value == "value1"));
+            .any(|(key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(prefix, key, value)| *prefix == "prefix" && *key == 2.0 && *value == "value2"));
+            .any(|(key, value)| *key == 2.0 && *value == "value2"));
     }
 
     #[test]
