@@ -214,6 +214,7 @@ class GrpcSysDB(SysDB):
         id: UUID,
         name: str,
         configuration: CollectionConfigurationInternal,
+        segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -229,6 +230,7 @@ class GrpcSysDB(SysDB):
             get_or_create=get_or_create,
             tenant=tenant,
             database=database,
+            segments=[to_proto_segment(segment) for segment in segments],
         )
         response = self._sys_db_stub.CreateCollection(
             request, timeout=self._request_timeout_seconds
