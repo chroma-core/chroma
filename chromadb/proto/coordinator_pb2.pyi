@@ -130,7 +130,7 @@ class UpdateSegmentResponse(_message.Message):
     def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class CreateCollectionRequest(_message.Message):
-    __slots__ = ("id", "name", "configuration_json_str", "metadata", "dimension", "get_or_create", "tenant", "database")
+    __slots__ = ("id", "name", "configuration_json_str", "metadata", "dimension", "get_or_create", "tenant", "database", "segments")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONFIGURATION_JSON_STR_FIELD_NUMBER: _ClassVar[int]
@@ -139,6 +139,7 @@ class CreateCollectionRequest(_message.Message):
     GET_OR_CREATE_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
+    SEGMENTS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     configuration_json_str: str
@@ -147,7 +148,8 @@ class CreateCollectionRequest(_message.Message):
     get_or_create: bool
     tenant: str
     database: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., configuration_json_str: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., get_or_create: bool = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
+    segments: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.Segment]
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., configuration_json_str: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., get_or_create: bool = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., segments: _Optional[_Iterable[_Union[_chroma_pb2.Segment, _Mapping]]] = ...) -> None: ...
 
 class CreateCollectionResponse(_message.Message):
     __slots__ = ("collection", "created", "status")
@@ -160,14 +162,16 @@ class CreateCollectionResponse(_message.Message):
     def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., created: bool = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
 
 class DeleteCollectionRequest(_message.Message):
-    __slots__ = ("id", "tenant", "database")
+    __slots__ = ("id", "tenant", "database", "with_segments")
     ID_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
+    WITH_SEGMENTS_FIELD_NUMBER: _ClassVar[int]
     id: str
     tenant: str
     database: str
-    def __init__(self, id: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
+    with_segments: bool
+    def __init__(self, id: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., with_segments: bool = ...) -> None: ...
 
 class DeleteCollectionResponse(_message.Message):
     __slots__ = ("status",)
