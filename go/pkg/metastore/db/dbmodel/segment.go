@@ -3,7 +3,7 @@ package dbmodel
 import (
 	"time"
 
-	"github.com/chroma-core/chroma/go/pkg/model"
+	"github.com/chroma-core/chroma/go/pkg/model" 
 
 	"github.com/chroma-core/chroma/go/pkg/types"
 )
