@@ -275,10 +275,10 @@ List all collections.
 
 **Examples**:
 
-    ```python
-    client.list_collections()
-    # [collection(name="my_collection", metadata={})]
-    ```
+```python
+client.list_collections()
+# [collection(name="my_collection", metadata={})]
+```
 
 ## create\_collection
 
