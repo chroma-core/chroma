@@ -356,8 +356,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         ids: Optional[IDs],
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
-    ) -> IDs:
-        return await self._server._delete(
+    ) -> None:
+        await self._server._delete(
             collection_id=collection_id,
             ids=ids,
             where=where,

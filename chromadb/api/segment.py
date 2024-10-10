@@ -593,7 +593,7 @@ class SegmentAPI(ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> IDs:
+    ) -> None:
         add_attributes_to_current_span(
             {
                 "collection_id": str(collection_id),
@@ -646,7 +646,7 @@ class SegmentAPI(ServerAPI):
             ids_to_delete = ids
 
         if len(ids_to_delete) == 0:
-            return []
+            return
 
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
@@ -659,7 +659,6 @@ class SegmentAPI(ServerAPI):
                 collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
             )
         )
-        return ids_to_delete
 
     @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @retry(  # type: ignore[misc]
