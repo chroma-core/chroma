@@ -2,14 +2,17 @@ from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
-from chromadb.types import Where, WhereDocument
+from chromadb.types import RequestVersionContext, Where, WhereDocument
 from chromadb.api.types import Embeddings, IDs
 
 
 @dataclass
 class Scan:
-    segment: UUID
     collection: UUID
+    metadata: UUID
+    record: UUID
+    vector: UUID
+    version: RequestVersionContext
 
 
 @dataclass
@@ -32,7 +35,8 @@ class Limit:
 
 
 @dataclass
-class Project:
+class Projection:
     document: bool = False
     embedding: bool = False
     metadata: bool = False
+    rank: bool = False

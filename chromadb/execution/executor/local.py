@@ -2,7 +2,7 @@ from typing import Sequence
 from overrides import overrides
 from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
-from chromadb.execution.expression.plan import CountPlan, GetPlan, KnnPlan
+from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.segment import SegmentManager
 from chromadb.types import MetadataEmbeddingRecord, VectorEmbeddingRecord
 
@@ -23,5 +23,5 @@ class LocalExecutor(Executor):
         return list()
 
     @overrides
-    def knn(self, plan: KnnPlan) -> Sequence[Sequence[VectorEmbeddingRecord]]:
+    def knn(self, plan: KNNPlan) -> Sequence[Sequence[VectorEmbeddingRecord]]:
         return list()
