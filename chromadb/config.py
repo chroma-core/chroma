@@ -322,6 +322,10 @@ class Component(ABC, EnforceOverrides):
         called from tests."""
         logger.debug(f"Resetting component {self.__class__.__name__}")
 
+    def _raise_for_running(self) -> None:
+        if not self._running:
+            raise RuntimeError("Component not running or already closed")
+
 
 class System(Component):
     settings: Settings

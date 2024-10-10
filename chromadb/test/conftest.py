@@ -305,6 +305,7 @@ def _fastapi_fixture(
         )
         system = System(settings)
         api = system.instance(ServerAPI)
+        api.start()
         system.start()
         _await_server(api if isinstance(api, FastAPI) else async_class_to_sync(api))
         yield system
@@ -380,6 +381,7 @@ def basic_http_client() -> Generator[System, None, None]:
     )
     system = System(settings)
     api = system.instance(ServerAPI)
+    api.start()
     _await_server(api)
     system.start()
     yield system
@@ -779,7 +781,7 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
 @pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
     system.reset_state()
-
+    system.start()
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
         yield client

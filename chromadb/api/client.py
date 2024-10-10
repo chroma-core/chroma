@@ -64,6 +64,7 @@ class Client(SharedSystemClient, ClientAPI):
         self._server = self._system.instance(ServerAPI)
 
         self._submit_client_start_event()
+        self._server.start()
 
     @classmethod
     @override
@@ -390,6 +391,11 @@ class Client(SharedSystemClient, ClientAPI):
 
     # endregion
 
+    @override
+    def close(self) -> None:
+        self._server.close()
+        self._admin_client.close()
+
 
 class AdminClient(SharedSystemClient, AdminAPI):
     _server: ServerAPI
@@ -397,6 +403,7 @@ class AdminClient(SharedSystemClient, AdminAPI):
     def __init__(self, settings: Settings = Settings()) -> None:
         super().__init__(settings)
         self._server = self._system.instance(ServerAPI)
+        self._server.start()
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -413,6 +420,10 @@ class AdminClient(SharedSystemClient, AdminAPI):
     @override
     def get_tenant(self, name: str) -> Tenant:
         return self._server.get_tenant(name=name)
+
+    @override
+    def close(self) -> None:
+        self._server.close()
 
     @classmethod
     @override
