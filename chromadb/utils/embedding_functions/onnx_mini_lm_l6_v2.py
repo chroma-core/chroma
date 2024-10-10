@@ -42,6 +42,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     )
     _MODEL_SHA256 = "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3"
 
+    dim = 384
+    space = "cosine"
+
     # https://github.com/python/mypy/issues/7291 mypy makes you type the constructor if
     # no args
     def __init__(self, preferred_providers: Optional[List[str]] = None) -> None:
@@ -129,7 +132,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         all_embeddings = []
         for i in range(0, len(documents), batch_size):
             batch = documents[i : i + batch_size]
-            encoded = [self.tokenizer.encode(d) for d in batch]
+            encoded = [self.tokenizer.encode(d) for d in batch]  # type: ignore[attr-defined]
             input_ids = np.array([e.ids for e in encoded])
             attention_mask = np.array([e.attention_mask for e in encoded])
             onnx_input = {
@@ -154,7 +157,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         return np.concatenate(all_embeddings)
 
     @cached_property
-    def tokenizer(self) -> "Tokenizer":  # noqa F821
+    def tokenizer(self) -> "Tokenizer":  # noqa F821 # type: ignore[valid-type]
         tokenizer = self.Tokenizer.from_file(
             os.path.join(
                 self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
@@ -164,10 +167,10 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
         tokenizer.enable_truncation(max_length=256)
         tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
-        return tokenizer
+        return tokenizer  # type: ignore[no-any-return]
 
     @cached_property
-    def model(self) -> "InferenceSession":  # noqa F821
+    def model(self) -> "InferenceSession":  # noqa F821 # type: ignore[name-defined]
         if self._preferred_providers is None or len(self._preferred_providers) == 0:
             if len(self.ort.get_available_providers()) > 0:
                 logger.debug(
