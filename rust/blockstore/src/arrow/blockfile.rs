@@ -182,9 +182,15 @@ impl ArrowBlockfileWriter {
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
             let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
             for (split_key, new_delta) in new_blocks {
-                self.root.sparse_index.add_block(split_key, new_delta.id);
-                let mut deltas = self.block_deltas.lock();
-                deltas.insert(new_delta.id, new_delta);
+                match self.root.sparse_index.add_block(split_key, new_delta.id) {
+                    Ok(_) => {
+                        let mut deltas = self.block_deltas.lock();
+                        deltas.insert(new_delta.id, new_delta);
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
             }
         }
 
