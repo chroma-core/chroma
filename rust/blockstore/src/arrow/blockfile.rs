@@ -17,6 +17,7 @@ use futures::future::join_all;
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::mem::transmute;
+use std::ops::Bound;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use uuid::Uuid;
@@ -511,7 +512,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            result.extend(block.get_gt(prefix, key.clone()));
+            result.extend(block.get_range(
+                prefix..=prefix,
+                (Bound::Excluded(key.clone()), Bound::Unbounded),
+            ));
         }
         Ok(result)
     }
@@ -546,7 +550,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            result.extend(block.get_lt(prefix, key.clone()));
+            result.extend(block.get_range(prefix..=prefix, ..key.clone()));
         }
         Ok(result)
     }
@@ -581,7 +585,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            result.extend(block.get_gte(prefix, key.clone()));
+            result.extend(block.get_range(prefix..=prefix, key.clone()..));
         }
         Ok(result)
     }
@@ -616,7 +620,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            result.extend(block.get_lte(prefix, key.clone()));
+            result.extend(block.get_range(prefix..=prefix, ..=key.clone()));
         }
         Ok(result)
     }
@@ -649,7 +653,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             };
 
-            result.extend(block.get_prefix(prefix));
+            result.extend(block.get_range(prefix..=prefix, ..));
         }
         Ok(result)
     }
