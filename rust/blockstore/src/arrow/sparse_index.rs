@@ -1,5 +1,6 @@
 use super::types::ArrowReadableKey;
 use crate::key::{CompositeKey, KeyWrapper};
+use chroma_error::ChromaError;
 use core::panic;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,20 @@ impl SparseIndexWriterData {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum AddError {
+    #[error("Block id already exists in the sparse index")]
+    BlockIdExists,
+}
+
+impl ChromaError for AddError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            AddError::BlockIdExists => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 impl SparseIndexWriter {
     pub(super) fn new(initial_block_id: Uuid) -> Self {
         let mut forward = BTreeMap::new();
@@ -98,12 +113,23 @@ impl SparseIndexWriter {
         }
     }
 
-    pub(super) fn add_block(&self, start_key: CompositeKey, block_id: Uuid) {
+    pub(super) fn add_block(
+        &self,
+        start_key: CompositeKey,
+        block_id: Uuid,
+    ) -> Result<(), AddError> {
         let mut data = self.data.lock();
+
+        if data.reverse.contains_key(&block_id) {
+            return Err(AddError::BlockIdExists);
+        }
+
         data.forward
             .insert(SparseIndexDelimiter::Key(start_key.clone()), block_id);
         data.reverse
             .insert(block_id, SparseIndexDelimiter::Key(start_key));
+
+        Ok(())
     }
 
     pub(super) fn replace_block(&self, old_block_id: Uuid, new_block_id: Uuid) {
@@ -602,7 +628,6 @@ mod tests {
         let block_id_1 = uuid::Uuid::new_v4();
         let sparse_index = SparseIndexWriter::new(block_id_1);
         let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
-        sparse_index.add_block(blockfile_key.clone(), block_id_1);
         sparse_index.set_count(block_id_1, 10);
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_1);
 
@@ -612,7 +637,9 @@ mod tests {
         // Split the range into two blocks (start, c), and (c, end)
         let block_id_2 = uuid::Uuid::new_v4();
         blockfile_key = CompositeKey::new("prefix".to_string(), "c");
-        sparse_index.add_block(blockfile_key.clone(), block_id_2);
+        sparse_index
+            .add_block(blockfile_key.clone(), block_id_2)
+            .expect("No error");
         sparse_index.set_count(block_id_2, 20);
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_2);
 
@@ -623,7 +650,9 @@ mod tests {
         // Split the second block into (c, f) and (f, end)
         let block_id_3 = uuid::Uuid::new_v4();
         blockfile_key = CompositeKey::new("prefix".to_string(), "f");
-        sparse_index.add_block(blockfile_key.clone(), block_id_3);
+        sparse_index
+            .add_block(blockfile_key.clone(), block_id_3)
+            .expect("No error");
         sparse_index.set_count(block_id_3, 30);
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_3);
 
@@ -647,12 +676,16 @@ mod tests {
         // Add some more blocks
         let blockfile_key = CompositeKey::new("prefix".to_string(), "a");
         let block_id_1 = uuid::Uuid::new_v4();
-        sparse_index.add_block(blockfile_key.clone(), block_id_1);
+        sparse_index
+            .add_block(blockfile_key.clone(), block_id_1)
+            .expect("No error");
         sparse_index.set_count(block_id_1, 10);
 
         let blockfile_key = CompositeKey::new("prefix".to_string(), "c");
         let block_id_2 = uuid::Uuid::new_v4();
-        sparse_index.add_block(blockfile_key.clone(), block_id_2);
+        sparse_index
+            .add_block(blockfile_key.clone(), block_id_2)
+            .expect("No error");
         sparse_index.set_count(block_id_2, 20);
 
         let new_sparse_index = sparse_index.to_reader().expect("Conversion should succeed");
@@ -681,19 +714,25 @@ mod tests {
         writer.set_count(block_id_0, 5);
         let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
         let block_id_1 = uuid::Uuid::new_v4();
-        writer.add_block(blockfile_key.clone(), block_id_1);
+        writer
+            .add_block(blockfile_key.clone(), block_id_1)
+            .expect("No error");
         writer.set_count(block_id_1, 10);
 
         // Split the range into two blocks (start, c), and (c, end)
         let block_id_2 = uuid::Uuid::new_v4();
         blockfile_key = CompositeKey::new("prefix".to_string(), "d");
-        writer.add_block(blockfile_key.clone(), block_id_2);
+        writer
+            .add_block(blockfile_key.clone(), block_id_2)
+            .expect("No error");
         writer.set_count(block_id_2, 10);
 
         // Split the second block into (c, f) and (f, end)
         let block_id_3 = uuid::Uuid::new_v4();
         blockfile_key = CompositeKey::new("prefix".to_string(), "f");
-        writer.add_block(blockfile_key.clone(), block_id_3);
+        writer
+            .add_block(blockfile_key.clone(), block_id_3)
+            .expect("No error");
         writer.set_count(block_id_3, 10);
         let composite_keys = vec![
             CompositeKey::new("prefix".to_string(), "b"),
@@ -728,12 +767,12 @@ mod tests {
         ];
 
         let sparse_index = SparseIndexWriter::new(ids[0]);
-        // sparse_index.add_block(keys[0].clone(), ids[0]);
-        // TODO: WHY THE FUCK IS THIS BUGGING!? IF UNCOMMENT LINE ABOVE
         sparse_index.set_count(ids[0], counts[0]);
 
         // Split the range into two blocks (start, c), and (c, end)
-        sparse_index.add_block(keys[1].clone(), ids[1]);
+        sparse_index
+            .add_block(keys[1].clone(), ids[1])
+            .expect("No error");
         sparse_index.set_count(ids[1], counts[1]);
 
         let reader = sparse_index.to_reader().expect("Conversion should succeed");

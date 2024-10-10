@@ -373,13 +373,16 @@ mod test {
 
         root_writer
             .sparse_index
-            .add_block(CompositeKey::new("prefix".to_string(), "a"), block_ids[1]);
+            .add_block(CompositeKey::new("prefix".to_string(), "a"), block_ids[1])
+            .expect("No error");
         root_writer
             .sparse_index
-            .add_block(CompositeKey::new("prefix".to_string(), "b"), block_ids[2]);
+            .add_block(CompositeKey::new("prefix".to_string(), "b"), block_ids[2])
+            .expect("No error");
         root_writer
             .sparse_index
-            .add_block(CompositeKey::new("prefix".to_string(), "c"), block_ids[3]);
+            .add_block(CompositeKey::new("prefix".to_string(), "c"), block_ids[3])
+            .expect("No error");
 
         root_writer.sparse_index.set_count(block_ids[0], 1);
         root_writer.sparse_index.set_count(block_ids[1], 2);
