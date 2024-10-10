@@ -23,7 +23,7 @@ We will aim to provide:
 ### v0.5.12
 
 The operators `$ne` (not equal) and `$nin` (not in) in `where` clauses have been updated:
-* Previously: They only matched records that had the specified key. 
+* Previously: They only matched records that had the specified key.
 * Now: They also match records that don't have the specified key at all.
 
 In other words, `$ne` and `$nin` now match the complement set of records (the exact opposite) that `$eq` (equals) and `$in` (in) would match, respectively.
