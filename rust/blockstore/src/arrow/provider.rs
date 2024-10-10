@@ -2,7 +2,7 @@ use super::{
     block::{delta::BlockDelta, Block, BlockLoadError},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
-    root::{FromBlockError, RootReader, RootWriter},
+    root::{FromBytesError, RootReader, RootWriter},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
 use crate::{
@@ -363,7 +363,7 @@ pub(super) enum RootManagerError {
     #[error(transparent)]
     StorageGetError(#[from] chroma_storage::GetError),
     #[error(transparent)]
-    FromBlockError(#[from] FromBlockError),
+    FromBytesError(#[from] FromBytesError),
 }
 
 impl ChromaError for RootManagerError {
@@ -373,7 +373,7 @@ impl ChromaError for RootManagerError {
             RootManagerError::BlockLoadError(e) => e.code(),
             RootManagerError::StorageGetError(e) => e.code(),
             RootManagerError::UUIDParseError(_) => ErrorCodes::DataLoss,
-            RootManagerError::FromBlockError(e) => e.code(),
+            RootManagerError::FromBytesError(e) => e.code(),
         }
     }
 }
@@ -420,30 +420,15 @@ impl RootManager {
                                 }
                             }
                         }
-                        let block = Block::from_bytes(&buf, *id);
-                        match block {
-                            Ok(block) => {
-                                let block_ref = &block;
-                                // Use unsafe to promote the liftimes using unsafe, we know block lives as long as it needs to
-                                // it only needs to live as long as the SparseIndex is created in from_block
-                                // the sparse index copies the block so it can live as long as it needs to independently
-                                let promoted_block: &'new Block =
-                                    unsafe { std::mem::transmute(block_ref) };
-                                let root = RootReader::from_block::<K>(promoted_block);
-                                match root {
-                                    Ok(root) => {
-                                        self.cache.insert(*id, root.clone()).await;
-                                        Ok(Some(root))
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Error turning block into root: {}", e);
-                                        Err(RootManagerError::FromBlockError(e))
-                                    }
-                                }
+                        let root = RootReader::from_bytes::<K>(&buf, *id);
+                        match root {
+                            Ok(root) => {
+                                self.cache.insert(*id, root.clone()).await;
+                                Ok(Some(root))
                             }
                             Err(e) => {
-                                tracing::error!("Error turning bytes into block: {}", e);
-                                Err(RootManagerError::BlockLoadError(e))
+                                tracing::error!("Error turning bytes into root: {}", e);
+                                Err(RootManagerError::FromBytesError(e))
                             }
                         }
                     }
@@ -460,32 +445,23 @@ impl RootManager {
         &self,
         root: &RootWriter,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let as_block = root.to_block::<K>();
-        match as_block {
-            Ok(block) => {
-                let bytes = match block.to_bytes() {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        tracing::error!("Failed to convert root to bytes");
-                        return Err(Box::new(e));
-                    }
-                };
-                let key = format!("sparse_index/{}", root.id);
-                let res = self.storage.put_bytes(&key, bytes).await;
-                match res {
-                    Ok(_) => {
-                        tracing::info!("Root written to storage");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        tracing::error!("Error writing root to storage");
-                        Err(Box::new(e))
-                    }
-                }
+        let bytes = match root.to_bytes::<K>() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::error!("Failed to convert root to bytes");
+                return Err(Box::new(e));
+            }
+        };
+        let key = format!("sparse_index/{}", root.id);
+        let res = self.storage.put_bytes(&key, bytes).await;
+        match res {
+            Ok(_) => {
+                tracing::info!("Root written to storage");
+                Ok(())
             }
             Err(e) => {
-                tracing::error!("Failed to convert root to block");
-                Err(e)
+                tracing::error!("Error writing root to storage");
+                Err(Box::new(e))
             }
         }
     }

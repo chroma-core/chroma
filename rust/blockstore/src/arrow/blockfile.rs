@@ -52,7 +52,7 @@ impl ArrowBlockfileWriter {
         root_manager: RootManager,
     ) -> Self {
         let initial_block = block_manager.create::<K, V>();
-        let sparse_index = SparseIndexWriter::new(id, initial_block.id);
+        let sparse_index = SparseIndexWriter::new(initial_block.id);
         let root_writer = RootWriter::new(CURRENT_VERSION, id, sparse_index);
 
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
@@ -102,6 +102,9 @@ impl ArrowBlockfileWriter {
                 removed = self.root.sparse_index.remove_block(&delta.id);
             }
             if !removed {
+                self.root
+                    .sparse_index
+                    .set_count(delta.id, delta.len() as u32);
                 let block = self.block_manager.commit::<K, V>(delta);
                 blocks.push(block);
             }
@@ -378,7 +381,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         for i in 0..sparse_index_len {
             // This unwrap is safe because we are iterating over the sparse index
             // within its len. The sparse index reader is immutable and cannot be modified
-            let uuid = *self.root.sparse_index.data.forward.iter().nth(i).unwrap().1;
+            let uuid = self
+                .root
+                .sparse_index
+                .data
+                .forward
+                .iter()
+                .nth(i)
+                .unwrap()
+                .1
+                .id;
             block = match self.get_block(uuid).await {
                 Ok(Some(block)) => Some(block),
                 Ok(None) => {
@@ -607,7 +619,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let mut block_ids: Vec<Uuid> = vec![];
         let curr_iter = self.root.sparse_index.data.forward.iter();
         for (_, block_id) in curr_iter {
-            block_ids.push(*block_id);
+            block_ids.push(block_id.id);
         }
         // Preload all blocks in parallel using the load_blocks helper
         self.load_blocks(&block_ids).await;
