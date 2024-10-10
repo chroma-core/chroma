@@ -12,6 +12,7 @@ var (
 	// Database errors
 	ErrDatabaseNotFound                  = errors.New("database not found")
 	ErrDatabaseUniqueConstraintViolation = errors.New("database unique constraint violation")
+	ErrDatabaseNameEmpty                 = errors.New("database name is empty")
 
 	// Collection errors
 	ErrCollectionNotFound                    = errors.New("collection not found")
