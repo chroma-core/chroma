@@ -225,7 +225,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Release Latest
         uses: ncipollo/release-action@v1.14.0
-        if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
+        if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         with:
           tag: "latest"
           name: "Latest"
