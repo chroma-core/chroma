@@ -3,7 +3,7 @@ import multiprocessing
 from multiprocessing.connection import Connection
 import multiprocessing.context
 import time
-from typing import Generator, Callable, List
+from typing import Generator, Callable, List, Tuple
 from uuid import UUID
 from hypothesis import given
 import hypothesis.strategies as st
@@ -76,7 +76,7 @@ collection_st = st.shared(
 @st.composite
 def collection_and_embeddings_strategy(
     draw: st.DrawFn,
-) -> tuple[strategies.Collection, strategies.RecordSet]:
+) -> Tuple[strategies.Collection, strategies.RecordSet]:
     collection_strategy = draw(
         strategies.collections(
             with_hnsw_params=True,
@@ -100,7 +100,7 @@ def collection_and_embeddings_strategy(
 def test_persist(
     settings: Settings,
     collection_and_embeddings_strategies: List[
-        tuple[strategies.Collection, strategies.RecordSet]
+        Tuple[strategies.Collection, strategies.RecordSet]
     ],
 ) -> None:
     system_1 = System(settings)
