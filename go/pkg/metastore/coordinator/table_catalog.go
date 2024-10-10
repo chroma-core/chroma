@@ -237,7 +237,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		if createCollection.GetOrCreate {
 			collection := convertCollectionToModel(existing)[0]
 			result = collection
-			return nil, false, nil
+			return result, false, nil
 		} else {
 			return nil, false, common.ErrCollectionUniqueConstraintViolation
 		}
@@ -516,7 +516,6 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 	log.Info("collection and segments created", zap.Any("collection", resultCollection))
 	return resultCollection, created, nil
 }
-
 
 func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error) {
 	tracer := otel.Tracer
