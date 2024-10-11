@@ -37,6 +37,14 @@ def _doc(metadata: Optional[Metadata]) -> Optional[str]:
     return None
 
 
+def _uri(metadata: Optional[Metadata]) -> Optional[str]:
+    """Retrieve the uri (if any) from a Metadata map"""
+
+    if metadata and "chroma:uri" in metadata:
+        return str(metadata["chroma:uri"])
+    return None
+
+
 class LocalExecutor(Executor):
     _manager: LocalSegmentManager
 
@@ -63,6 +71,7 @@ class LocalExecutor(Executor):
         ids = [r["id"] for r in records]
         embeddings = None
         documents = None
+        uris = None
         metadatas = None
         included = list()
 
@@ -80,6 +89,10 @@ class LocalExecutor(Executor):
             documents = [_doc(r["metadata"]) for r in records]
             included.append(IncludeEnum.documents)
 
+        if plan.projection.uri:
+            uris = [_uri(r["metadata"]) for r in records]
+            included.append(IncludeEnum.uris)
+
         if plan.projection.metadata:
             metadatas = [_clean_metadata(r["metadata"]) for r in records]
             included.append(IncludeEnum.metadatas)
@@ -89,7 +102,7 @@ class LocalExecutor(Executor):
             ids=ids,
             embeddings=embeddings,
             documents=documents,  # type: ignore[typeddict-item]
-            uris=None,
+            uris=uris,  # type: ignore[typeddict-item]
             data=None,
             metadatas=metadatas,  # type: ignore[typeddict-item]
             included=included,
@@ -123,6 +136,7 @@ class LocalExecutor(Executor):
         ids = [[r["id"] for r in result] for result in knns]
         embeddings = None
         documents = None
+        uris = None
         metadatas = None
         distances = None
         included = list()
@@ -135,7 +149,7 @@ class LocalExecutor(Executor):
             distances = [[r["distance"] for r in result] for result in knns]
             included.append(IncludeEnum.distances)
 
-        if plan.projection.document or plan.projection.metadata:
+        if plan.projection.document or plan.projection.metadata or plan.projection.uri:
             merged_ids = list(set([id for result in ids for id in result]))
             hydrated_records = self._metadata_segment(
                 plan.scan.collection
@@ -157,6 +171,13 @@ class LocalExecutor(Executor):
                 ]
                 included.append(IncludeEnum.documents)
 
+            if plan.projection.uri:
+                uris = [
+                    [_uri(metadata_by_id.get(id, None)) for id in result]
+                    for result in ids
+                ]
+                included.append(IncludeEnum.uris)
+
             if plan.projection.metadata:
                 metadatas = [
                     [_clean_metadata(metadata_by_id.get(id, None)) for id in result]
@@ -169,7 +190,7 @@ class LocalExecutor(Executor):
             ids=ids,
             embeddings=embeddings,  # type: ignore[typeddict-item]
             documents=documents,  # type: ignore[typeddict-item]
-            uris=None,
+            uris=uris,  # type: ignore[typeddict-item]
             data=None,
             metadatas=metadatas,  # type: ignore[typeddict-item]
             distances=distances,
