@@ -20,34 +20,14 @@ pub trait Readable<'referred_data>: Sized {
         storage: &'referred_data Storage,
     ) -> Option<Self>;
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>;
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>;
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>;
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>;
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>;
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>;
 
     fn get_at_index(
         storage: &'referred_data Storage,
@@ -103,66 +83,21 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             .map(|s| s.as_str())
     }
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
         storage
             .string_value_storage
             .iter()
-            .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, v.as_str()))
-            .collect()
-    }
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .string_value_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, v.as_str()))
-            .collect()
-    }
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .string_value_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, v.as_str()))
-            .collect()
-    }
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .string_value_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, v.as_str()))
-            .collect()
-    }
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .string_value_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .filter(|(k, _)| {
+                prefix_range.contains(&k.prefix.as_str()) && key_range.contains(&k.key)
+            })
             .map(|(k, v)| (k, v.as_str()))
             .collect()
     }
@@ -238,66 +173,21 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data [u32] {
             .map(|a| a.as_slice())
     }
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
         storage
             .uint32_array_storage
             .iter()
-            .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, v.as_slice()))
-            .collect()
-    }
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .uint32_array_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, v.as_slice()))
-            .collect()
-    }
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .uint32_array_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, v.as_slice()))
-            .collect()
-    }
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .uint32_array_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, v.as_slice()))
-            .collect()
-    }
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .uint32_array_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .filter(|(k, _)| {
+                prefix_range.contains(&k.prefix.as_str()) && key_range.contains(&k.key)
+            })
             .map(|(k, v)| (k, v.as_slice()))
             .collect()
     }
@@ -368,66 +258,21 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .cloned()
     }
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
         storage
             .roaring_bitmap_storage
             .iter()
-            .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, v.clone()))
-            .collect()
-    }
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .roaring_bitmap_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, v.clone()))
-            .collect()
-    }
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .roaring_bitmap_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, v.clone()))
-            .collect()
-    }
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .roaring_bitmap_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, v.clone()))
-            .collect()
-    }
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .roaring_bitmap_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .filter(|(k, _)| {
+                prefix_range.contains(&k.prefix.as_str()) && key_range.contains(&k.key)
+            })
             .map(|(k, v)| (k, v.clone()))
             .collect()
     }
@@ -493,66 +338,21 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             .copied()
     }
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
         storage
             .f32_storage
             .iter()
-            .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .f32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .f32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .f32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .f32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .filter(|(k, _)| {
+                prefix_range.contains(&k.prefix.as_str()) && key_range.contains(&k.key)
+            })
             .map(|(k, v)| (k, *v))
             .collect()
     }
@@ -614,66 +414,21 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .copied()
     }
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
         storage
             .u32_storage
             .iter()
-            .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .u32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .u32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .u32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .u32_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .filter(|(k, _)| {
+                prefix_range.contains(&k.prefix.as_str()) && key_range.contains(&k.key)
+            })
             .map(|(k, v)| (k, *v))
             .collect()
     }
@@ -739,66 +494,21 @@ impl<'referred_data> Readable<'referred_data> for bool {
             .copied()
     }
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
         storage
             .bool_storage
             .iter()
-            .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .bool_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key > key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .bool_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .bool_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| (k, *v))
-            .collect()
-    }
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .bool_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
+            .filter(|(k, _)| {
+                prefix_range.contains(&k.prefix.as_str()) && key_range.contains(&k.key)
+            })
             .map(|(k, v)| (k, *v))
             .collect()
     }
@@ -897,121 +607,27 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
         })
     }
 
-    fn get_by_prefix_from_storage(
-        prefix: &str,
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
         storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
         storage
             .data_record_id_storage
             .iter()
-            .filter(|(k, _)| k.prefix == prefix)
-            .map(|(k, v)| {
-                let embedding = storage.data_record_embedding_storage.get(k).unwrap();
-                let id = v;
-                (
-                    k,
-                    DataRecord {
-                        id,
-                        embedding,
-                        metadata: None,
-                        document: None,
-                    },
-                )
+            .filter(|(k, _)| {
+                prefix_range.contains(&k.prefix.as_str()) && key_range.contains(&k.key)
             })
-            .collect()
-    }
-
-    fn read_gt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .data_record_id_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key > key)
             .map(|(k, v)| {
                 let embedding = storage.data_record_embedding_storage.get(k).unwrap();
-                let id = v;
                 (
                     k,
                     DataRecord {
-                        id,
-                        embedding,
-                        metadata: None,
-                        document: None,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    fn read_gte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .data_record_id_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key >= key)
-            .map(|(k, v)| {
-                let embedding = storage.data_record_embedding_storage.get(k).unwrap();
-                let id = v;
-                (
-                    k,
-                    DataRecord {
-                        id,
-                        embedding,
-                        metadata: None,
-                        document: None,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    fn read_lt_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .data_record_id_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key < key)
-            .map(|(k, v)| {
-                let embedding = storage.data_record_embedding_storage.get(k).unwrap();
-                let id = v;
-                (
-                    k,
-                    DataRecord {
-                        id,
-                        embedding,
-                        metadata: None,
-                        document: None,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    fn read_lte_from_storage(
-        prefix: &str,
-        key: KeyWrapper,
-        storage: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)> {
-        storage
-            .data_record_id_storage
-            .iter()
-            .filter(|(k, _)| k.prefix == prefix && k.key <= key)
-            .map(|(k, v)| {
-                let embedding = storage.data_record_embedding_storage.get(k).unwrap();
-                let id = v;
-                (
-                    k,
-                    DataRecord {
-                        id,
+                        id: v,
                         embedding,
                         metadata: None,
                         document: None,
