@@ -119,6 +119,57 @@ impl Block {
         delta
     }
 
+    /// Binary search the block to find the last index of the specified prefix.
+    /// Returns None if prefix does not exist in the block.
+    /// [`std::slice::partition_point`]: std::slice::partition_point
+    #[inline]
+    fn binary_search_last_index(&self, prefix: &str) -> Option<usize> {
+        let mut size = self.len();
+        if size == 0 {
+            return None;
+        }
+
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut base = self.len() - 1;
+
+        // This loop intentionally doesn't have an early exit if the comparison
+        // returns Equal. We want the number of loop iterations to depend *only*
+        // on the size of the input slice so that the CPU can reliably predict
+        // the loop count.
+        while size > 1 {
+            let half = size / 2;
+            let mid = base - half;
+
+            // SAFETY: the call is made safe by the following inconstants:
+            // - `mid >= 0`: by definition
+            // - `mid < size`: `mid = size / 2 - size / 4 - size / 8 ...`
+            let cmp = prefix_array.value(mid).cmp(prefix);
+
+            base = if cmp == Greater { mid } else { base };
+            size -= half;
+        }
+
+        // SAFETY: `base` is always in [0, size) because `base < size` by init.
+        // `base` should be the last index where the element matches the target prefix,
+        // or 0 if the first element is already larger than the target prefix.
+        match prefix_array.value(base).cmp(prefix) {
+            Less => None,
+            Equal => Some(base),
+            Greater => {
+                if prefix_array.value(base - 1) == prefix {
+                    Some(base - 1)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     /// Binary search the blockfile to find the partition point of the specified prefix and key.
     /// The implementation is based on [`std::slice::partition_point`].
     ///
@@ -285,7 +336,10 @@ impl Block {
                     }
                 }
                 Bound::Excluded(key) => self.binary_search_index(prefix, Some(key)),
-                Bound::Unbounded => self.len(),
+                Bound::Unbounded => match self.binary_search_last_index(prefix) {
+                    Some(last_index_of_prefix) => last_index_of_prefix + 1, // (add 1 because end_index is exclusive below)
+                    None => start_index, // prefix does not exist in the block so we shouldn't return anything
+                },
             },
             Bound::Excluded(_) => {
                 unimplemented!("Excluded prefix range is not currently supported")
