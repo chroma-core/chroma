@@ -1,5 +1,5 @@
 use super::provider::{GetError, RootManager};
-use super::root::{RootReader, RootWriter};
+use super::root::{RootReader, RootWriter, Version};
 use super::{block::delta::BlockDelta, provider::BlockManager};
 use super::{
     block::Block,
@@ -623,28 +623,39 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
     // Count the total number of records.
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
-        let mut block_ids: Vec<Uuid> = vec![];
-        let curr_iter = self.root.sparse_index.data.forward.iter();
-        for (_, block_id) in curr_iter {
-            block_ids.push(block_id.id);
+        if self.root.version >= Version::V1_1 {
+            // If the version is >=V1_1, we can use the count in the sparse index.
+            let result = self
+                .root
+                .sparse_index
+                .data
+                .forward
+                .iter()
+                .fold(0, |acc, (_, val)| acc + val.count as usize);
+            Ok(result)
+        } else {
+            let mut block_ids: Vec<Uuid> = vec![];
+            let curr_iter = self.root.sparse_index.data.forward.iter();
+            for (_, block_id) in curr_iter {
+                block_ids.push(block_id.id);
+            }
+            // Preload all blocks in parallel using the load_blocks helper
+            self.load_blocks(&block_ids).await;
+            let mut result: usize = 0;
+            for block_id in block_ids {
+                let block = match self.get_block(block_id).await {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                result += block.len();
+            }
+            Ok(result)
         }
-        // Preload all blocks in parallel using the load_blocks helper
-        self.load_blocks(&block_ids).await;
-        let mut result: usize = 0;
-        for block_id in block_ids {
-            let block = match self.get_block(block_id).await {
-                Ok(Some(block)) => block,
-                Ok(None) => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
-            result += block.len();
-        }
-
-        Ok(result)
     }
 
     pub(crate) fn id(&self) -> Uuid {

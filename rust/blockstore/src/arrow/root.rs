@@ -194,7 +194,7 @@ pub struct RootReader {
     pub(super) sparse_index: SparseIndexReader,
     // Metadata
     pub(super) id: Uuid,
-    version: Version,
+    pub(super) version: Version,
 }
 
 impl chroma_cache::Weighted for RootReader {
