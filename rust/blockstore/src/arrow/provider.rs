@@ -429,7 +429,6 @@ impl RootManager {
                                 // the sparse index copies the block so it can live as long as it needs to independently
                                 let promoted_block: &'new Block =
                                     unsafe { std::mem::transmute(block_ref) };
-                                // let index = SparseIndex::from_block::<K>(promoted_block);
                                 let root = RootReader::from_block::<K>(promoted_block);
                                 match root {
                                     Ok(root) => {

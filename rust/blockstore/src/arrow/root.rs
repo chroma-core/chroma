@@ -26,13 +26,25 @@ impl Display for Version {
     }
 }
 
-// TODO: TRY_FROM
-impl From<&str> for Version {
-    fn from(s: &str) -> Self {
+#[derive(Error, Debug)]
+pub(super) enum VersionError {
+    #[error("Unknown version: {0}")]
+    UnknownVersion(String),
+}
+
+impl ChromaError for VersionError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::InvalidArgument
+    }
+}
+
+impl TryFrom<&str> for Version {
+    type Error = VersionError;
+    fn try_from(s: &str) -> Result<Self, VersionError> {
         match s {
-            "v1" => Version::V1,
-            "v1.1" => Version::V1_1,
-            _ => panic!("Unknown version: {}", s),
+            "v1" => Ok(Version::V1),
+            "v1.1" => Ok(Version::V1_1),
+            _ => Err(VersionError::UnknownVersion(s.to_string())),
         }
     }
 }
@@ -89,6 +101,8 @@ pub(super) enum FromBlockError {
     VersionParseError(#[from] std::fmt::Error),
     #[error("Missing metadata: {0}")]
     MissingMetadata(String),
+    #[error(transparent)]
+    VersionError(#[from] VersionError),
 }
 
 impl ChromaError for FromBlockError {
@@ -97,6 +111,7 @@ impl ChromaError for FromBlockError {
             FromBlockError::UuidParseError(_) => chroma_error::ErrorCodes::InvalidArgument,
             FromBlockError::VersionParseError(_) => chroma_error::ErrorCodes::InvalidArgument,
             FromBlockError::MissingMetadata(_) => chroma_error::ErrorCodes::InvalidArgument,
+            FromBlockError::VersionError(e) => e.code(),
         }
     }
 }
@@ -108,7 +123,9 @@ impl RootReader {
         // Parse metadata
         let block_metadata = block.metadata();
         let (version, id) = match (block_metadata.get("version"), block_metadata.get("id")) {
-            (Some(version), Some(id)) => (Version::from(version.as_str()), Uuid::parse_str(id)?),
+            (Some(version), Some(id)) => {
+                (Version::try_from(version.as_str())?, Uuid::parse_str(id)?)
+            }
             (Some(_), None) => return Err(FromBlockError::MissingMetadata("id".to_string())),
             (None, Some(_)) => {
                 return Err(FromBlockError::MissingMetadata("version".to_string()));
