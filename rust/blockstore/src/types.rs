@@ -282,7 +282,7 @@ impl<
         prefix: &str,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
+            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_range(prefix..=prefix, ..),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.get_range(prefix..=prefix, ..).await
             }
@@ -295,7 +295,9 @@ impl<
         key: K,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, (Bound::Excluded(key), Bound::Unbounded))
+            }
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader
                     .get_range(prefix..=prefix, (Bound::Excluded(key), Bound::Unbounded))
@@ -310,7 +312,9 @@ impl<
         key: K,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, ..key)
+            }
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.get_range(prefix..=prefix, ..key).await
             }
@@ -323,7 +327,9 @@ impl<
         key: K,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, key..)
+            }
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.get_range(prefix..=prefix, key..).await
             }
@@ -336,7 +342,9 @@ impl<
         key: K,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, ..=key)
+            }
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.get_range(prefix..=prefix, ..=key).await
             }
