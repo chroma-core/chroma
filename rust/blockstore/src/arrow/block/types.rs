@@ -385,7 +385,7 @@ impl Block {
     /// Returns a reference to metadata of the block if any is present
     /// ### Notes
     /// - The metadata is stored in the Arrow RB schema as custom metadata
-    pub(crate) fn metadata<'me>(&'me self) -> &'me HashMap<String, String> {
+    pub(crate) fn metadata(&self) -> &HashMap<String, String> {
         let schema = self.data.schema_ref();
         schema.metadata()
     }
