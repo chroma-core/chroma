@@ -52,6 +52,11 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         database: str = DEFAULT_DATABASE,
         settings: Settings = Settings(),
     ) -> "AsyncClient":
+        # Always include the tenant in the headers
+        headers = settings.chroma_server_headers or {}
+        headers["Chroma-ID"] = tenant
+        settings.chroma_server_headers = headers
+
         # Create an admin client for verifying that databases and tenants exist
         self = cls(settings=settings)
         SharedSystemClient._populate_data_from_system(self._system)

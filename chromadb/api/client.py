@@ -53,6 +53,11 @@ class Client(SharedSystemClient, ClientAPI):
         database: str = DEFAULT_DATABASE,
         settings: Settings = Settings(),
     ) -> None:
+        # Always include the tenant in the headers
+        headers = settings.chroma_server_headers or {}
+        headers["Chroma-ID"] = tenant
+        settings.chroma_server_headers = headers
+
         super().__init__(settings=settings)
         self.tenant = tenant
         self.database = database

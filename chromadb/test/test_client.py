@@ -70,6 +70,7 @@ def test_http_client(http_api: ClientAPI) -> None:
         settings.chroma_api_impl == "chromadb.api.fastapi.FastAPI"
         or settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI"
     )
+    assert settings.chroma_server_headers == {"Chroma-ID": "default_tenant"}
 
 
 def test_http_client_with_inconsistent_host_settings(
