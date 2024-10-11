@@ -9,6 +9,13 @@ if TYPE_CHECKING:
 
 
 class WordLlamaEmbeddingFunction(EmbeddingFunction[Documents]):
+    """
+    WordLlama is a fast, lightweight NLP toolkit designed for tasks like fuzzy deduplication, similarity computation,
+    ranking, clustering, and semantic text splitting. It operates with minimal inference-time dependencies
+    and is optimized for CPU hardware, making it suitable for deployment in resource-constrained environments.
+
+    https://github.com/dleemiller/WordLlama
+    """
     models: Dict[str, WordLlamaInference] = {}
 
     def __init__(
