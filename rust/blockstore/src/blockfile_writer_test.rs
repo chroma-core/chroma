@@ -15,7 +15,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::arrow::provider::ArrowBlockfileProvider;
-    use crate::BlockfileWriter;
+    use crate::{BlockfileWriter, BlockfileWriterOptions};
     use chroma_cache::new_cache_for_test;
 
     #[derive(Clone, Debug)]
@@ -122,7 +122,9 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = provider.create::<&str, String>().unwrap();
+            let writer =
+                block_on(provider.get_writer::<&str, String>(BlockfileWriterOptions::default()))
+                    .unwrap();
 
             BlockfileWriterWrapper {
                 provider,
@@ -154,7 +156,12 @@ mod tests {
                     block_on(flusher.flush::<&str, String>()).unwrap();
 
                     state.last_blockfile_id = Some(id);
-                    state.writer = block_on(state.provider.fork::<&str, String>(&id)).unwrap();
+                    state.writer = block_on(
+                        state
+                            .provider
+                            .get_writer::<&str, String>(BlockfileWriterOptions::new().fork(id)),
+                    )
+                    .unwrap();
                 }
             }
 
@@ -178,7 +185,8 @@ mod tests {
             assert_eq!(block_on(reader.count()).unwrap(), ref_last_commit.len());
 
             // Check that entries are ordered and match expected
-            let all_entries = block_on(reader.get_range_stream(.., ..).try_collect::<Vec<_>>()).unwrap();
+            let all_entries =
+                block_on(reader.get_range_stream(.., ..).try_collect::<Vec<_>>()).unwrap();
             assert_eq!(all_entries.len(), ref_last_commit.len());
 
             for (blockfile_entry, expected_entry) in all_entries.iter().zip(ref_last_commit.iter())

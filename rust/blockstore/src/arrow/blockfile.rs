@@ -633,7 +633,7 @@ mod tests {
     use crate::{
         arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, arrow::provider::ArrowBlockfileProvider,
     };
-    use crate::{BlockfileReader, BlockfileWriter};
+    use crate::{BlockfileReader, BlockfileWriter, BlockfileWriterOptions};
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
@@ -660,7 +660,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
@@ -697,7 +700,10 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = blockfile_provider.create::<&str, u32>().unwrap();
+            let writer = blockfile_provider
+                .get_writer::<&str, u32>(BlockfileWriterOptions::default())
+                .await
+                .unwrap();
             let id = writer.id();
 
             for j in 1..=5 {
@@ -749,7 +755,7 @@ mod tests {
         });
     }
 
-    fn blockfile_comparisons(operation: ComparisonOperation, num_keys: u32, query_key: u32) {
+    async fn blockfile_comparisons(operation: ComparisonOperation, num_keys: u32, query_key: u32) {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
@@ -761,7 +767,10 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = blockfile_provider.create::<&str, u32>().unwrap();
+            let writer = blockfile_provider
+                .get_writer::<&str, u32>(BlockfileWriterOptions::default())
+                .await
+                .unwrap();
             let id = writer.id();
             println!("Number of keys {}", num_keys);
             let prefix = "prefix";
@@ -915,7 +924,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
@@ -952,7 +964,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
@@ -987,7 +1002,7 @@ mod tests {
 
         // Add 5 new entries to the first block
         let writer = blockfile_provider
-            .fork::<&str, Vec<u32>>(&id_1)
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
             .await
             .unwrap();
         let id_2 = writer.id();
@@ -1022,7 +1037,7 @@ mod tests {
 
         // Add 1200 more entries, causing splits
         let writer = blockfile_provider
-            .fork::<&str, Vec<u32>>(&id_2)
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
             .await
             .unwrap();
         let id_3 = writer.id();
@@ -1066,7 +1081,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
@@ -1109,7 +1127,10 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider.create::<&str, String>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1146,7 +1167,10 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = provider.create::<f32, String>().unwrap();
+        let writer = provider
+            .get_writer::<f32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1181,7 +1205,8 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .create::<&str, roaring::RoaringBitmap>()
+            .get_writer::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
             .unwrap();
         let id = writer.id();
 
@@ -1229,7 +1254,10 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider.create::<u32, u32>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<u32, u32>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1263,7 +1291,10 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, &DataRecord>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1315,7 +1346,10 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider.create::<&str, String>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let val_1_small = "a";
@@ -1352,7 +1386,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, String>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1375,7 +1412,10 @@ mod tests {
             assert_eq!(value, format!("{:04}", i));
         }
 
-        let writer = blockfile_provider.fork::<&str, String>(&id).await.unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, String>(BlockfileWriterOptions::new().fork(id))
+            .await
+            .unwrap();
         let id = writer.id();
 
         // Delete some keys
@@ -1416,7 +1456,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
@@ -1455,7 +1498,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
@@ -1474,7 +1520,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
-            .fork::<&str, Vec<u32>>(&id_1)
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Delete everything but the last 10 keys.
@@ -1507,7 +1553,7 @@ mod tests {
         }
 
         let writer = blockfile_provider
-            .fork::<&str, Vec<u32>>(&id_1)
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Add everything back.
@@ -1548,7 +1594,10 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider.create::<&str, u32>().unwrap();
+        let writer = blockfile_provider
+            .get_writer::<&str, u32>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let id = writer.id();
 
         let n = 20000;
@@ -1704,7 +1753,7 @@ mod tests {
         // successfully hydrating counts for ALL blocks it needs to set counts for
 
         let writer = blockfile_provider
-            .fork::<&str, String>(&first_write_id)
+            .get_writer::<&str, String>(BlockfileWriterOptions::new().fork(first_write_id))
             .await
             .unwrap();
         let second_write_id = writer.id();

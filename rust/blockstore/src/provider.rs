@@ -1,4 +1,5 @@
 use crate::arrow::root::RootReader;
+use crate::BlockfileWriterOptions;
 
 use super::arrow::block::Block;
 use super::arrow::provider::ArrowBlockfileProvider;
@@ -8,7 +9,7 @@ use super::arrow::types::{
 use super::config::BlockfileProviderConfig;
 use super::key::{InvalidKeyConversion, KeyWrapper};
 use super::memory::provider::MemoryBlockfileProvider;
-use super::memory::storage::{Readable, Writeable};
+use super::memory::storage::Readable;
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
 use async_trait::async_trait;
@@ -78,16 +79,15 @@ impl BlockfileProvider {
         }
     }
 
-    pub fn create<
-        'new,
-        K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
-        V: Value + Writeable + ArrowWriteableValue + 'new,
-    >(
+    pub async fn get_writer<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
+        options: BlockfileWriterOptions,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create(),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.create::<K, V>(),
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.get_writer(options),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider.get_writer::<K, V>(options).await
+            }
         }
     }
 
@@ -101,13 +101,42 @@ impl BlockfileProvider {
         Ok(())
     }
 
+    // todo: deprecate
+    pub async fn create<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+        &self,
+    ) -> Result<BlockfileWriter, Box<CreateError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => {
+                provider.get_writer(BlockfileWriterOptions::default())
+            }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider
+                    .get_writer::<K, V>(BlockfileWriterOptions::default())
+                    .await
+            }
+        }
+    }
+
+    // todo: deprecate
     pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         id: &uuid::Uuid,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork(id),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.fork::<K, V>(id).await,
+            BlockfileProvider::HashMapBlockfileProvider(provider) => {
+                provider.get_writer(BlockfileWriterOptions {
+                    fork: Some(*id),
+                    ..Default::default()
+                })
+            }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider
+                    .get_writer::<K, V>(BlockfileWriterOptions {
+                        fork: Some(*id),
+                        ..Default::default()
+                    })
+                    .await
+            }
         }
     }
 }
