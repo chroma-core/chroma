@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::sync::Arc;
+use thiserror::Error;
 use uuid::Uuid;
 
 // ============
@@ -93,6 +94,20 @@ impl ChromaError for AddError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum SetCountError {
+    #[error("Block id does not exist in the sparse index")]
+    BlockIdDoesNotExist,
+}
+
+impl ChromaError for SetCountError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            SetCountError::BlockIdDoesNotExist => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 impl SparseIndexWriter {
     pub(super) fn new(initial_block_id: Uuid) -> Self {
         let mut forward = BTreeMap::new();
@@ -152,11 +167,16 @@ impl SparseIndexWriter {
     /// # Arguments
     /// * `block_id` - The block id to set the count for
     /// * `count` - The number of keys in the block
-    pub(super) fn set_count(&self, block_id: Uuid, count: u32) {
+    pub(super) fn set_count(&self, block_id: Uuid, count: u32) -> Result<(), SetCountError> {
         let mut data = self.data.lock();
-        // TODO: error if block_id does not exist
-        let start_key = data.reverse.get(&block_id).unwrap().clone();
-        data.counts.insert(start_key, count);
+        let start_key = data.reverse.get(&block_id);
+        match start_key.cloned() {
+            Some(start_key) => {
+                data.counts.insert(start_key, count);
+                Ok(())
+            }
+            None => Err(SetCountError::BlockIdDoesNotExist),
+        }
     }
 
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
@@ -628,7 +648,9 @@ mod tests {
         let block_id_1 = uuid::Uuid::new_v4();
         let sparse_index = SparseIndexWriter::new(block_id_1);
         let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
-        sparse_index.set_count(block_id_1, 10);
+        sparse_index
+            .set_count(block_id_1, 10)
+            .expect("Set count should succeed");
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_1);
 
         blockfile_key = CompositeKey::new("prefix".to_string(), "b");
@@ -640,7 +662,9 @@ mod tests {
         sparse_index
             .add_block(blockfile_key.clone(), block_id_2)
             .expect("No error");
-        sparse_index.set_count(block_id_2, 20);
+        sparse_index
+            .set_count(block_id_2, 20)
+            .expect("Set count should succeed");
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_2);
 
         // d should fall into the second block
@@ -653,7 +677,9 @@ mod tests {
         sparse_index
             .add_block(blockfile_key.clone(), block_id_3)
             .expect("No error");
-        sparse_index.set_count(block_id_3, 30);
+        sparse_index
+            .set_count(block_id_3, 30)
+            .expect("Set count should succeed");
         assert_eq!(sparse_index.get_target_block_id(&blockfile_key), block_id_3);
 
         // g should fall into the third block
@@ -666,12 +692,64 @@ mod tests {
     }
 
     #[test]
+    fn test_count() {
+        let ids = [
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+        ];
+        let keys = [
+            CompositeKey::new("prefix".to_string(), "a"),
+            CompositeKey::new("prefix".to_string(), "c"),
+            CompositeKey::new("prefix".to_string(), "e"),
+        ];
+        let counts = [10, 20, 30];
+
+        let sparse_index = SparseIndexWriter::new(ids[0]);
+        sparse_index
+            .set_count(ids[0], counts[0])
+            .expect("Set count should succeed");
+        sparse_index
+            .add_block(keys[1].clone(), ids[1])
+            .expect("No error");
+        sparse_index
+            .set_count(ids[1], counts[1])
+            .expect("Set count should succeed");
+        sparse_index
+            .add_block(keys[2].clone(), ids[2])
+            .expect("No error");
+        sparse_index
+            .set_count(ids[2], counts[2])
+            .expect("Set count should succeed");
+
+        // Check that the counts are set correctly
+        assert_eq!(sparse_index.data.lock().counts.len(), 3);
+        for i in 0..ids.len() {
+            let target_key = match i {
+                0 => SparseIndexDelimiter::Start,
+                _ => SparseIndexDelimiter::Key(keys[i].clone()),
+            };
+            assert_eq!(
+                sparse_index.data.lock().counts.get(&target_key).unwrap(),
+                &counts[i]
+            );
+        }
+
+        // Check that we can't insert count for block not in map
+        let non_existent_id = uuid::Uuid::new_v4();
+        let result = sparse_index.set_count(non_existent_id, 10);
+        assert!(matches!(result, Err(SetCountError::BlockIdDoesNotExist)));
+    }
+
+    #[test]
     fn test_to_reader() {
         let block_id_0 = uuid::Uuid::new_v4();
 
         // Add an initial block to the sparse index
         let sparse_index = SparseIndexWriter::new(block_id_0);
-        sparse_index.set_count(block_id_0, 5);
+        sparse_index
+            .set_count(block_id_0, 5)
+            .expect("Set count should succeed");
 
         // Add some more blocks
         let blockfile_key = CompositeKey::new("prefix".to_string(), "a");
@@ -679,14 +757,18 @@ mod tests {
         sparse_index
             .add_block(blockfile_key.clone(), block_id_1)
             .expect("No error");
-        sparse_index.set_count(block_id_1, 10);
+        sparse_index
+            .set_count(block_id_1, 10)
+            .expect("Set count should succeed");
 
         let blockfile_key = CompositeKey::new("prefix".to_string(), "c");
         let block_id_2 = uuid::Uuid::new_v4();
         sparse_index
             .add_block(blockfile_key.clone(), block_id_2)
             .expect("No error");
-        sparse_index.set_count(block_id_2, 20);
+        sparse_index
+            .set_count(block_id_2, 20)
+            .expect("Set count should succeed");
 
         let new_sparse_index = sparse_index.to_reader().expect("Conversion should succeed");
         let old_data = sparse_index.data.lock();
@@ -711,13 +793,17 @@ mod tests {
     fn test_get_all_block_ids() {
         let block_id_0 = uuid::Uuid::new_v4();
         let writer = SparseIndexWriter::new(block_id_0);
-        writer.set_count(block_id_0, 5);
+        writer
+            .set_count(block_id_0, 5)
+            .expect("Set count should succeed");
         let mut blockfile_key = CompositeKey::new("prefix".to_string(), "a");
         let block_id_1 = uuid::Uuid::new_v4();
         writer
             .add_block(blockfile_key.clone(), block_id_1)
             .expect("No error");
-        writer.set_count(block_id_1, 10);
+        writer
+            .set_count(block_id_1, 10)
+            .expect("Set count should succeed");
 
         // Split the range into two blocks (start, c), and (c, end)
         let block_id_2 = uuid::Uuid::new_v4();
@@ -725,7 +811,11 @@ mod tests {
         writer
             .add_block(blockfile_key.clone(), block_id_2)
             .expect("No error");
-        writer.set_count(block_id_2, 10);
+        writer
+            .set_count(block_id_2, 10)
+            .expect("Set count should succeed");
+
+        //
 
         // Split the second block into (c, f) and (f, end)
         let block_id_3 = uuid::Uuid::new_v4();
@@ -733,7 +823,9 @@ mod tests {
         writer
             .add_block(blockfile_key.clone(), block_id_3)
             .expect("No error");
-        writer.set_count(block_id_3, 10);
+        writer
+            .set_count(block_id_3, 10)
+            .expect("Set count should succeed");
         let composite_keys = vec![
             CompositeKey::new("prefix".to_string(), "b"),
             CompositeKey::new("prefix".to_string(), "c"),
@@ -767,13 +859,17 @@ mod tests {
         ];
 
         let sparse_index = SparseIndexWriter::new(ids[0]);
-        sparse_index.set_count(ids[0], counts[0]);
+        sparse_index
+            .set_count(ids[0], counts[0])
+            .expect("Set count should succeed");
 
         // Split the range into two blocks (start, c), and (c, end)
         sparse_index
             .add_block(keys[1].clone(), ids[1])
             .expect("No error");
-        sparse_index.set_count(ids[1], counts[1]);
+        sparse_index
+            .set_count(ids[1], counts[1])
+            .expect("Set count should succeed");
 
         let reader = sparse_index.to_reader().expect("Conversion should succeed");
 

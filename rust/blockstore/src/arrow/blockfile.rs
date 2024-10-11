@@ -104,7 +104,8 @@ impl ArrowBlockfileWriter {
             if !removed {
                 self.root
                     .sparse_index
-                    .set_count(delta.id, delta.len() as u32);
+                    .set_count(delta.id, delta.len() as u32)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                 let block = self.block_manager.commit::<K, V>(delta);
                 blocks.push(block);
             }
