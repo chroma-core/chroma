@@ -1,5 +1,4 @@
 from typing import Optional, Sequence
-from uuid import UUID
 
 from chromadb.api.types import (
     GetResult,
@@ -13,7 +12,7 @@ from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.segment.impl.manager.local import LocalSegmentManager
 from chromadb.segment.impl.metadata.sqlite import SqliteMetadataSegment
 from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
-from chromadb.types import VectorQuery, VectorQueryResult
+from chromadb.types import VectorQuery, VectorQueryResult, Collection
 from overrides import overrides
 
 
@@ -177,8 +176,8 @@ class LocalExecutor(Executor):
             included=included,
         )
 
-    def _metadata_segment(self, collection_id: UUID) -> SqliteMetadataSegment:
-        return self._manager.get_segment(collection_id, SqliteMetadataSegment)
+    def _metadata_segment(self, collection: Collection) -> SqliteMetadataSegment:
+        return self._manager.get_segment(collection.id, SqliteMetadataSegment)
 
-    def _vector_segment(self, collection_id: UUID) -> LocalHnswSegment:
-        return self._manager.get_segment(collection_id, LocalHnswSegment)
+    def _vector_segment(self, collection: Collection) -> LocalHnswSegment:
+        return self._manager.get_segment(collection.id, LocalHnswSegment)

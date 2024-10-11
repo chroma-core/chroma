@@ -2,7 +2,6 @@
 # TODO: This will be refactored after grpc defs have been updated for query pushdown
 
 from typing import Optional, Sequence
-from uuid import UUID
 
 from chromadb.api.types import (
     GetResult,
@@ -16,7 +15,7 @@ from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
 from chromadb.segment.impl.metadata.grpc_segment import GrpcMetadataSegment
 from chromadb.segment.impl.vector.grpc_segment import GrpcVectorSegment
-from chromadb.types import VectorQuery, VectorQueryResult
+from chromadb.types import VectorQuery, VectorQueryResult, Collection
 from overrides import overrides
 
 
@@ -180,8 +179,8 @@ class DistributedExecutor(Executor):
             included=included,
         )
 
-    def _metadata_segment(self, collection_id: UUID) -> GrpcMetadataSegment:
-        return self._manager.get_segment(collection_id, GrpcMetadataSegment)
+    def _metadata_segment(self, collection: Collection) -> GrpcMetadataSegment:
+        return self._manager.get_segment(collection.id, GrpcMetadataSegment)
 
-    def _vector_segment(self, collection_id: UUID) -> GrpcVectorSegment:
-        return self._manager.get_segment(collection_id, GrpcVectorSegment)
+    def _vector_segment(self, collection: Collection) -> GrpcVectorSegment:
+        return self._manager.get_segment(collection.id, GrpcVectorSegment)
