@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from chromadb.execution.expression.operator import Filter, KNN, Limit, Projection, Scan
+from chromadb.execution.expression.operator import KNN, Filter, Limit, Projection, Scan
 
 
 @dataclass
@@ -11,14 +11,14 @@ class CountPlan:
 @dataclass
 class GetPlan:
     scan: Scan
-    filter: Filter = Filter()
-    limit: Limit = Limit()
-    projection: Projection = Projection()
+    filter: Filter = field(default_factory=Filter)
+    limit: Limit = field(default_factory=Limit)
+    projection: Projection = field(default_factory=Projection)
 
 
 @dataclass
 class KNNPlan:
     scan: Scan
     knn: KNN
-    filter: Filter = Filter()
-    projection: Projection = Projection()
+    filter: Filter = field(default_factory=Filter)
+    projection: Projection = field(default_factory=Projection)

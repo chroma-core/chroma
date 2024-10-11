@@ -1,18 +1,20 @@
 from dataclasses import dataclass
 from typing import Optional
-from uuid import UUID
 
-from chromadb.types import RequestVersionContext, Where, WhereDocument
 from chromadb.api.types import Embeddings, IDs
+from chromadb.types import RequestVersionContext, Where, WhereDocument, Collection
 
 
 @dataclass
 class Scan:
-    collection: UUID
-    metadata: UUID
-    record: UUID
-    vector: UUID
-    version: RequestVersionContext
+    collection: Collection
+
+    @property
+    def version(self) -> RequestVersionContext:
+        return RequestVersionContext(
+            collection_version=self.collection.version,
+            log_position=self.collection.log_position,
+        )
 
 
 @dataclass
@@ -40,3 +42,4 @@ class Projection:
     embedding: bool = False
     metadata: bool = False
     rank: bool = False
+    uri: bool = False
