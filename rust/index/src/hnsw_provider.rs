@@ -74,6 +74,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
         config: &(HnswProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
+        // TODO(rescrv):  Long-term we should migrate this to the component API.
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let cache =
             chroma_cache::from_config_with_event_listener(&hnsw_config.hnsw_cache_config, tx)
