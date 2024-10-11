@@ -139,6 +139,8 @@ impl ChromaError for GetSegmentWritersError {
 enum CompactionError {
     #[error(transparent)]
     SystemTimeError(#[from] std::time::SystemTimeError),
+    #[error("Result channel dropped")]
+    ResultChannelDropped,
 }
 
 impl ChromaError for CompactionError {
@@ -519,7 +521,8 @@ impl CompactOrchestrator {
         let mut handle = self.system.clone().start_component(self);
         let result = rx.await;
         handle.stop();
-        result.unwrap()
+        result
+            .map_err(|_| Box::new(CompactionError::ResultChannelDropped) as Box<dyn ChromaError>)?
     }
 }
 
