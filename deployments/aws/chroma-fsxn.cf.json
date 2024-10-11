@@ -162,6 +162,7 @@
         },
         "FSxONTAP": {
             "Type": "AWS::FSx::FileSystem",
+            "DependsOn": "FsxAdminPassword",
             "Properties": {
                 "FileSystemType": "ONTAP",
                 "StorageCapacity": {
@@ -188,6 +189,7 @@
         },
         "FSxSVM": {
             "Type": "AWS::FSx::StorageVirtualMachine",
+            "DependsOn": "FsxSvmPassword",
             "Properties": {
                 "FileSystemId": {
                     "Ref": "FSxONTAP"
