@@ -534,6 +534,7 @@ class SegmentAPI(ServerAPI):
                     IncludeEnum.embeddings in include,
                     IncludeEnum.metadatas in include,
                     False,
+                    IncludeEnum.uris in include,
                 ),
             )
         )
@@ -685,6 +686,7 @@ class SegmentAPI(ServerAPI):
                     IncludeEnum.embeddings in include,
                     IncludeEnum.metadatas in include,
                     IncludeEnum.distances in include,
+                    IncludeEnum.uris in include,
                 ),
             )
         )
