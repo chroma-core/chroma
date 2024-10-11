@@ -3,7 +3,8 @@ from typing import Tuple
 from uuid import UUID
 
 from chromadb.db.base import SqlDB
-from chromadb.segment import SegmentManager, VectorReader
+from chromadb.segment import SegmentManager
+from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
 
 topic_regex = r"persistent:\/\/(?P<tenant>.+)\/(?P<namespace>.+)\/(?P<topic>.+)"
 
@@ -46,4 +47,4 @@ def trigger_vector_segments_max_seq_id_migration(
 
     for collection_id in collection_ids_with_unmigrated_segments:
         # Loading the segment triggers the migration on init
-        segment_manager.get_segment(UUID(collection_id), VectorReader)
+        segment_manager.get_segment(UUID(collection_id), LocalHnswSegment)

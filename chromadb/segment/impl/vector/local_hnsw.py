@@ -1,7 +1,7 @@
 from overrides import override
 from typing import Optional, Sequence, Dict, Set, List, cast
 from uuid import UUID
-from chromadb.segment import VectorReader
+from chromadb.segment import SegmentImplementation
 from chromadb.ingest import Consumer
 from chromadb.config import System, Settings
 from chromadb.segment.impl.vector.batch import Batch
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CAPACITY = 1000
 
 
-class LocalHnswSegment(VectorReader):
+class LocalHnswSegment(SegmentImplementation):
     _id: UUID
     _consumer: Consumer
     _collection: Optional[UUID]
@@ -103,7 +103,6 @@ class LocalHnswSegment(VectorReader):
             self._consumer.unsubscribe(self._subscription)
 
     @trace_method("LocalHnswSegment.get_vectors", OpenTelemetryGranularity.ALL)
-    @override
     def get_vectors(
         self,
         request_version_context: RequestVersionContext,
@@ -130,7 +129,6 @@ class LocalHnswSegment(VectorReader):
         return results
 
     @trace_method("LocalHnswSegment.query_vectors", OpenTelemetryGranularity.ALL)
-    @override
     def query_vectors(
         self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:
