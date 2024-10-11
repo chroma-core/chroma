@@ -203,7 +203,7 @@ jobs:
         id: builddate
         run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
       - name: Release Tagged Version
-        uses: ncipollo/release-action@v1.11.1
+        uses: ncipollo/release-action@v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         with:
           body: |
@@ -214,7 +214,8 @@ jobs:
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
           artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
-          prerelease: true
+          prerelease: false
+          makeLatest: true
           generateReleaseNotes: true
       - name: Update Tag
         uses: richardsimko/update-tag@v1.0.5
@@ -225,7 +226,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Release Latest
         uses: ncipollo/release-action@v1.14.0
-        if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+        if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
         with:
           tag: "latest"
           name: "Latest"
@@ -239,8 +240,8 @@ jobs:
           artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
           allowUpdates: true
           removeArtifacts: true
-          prerelease: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
-          makeLatest: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+          prerelease: true
+
 
   release-cloudformation:
     name: Release CloudFormation
