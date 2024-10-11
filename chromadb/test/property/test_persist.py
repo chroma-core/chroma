@@ -11,7 +11,8 @@ import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
-from chromadb.segment import SegmentManager, VectorReader
+from chromadb.segment import SegmentManager
+from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.property.test_embeddings import (
@@ -142,7 +143,7 @@ def test_sync_threshold(settings: Settings) -> None:
     )
 
     manager = system.instance(SegmentManager)
-    segment = manager.get_segment(collection.id, VectorReader)
+    segment = manager.get_segment(collection.id, LocalHnswSegment)
 
     def get_index_last_modified_at() -> float:
         # Time resolution on Windows can be up to 10ms
