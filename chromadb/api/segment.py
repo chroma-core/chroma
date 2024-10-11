@@ -6,6 +6,7 @@ from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer
 from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.segment import SegmentManager, MetadataReader, VectorReader
+from chromadb.execution.executor.abstract import Executor
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -111,6 +112,7 @@ class SegmentAPI(ServerAPI):
     _settings: Settings
     _sysdb: SysDB
     _manager: SegmentManager
+    _executor: Executor
     _producer: Producer
     _product_telemetry_client: ProductTelemetryClient
     _opentelemetry_client: OpenTelemetryClient
@@ -122,6 +124,7 @@ class SegmentAPI(ServerAPI):
         self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
+        self._executor = self.require(Executor)
         self._quota = self.require(QuotaEnforcer)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
