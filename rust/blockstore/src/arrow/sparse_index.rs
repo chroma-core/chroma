@@ -624,7 +624,7 @@ impl Debug for SparseIndexReader {
     }
 }
 
-pub(super) fn get_target_block<'data, T>(
+fn get_target_block<'data, T>(
     search_key: &CompositeKey,
     forward: &'data BTreeMap<SparseIndexDelimiter, T>,
 ) -> &'data T {
