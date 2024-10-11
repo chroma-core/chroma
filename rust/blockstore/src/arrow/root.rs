@@ -129,11 +129,6 @@ impl RootWriter {
         let built_ids = ids_builder.finish();
         let built_counts = count_builder.finish();
 
-        println!("prefix_len: {}", prefix_arr.len());
-        println!("key_len: {}", key_arr.len());
-        println!("id_len: {}", built_ids.len());
-        println!("count_len: {}", built_counts.len());
-
         let metadata = HashMap::from_iter(vec![
             ("version".to_string(), self.version.to_string()),
             ("id".to_string(), self.id.to_string()),
@@ -384,10 +379,22 @@ mod test {
             .add_block(CompositeKey::new("prefix".to_string(), "c"), block_ids[3])
             .expect("No error");
 
-        root_writer.sparse_index.set_count(block_ids[0], 1);
-        root_writer.sparse_index.set_count(block_ids[1], 2);
-        root_writer.sparse_index.set_count(block_ids[2], 3);
-        root_writer.sparse_index.set_count(block_ids[3], 4);
+        root_writer
+            .sparse_index
+            .set_count(block_ids[0], 1)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[1], 2)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[2], 3)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[3], 4)
+            .expect("Set count should succeed");
 
         let bytes = root_writer
             .to_bytes::<&str>()
@@ -395,6 +402,7 @@ mod test {
         let root_reader =
             RootReader::from_bytes::<&str>(&bytes, bf_id).expect("To be able to deserialize");
 
+        // Check that the sparse index is the same
         assert_eq!(
             root_writer.sparse_index.len(),
             root_reader.sparse_index.len()
@@ -420,6 +428,67 @@ mod test {
                     .unwrap()
                     .count,
                 *writer_data.counts.get(key).unwrap()
+            );
+        }
+
+        assert_eq!(root_writer.version, root_reader.version);
+        assert_eq!(root_writer.id, root_reader.id);
+    }
+
+    #[test]
+    fn test_from_v1() {
+        let block_ids = [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ];
+        let counts = [1, 2, 3, 4];
+        let composite_keys = [
+            CompositeKey::new("prefix".to_string(), "a"),
+            CompositeKey::new("prefix".to_string(), "b"),
+            CompositeKey::new("prefix".to_string(), "c"),
+            CompositeKey::new("prefix".to_string(), "d"),
+        ];
+        let sparse_index = SparseIndexWriter::new(block_ids[0]);
+
+        let bf_id = Uuid::new_v4();
+        let root_writer = RootWriter::new(Version::V1, bf_id, sparse_index);
+        root_writer
+            .sparse_index
+            .set_count(block_ids[0], counts[0])
+            .expect("Set count should succeed");
+        for i in 1..block_ids.len() {
+            root_writer
+                .sparse_index
+                .add_block(composite_keys[i].clone(), block_ids[i])
+                .expect("No error");
+            root_writer
+                .sparse_index
+                .set_count(block_ids[i], counts[i])
+                .expect("Set count should succeed");
+        }
+
+        let bytes = root_writer
+            .to_bytes::<&str>()
+            .expect("To be able to serialize");
+
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, bf_id).expect("To be able to deserialize");
+
+        // Check the version is still v1
+        assert_eq!(root_reader.version, Version::V1);
+        // Check that the counts map is just 0
+        for (key, _) in root_reader.sparse_index.data.forward.iter() {
+            assert_eq!(
+                root_reader
+                    .sparse_index
+                    .data
+                    .forward
+                    .get(key)
+                    .unwrap()
+                    .count,
+                0
             );
         }
     }
