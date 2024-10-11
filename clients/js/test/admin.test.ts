@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { AdminClient } from "../src/AdminClient";
-import { ChromaError } from "../src/Errors";
+import { ChromaError, ChromaUniqueError } from "../src/Errors";
 import { startChromaContainer } from "./startChromaContainer";
 
 describe("AdminClient", () => {
@@ -79,7 +79,7 @@ describe("AdminClient", () => {
       expect(false).toBe(true);
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect(error).toBeInstanceOf(ChromaError);
+      expect(error).toBeInstanceOf(ChromaUniqueError);
     }
   });
 });
