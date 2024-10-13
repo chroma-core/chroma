@@ -4,7 +4,7 @@ import {
   OllamaEmbeddingFunction,
 } from "../../src/index";
 
-describe("Conditional Tests", () => {
+describe("Langchain Embedding Function Tests", () => {
   if ((globalThis as any).isLangchainInstalled) {
     test("Test LC to Chroma EF", async () => {
       // @ts-ignore
