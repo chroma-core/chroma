@@ -7,6 +7,7 @@ import {
 describe("Conditional Tests", () => {
   if ((globalThis as any).isLangchainInstalled) {
     test("Test LC to Chroma EF", async () => {
+      // @ts-ignore
       const importedModule = await import("@langchain/ollama");
       const chromaEmbedding = await LangChainEmbeddingFunction.create({
         langchainEmbeddings: new importedModule.OllamaEmbeddings({
@@ -18,7 +19,9 @@ describe("Conditional Tests", () => {
       expect(results).toBeDefined();
       expect(results).toHaveLength(1);
       expect(results[0]).toHaveLength(384);
+
       const chromaModule = await import(
+        // @ts-ignore
         "@langchain/community/vectorstores/chroma"
       );
       const vectorStore = new chromaModule.Chroma(chromaEmbedding, {
@@ -46,6 +49,7 @@ describe("Conditional Tests", () => {
       expect(results).toHaveLength(1);
       expect(results[0]).toHaveLength(384);
       const chromaModule = await import(
+        // @ts-ignore
         "@langchain/community/vectorstores/chroma"
       );
       const vectorStore = new chromaModule.Chroma(chromaEmbedding, {
@@ -64,7 +68,6 @@ describe("Conditional Tests", () => {
       );
       expect(retrieverResults).toBeDefined();
       expect(retrieverResults).toHaveLength(1);
-      console.log(retrieverResults);
     });
   } else {
     test.skip("should skip this test if the package is not installed.", () => {
