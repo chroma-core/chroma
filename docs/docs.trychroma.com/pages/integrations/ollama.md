@@ -2,7 +2,7 @@
 title: Ollama Embeddings
 ---
 
-Chroma provides a convenient wrapper around [Ollama's](https://github.com/ollama/ollama) [python client](https://pypi.org/project/ollama/). You can use
+Chroma provides a convenient wrappers around [Ollama's](https://github.com/ollama/ollama) [python](https://pypi.org/project/ollama/) and [js](https://www.npmjs.com/package/ollama) clients. You can use
 the `OllamaEmbeddingFunction` embedding function to generate embeddings for your documents with
 a [model](https://github.com/ollama/ollama?tab=readme-ov-file#model-library) of your choice.
 
@@ -11,10 +11,8 @@ a [model](https://github.com/ollama/ollama?tab=readme-ov-file#model-library) of 
 
 ```python
 from chromadb.utils.embedding_functions.ollama_embedding_function import OllamaEmbeddingFunction
-
-ollama_ef = OllamaEmbeddingFunction(
-    model_name="chroma/all-minilm-l6-v2-f32",
-)
+# default model is "chroma/all-minilm-l6-v2-f32"
+ollama_ef = OllamaEmbeddingFunction()
 
 embeddings = ollama_ef(["This is my first text to embed",
                         "This is my second document"])
@@ -27,10 +25,8 @@ embeddings = ollama_ef(["This is my first text to embed",
 {% codetab label="ESM" %}
 ```js {% codetab=true %}
 import {OllamaEmbeddingFunction} from "chromadb";
-const embedder = new OllamaEmbeddingFunction({
-    url: "http://127.0.0.1:11434/api/embeddings",
-    model: "llama2"
-})
+// default model is "chroma/all-minilm-l6-v2-f32"
+const embedder = new OllamaEmbeddingFunction()
 
 // use directly
 const embeddings = embedder.generate(["document1", "document2"])
@@ -49,10 +45,8 @@ const collection = await client.getCollection({
 {% codetab label="CJS" %}
 ```js {% codetab=true %}
 const {OllamaEmbeddingFunction} = require('chromadb');
-const embedder = new OllamaEmbeddingFunction({
-    url: "http://127.0.0.1:11434/api/embeddings",
-    model: "llama2"
-})
+// default model is "chroma/all-minilm-l6-v2-f32"
+const embedder = new OllamaEmbeddingFunction();
 
 // use directly
 const embeddings = embedder.generate(["document1", "document2"])
