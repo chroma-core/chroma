@@ -58,6 +58,13 @@ describe("Conditional Tests", () => {
       };
       const res = await vectorStore.addDocuments([document1], { ids: ["1"] });
       expect(res).toBeDefined();
+      const retriever = await vectorStore.asRetriever();
+      const retrieverResults = await retriever.invoke(
+        "Tell me about the mitochondria",
+      );
+      expect(retrieverResults).toBeDefined();
+      expect(retrieverResults).toHaveLength(1);
+      console.log(retrieverResults);
     });
   } else {
     test.skip("should skip this test if the package is not installed.", () => {
