@@ -528,7 +528,7 @@ mod tests {
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::channel(1000);
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut manager = CompactionManager::new(
             scheduler,
             log,

@@ -199,7 +199,7 @@ impl FoyerCacheConfig {
 
     pub async fn build_memory_with_event_listener<K, V>(
         &self,
-        tx: tokio::sync::mpsc::Sender<K>,
+        tx: tokio::sync::mpsc::UnboundedSender<K>,
     ) -> Result<Box<dyn super::Cache<K, V>>, Box<dyn ChromaError>>
     where
         K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
@@ -378,9 +378,12 @@ where
     /// Build an in-memory cache that emits keys that get evicted to a channel.
     pub async fn memory_with_event_listener(
         config: &FoyerCacheConfig,
-        tx: tokio::sync::mpsc::Sender<K>,
+        tx: tokio::sync::mpsc::UnboundedSender<K>,
     ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
-        struct TokioEventListener<K, V>(tokio::sync::mpsc::Sender<K>, std::marker::PhantomData<V>)
+        struct TokioEventListener<K, V>(
+            tokio::sync::mpsc::UnboundedSender<K>,
+            std::marker::PhantomData<V>,
+        )
         where
             K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
             V: Clone + Send + Sync + Weighted + 'static;
@@ -398,7 +401,7 @@ where
             {
                 // NOTE(rescrv):  There's no mechanism by which we can error.  We could log a
                 // metric, but this should really never happen.
-                let _ = self.0.blocking_send(key.clone());
+                let _ = self.0.send(key.clone());
             }
         }
         let evl = TokioEventListener(tx, std::marker::PhantomData);

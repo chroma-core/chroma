@@ -75,7 +75,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
         // TODO(rescrv):  Long-term we should migrate this to the component API.
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let cache =
             chroma_cache::from_config_with_event_listener(&hnsw_config.hnsw_cache_config, tx)
                 .await?;
@@ -103,7 +103,7 @@ impl HnswIndexProvider {
         storage: Storage,
         storage_path: PathBuf,
         cache: Box<dyn Cache<Uuid, HnswIndexRef>>,
-        mut evicted: tokio::sync::mpsc::Receiver<Uuid>,
+        mut evicted: tokio::sync::mpsc::UnboundedReceiver<Uuid>,
     ) -> Self {
         let cache: Arc<dyn Cache<Uuid, HnswIndexRef>> = cache.into();
         let temporary_storage_path = storage_path.to_path_buf();
@@ -602,7 +602,7 @@ mod tests {
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = new_non_persistent_cache_for_test();
-        let (_tx, rx) = tokio::sync::mpsc::channel(100);
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, rx);
         let segment = Segment {
             id: Uuid::new_v4(),
