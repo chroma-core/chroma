@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use roaring::RoaringBitmap;
 use thiserror::Error;
@@ -71,6 +72,17 @@ pub enum LimitError {
     LogMaterializationError(#[from] LogMaterializerError),
     #[error("Error reading from record segment")]
     RecordSegmentReaderError,
+}
+
+impl ChromaError for LimitError {
+    fn code(&self) -> ErrorCodes {
+        use LimitError::*;
+        match self {
+            RecordSegmentReaderCreationError(e) => e.code(),
+            LogMaterializationError(e) => e.code(),
+            RecordSegmentReaderError => ErrorCodes::Internal,
+        }
+    }
 }
 
 // Sadly the std binary search cannot be directly used with async
@@ -336,7 +348,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                         .min(filter_match_count - truncated_skip);
 
                     let mut merged_result = Vec::new();
-                    while truncated_fetch >= 0
+                    while truncated_fetch > 0
                         && (log_index < log_count || compact_index < compact_count)
                     {
                         if compact_index == compact_count {

@@ -1,8 +1,7 @@
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
-use crate::execution::operators::filter::{
-    FilterError, FilterOperator, FilterOperatorInput, FilterOutput,
-};
+use crate::execution::operators::filter::{FilterError, FilterInput, FilterOperator, FilterOutput};
+use crate::execution::operators::limit::{LimitError, LimitInput, LimitOperator, LimitOutput};
 use crate::execution::operators::projection::{
     ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput,
 };
@@ -15,9 +14,10 @@ use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Where;
-use chroma_types::{Chunk, Segment};
-use chroma_types::{Collection, CollectionUuid, LogRecord, Metadata, SegmentType};
+use chroma_types::{
+    Chunk, Collection, CollectionUuid, LogRecord, Metadata, Segment, SegmentType,
+    SignedRoaringBitmap, Where,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -28,7 +28,8 @@ enum ExecutionState {
     Pending,
     PullLogs,
     Filter, // Filter logs and search metadata segment
-    MergeResults,
+    Limit,
+    Projection,
 }
 
 // Returns the ids, metadata, and documents
@@ -250,7 +251,7 @@ impl MetadataQueryOrchestrator {
         tracing::debug!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
-        let input = FilterOperatorInput::new(
+        let input = FilterInput::new(
             self.blockfile_provider.clone(),
             self.record_segment
                 .as_ref()
@@ -263,11 +264,44 @@ impl MetadataQueryOrchestrator {
             logs,
             self.query_ids.clone(),
             self.where_clause.clone(),
-            self.offset,
-            self.limit,
         );
 
         let op = FilterOperator::new();
+        let task = wrap(op, input, ctx.receiver());
+        match self.dispatcher.send(task, Some(Span::current())).await {
+            Ok(_) => (),
+            Err(e) => {
+                // Log an error - this implies the dispatcher was dropped somehow
+                // and is likely fatal
+                println!("Error sending Metadata Query task: {:?}", e);
+            }
+        }
+    }
+
+    async fn limit(
+        &mut self,
+        logs: Chunk<LogRecord>,
+        log_oids: SignedRoaringBitmap,
+        compact_oids: SignedRoaringBitmap,
+        ctx: &ComponentContext<Self>,
+    ) {
+        tracing::debug!("Applying limit and offset to filtered records");
+        self.state = ExecutionState::Limit;
+
+        let input = LimitInput::new(
+            self.blockfile_provider.clone(),
+            self.record_segment
+                .as_ref()
+                .expect("Expected record segment to be set")
+                .clone(),
+            logs,
+            log_oids,
+            compact_oids,
+            self.offset.unwrap_or(0),
+            self.limit,
+        );
+
+        let op = LimitOperator::new();
         let task = wrap(op, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
@@ -436,15 +470,43 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for MetadataQueryOrchestrato
         ctx: &ComponentContext<Self>,
     ) {
         let message = message.into_inner();
+        match message {
+            Ok(filter_output) => {
+                self.limit(
+                    filter_output.log_records,
+                    filter_output.log_oids,
+                    filter_output.compact_oids,
+                    ctx,
+                )
+                .await;
+            }
+            Err(e) => {
+                tracing::error!("Error filtering metadata: {:?}", e);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
+            }
+        };
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<LimitOutput, LimitError>> for MetadataQueryOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<LimitOutput, LimitError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let message = message.into_inner();
         let output = match message {
             Ok(output) => output,
             Err(e) => {
-                tracing::error!("Error merging metadata results: {:?}", e);
+                tracing::error!("Error limit get results: {:?}", e);
                 return terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         };
 
-        self.state = ExecutionState::MergeResults;
+        self.state = ExecutionState::Projection;
 
         let operator = ProjectionOperator::new();
         let input = ProjectionInput::new(
