@@ -212,8 +212,8 @@ impl ArrowBlockfileWriter {
     ) -> Result<(), Box<dyn ChromaError>> {
         let block_ids = self.root.sparse_index.block_ids();
         for block_id in block_ids {
-            let block_deltas = self.block_deltas.lock();
-            let delta = block_deltas.get(&block_id).unwrap(); // todo: is old delta removed?
+            let mut block_deltas = self.block_deltas.lock();
+            let delta = block_deltas.get(&block_id).unwrap();
             if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
                 match self.split_delta::<K, V>(delta.clone()) {
                     Ok(_) => {}
