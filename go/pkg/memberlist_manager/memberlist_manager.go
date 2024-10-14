@@ -150,11 +150,11 @@ func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
 	if memberlist == nil {
 		return nil, nil, errors.New("Memberlist recieved is nil")
 	}
-	return *memberlist, &resourceVersion, nil
+	return memberlist, &resourceVersion, nil
 }
 
 func (m *MemberlistManager) updateMemberlist(memberlist Memberlist, resourceVersion string) error {
-	return m.memberlistStore.UpdateMemberlist(context.Background(), &memberlist, resourceVersion)
+	return m.memberlistStore.UpdateMemberlist(context.Background(), memberlist, resourceVersion)
 }
 
 func (m *MemberlistManager) SetReconcileInterval(interval time.Duration) {
