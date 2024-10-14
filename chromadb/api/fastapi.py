@@ -363,8 +363,8 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
     ) -> None:
         """Deletes embeddings from the database"""
         self._make_request(

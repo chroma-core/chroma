@@ -680,7 +680,7 @@ def filters(
         ids = recordset["ids"]
 
     if not include_all_ids:
-        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
+        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids), min_size=1)))
         if ids is not None:
             # Remove duplicates since hypothesis samples with replacement
             ids = list(set(ids))
