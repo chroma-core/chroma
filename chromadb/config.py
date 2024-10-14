@@ -124,7 +124,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_ssl_enabled: Optional[bool] = False
 
     chroma_server_ssl_verify: Optional[Union[bool, str]] = None
-    chroma_server_api_default_path: Optional[str] = "/api/v1"
+    chroma_server_api_default_path: Optional[str] = "/api/v2"
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 
@@ -162,9 +162,9 @@ class Settings(BaseSettings):  # type: ignore
     # ================
 
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
+        "/api/v2": ["GET"],
+        "/api/v2/heartbeat": ["GET"],
+        "/api/v2/version": ["GET"],
     }
     # Overwrite singleton tenant and database access from the auth provider
     # if applicable. See chromadb/server/fastapi/__init__.py's
