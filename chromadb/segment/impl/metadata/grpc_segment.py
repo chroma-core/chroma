@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Sequence
 from chromadb.proto.convert import to_proto_request_version_context
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
-from chromadb.segment import MetadataReader
+from chromadb.segment import SegmentImplementation
 from chromadb.config import System
 from chromadb.errors import InvalidArgumentError, VersionMismatchError
 from chromadb.types import Segment, RequestVersionContext
@@ -21,7 +21,7 @@ import chromadb.proto.chroma_pb2 as pb
 import grpc
 
 
-class GrpcMetadataSegment(MetadataReader):
+class GrpcMetadataSegment(SegmentImplementation):
     """Embedding Metadata segment interface"""
 
     _request_timeout_seconds: int
@@ -81,7 +81,6 @@ class GrpcMetadataSegment(MetadataReader):
         "GrpcMetadataSegment.get_metadata",
         OpenTelemetryGranularity.ALL,
     )
-    @override
     def get_metadata(
         self,
         request_version_context: RequestVersionContext,

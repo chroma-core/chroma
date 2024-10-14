@@ -16,8 +16,8 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 from typing import Dict, List
-from chromadb.segment import VectorReader
 from chromadb.segment import SegmentManager
+from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
 
 from chromadb.types import SegmentScope
 from chromadb.db.system import SysDB
@@ -112,7 +112,7 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
     @rule(coll=collections)
     def get_segment(self, coll: strategies.Collection) -> None:
         segment = self.segment_manager.get_segment(
-            collection_id=coll.id, type=VectorReader
+            collection_id=coll.id, type=LocalHnswSegment
         )
         self.last_use.add(coll.id)
         assert segment is not None
