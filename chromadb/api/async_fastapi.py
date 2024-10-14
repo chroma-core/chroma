@@ -222,7 +222,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> int:
         resp_json = await self._make_request(
             "get",
-            f"tenants/{tenant}/databases/{database}/collections_count",
+            f"/tenants/{tenant}/databases/{database}/collections_count",
         )
 
         return cast(int, resp_json)
@@ -313,7 +313,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> None:
         await self._make_request(
             "put",
-            f"tenants/{tenant}/databases/{database}/collections/{id}",
+            f"/tenants/{tenant}/databases/{database}/collections/{id}",
             json={"new_metadata": new_metadata, "new_name": new_name},
         )
 
@@ -327,7 +327,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> None:
         await self._make_request(
             "delete",
-            f"tenants/{tenant}/databases/{database}/collections/{name}",
+            f"/tenants/{tenant}/databases/{database}/collections/{name}",
         )
 
     @trace_method("AsyncFastAPI._count", OpenTelemetryGranularity.OPERATION)
@@ -341,7 +341,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         """Returns the number of embeddings in the database"""
         resp_json = await self._make_request(
             "get",
-            f"tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
         )
 
         return cast(int, resp_json)
