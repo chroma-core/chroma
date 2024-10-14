@@ -2,11 +2,11 @@ from threading import Lock
 from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
+    MetadataReader,
     SegmentType,
+    VectorReader,
     S,
 )
-from chromadb.segment.impl.metadata.sqlite import SqliteMetadataSegment
-from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
 import logging
 from chromadb.segment.impl.manager.cache.cache import (
     SegmentLRUCache,
@@ -155,10 +155,10 @@ class LocalSegmentManager(SegmentManager):
         for segment in segments:
             if segment["id"] in self._instances:
                 if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
-                    instance = self.get_segment(collection_id, LocalHnswSegment)
+                    instance = self.get_segment(collection_id, VectorReader)
                     instance.delete()
                 elif segment["type"] == SegmentType.SQLITE.value:
-                    instance = self.get_segment(collection_id, SqliteMetadataSegment)  # type: ignore[assignment]
+                    instance = self.get_segment(collection_id, MetadataReader)  # type: ignore[assignment]
                     instance.delete()
                 del self._instances[segment["id"]]
             if segment["scope"] is SegmentScope.VECTOR:
@@ -199,9 +199,9 @@ class LocalSegmentManager(SegmentManager):
     )
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
-        if type == SqliteMetadataSegment:
+        if type == MetadataReader:
             scope = SegmentScope.METADATA
-        elif type == LocalHnswSegment:
+        elif type == VectorReader:
             scope = SegmentScope.VECTOR
         else:
             raise ValueError(f"Invalid segment type: {type}")
@@ -225,14 +225,12 @@ class LocalSegmentManager(SegmentManager):
     def hint_use_collection(self, collection_id: UUID, hint_type: Operation) -> None:
         # The local segment manager responds to hints by pre-loading both the metadata and vector
         # segments for the given collection.
-        for type in [SqliteMetadataSegment, LocalHnswSegment]:
+        for type in [MetadataReader, VectorReader]:
             # Just use get_segment to load the segment into the cache
             instance = self.get_segment(collection_id, type)
             # If the segment is a vector segment, we need to keep segments in an LRU cache
             # to avoid hitting the OS file handle limit.
-            if type == LocalHnswSegment and self._system.settings.require(
-                "is_persistent"
-            ):
+            if type == VectorReader and self._system.settings.require("is_persistent"):
                 instance = cast(PersistentLocalHnswSegment, instance)
                 instance.open_persistent_index()
                 self._vector_instances_file_handle_cache.set(collection_id, instance)

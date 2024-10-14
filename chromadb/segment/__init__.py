@@ -2,8 +2,14 @@ from typing import Optional, Sequence, TypeVar, Type
 from abc import abstractmethod
 from chromadb.types import (
     Collection,
+    MetadataEmbeddingRecord,
     Operation,
     RequestVersionContext,
+    VectorEmbeddingRecord,
+    Where,
+    WhereDocument,
+    VectorQuery,
+    VectorQueryResult,
     Segment,
     SeqId,
     Metadata,
@@ -51,6 +57,46 @@ class SegmentImplementation(Component):
 
 
 S = TypeVar("S", bound=SegmentImplementation)
+
+
+class MetadataReader(SegmentImplementation):
+    """Embedding Metadata segment interface"""
+
+    @abstractmethod
+    def get_metadata(
+        self,
+        request_version_context: RequestVersionContext,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        ids: Optional[Sequence[str]] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        include_metadata: bool = True,
+    ) -> Sequence[MetadataEmbeddingRecord]:
+        """Query for embedding metadata."""
+        pass
+
+
+class VectorReader(SegmentImplementation):
+    """Embedding Vector segment interface"""
+
+    @abstractmethod
+    def get_vectors(
+        self,
+        request_version_context: RequestVersionContext,
+        ids: Optional[Sequence[str]] = None,
+    ) -> Sequence[VectorEmbeddingRecord]:
+        """Get embeddings from the segment. If no IDs are provided, all embeddings are
+        returned."""
+        pass
+
+    @abstractmethod
+    def query_vectors(
+        self, query: VectorQuery
+    ) -> Sequence[Sequence[VectorQueryResult]]:
+        """Given a vector query, return the top-k nearest neighbors for vector in the
+        query."""
+        pass
 
 
 class SegmentManager(Component):

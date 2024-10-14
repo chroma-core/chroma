@@ -2,11 +2,11 @@ from threading import Lock
 from chromadb.segment import (
     SegmentImplementation,
     SegmentManager,
+    MetadataReader,
     SegmentType,
+    VectorReader,
     S,
 )
-from chromadb.segment.impl.metadata.grpc_segment import GrpcMetadataSegment
-from chromadb.segment.impl.vector.grpc_segment import GrpcVectorSegment
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
@@ -84,9 +84,9 @@ class DistributedSegmentManager(SegmentManager):
     )
     @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
-        if type == GrpcMetadataSegment:
+        if type == MetadataReader:
             scope = SegmentScope.METADATA
-        elif type == GrpcVectorSegment:
+        elif type == VectorReader:
             scope = SegmentScope.VECTOR
         else:
             raise ValueError(f"Invalid segment type: {type}")

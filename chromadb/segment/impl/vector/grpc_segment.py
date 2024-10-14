@@ -8,7 +8,7 @@ from chromadb.proto.convert import (
     to_proto_vector,
 )
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
-from chromadb.segment import SegmentImplementation
+from chromadb.segment import VectorReader
 from chromadb.errors import VersionMismatchError
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
@@ -35,7 +35,7 @@ from chromadb.proto.chroma_pb2 import (
 import grpc
 
 
-class GrpcVectorSegment(SegmentImplementation, EnforceOverrides):
+class GrpcVectorSegment(VectorReader, EnforceOverrides):
     _vector_reader_stub: VectorReaderStub
     _segment: Segment
     _request_timeout_seconds: int
@@ -56,6 +56,7 @@ class GrpcVectorSegment(SegmentImplementation, EnforceOverrides):
         )
 
     @trace_method("GrpcVectorSegment.get_vectors", OpenTelemetryGranularity.ALL)
+    @override
     def get_vectors(
         self,
         request_version_context: RequestVersionContext,
@@ -86,6 +87,7 @@ class GrpcVectorSegment(SegmentImplementation, EnforceOverrides):
         return results
 
     @trace_method("GrpcVectorSegment.query_vectors", OpenTelemetryGranularity.ALL)
+    @override
     def query_vectors(
         self, query: VectorQuery
     ) -> Sequence[Sequence[VectorQueryResult]]:

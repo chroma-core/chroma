@@ -1,5 +1,5 @@
 import pytest
-from typing import Generator, List, Callable, Iterator, Type, cast, Union
+from typing import Generator, List, Callable, Iterator, Type, cast
 from chromadb.config import System, Settings
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
@@ -14,6 +14,7 @@ from chromadb.types import (
     Vector,
 )
 from chromadb.ingest import Producer
+from chromadb.segment import VectorReader
 import uuid
 import time
 
@@ -32,8 +33,6 @@ import tempfile
 import os
 import shutil
 import numpy as np
-
-VectorReader = Union[LocalHnswSegment, PersistentLocalHnswSegment]
 
 
 def sqlite() -> Generator[System, None, None]:
