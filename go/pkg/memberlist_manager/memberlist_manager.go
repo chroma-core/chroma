@@ -2,7 +2,6 @@ package memberlist_manager
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -147,9 +146,7 @@ func (m *MemberlistManager) getOldMemberlist() (Memberlist, *string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if memberlist == nil {
-		return nil, nil, errors.New("Memberlist recieved is nil")
-	}
+
 	return memberlist, &resourceVersion, nil
 }
 
