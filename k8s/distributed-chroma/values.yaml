@@ -29,10 +29,10 @@ frontendService:
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: |
-      - name: CHROMA_OTEL_COLLECTION_ENDPOINT
-        value: "http://jaeger:4317"
-      - name: CHROMA_OTEL_GRANULARITY
-        value: all
+    - name: CHROMA_OTEL_COLLECTION_ENDPOINT
+      value: "http://jaeger:4317"
+    - name: CHROMA_OTEL_GRANULARITY
+      value: all
   replicaCount: 2
 sysdb:
   image:
@@ -40,8 +40,8 @@ sysdb:
     tag: 'sysdb'
   replicaCount: 1
   env:
-    - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "jaeger:4317"'
+  - name: OPTL_TRACING_ENDPOINT
+    value: 'value: "jaeger:4317"'
   resources:
     limits:
       cpu: '2000m'
@@ -56,10 +56,10 @@ logService:
     repository: 'local'
     tag: 'log-service'
   env:
-    - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "otel-collector:4317"'
-    - name: SYSDB_CONN
-      value: 'value: "sysdb.chroma:50051"'
+  - name: OPTL_TRACING_ENDPOINT
+    value: 'value: "otel-collector:4317"'
+  - name: SYSDB_CONN
+    value: 'value: "sysdb.chroma:50051"'
   flags:
   replicaCount: 1
 
@@ -68,12 +68,19 @@ queryService:
     repository: 'local'
     tag: 'query-service'
   env:
+  cache:
+    hostPath: '/var/cache/chroma'
+    mountPath: '/cache/'
+
 
 compactionService:
   image:
     repository: 'local'
     tag: 'compaction-service'
   env:
+  cache:
+    hostPath: '/var/cache/chroma'
+    mountPath: '/cache/'
   replicaCount: 1
 
 sysdbMigration:

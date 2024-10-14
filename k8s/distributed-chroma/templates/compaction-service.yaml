@@ -29,21 +29,31 @@ spec:
         member-type: compaction-service
     spec:
       serviceAccountName: compaction-service-serviceaccount
-      {{if .Values.compactionService.configuration}}
       volumes:
+        {{if .Values.compactionService.configuration}}
         - name: compaction-service-config
           configMap:
             name: compaction-service-config
-      {{ end }}
+        {{ end }}
+        {{if .Values.compactionService.cache}}
+        - name: compaction-service-cache
+          hostPath:
+            path: {{ .Values.compactionService.cache.hostPath }}
+            type: DirectoryOrCreate
+        {{ end }}
       containers:
         - name: compaction-service
           image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          {{if .Values.compactionService.configuration}}
           volumeMounts:
+            {{if .Values.compactionService.configuration}}
             - name: compaction-service-config
               mountPath: /config/
-          {{ end }}
+            {{ end }}
+            {{if .Values.compactionService.cache}}
+            - name: compaction-service-cache
+              mountPath: {{ .Values.compactionService.cache.mountPath }}
+            {{ end }}
           ports:
             - containerPort: 50051
           env:
