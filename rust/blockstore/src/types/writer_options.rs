@@ -1,13 +1,13 @@
 use uuid::Uuid;
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub(crate) enum BlockfileWriterMutationOrdering {
     #[default]
     Unordered,
     Ordered,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BlockfileWriterOptions {
     pub(crate) mutation_ordering: BlockfileWriterMutationOrdering,
     pub(crate) fork: Option<Uuid>,

@@ -29,6 +29,7 @@ pub struct ArrowBlockfileWriter {
     root: RootWriter,
     id: Uuid,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
+    options: ArrowBlockfileWriterOptions,
 }
 // TODO: method visibility should not be pub(crate)
 
@@ -46,6 +47,7 @@ impl ChromaError for ArrowBlockfileError {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub(super) struct ArrowBlockfileWriterOptions {
     mutation_ordering: BlockfileWriterMutationOrdering,
 }
@@ -86,6 +88,7 @@ impl ArrowBlockfileWriter {
             root: root_writer,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            options,
         }
     }
 
@@ -106,6 +109,7 @@ impl ArrowBlockfileWriter {
             root: new_root,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            options,
         }
     }
 
@@ -183,6 +187,47 @@ impl ArrowBlockfileWriter {
         Ok(flusher)
     }
 
+    fn split_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &self,
+        delta: BlockDelta,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+        for (split_key, new_delta) in new_blocks {
+            match self.root.sparse_index.add_block(split_key, new_delta.id) {
+                Ok(_) => {
+                    let mut deltas = self.block_deltas.lock();
+                    deltas.insert(new_delta.id, new_delta);
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    fn split_all<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &self,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let block_ids = self.root.sparse_index.block_ids();
+        for block_id in block_ids {
+            let block_deltas = self.block_deltas.lock();
+            let delta = block_deltas.get(&block_id).unwrap(); // todo: is old delta removed?
+            if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+                match self.split_delta::<K, V>(delta.clone()) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("Error splitting delta: {:?}", e);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
@@ -244,13 +289,15 @@ impl ArrowBlockfileWriter {
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
             let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
             for (split_key, new_delta) in new_blocks {
-                self.root
-                    .sparse_index
-                    .add_block(split_key, new_delta.id)
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-
-                let mut deltas = self.block_deltas.lock();
-                deltas.insert(new_delta.id, new_delta);
+                match self.root.sparse_index.add_block(split_key, new_delta.id) {
+                    Ok(_) => {
+                        let mut deltas = self.block_deltas.lock();
+                        deltas.insert(new_delta.id, new_delta);
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
             }
         }
 
@@ -726,7 +773,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 #[cfg(test)]
 mod tests {
     use crate::arrow::block::Block;
-    use crate::arrow::blockfile::ArrowBlockfileWriter;
+    use crate::arrow::blockfile::{ArrowBlockfileWriter, ArrowBlockfileWriterOptions};
     use crate::arrow::provider::{BlockManager, RootManager};
     use crate::arrow::root::{RootWriter, Version};
     use crate::arrow::sparse_index::SparseIndexWriter;
@@ -738,6 +785,7 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
+    use futures::executor::block_on;
     use parking_lot::Mutex;
     use proptest::prelude::*;
     use proptest::test_runner::Config;
@@ -1694,6 +1742,7 @@ mod tests {
             root: root_writer,
             id: Uuid::new_v4(),
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            options: ArrowBlockfileWriterOptions::default(),
         };
 
         let n = 2000;

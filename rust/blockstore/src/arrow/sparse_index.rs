@@ -190,6 +190,11 @@ impl SparseIndexWriter {
         data.forward.len()
     }
 
+    pub(super) fn block_ids(&self) -> Vec<Uuid> {
+        let data = self.data.lock();
+        data.forward.values().copied().collect::<Vec<_>>()
+    }
+
     pub(super) fn remove_block(&self, block_id: &Uuid) -> bool {
         // We commit and flush an empty dummy block if the blockfile is empty.
         // It can happen that other indexes of the segment are not empty. In this case,
@@ -319,6 +324,14 @@ impl SparseIndexReader {
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
         let forward = &self.data.forward;
         get_target_block(search_key, forward).id
+    }
+
+    pub(super) fn block_ids(&self) -> Vec<Uuid> {
+        self.data
+            .forward
+            .values()
+            .map(|sparse_index_value| sparse_index_value.id)
+            .collect::<Vec<_>>()
     }
 
     /// Get all the block ids that contain keys in the given input search keys
