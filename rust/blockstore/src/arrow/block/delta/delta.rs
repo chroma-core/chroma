@@ -90,13 +90,13 @@ impl BlockDelta {
     /// The new block deltas contains all the key value pairs after, but not including the
     /// split point.
     pub(crate) fn split<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        self,
+        &self,
         max_block_size_bytes: usize,
     ) -> Vec<(CompositeKey, BlockDelta)> {
         let half_size = max_block_size_bytes / 2;
 
         let mut blocks_to_split = Vec::new();
-        blocks_to_split.push(self);
+        blocks_to_split.push(self.clone());
         let mut output = Vec::new();
         let mut first_iter: bool = true;
         // iterate over all blocks to split until its empty

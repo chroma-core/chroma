@@ -212,8 +212,11 @@ impl ArrowBlockfileWriter {
     ) -> Result<(), Box<dyn ChromaError>> {
         let block_ids = self.root.sparse_index.block_ids();
         for block_id in block_ids {
-            let mut block_deltas = self.block_deltas.lock();
-            let delta = block_deltas.get(&block_id).unwrap();
+            let delta = {
+                let block_deltas = self.block_deltas.lock();
+                block_deltas.get(&block_id).unwrap().clone()
+            };
+
             if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
                 match self.split_delta::<K, V>(delta.clone()) {
                     Ok(_) => {}
@@ -1051,8 +1054,7 @@ mod tests {
         assert_eq!(value, [4, 5, 6]);
     }
 
-    #[tokio::test]
-    async fn test_splitting() {
+    async fn test_splitting(options: BlockfileWriterOptions) {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -1064,7 +1066,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .get_writer::<&str, Vec<u32>>(options)
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1166,6 +1168,16 @@ mod tests {
             }
             _ => panic!("Unexpected reader type"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_splitting_on_mutation() {
+        test_splitting(BlockfileWriterOptions::default()).await;
+    }
+
+    #[tokio::test]
+    async fn test_splitting_on_commit() {
+        test_splitting(BlockfileWriterOptions::new().split_at_commit()).await;
     }
 
     #[tokio::test]
