@@ -9,8 +9,7 @@ use crate::{
     key::KeyWrapper,
     memory::storage::Readable,
     provider::{CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
-    BlockfileWriterSplitMode, Key, Value,
+    BlockfileReader, BlockfileWriter, BlockfileWriterOptions, Key, Value,
 };
 use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
