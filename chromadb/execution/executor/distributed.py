@@ -13,8 +13,7 @@ from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
-from chromadb.segment.impl.metadata.grpc_segment import GrpcMetadataSegment
-from chromadb.segment.impl.vector.grpc_segment import GrpcVectorSegment
+from chromadb.segment import MetadataReader, VectorReader
 from chromadb.types import VectorQuery, VectorQueryResult, Collection
 from overrides import overrides
 
@@ -200,8 +199,8 @@ class DistributedExecutor(Executor):
             included=included,
         )
 
-    def _metadata_segment(self, collection: Collection) -> GrpcMetadataSegment:
-        return self._manager.get_segment(collection.id, GrpcMetadataSegment)
+    def _metadata_segment(self, collection: Collection) -> MetadataReader:
+        return self._manager.get_segment(collection.id, MetadataReader)
 
-    def _vector_segment(self, collection: Collection) -> GrpcVectorSegment:
-        return self._manager.get_segment(collection.id, GrpcVectorSegment)
+    def _vector_segment(self, collection: Collection) -> VectorReader:
+        return self._manager.get_segment(collection.id, VectorReader)

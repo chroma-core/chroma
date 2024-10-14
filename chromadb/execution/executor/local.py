@@ -10,8 +10,7 @@ from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.segment.impl.manager.local import LocalSegmentManager
-from chromadb.segment.impl.metadata.sqlite import SqliteMetadataSegment
-from chromadb.segment.impl.vector.local_hnsw import LocalHnswSegment
+from chromadb.segment import MetadataReader, VectorReader
 from chromadb.types import VectorQuery, VectorQueryResult, Collection
 from overrides import overrides
 
@@ -197,8 +196,8 @@ class LocalExecutor(Executor):
             included=included,
         )
 
-    def _metadata_segment(self, collection: Collection) -> SqliteMetadataSegment:
-        return self._manager.get_segment(collection.id, SqliteMetadataSegment)
+    def _metadata_segment(self, collection: Collection) -> MetadataReader:
+        return self._manager.get_segment(collection.id, MetadataReader)
 
-    def _vector_segment(self, collection: Collection) -> LocalHnswSegment:
-        return self._manager.get_segment(collection.id, LocalHnswSegment)
+    def _vector_segment(self, collection: Collection) -> VectorReader:
+        return self._manager.get_segment(collection.id, VectorReader)
