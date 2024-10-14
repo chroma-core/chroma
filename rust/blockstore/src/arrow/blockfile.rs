@@ -834,7 +834,7 @@ mod tests {
         });
     }
 
-    async fn blockfile_comparisons(operation: ComparisonOperation, num_keys: u32, query_key: u32) {
+    fn blockfile_comparisons(operation: ComparisonOperation, num_keys: u32, query_key: u32) {
         Runtime::new().unwrap().block_on(async {
             let tmp_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
