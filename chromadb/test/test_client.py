@@ -113,11 +113,15 @@ def test_http_client_with_inconsistent_port_settings(
         )
 
 
-def test_persistent_client_close(persistent_api: ClientAPI) -> None:
+def test_persistent_client_close() -> None:
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
+    persistent_api = chromadb.PersistentClient(
+        path=os.path.join(tempfile.gettempdir(), "test_server-" + uuid.uuid4().hex),
+        settings=Settings(),
+    )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test")
     temp_persist_dir = persistent_api.get_settings().persist_directory
@@ -140,11 +144,15 @@ def test_persistent_client_close(persistent_api: ClientAPI) -> None:
     assert len(post_filtered_open_files) == 0
 
 
-def test_persistent_client_use_after_close(persistent_api: ClientAPI) -> None:
+def test_persistent_client_use_after_close() -> None:
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
         pytest.skip(
             "Skipping test that closes the persistent client in integration test"
         )
+    persistent_api = chromadb.PersistentClient(
+        path=os.path.join(tempfile.gettempdir(), "test_server-" + uuid.uuid4().hex),
+        settings=Settings(),
+    )
     current_process = psutil.Process()
     col = persistent_api.create_collection("test" + uuid.uuid4().hex)
     temp_persist_dir = persistent_api.get_settings().persist_directory
