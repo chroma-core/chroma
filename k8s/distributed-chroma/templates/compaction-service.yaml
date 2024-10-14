@@ -61,10 +61,6 @@ spec:
             - name: CONFIG_PATH
               value: /config/config.yaml
             {{ end }}
-            {{if .Values.compactionService.cache}}
-            - name: CACHE_PATH
-              value: {{ .Values.compactionService.cache.mountPath }}
-            {{ end }}
             {{ range .Values.compactionService.env }}
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
