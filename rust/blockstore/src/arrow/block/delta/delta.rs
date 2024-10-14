@@ -144,7 +144,6 @@ mod test {
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
     use std::collections::HashMap;
-    use uuid::Uuid;
 
     /// Saves a block to a random file under the given path, then loads the block
     /// and validates that the loaded block has the same size as the original block.

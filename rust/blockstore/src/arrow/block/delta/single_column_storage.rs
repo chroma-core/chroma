@@ -18,7 +18,7 @@ use std::{
 };
 
 #[derive(Clone)]
-pub struct SingleColumnStorageUnsorted<T: ArrowWriteableValue> {
+pub struct SingleColumnStorage<T: ArrowWriteableValue> {
     inner: Arc<RwLock<Inner<T>>>,
 }
 
@@ -27,7 +27,7 @@ struct Inner<T> {
     size_tracker: SingleColumnSizeTracker,
 }
 
-impl<T: ArrowWriteableValue> SingleColumnStorageUnsorted<T> {
+impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(Inner {
@@ -133,7 +133,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorageUnsorted<T> {
     pub(super) fn split<K: ArrowWriteableKey>(
         &self,
         split_size: usize,
-    ) -> (CompositeKey, SingleColumnStorageUnsorted<T>) {
+    ) -> (CompositeKey, SingleColumnStorage<T>) {
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut value_size = 0;
@@ -204,7 +204,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorageUnsorted<T> {
                 let new_delta = inner.storage.split_off(&split_key);
                 (
                     split_key,
-                    SingleColumnStorageUnsorted {
+                    SingleColumnStorage {
                         inner: Arc::new(RwLock::new(Inner {
                             storage: new_delta,
                             size_tracker: SingleColumnSizeTracker::with_values(
@@ -220,7 +220,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorageUnsorted<T> {
     }
 }
 
-impl SingleColumnStorageUnsorted<String> {
+impl SingleColumnStorage<String> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
@@ -264,7 +264,7 @@ impl SingleColumnStorageUnsorted<String> {
     }
 }
 
-impl SingleColumnStorageUnsorted<Vec<u32>> {
+impl SingleColumnStorage<Vec<u32>> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
@@ -320,7 +320,7 @@ impl SingleColumnStorageUnsorted<Vec<u32>> {
     }
 }
 
-impl SingleColumnStorageUnsorted<u32> {
+impl SingleColumnStorage<u32> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,
@@ -363,7 +363,7 @@ impl SingleColumnStorageUnsorted<u32> {
     }
 }
 
-impl SingleColumnStorageUnsorted<RoaringBitmap> {
+impl SingleColumnStorage<RoaringBitmap> {
     pub(super) fn into_arrow(
         self,
         key_builder: BlockKeyArrowBuilder,

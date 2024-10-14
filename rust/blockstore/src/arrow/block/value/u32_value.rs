@@ -1,8 +1,6 @@
 use crate::{
     arrow::{
-        block::delta::{
-            single_column_storage_unsorted::SingleColumnStorageUnsorted, BlockDelta, BlockStorage,
-        },
+        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -36,7 +34,7 @@ impl ArrowWriteableValue for u32 {
     }
 
     fn get_delta_builder() -> BlockStorage {
-        BlockStorage::UInt32(SingleColumnStorageUnsorted::new())
+        BlockStorage::UInt32(SingleColumnStorage::new())
     }
 }
 

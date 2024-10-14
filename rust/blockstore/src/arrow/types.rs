@@ -39,7 +39,6 @@ pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
 
 pub trait ArrowReadableValue<'referred_data>: Sized {
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
-    // when/how is this used?
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
         key: K,
