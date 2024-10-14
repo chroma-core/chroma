@@ -1,20 +1,20 @@
 use uuid::Uuid;
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub(crate) enum BlockfileWriterMutationOrdering {
     #[default]
     Unsorted,
     Sorted,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub(crate) enum BlockfileWriterSplitMode {
     #[default]
     OnMutations,
     AtCommit,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BlockfileWriterOptions {
     pub(crate) mutation_ordering: BlockfileWriterMutationOrdering,
     pub(crate) split_mode: BlockfileWriterSplitMode,
