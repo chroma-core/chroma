@@ -90,6 +90,7 @@ impl ArrowBlockfileProvider {
                 self.block_manager.clone(),
                 self.root_manager.clone(),
                 new_root,
+                options.into(),
             );
             Ok(BlockfileWriter::ArrowBlockfileWriter(file))
         } else {
@@ -99,6 +100,7 @@ impl ArrowBlockfileProvider {
                 new_id,
                 self.block_manager.clone(),
                 self.root_manager.clone(),
+                options.into(),
             );
             Ok(BlockfileWriter::ArrowBlockfileWriter(file))
         }

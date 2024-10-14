@@ -10,7 +10,7 @@ use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
-use crate::BlockfileError;
+use crate::{BlockfileError, BlockfileWriterMutationOrdering, BlockfileWriterOptions};
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
@@ -46,11 +46,28 @@ impl ChromaError for ArrowBlockfileError {
     }
 }
 
+pub(super) struct ArrowBlockfileWriterOptions {
+    mutation_ordering: BlockfileWriterMutationOrdering,
+}
+
+impl From<BlockfileWriterOptions> for ArrowBlockfileWriterOptions {
+    fn from(options: BlockfileWriterOptions) -> Self {
+        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unordered {
+            unimplemented!();
+        }
+
+        Self {
+            mutation_ordering: options.mutation_ordering,
+        }
+    }
+}
+
 impl ArrowBlockfileWriter {
     pub(super) fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         id: Uuid,
         block_manager: BlockManager,
         root_manager: RootManager,
+        options: ArrowBlockfileWriterOptions,
     ) -> Self {
         let initial_block = block_manager.create::<K, V>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
@@ -77,6 +94,7 @@ impl ArrowBlockfileWriter {
         block_manager: BlockManager,
         root_manager: RootManager,
         new_root: RootWriter,
+        options: ArrowBlockfileWriterOptions,
     ) -> Self {
         tracing::debug!("Constructed blockfile writer from existing root {:?}", id);
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
