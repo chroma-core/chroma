@@ -989,7 +989,7 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
  * ApiApi - functional programming interface
  * @export
  */
-export const ApiApiFp = function (configuration?: Configuration) {
+export const ApiApiFp = function(configuration?: Configuration) {
 	return {
 		/**
 		 * @summary Add
