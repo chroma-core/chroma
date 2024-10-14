@@ -78,7 +78,7 @@ fn bench_metadata_filtering(criterion: &mut Criterion) {
     };
 
     let routine = |metadata_filter_input| async move {
-        MetadataFilteringOperator::new()
+        FilterOperator::new()
             .run(&metadata_filter_input)
             .await
             .expect("Metadata filtering should not fail.");
@@ -90,7 +90,7 @@ fn bench_metadata_filtering(criterion: &mut Criterion) {
 
         for (op, where_clause) in baseline_where_clauses() {
             let setup = || {
-                MetadataFilteringInput::new(
+                FilterOperatorInput::new(
                     compact.blockfile_provider.clone(),
                     compact.record.clone(),
                     compact.metadata.clone(),

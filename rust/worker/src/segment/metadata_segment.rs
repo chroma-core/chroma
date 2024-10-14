@@ -1,6 +1,6 @@
-use crate::execution::operators::metadata_filtering::RoaringMetadataFilter;
+use crate::execution::operators::filter::RoaringMetadataFilter;
 
-use super::super::execution::operators::metadata_filtering::MetadataProvider;
+use super::super::execution::operators::filter::MetadataProvider;
 use super::record_segment::ApplyMaterializedLogError;
 use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;

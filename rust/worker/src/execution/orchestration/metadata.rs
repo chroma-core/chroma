@@ -1,12 +1,10 @@
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
-use crate::execution::operators::hydrate_metadata_results::{
-    HydrateMetadataResultsOperator, HydrateMetadataResultsOperatorError,
-    HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperatorOutput,
+use crate::execution::operators::filter::{
+    FilterError, FilterOperator, FilterOperatorInput, FilterOutput,
 };
-use crate::execution::operators::metadata_filtering::{
-    MetadataFilteringError, MetadataFilteringInput, MetadataFilteringOperator,
-    MetadataFilteringOutput,
+use crate::execution::operators::projection::{
+    ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput,
 };
 use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
 use crate::execution::orchestration::common::terminate_with_error;
@@ -252,7 +250,7 @@ impl MetadataQueryOrchestrator {
         tracing::debug!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
-        let input = MetadataFilteringInput::new(
+        let input = FilterOperatorInput::new(
             self.blockfile_provider.clone(),
             self.record_segment
                 .as_ref()
@@ -269,7 +267,7 @@ impl MetadataQueryOrchestrator {
             self.limit,
         );
 
-        let op = MetadataFilteringOperator::new();
+        let op = FilterOperator::new();
         let task = wrap(op, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
@@ -429,14 +427,12 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
 }
 
 #[async_trait]
-impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
-    for MetadataQueryOrchestrator
-{
+impl Handler<TaskResult<FilterOutput, FilterError>> for MetadataQueryOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<MetadataFilteringOutput, MetadataFilteringError>,
+        message: TaskResult<FilterOutput, FilterError>,
         ctx: &ComponentContext<Self>,
     ) {
         let message = message.into_inner();
@@ -450,8 +446,8 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
 
         self.state = ExecutionState::MergeResults;
 
-        let operator = HydrateMetadataResultsOperator::new();
-        let input = HydrateMetadataResultsOperatorInput::new(
+        let operator = ProjectionOperator::new();
+        let input = ProjectionInput::new(
             self.blockfile_provider.clone(),
             self.record_segment
                 .as_ref()
@@ -475,17 +471,12 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<HydrateMetadataResultsOperatorOutput, HydrateMetadataResultsOperatorError>>
-    for MetadataQueryOrchestrator
-{
+impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for MetadataQueryOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<
-            HydrateMetadataResultsOperatorOutput,
-            HydrateMetadataResultsOperatorError,
-        >,
+        message: TaskResult<ProjectionOutput, ProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
         let message = message.into_inner();

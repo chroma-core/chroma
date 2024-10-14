@@ -817,27 +817,21 @@ impl RecordSegmentReader<'_> {
         Ok(data)
     }
 
-    /// Returns all offset_ids in the record segment sorted.
-    pub(crate) async fn get_all_offset_ids(&self) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
-        let offset_id_count = self.count().await?;
-        let mut collected_offset_ids = RoaringBitmap::new();
-        for i in 0..offset_id_count {
-            let record = self.id_to_user_id.get_at_index(i).await;
-            match record {
-                Ok((_, offset_id, _)) => {
-                    collected_offset_ids.insert(offset_id);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "[GetAllData] Error getting offset id for index {}: {}",
-                        i,
-                        e
-                    );
-                    return Err(e);
-                }
+    pub(crate) async fn get_offset_id_at_index(
+        &self,
+        index: usize,
+    ) -> Result<u32, Box<dyn ChromaError>> {
+        match self.id_to_user_id.get_at_index(index).await {
+            Ok((_, oid, _)) => Ok(oid),
+            Err(e) => {
+                tracing::error!(
+                    "[GetAllData] Error getting offset id for index {}: {}",
+                    index,
+                    e
+                );
+                Err(e)
             }
         }
-        Ok(collected_offset_ids)
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
