@@ -14,8 +14,8 @@ import (
 )
 
 type IMemberlistStore interface {
-	GetMemberlist(ctx context.Context) (return_memberlist Memberlist, resourceVersion string, err error)
-	UpdateMemberlist(ctx context.Context, memberlist Memberlist, resourceVersion string) error
+	GetMemberlist(ctx context.Context) (_ Memberlist, resourceVersion string, err error)
+	UpdateMemberlist(ctx context.Context, _ Memberlist, resourceVersion string) error
 }
 
 type Member struct {
@@ -63,13 +63,14 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 	cr := unstrucuted.UnstructuredContent()
 	log.Debug("Got unstructured memberlist object", zap.Any("cr", cr))
 	members := cr["spec"].(map[string]interface{})["members"]
-	memberlist := Memberlist{}
 	if members == nil {
 		// Empty memberlist
 		log.Debug("Get memberlist received nil memberlist, returning empty")
-		return memberlist, unstrucuted.GetResourceVersion(), nil
+		return nil, unstrucuted.GetResourceVersion(), nil
 	}
 	cast_members := members.([]interface{})
+	memberlist := make(Memberlist, 0, len(cast_members))
+
 	for _, member := range cast_members {
 		member_map, ok := member.(map[string]interface{})
 		if !ok {
@@ -79,10 +80,7 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 		if !ok {
 			return nil, "", errors.New("failed to cast member_id to string")
 		}
-		member := Member{
-			id: member_id,
-		}
-		memberlist = append(memberlist, member)
+		memberlist = append(memberlist, Member{member_id})
 	}
 	return memberlist, unstrucuted.GetResourceVersion(), nil
 }
