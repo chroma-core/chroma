@@ -1,4 +1,6 @@
-use super::{data_record::DataRecordStorage, single_column_storage::SingleColumnStorage};
+use super::{
+    data_record::DataRecordStorage, single_column_storage_unsorted::SingleColumnStorageUnsorted,
+};
 use crate::{
     arrow::types::ArrowWriteableKey,
     key::{CompositeKey, KeyWrapper},
@@ -17,10 +19,10 @@ use std::{
 
 #[derive(Clone)]
 pub enum BlockStorage {
-    String(SingleColumnStorage<String>),
-    VecUInt32(SingleColumnStorage<Vec<u32>>),
-    UInt32(SingleColumnStorage<u32>),
-    RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
+    String(SingleColumnStorageUnsorted<String>),
+    VecUInt32(SingleColumnStorageUnsorted<Vec<u32>>),
+    UInt32(SingleColumnStorageUnsorted<u32>),
+    RoaringBitmap(SingleColumnStorageUnsorted<RoaringBitmap>),
     DataRecord(DataRecordStorage),
 }
 
