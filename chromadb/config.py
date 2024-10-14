@@ -76,6 +76,7 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
+    "chromadb.execution.executor.abstract.Executor": "chroma_executor_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
@@ -231,6 +232,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_segment_manager_impl: str = (
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
+    chroma_executor_impl: str = "chromadb.execution.executor.local.LocalExecutor"
 
     chroma_logservice_host = "localhost"
     chroma_logservice_port = 50052

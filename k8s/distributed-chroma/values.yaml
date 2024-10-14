@@ -16,6 +16,7 @@ frontendService:
   producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
+  executorImpl: 'value: "chromadb.execution.executor.distributed.DistributedExecutor"'
   allowReset: 'value: "TRUE"'
   sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
   serverGrpcPort: 'value: "50051"'
