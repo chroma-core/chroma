@@ -30,6 +30,7 @@ from chromadb.types import (
 )
 from pypika import Table
 from chromadb.ingest import Producer
+from chromadb.segment import MetadataReader
 import uuid
 import time
 
@@ -139,7 +140,7 @@ segment_definition2 = Segment(
 )
 
 
-def sync(segment: SqliteMetadataSegment, seq_id: SeqId) -> None:
+def sync(segment: MetadataReader, seq_id: SeqId) -> None:
     # Try for up to 5 seconds, then throw a TimeoutError
     start = time.time()
     while time.time() - start < 5:
@@ -667,7 +668,7 @@ def test_upsert(
 def _test_update(
     sample_embeddings: Iterator[OperationRecord],
     producer: Producer,
-    segment: SqliteMetadataSegment,
+    segment: MetadataReader,
     collection_id: uuid.UUID,
     op: Operation,
 ) -> None:

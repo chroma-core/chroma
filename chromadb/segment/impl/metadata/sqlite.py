@@ -1,5 +1,5 @@
 from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict, List
-from chromadb.segment import SegmentImplementation
+from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
 from chromadb.types import RequestVersionContext, Segment, InclusionExclusionOperator
@@ -40,7 +40,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class SqliteMetadataSegment(SegmentImplementation):
+class SqliteMetadataSegment(MetadataReader):
     _consumer: Consumer
     _db: SqliteDB
     _id: UUID
@@ -109,6 +109,7 @@ class SqliteMetadataSegment(SegmentImplementation):
             return cast(int, result)
 
     @trace_method("SqliteMetadataSegment.get_metadata", OpenTelemetryGranularity.ALL)
+    @override
     def get_metadata(
         self,
         request_version_context: RequestVersionContext,
