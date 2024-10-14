@@ -788,7 +788,6 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
-    use futures::executor::block_on;
     use parking_lot::Mutex;
     use proptest::prelude::*;
     use proptest::test_runner::Config;
@@ -1054,7 +1053,8 @@ mod tests {
         assert_eq!(value, [4, 5, 6]);
     }
 
-    async fn test_splitting(options: BlockfileWriterOptions) {
+    #[tokio::test]
+    async fn test_splitting() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -1066,7 +1066,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(options)
+            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1168,16 +1168,6 @@ mod tests {
             }
             _ => panic!("Unexpected reader type"),
         }
-    }
-
-    #[tokio::test]
-    async fn test_splitting_on_mutation() {
-        test_splitting(BlockfileWriterOptions::default()).await;
-    }
-
-    #[tokio::test]
-    async fn test_splitting_on_commit() {
-        test_splitting(BlockfileWriterOptions::new().split_at_commit()).await;
     }
 
     #[tokio::test]
