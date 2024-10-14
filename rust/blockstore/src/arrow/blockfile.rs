@@ -149,7 +149,7 @@ impl ArrowBlockfileWriter {
         Ok(flusher)
     }
 
-    fn split_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, delta: BlockDelta) {
+    fn split_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, delta: &BlockDelta) {
         let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
         for (split_key, new_delta) in new_blocks {
             self.root.sparse_index.add_block(split_key, new_delta.id);
@@ -161,11 +161,13 @@ impl ArrowBlockfileWriter {
     fn split_all<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) {
         let block_ids = self.root.sparse_index.block_ids();
         for block_id in block_ids {
-            let mut block_deltas = self.block_deltas.lock();
-            let delta = block_deltas.get(&block_id).unwrap();
+            let delta = {
+                let block_deltas = self.block_deltas.lock();
+                block_deltas.get(&block_id).unwrap().clone()
+            };
+
             if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-                let delta = block_deltas.remove(&block_id).unwrap();
-                self.split_delta::<K, V>(delta);
+                self.split_delta::<K, V>(&delta);
             }
         }
     }
@@ -232,7 +234,7 @@ impl ArrowBlockfileWriter {
         if self.options.split_mode == BlockfileWriterSplitMode::OnMutations
             && delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes()
         {
-            self.split_delta::<K, V>(delta);
+            self.split_delta::<K, V>(&delta);
         }
 
         Ok(())
@@ -955,8 +957,7 @@ mod tests {
         assert_eq!(value, [4, 5, 6]);
     }
 
-    #[tokio::test]
-    async fn test_splitting() {
+    async fn test_splitting(options: BlockfileWriterOptions) {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -968,7 +969,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .get_writer::<&str, Vec<u32>>(options)
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1070,6 +1071,16 @@ mod tests {
             }
             _ => panic!("Unexpected reader type"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_splitting_on_mutation() {
+        test_splitting(BlockfileWriterOptions::default()).await;
+    }
+
+    #[tokio::test]
+    async fn test_splitting_on_commit() {
+        test_splitting(BlockfileWriterOptions::new().split_at_commit()).await;
     }
 
     #[tokio::test]

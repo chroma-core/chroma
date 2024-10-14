@@ -55,7 +55,7 @@ where
     }
 
     full_text_index_writer.write_to_blockfiles().await.unwrap();
-    let flusher = full_text_index_writer.commit().unwrap();
+    let flusher = full_text_index_writer.commit().await.unwrap();
     flusher.flush().await.unwrap();
 
     let postings_blockfile_reader = blockfile_provider
