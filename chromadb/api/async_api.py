@@ -7,6 +7,7 @@ from chromadb.api.configuration import (
     CollectionConfiguration,
     CollectionConfigurationInternal,
 )
+from chromadb.auth import UserIdentity
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
@@ -319,6 +320,14 @@ class AsyncBaseAPI(ABC):
         """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
+    @abstractmethod
+    async def resolve_tenant_and_databases(self) -> UserIdentity:
+        """Resolve the tenant and databases for the client. Returns the default
+        values if can't be resolved.
+
+        """
+        pass
+
 
 class AsyncClientAPI(AsyncBaseAPI, ABC):
     tenant: str
@@ -581,6 +590,131 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def delete_collection(
         self,
         name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    async def _modify(
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    async def _count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        pass
+
+    @abstractmethod
+    @override
+    async def _peek(
+        self,
+        collection_id: UUID,
+        n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    async def _get(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        where_document: Optional[WhereDocument] = {},
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    async def _add(
+        self,
+        ids: IDs,
+        collection_id: UUID,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    async def _update(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    async def _upsert(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    async def _query(
+        self,
+        collection_id: UUID,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Where = {},
+        where_document: WhereDocument = {},
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> QueryResult:
+        pass
+
+    @abstractmethod
+    @override
+    async def _delete(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:

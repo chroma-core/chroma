@@ -200,6 +200,11 @@ class QueryResult(TypedDict):
     included: Include
 
 
+class TenantAndDatabases(TypedDict):
+    tenant: Optional[str]
+    databases: Optional[List[str]]
+
+
 class IndexMetadata(TypedDict):
     dimensionality: int
     # The current number of elements in the index (total = additions - deletes)

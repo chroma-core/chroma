@@ -1,7 +1,8 @@
-from typing import ClassVar, Dict
+from typing import ClassVar, Dict, Optional, Tuple, List
 import uuid
 
 from chromadb.api import ServerAPI
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.config import Settings, System
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
@@ -91,3 +92,58 @@ class SharedSystemClient:
     def _submit_client_start_event(self) -> None:
         telemetry_client = self._system.instance(ProductTelemetryClient)
         telemetry_client.capture(ClientStartEvent())
+
+    @staticmethod
+    def _singleton_tenant_database_if_applicable(
+        overwrite_singleton_tenant_database_access_from_auth: bool,
+        user_tenant: Optional[str],
+        user_databases: Optional[List[str]],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        If settings.chroma_overwrite_singleton_tenant_database_access_from_auth
+        is False, this function always returns (None, None).
+
+        If settings.chroma_overwrite_singleton_tenant_database_access_from_auth
+        is True, follows the following logic:
+        - If the user only has access to a single tenant, this function will
+          return that tenant as its first return value.
+        - If the user only has access to a single database, this function will
+          return that database as its second return value. If the user has
+          access to multiple tenants and/or databases, including "*", this
+          function will return None for the corresponding value(s).
+        - If the user has access to multiple tenants and/or databases this
+          function will return None for the corresponding value(s).
+        """
+        if not overwrite_singleton_tenant_database_access_from_auth:
+            return None, None
+        tenant = None
+        database = None
+        if user_tenant and user_tenant != "*":
+            tenant = user_tenant
+        if user_databases and len(user_databases) == 1 and user_databases[0] != "*":
+            database = user_databases[0]
+        return tenant, database
+
+    @staticmethod
+    def maybe_set_tenant_and_database(
+        overwrite_singleton_tenant_database_access_from_auth: bool,
+        tenant: Optional[str] = None,
+        database: Optional[str] = None,
+        user_tenant: Optional[str] = None,
+        user_databases: Optional[List[str]] = None,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        (
+            new_tenant,
+            new_database,
+        ) = SharedSystemClient._singleton_tenant_database_if_applicable(
+            overwrite_singleton_tenant_database_access_from_auth,
+            user_tenant,
+            user_databases,
+        )
+
+        if (not tenant or tenant == DEFAULT_TENANT) and new_tenant:
+            tenant = new_tenant
+        if (not database or database == DEFAULT_DATABASE) and new_database:
+            database = new_database
+
+        return tenant, database

@@ -21,6 +21,7 @@ from chromadb.api.types import (
     QueryResult,
     URIs,
 )
+from chromadb.auth import UserIdentity
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
@@ -63,6 +64,20 @@ class Client(SharedSystemClient, ClientAPI):
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
 
+        user_identity = self.resolve_tenant_and_databases()
+
+        maybe_tenant, maybe_database = SharedSystemClient.maybe_set_tenant_and_database(
+            settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            tenant,
+            database,
+            user_identity.tenant,
+            user_identity.databases,
+        )
+        if maybe_tenant:
+            self.tenant = maybe_tenant
+        if maybe_database:
+            self.database = maybe_database
+
         self._submit_client_start_event()
 
     @classmethod
@@ -78,6 +93,10 @@ class Client(SharedSystemClient, ClientAPI):
         return instance
 
     # endregion
+
+    @override
+    def resolve_tenant_and_databases(self) -> UserIdentity:
+        return self._server.resolve_tenant_and_databases()
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking
@@ -186,6 +205,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> None:
         return self._server._modify(
             id=id,
+            tenant=self.tenant,
+            database=self.database,
             new_name=new_name,
             new_metadata=new_metadata,
         )
@@ -217,6 +238,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._add(
             ids=ids,
+            tenant=self.tenant,
+            database=self.database,
             collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -236,6 +259,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._update(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -255,6 +280,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._upsert(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -291,6 +318,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> GetResult:
         return self._server._get(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             where=where,
             sort=sort,
@@ -311,6 +340,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> None:
         self._server._delete(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             where=where,
             where_document=where_document,
@@ -328,6 +359,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> QueryResult:
         return self._server._query(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,

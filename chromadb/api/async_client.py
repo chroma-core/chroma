@@ -2,6 +2,7 @@ import httpx
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
+from chromadb.auth import UserIdentity
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
 from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.models.AsyncCollection import AsyncCollection
@@ -64,6 +65,20 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # Get the root system component we want to interact with
         self._server = self._system.instance(AsyncServerAPI)
 
+        user_identity = await self.resolve_tenant_and_databases()
+
+        maybe_tenant, maybe_database = SharedSystemClient.maybe_set_tenant_and_database(
+            settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            tenant,
+            database,
+            user_identity.tenant,
+            user_identity.databases,
+        )
+        if maybe_tenant:
+            self.tenant = maybe_tenant
+        if maybe_database:
+            self.database = maybe_database
+
         self._submit_client_start_event()
 
         return self
@@ -89,6 +104,10 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         raise NotImplementedError(
             "AsyncClient cannot be created synchronously. Use .from_system_async() instead."
         )
+
+    @override
+    async def resolve_tenant_and_databases(self) -> UserIdentity:
+        return await self._server.resolve_tenant_and_databases()
 
     @override
     async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
@@ -236,6 +255,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             id=id,
             new_name=new_name,
             new_metadata=new_metadata,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -270,6 +291,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -289,6 +312,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -308,6 +333,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -348,6 +375,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             page_size=page_size,
             where_document=where_document,
             include=include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def _delete(
@@ -362,6 +391,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             ids=ids,
             where=where,
             where_document=where_document,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -381,6 +412,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             where=where,
             where_document=where_document,
             include=include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
