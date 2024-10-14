@@ -31,9 +31,7 @@ pub(super) struct ArrowBlockfileWriterOptions {
 
 impl From<BlockfileWriterOptions> for ArrowBlockfileWriterOptions {
     fn from(options: BlockfileWriterOptions) -> Self {
-        if options.mutation_ordering == BlockfileWriterMutationOrdering::Sorted
-            && options.split_mode != BlockfileWriterSplitMode::AtCommit
-        {
+        if options.mutation_ordering == BlockfileWriterMutationOrdering::Sorted {
             unimplemented!();
         }
 
@@ -163,10 +161,11 @@ impl ArrowBlockfileWriter {
     fn split_all<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) {
         let block_ids = self.root.sparse_index.block_ids();
         for block_id in block_ids {
-            let block_deltas = self.block_deltas.lock();
-            let delta = block_deltas.get(&block_id).unwrap(); // todo: is old delta removed?
+            let mut block_deltas = self.block_deltas.lock();
+            let delta = block_deltas.get(&block_id).unwrap();
             if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-                self.split_delta::<K, V>(delta.clone());
+                let delta = block_deltas.remove(&block_id).unwrap();
+                self.split_delta::<K, V>(delta);
             }
         }
     }
