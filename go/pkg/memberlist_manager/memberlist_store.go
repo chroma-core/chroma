@@ -14,8 +14,8 @@ import (
 )
 
 type IMemberlistStore interface {
-	GetMemberlist(ctx context.Context) (return_memberlist *Memberlist, resourceVersion string, err error)
-	UpdateMemberlist(ctx context.Context, memberlist *Memberlist, resourceVersion string) error
+	GetMemberlist(ctx context.Context) (return_memberlist Memberlist, resourceVersion string, err error)
+	UpdateMemberlist(ctx context.Context, memberlist Memberlist, resourceVersion string) error
 }
 
 type Member struct {
@@ -54,7 +54,7 @@ func NewCRMemberlistStore(dynamicClient dynamic.Interface, coordinatorNamespace 
 	}
 }
 
-func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlist *Memberlist, resourceVersion string, err error) {
+func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlist Memberlist, resourceVersion string, err error) {
 	gvr := getGvr()
 	unstrucuted, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Get(ctx, s.memberlistCustomResource, metav1.GetOptions{})
 	if err != nil {
@@ -67,7 +67,7 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 	if members == nil {
 		// Empty memberlist
 		log.Debug("Get memberlist received nil memberlist, returning empty")
-		return &memberlist, unstrucuted.GetResourceVersion(), nil
+		return memberlist, unstrucuted.GetResourceVersion(), nil
 	}
 	cast_members := members.([]interface{})
 	for _, member := range cast_members {
@@ -84,10 +84,10 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 		}
 		memberlist = append(memberlist, member)
 	}
-	return &memberlist, unstrucuted.GetResourceVersion(), nil
+	return memberlist, unstrucuted.GetResourceVersion(), nil
 }
 
-func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist *Memberlist, resourceVersion string) error {
+func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist Memberlist, resourceVersion string) error {
 	gvr := getGvr()
 	log.Debug("Updating memberlist store", zap.Any("memberlist", memberlist))
 	unstructured := memberlistToCr(memberlist, s.coordinatorNamespace, s.memberlistCustomResource, resourceVersion)
@@ -104,9 +104,9 @@ func getGvr() schema.GroupVersionResource {
 	return gvr
 }
 
-func memberlistToCr(memberlist *Memberlist, namespace string, memberlistName string, resourceVersion string) *unstructured.Unstructured {
+func memberlistToCr(memberlist Memberlist, namespace string, memberlistName string, resourceVersion string) *unstructured.Unstructured {
 	members := []interface{}{}
-	for _, member := range *memberlist {
+	for _, member := range memberlist {
 		members = append(members, map[string]interface{}{
 			"member_id": member.id,
 		})

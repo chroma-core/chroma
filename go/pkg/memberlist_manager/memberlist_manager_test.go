@@ -93,7 +93,7 @@ func TestNodeWatcher(t *testing.T) {
 func TestMemberlistStore(t *testing.T) {
 	memberlistName := "test-memberlist"
 	namespace := "chroma"
-	memberlist := &Memberlist{}
+	memberlist := Memberlist{}
 	cr_memberlist := memberlistToCr(memberlist, namespace, memberlistName, "0")
 
 	// Following the assumptions of the real system, we initialize the CR with no members.
@@ -105,16 +105,16 @@ func TestMemberlistStore(t *testing.T) {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
 	// assert the memberlist is empty
-	assert.Equal(t, Memberlist{}, *memberlist)
+	assert.Equal(t, Memberlist{}, memberlist)
 
 	// Add a member to the memberlist
-	memberlist_store.UpdateMemberlist(context.Background(), &Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}, "0")
+	memberlist_store.UpdateMemberlist(context.Background(), Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}, "0")
 	memberlist, _, err = memberlist_store.GetMemberlist(context.Background())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
 	// assert the memberlist has the correct members
-	if !memberlistSame(*memberlist, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}) {
+	if !memberlistSame(memberlist, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}) {
 		t.Fatalf("Memberlist did not update after adding a member")
 	}
 }
@@ -150,7 +150,7 @@ func deleteFakePod(name string, clientset kubernetes.Interface) {
 func TestMemberlistManager(t *testing.T) {
 	memberlist_name := "test-memberlist"
 	namespace := "chroma"
-	initialMemberlist := &Memberlist{}
+	initialMemberlist := Memberlist{}
 	initialCrMemberlist := memberlistToCr(initialMemberlist, namespace, memberlist_name, "0")
 
 	// Create a fake kubernetes client
@@ -253,5 +253,5 @@ func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, exp
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
-	return memberlistSame(*memberlist, expected_memberlist)
+	return memberlistSame(memberlist, expected_memberlist)
 }
