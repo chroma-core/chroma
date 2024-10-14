@@ -1,6 +1,8 @@
 use crate::{
     arrow::{
-        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
+        block::delta::{
+            single_column_storage_unsorted::SingleColumnStorageUnsorted, BlockDelta, BlockStorage,
+        },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -41,7 +43,7 @@ impl ArrowWriteableValue for RoaringBitmap {
     }
 
     fn get_delta_builder() -> BlockStorage {
-        BlockStorage::RoaringBitmap(SingleColumnStorage::new())
+        BlockStorage::RoaringBitmap(SingleColumnStorageUnsorted::new())
     }
 }
 
