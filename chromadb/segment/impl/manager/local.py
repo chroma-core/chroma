@@ -197,7 +197,6 @@ class LocalSegmentManager(SegmentManager):
         "LocalSegmentManager.get_segment",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
         if type == MetadataReader:
             scope = SegmentScope.METADATA
