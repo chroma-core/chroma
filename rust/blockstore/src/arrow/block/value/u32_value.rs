@@ -5,11 +5,16 @@ use crate::{
     },
     key::KeyWrapper,
 };
-use arrow::array::{Array, UInt32Array};
+use arrow::{
+    array::{Array, UInt32Array, UInt32Builder},
+    datatypes::Field,
+};
 use std::sync::Arc;
 
 impl ArrowWriteableValue for u32 {
     type ReadableValue<'referred_data> = u32;
+    type ValueBuilder = UInt32Builder;
+    type PreparedValue = u32;
 
     fn offset_size(_item_count: usize) -> usize {
         0
@@ -35,6 +40,25 @@ impl ArrowWriteableValue for u32 {
 
     fn get_delta_builder() -> BlockStorage {
         BlockStorage::UInt32(SingleColumnStorage::new())
+    }
+
+    fn get_value_builder() -> Self::ValueBuilder {
+        UInt32Builder::new()
+    }
+
+    fn prepare(value: Self) -> Self::PreparedValue {
+        value
+    }
+
+    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+        builder.append_value(value);
+    }
+
+    fn finish(mut builder: Self::ValueBuilder) -> (arrow::datatypes::Field, Arc<dyn Array>) {
+        let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
+        let value_arr = builder.finish();
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+        (value_field, value_arr)
     }
 }
 
