@@ -1,4 +1,5 @@
 import 'isomorphic-fetch';
+import 'isomorphic-fetch';
 /* eslint-disable */
 // tslint:disable
 /**
