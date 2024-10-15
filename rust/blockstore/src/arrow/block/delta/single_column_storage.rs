@@ -39,11 +39,6 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         inner.size_tracker.get_key_size()
     }
 
-    pub(super) fn get_value_size(&self) -> usize {
-        let inner = self.inner.read();
-        inner.size_tracker.get_value_size()
-    }
-
     pub(super) fn len(&self) -> usize {
         let inner = self.inner.read();
         inner.storage.len()
