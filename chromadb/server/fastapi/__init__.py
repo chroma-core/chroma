@@ -5,9 +5,9 @@ from typing import (
     Dict,
     Sequence,
     Optional,
-    Tuple,
     Type,
     TypeVar,
+    Tuple,
 )
 import fastapi
 import orjson
