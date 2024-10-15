@@ -6,13 +6,16 @@ use crate::{
     key::KeyWrapper,
 };
 use arrow::{
-    array::{Array, Int32Array, ListArray, UInt32Array},
+    array::{Array, Int32Array, ListArray, ListBuilder, UInt32Array, UInt32Builder},
+    datatypes::Field,
     util::bit_util,
 };
 use std::{mem::size_of, sync::Arc};
 
 impl ArrowWriteableValue for Vec<u32> {
     type ReadableValue<'referred_data> = &'referred_data [u32];
+    type ValueBuilder = ListBuilder<UInt32Builder>;
+    type PreparedValue = Vec<u32>;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * size_of::<u32>())
@@ -42,6 +45,34 @@ impl ArrowWriteableValue for Vec<u32> {
 
     fn get_delta_builder() -> BlockStorage {
         BlockStorage::VecUInt32(SingleColumnStorage::new())
+    }
+
+    fn get_value_builder() -> Self::ValueBuilder {
+        ListBuilder::new(UInt32Builder::new())
+    }
+
+    fn prepare(value: Self) -> Self::PreparedValue {
+        value
+    }
+
+    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+        builder.append_value(&UInt32Array::new(value.into(), None));
+    }
+
+    fn finish(mut builder: Self::ValueBuilder) -> (Field, Arc<dyn Array>) {
+        let value_field = Field::new(
+            "value",
+            arrow::datatypes::DataType::List(Arc::new(Field::new(
+                "item",
+                arrow::datatypes::DataType::UInt32,
+                true,
+            ))),
+            true,
+        );
+        let value_arr = builder.finish();
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+
+        (value_field, Arc::new(value_arr))
     }
 }
 
