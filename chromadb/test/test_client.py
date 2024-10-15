@@ -34,17 +34,21 @@ def http_api_factory(
 ) -> Generator[HttpAPIFactory, None, None]:
     if request.param == "sync_client":
         with patch("chromadb.api.client.Client._validate_tenant_database"):
-            yield chromadb.HttpClient
+            with patch("chromadb.api.client.Client.resolve_tenant_and_databases"):
+                yield chromadb.HttpClient
     else:
         with patch("chromadb.api.async_client.AsyncClient._validate_tenant_database"):
+            with patch(
+                "chromadb.api.async_client.AsyncClient.resolve_tenant_and_databases"
+            ):
 
-            def factory(*args: Any, **kwargs: Any) -> Any:
-                cls = asyncio.get_event_loop().run_until_complete(
-                    chromadb.AsyncHttpClient(*args, **kwargs)
-                )
-                return cls
+                def factory(*args: Any, **kwargs: Any) -> Any:
+                    cls = asyncio.get_event_loop().run_until_complete(
+                        chromadb.AsyncHttpClient(*args, **kwargs)
+                    )
+                    return cls
 
-            yield cast(HttpAPIFactory, factory)
+                yield cast(HttpAPIFactory, factory)
 
 
 @pytest.fixture()
