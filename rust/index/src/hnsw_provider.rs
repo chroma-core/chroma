@@ -51,6 +51,8 @@ pub struct HnswIndexProvider {
     pub temporary_storage_path: PathBuf,
     storage: Storage,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
+    #[allow(dead_code)]
+    purger: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Clone)]
@@ -72,14 +74,17 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
         config: &(HnswProviderConfig, Storage),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
-        let cache = chroma_cache::from_config(&hnsw_config.hnsw_cache_config).await?;
-        let cache: Arc<dyn Cache<_, _>> = cache.into();
-        Ok(Self {
+        // TODO(rescrv):  Long-term we should migrate this to the component API.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let cache =
+            chroma_cache::from_config_with_event_listener(&hnsw_config.hnsw_cache_config, tx)
+                .await?;
+        Ok(Self::new(
+            storage.clone(),
+            PathBuf::from(&hnsw_config.hnsw_temporary_path),
             cache,
-            storage: storage.clone(),
-            temporary_storage_path: PathBuf::from(&hnsw_config.hnsw_temporary_path),
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
-        })
+            rx,
+        ))
     }
 }
 
@@ -98,13 +103,21 @@ impl HnswIndexProvider {
         storage: Storage,
         storage_path: PathBuf,
         cache: Box<dyn Cache<Uuid, HnswIndexRef>>,
+        mut evicted: tokio::sync::mpsc::UnboundedReceiver<Uuid>,
     ) -> Self {
         let cache: Arc<dyn Cache<Uuid, HnswIndexRef>> = cache.into();
+        let temporary_storage_path = storage_path.to_path_buf();
+        let purger = Some(Arc::new(tokio::task::spawn(async move {
+            while let Some(id) = evicted.recv().await {
+                let _ = Self::purge_one_id(&temporary_storage_path, id).await;
+            }
+        })));
         Self {
             cache,
             storage,
             temporary_storage_path: storage_path,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            purger,
         }
     }
 
@@ -431,6 +444,12 @@ impl HnswIndexProvider {
         }
     }
 
+    pub async fn purge_one_id(path: &Path, id: Uuid) -> tokio::io::Result<()> {
+        let index_storage_path = path.join(id.to_string());
+        tokio::fs::remove_dir_all(index_storage_path).await?;
+        Ok(())
+    }
+
     async fn remove_temporary_files(&self, id: &Uuid) -> tokio::io::Result<()> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         tokio::fs::remove_dir_all(index_storage_path).await
@@ -583,7 +602,8 @@ mod tests {
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = new_non_persistent_cache_for_test();
-        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache);
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, rx);
         let segment = Segment {
             id: Uuid::new_v4(),
             r#type: SegmentType::HnswDistributed,
