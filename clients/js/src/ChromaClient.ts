@@ -13,6 +13,7 @@ import type {
   GetCollectionParams,
   GetOrCreateCollectionParams,
   ListCollectionsParams,
+  TenantAndDatabases,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
 
@@ -27,11 +28,11 @@ export class ChromaClient {
   /**
    * @ignore
    */
-  private tenant: string;
+  public tenant: string;
   /**
    * @ignore
    */
-  private database: string;
+  public database: string;
   /**
    * @ignore
    */
@@ -39,7 +40,7 @@ export class ChromaClient {
   /**
    * @ignore
    */
-  private authProvider: ClientAuthProvider | undefined;
+  public authProvider: ClientAuthProvider | undefined;
   /**
    * @ignore
    */
@@ -94,7 +95,9 @@ export class ChromaClient {
   }
 
   /** @ignore */
-  init(): Promise<void> {
+  async init(): Promise<void> {
+    await this.resolveTenantAndDatabases();
+
     if (!this._initPromise) {
       this._initPromise = validateTenantDatabase(
         this._adminClient,
@@ -104,6 +107,39 @@ export class ChromaClient {
     }
 
     return this._initPromise;
+  }
+
+  /**
+   * Tries to set the tenant and database for the client.
+   *
+   * @returns {Promise<void>} A promise that resolves when the tenant/database is resolved.
+   * @throws {Error} If there is an issue resolving the tenant and database.
+   *
+   */
+  async resolveTenantAndDatabases(): Promise<void> {
+    const response = (await this.api.resolveTenantAndDatabases(
+      this.api.options,
+    )) as TenantAndDatabases;
+    const user_identity = response as TenantAndDatabases;
+    const user_tenant = user_identity.tenant;
+    const user_databases = user_identity.databases;
+
+    if (
+      user_tenant !== null &&
+      user_tenant !== undefined &&
+      user_tenant !== "*"
+    ) {
+      this.tenant = user_tenant;
+    }
+
+    if (
+      user_databases !== null &&
+      user_databases !== undefined &&
+      user_databases.length == 1 &&
+      user_databases[0] !== "*"
+    ) {
+      this.database = user_databases[0];
+    }
   }
 
   /**
@@ -269,10 +305,10 @@ export class ChromaClient {
   > {
     await this.init();
     return (await this.api.listCollections(
-      limit,
-      offset,
       this.tenant,
       this.database,
+      limit,
+      offset,
       this.api.options,
     )) as CollectionParams[];
   }
@@ -320,9 +356,9 @@ export class ChromaClient {
     await this.init();
 
     const response = (await this.api.getCollection(
-      name,
       this.tenant,
       this.database,
+      name,
       this.api.options,
     )) as CollectionParams;
 
