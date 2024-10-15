@@ -6,13 +6,16 @@ use crate::{
     key::KeyWrapper,
 };
 use arrow::{
-    array::{Array, StringArray},
+    array::{Array, StringArray, StringBuilder},
+    datatypes::Field,
     util::bit_util,
 };
 use std::sync::Arc;
 
 impl ArrowWriteableValue for String {
     type ReadableValue<'referred_data> = &'referred_data str;
+    type ValueBuilder = StringBuilder;
+    type PreparedValue = String;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
@@ -38,6 +41,25 @@ impl ArrowWriteableValue for String {
 
     fn get_delta_builder() -> BlockStorage {
         BlockStorage::String(SingleColumnStorage::new())
+    }
+
+    fn get_value_builder() -> Self::ValueBuilder {
+        StringBuilder::new()
+    }
+
+    fn prepare(value: Self) -> Self::PreparedValue {
+        value
+    }
+
+    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+        builder.append_value(value);
+    }
+
+    fn finish(mut builder: Self::ValueBuilder) -> (arrow::datatypes::Field, Arc<dyn Array>) {
+        let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
+        let value_arr = builder.finish();
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+        (value_field, value_arr)
     }
 }
 
