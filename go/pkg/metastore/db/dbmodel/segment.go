@@ -14,9 +14,9 @@ type Segment struct {
 	   need to modify CollectionID in the near future. Each Segment should always have a
 	   collection as a parent and cannot be modified. */
 	CollectionID *string             `gorm:"collection_id;primaryKey;not null"`
-	ID           string              `gorm:"id;primaryKey"`
+	ID           string              `gorm:"id;primaryKey;unique;not null"`
 	Type         string              `gorm:"type;type:string;not null"`
-	Scope        string              `gorm:"scope"`
+	Scope        string              `gorm:"scope;"`
 	Ts           types.Timestamp     `gorm:"ts;type:bigint;default:0"`
 	IsDeleted    bool                `gorm:"is_deleted;type:bool;default:false"`
 	CreatedAt    time.Time           `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`

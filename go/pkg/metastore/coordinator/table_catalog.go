@@ -98,7 +98,23 @@ func (tc *Catalog) ResetState(ctx context.Context) error {
 func (tc *Catalog) CreateDatabase(ctx context.Context, createDatabase *model.CreateDatabase, ts types.Timestamp) (*model.Database, error) {
 	var result *model.Database
 
-	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+	// Check if database name is not empty
+	if createDatabase.Name == "" {
+		return nil, common.ErrDatabaseNameEmpty
+	}
+
+	// Check if tenant exists for the given tenant id
+	tenants, err := tc.metaDomain.TenantDb(ctx).GetTenants(createDatabase.Tenant)
+	if err != nil {
+		log.Error("error getting tenants", zap.Error(err))
+		return nil, err
+	}
+	if len(tenants) == 0 {
+		log.Error("tenant not found", zap.Error(err))
+		return nil, common.ErrTenantNotFound
+	}
+
+	err = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		dbDatabase := &dbmodel.Database{
 			ID:       createDatabase.ID,
 			Name:     createDatabase.Name,
