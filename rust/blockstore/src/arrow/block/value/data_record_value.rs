@@ -72,25 +72,15 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         let id = value.id.to_string();
         let embedding = value.embedding.to_vec();
 
-        let mut metadata_size = 0;
         let metadata = match &value.metadata {
             Some(metadata) => {
                 let metadata_proto = Into::<UpdateMetadata>::into(metadata.clone());
                 let metadata_as_bytes = metadata_proto.encode_to_vec();
-                metadata_size = metadata_as_bytes.len();
                 Some(metadata_as_bytes)
             }
             None => None,
         };
-
-        let mut document_size = 0;
-        let document = match value.document {
-            Some(document) => {
-                document_size = document.len();
-                Some(document.to_string())
-            }
-            None => None,
-        };
+        let document = value.document.as_ref().map(|s| s.to_string());
 
         (id, embedding, metadata, document)
     }
@@ -110,7 +100,9 @@ impl ArrowWriteableValue for &DataRecord<'_> {
                 document_builder: StringBuilder::new(),
             });
         }
-        let builder = builder.as_mut().unwrap();
+        let builder = builder
+            .as_mut()
+            .expect("Builder should have been initialized above");
 
         builder.id_builder.append_value(id);
 
@@ -125,7 +117,12 @@ impl ArrowWriteableValue for &DataRecord<'_> {
     }
 
     fn finish(mut builder: Self::ValueBuilder) -> (Field, Arc<dyn Array>) {
-        let mut builder = builder.take().unwrap();
+        let mut builder = builder.take().unwrap_or(ValueBuilderWrapper {
+            id_builder: StringBuilder::new(),
+            embedding_builder: FixedSizeListBuilder::new(Float32Builder::new(), 0),
+            metadata_builder: BinaryBuilder::new(),
+            document_builder: StringBuilder::new(),
+        });
 
         let id_field = Field::new("id", arrow::datatypes::DataType::Utf8, true);
         let embedding_field = Field::new(
