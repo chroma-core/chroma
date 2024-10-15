@@ -170,4 +170,5 @@ error_types: Dict[str, Type[ChromaError]] = {
     "BatchSizeExceededError": BatchSizeExceededError,
     "VersionMismatchError": VersionMismatchError,
     "RateLimitError": RateLimitError,
+    "AuthError": ChromaAuthError,
 }

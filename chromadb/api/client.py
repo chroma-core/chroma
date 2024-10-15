@@ -97,7 +97,17 @@ class Client(SharedSystemClient, ClientAPI):
 
     @override
     def resolve_tenant_and_databases(self) -> UserIdentity:
-        return self._server.resolve_tenant_and_databases()
+        try:
+            return self._server.resolve_tenant_and_databases()
+        except httpx.ConnectError:
+            raise ValueError(
+                "Could not connect to a Chroma server. Are you sure it is running?"
+            )
+        # Propagate ChromaErrors
+        except ChromaError as e:
+            raise e
+        except Exception:
+            raise ValueError("Could not resolve tenant and database.")
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking
