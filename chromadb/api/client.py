@@ -57,9 +57,6 @@ class Client(SharedSystemClient, ClientAPI):
         super().__init__(settings=settings)
         self.tenant = tenant
         self.database = database
-        # Create an admin client for verifying that databases and tenants exist
-        self._admin_client = AdminClient.from_system(self._system)
-        self._validate_tenant_database(tenant=tenant, database=database)
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
@@ -77,6 +74,10 @@ class Client(SharedSystemClient, ClientAPI):
             self.tenant = maybe_tenant
         if maybe_database:
             self.database = maybe_database
+
+        # Create an admin client for verifying that databases and tenants exist
+        self._admin_client = AdminClient.from_system(self._system)
+        self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
         self._submit_client_start_event()
 

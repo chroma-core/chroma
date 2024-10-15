@@ -56,8 +56,6 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # Create an admin client for verifying that databases and tenants exist
         self = cls(settings=settings)
         SharedSystemClient._populate_data_from_system(self._system)
-        self._admin_client = AsyncAdminClient.from_system(self._system)
-        await self._validate_tenant_database(tenant=tenant, database=database)
 
         self.tenant = tenant
         self.database = database
@@ -78,6 +76,9 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             self.tenant = maybe_tenant
         if maybe_database:
             self.database = maybe_database
+
+        self._admin_client = AsyncAdminClient.from_system(self._system)
+        await self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
         self._submit_client_start_event()
 
