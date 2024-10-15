@@ -8,7 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-foyer = "0.10"
+foyer = "0.12"
 anyhow = "1.0"
 # TODO(rescrv):  Deprecated.  Find a suitable replacement for such things.
 serde_yaml = "0.9"
@@ -23,4 +23,8 @@ uuid = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
-chroma-types = { workspace = true}
+chroma-types = { workspace = true }
+
+[features]
+default = []
+tracing = ["foyer/tracing"]
