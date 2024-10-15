@@ -26,6 +26,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub(super) struct ArrowBlockfileWriterOptions {
     split_mode: BlockfileWriterSplitMode,
+    #[allow(dead_code)]
     mutation_ordering: BlockfileWriterMutationOrdering,
 }
 
