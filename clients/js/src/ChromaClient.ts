@@ -28,11 +28,11 @@ export class ChromaClient {
   /**
    * @ignore
    */
-  public tenant: string;
+  private tenant: string;
   /**
    * @ignore
    */
-  public database: string;
+  private database: string;
   /**
    * @ignore
    */
@@ -40,7 +40,7 @@ export class ChromaClient {
   /**
    * @ignore
    */
-  public authProvider: ClientAuthProvider | undefined;
+  private authProvider: ClientAuthProvider | undefined;
   /**
    * @ignore
    */
