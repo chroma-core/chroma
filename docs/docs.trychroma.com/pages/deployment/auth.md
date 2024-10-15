@@ -38,8 +38,8 @@ chroma run --path <DB path>
 We also have dedicated auth guides for various deployments:
 * [Docker](/deployment/docker#authentication-with-docker)
 * [AWS](/deployment/aws#authentication-with-AWS)
-* GCP - Coming Soon!
-* Azure - Coming Soon!
+* [GCP](/deployment/gcp#authentication-with-GCP)
+* [Azure](/deployment/azure#authentication-with-Azure)
 
 ### Encrypted User:Password Authentication
 

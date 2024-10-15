@@ -25,8 +25,7 @@ export const items = [
         title: 'Cloud Providers',
         links: [
           { href: '/deployment/aws', children: 'AWS' },
-          // { href: '/deployment/gcp', children: 'GCP' },
-          // { href: '/deployment/azure', children: 'Azure' },
+          { href: '/deployment/gcp', children: 'GCP' },
         ]
     },
     {

@@ -37,6 +37,26 @@
       "Description": "Chroma authentication custom token header",
       "Type": "String",
       "Default": ""
+    },
+    "ChromaOtelCollectionEndpoint": {
+      "Description": "Chroma OTEL endpoint",
+      "Type": "String",
+      "Default": ""
+    },
+    "ChromaOtelServiceName": {
+      "Description": "Chroma OTEL service name",
+      "Type": "String",
+      "Default": ""
+    },
+    "ChromaOtelCollectionHeaders": {
+      "Description": "Chroma OTEL headers",
+      "Type": "String",
+      "Default": "{}"
+    },
+    "ChromaOtelGranularity": {
+      "Description": "Chroma OTEL granularity",
+      "Type": "String",
+      "Default": ""
     }
   },
   "Conditions": {
@@ -98,6 +118,18 @@
                 },
                 {
                   "Fn::Sub": "echo 'CHROMA_AUTH_TOKEN_TRANSPORT_HEADER=${ChromaAuthTokenTransportHeader}' >> /home/ec2-user/.env\n"
+                },
+                {
+                  "Fn::Sub": "echo 'CHROMA_OTEL_COLLECTION_ENDPOINT=${ChromaOtelCollectionEndpoint}' >> /home/ec2-user/.env\n"
+                },
+                {
+                  "Fn::Sub": "echo 'CHROMA_OTEL_SERVICE_NAME=${ChromaOtelServiceName}' >> /home/ec2-user/.env\n"
+                },
+                {
+                  "Fn::Sub": "echo 'CHROMA_OTEL_COLLECTION_HEADERS=${ChromaOtelCollectionHeaders}' >> /home/ec2-user/.env\n"
+                },
+                {
+                  "Fn::Sub": "echo 'CHROMA_OTEL_GRANULARITY=${ChromaOtelGranularity}' >> /home/ec2-user/.env\n"
                 },
                 "chown ec2-user:ec2-user /home/ec2-user/.env\n",
                 "cd /home/ec2-user\n",

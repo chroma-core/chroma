@@ -1,3 +1,3 @@
 ---
-title: Azure
+title: "☁️ Azure Deployment"
 ---
