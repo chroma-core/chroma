@@ -1,28 +1,20 @@
 use super::BlockKeyArrowBuilder;
+use crate::arrow::types::ArrowWriteableValue;
 use crate::{
     arrow::types::ArrowWriteableKey,
     key::{CompositeKey, KeyWrapper},
 };
-use arrow::{
-    array::{
-        Array, ArrayRef, BinaryBuilder, FixedSizeListBuilder, Float32Builder, RecordBatch,
-        StringBuilder, StructArray,
-    },
-    datatypes::{Field, Fields},
-    util::bit_util,
-};
-use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
+use arrow::{array::RecordBatch, util::bit_util};
+use chroma_types::DataRecord;
 use parking_lot::RwLock;
-use prost::Message;
 use std::{collections::BTreeMap, sync::Arc};
-
-// Convenience type for the storage entry
-// (id, embedding, metadata, document)
-type DataRecordStorageEntry = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
 
 #[derive(Debug)]
 struct Inner {
-    storage: BTreeMap<CompositeKey, DataRecordStorageEntry>,
+    storage: BTreeMap<
+        CompositeKey,
+        <&'static chroma_types::DataRecord<'static> as ArrowWriteableValue>::PreparedValue,
+    >,
     prefix_size: usize,
     key_size: usize,
     id_size: usize,
@@ -130,38 +122,17 @@ impl DataRecordStorage {
 
         let prefix_size = composite_key.prefix.len();
         let key_size = composite_key.key.get_size();
-        let id_size = value.id.len();
-        let embedding_size = value.embedding.len() * 4;
-        let mut metadata_size = 0;
-        let mut document_size = 0;
 
-        let id = value.id.to_string();
-        let embedding = value.embedding.to_vec();
-        let metadata = match &value.metadata {
-            Some(metadata) => {
-                let metadata_proto = Into::<UpdateMetadata>::into(metadata.clone());
-                let metadata_as_bytes = metadata_proto.encode_to_vec();
-                metadata_size = metadata_as_bytes.len();
-                Some(metadata_as_bytes)
-            }
-            None => None,
-        };
-        let document = match value.document {
-            Some(document) => {
-                document_size = document.len();
-                Some(document.to_string())
-            }
-            None => None,
-        };
-        inner
-            .storage
-            .insert(composite_key.clone(), (id, embedding, metadata, document));
-        inner.id_size += id_size;
-        inner.embedding_size += embedding_size;
-        inner.metadata_size += metadata_size;
-        inner.document_size += document_size;
+        let prepared = <&chroma_types::DataRecord>::prepare(value);
+
+        inner.id_size += prepared.0.len();
+        inner.embedding_size += prepared.1.len() * 4;
+        inner.metadata_size += prepared.2.as_ref().map_or(0, |v| v.len());
+        inner.document_size += prepared.3.as_ref().map_or(0, |v| v.len());
         inner.prefix_size += prefix_size;
         inner.key_size += key_size;
+
+        inner.storage.insert(composite_key.clone(), prepared);
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
@@ -344,49 +315,16 @@ impl DataRecordStorage {
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
         // build arrow key.
         let mut key_builder = key_builder;
-        let mut embedding_builder;
-        let mut id_builder;
-        let mut metadata_builder;
-        let mut document_builder;
-        let embedding_dim;
+        let mut value_builder = <&DataRecord as ArrowWriteableValue>::get_value_builder();
+
         match Arc::try_unwrap(self.inner) {
             Ok(inner) => {
                 let inner = inner.into_inner();
                 let storage = inner.storage;
-                let item_capacity = storage.len();
-                if item_capacity == 0 {
-                    // ok to initialize fixed size float list with fixed size as 0.
-                    embedding_dim = 0;
-                    embedding_builder = FixedSizeListBuilder::new(Float32Builder::new(), 0);
-                    id_builder = StringBuilder::new();
-                    metadata_builder = BinaryBuilder::new();
-                    document_builder = StringBuilder::new();
-                } else {
-                    embedding_dim = storage.iter().next().unwrap().1 .1.len();
-                    // Assumes all embeddings are of the same length, which is guaranteed by calling code
-                    // TODO: validate this assumption by throwing an error if it's not true
-                    let total_embedding_count = embedding_dim * item_capacity;
-                    id_builder = StringBuilder::with_capacity(item_capacity, inner.id_size);
-                    embedding_builder = FixedSizeListBuilder::with_capacity(
-                        Float32Builder::with_capacity(total_embedding_count),
-                        embedding_dim as i32,
-                        item_capacity,
-                    );
-                    metadata_builder =
-                        BinaryBuilder::with_capacity(item_capacity, inner.metadata_size);
-                    document_builder =
-                        StringBuilder::with_capacity(item_capacity, inner.document_size);
-                }
-                for (key, (id, embedding, metadata, document)) in storage.into_iter() {
+
+                for (key, value) in storage.into_iter() {
                     key_builder.add_key(key);
-                    id_builder.append_value(id);
-                    let embedding_arr = embedding_builder.values();
-                    for entry in embedding {
-                        embedding_arr.append_value(entry);
-                    }
-                    embedding_builder.append(true);
-                    metadata_builder.append_option(metadata.as_deref());
-                    document_builder.append_option(document.as_deref());
+                    <&DataRecord as ArrowWriteableValue>::append(value, &mut value_builder);
                 }
             }
             Err(_) => {
@@ -395,55 +333,8 @@ impl DataRecordStorage {
         }
         // Build arrow key with fields.
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
+        let (struct_field, value_arr) = <&DataRecord as ArrowWriteableValue>::finish(value_builder);
 
-        let id_field = Field::new("id", arrow::datatypes::DataType::Utf8, true);
-        let embedding_field = Field::new(
-            "embedding",
-            arrow::datatypes::DataType::FixedSizeList(
-                Arc::new(Field::new(
-                    "item",
-                    arrow::datatypes::DataType::Float32,
-                    true,
-                )),
-                embedding_dim as i32,
-            ),
-            true,
-        );
-        let metadata_field = Field::new("metadata", arrow::datatypes::DataType::Binary, true);
-        let document_field = Field::new("document", arrow::datatypes::DataType::Utf8, true);
-
-        let id_arr = id_builder.finish();
-        let embedding_arr = embedding_builder.finish();
-        let metadata_arr = metadata_builder.finish();
-        let document_arr = document_builder.finish();
-
-        let struct_arr = StructArray::from(vec![
-            (Arc::new(id_field.clone()), Arc::new(id_arr) as ArrayRef),
-            (
-                Arc::new(embedding_field.clone()),
-                Arc::new(embedding_arr) as ArrayRef,
-            ),
-            (
-                Arc::new(metadata_field.clone()),
-                Arc::new(metadata_arr) as ArrayRef,
-            ),
-            (
-                Arc::new(document_field.clone()),
-                Arc::new(document_arr) as ArrayRef,
-            ),
-        ]);
-        let struct_fields = Fields::from(vec![
-            id_field,
-            embedding_field,
-            metadata_field,
-            document_field,
-        ]);
-        let struct_field = Field::new(
-            "value",
-            arrow::datatypes::DataType::Struct(struct_fields),
-            true,
-        );
-        let value_arr = (&struct_arr as &dyn Array).slice(0, struct_arr.len());
         let schema = Arc::new(arrow::datatypes::Schema::new(vec![
             prefix_field,
             key_field,
