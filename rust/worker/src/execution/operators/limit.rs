@@ -238,8 +238,8 @@ impl<'me> SkipCmp<'me> {
             && self.record_count > self.tombstone.len()
             && !self.sorted_log_oids.is_empty()
         {
+            // The binary search can only be performed when both log and compact segment are not empty.
             self.locate(self.sorted_log_oids)
-                // The binary search can only be performed when both log and compact segment are not empty.
                 .await?
                 .unwrap_or_else(|index| index)
         } else if self.record_count == self.tombstone.len() {
