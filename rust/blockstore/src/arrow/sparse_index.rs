@@ -10,9 +10,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
-#[cfg(test)]
-use thiserror::Error;
-
 // ============
 // Sparse Index Delimeter
 // ============
