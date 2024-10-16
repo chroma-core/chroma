@@ -161,7 +161,7 @@ impl Block {
             Less => None,
             Equal => Some(base),
             Greater => {
-                if prefix_array.value(base - 1) == prefix {
+                if base > 0 && prefix_array.value(base - 1) == prefix {
                     Some(base - 1)
                 } else {
                     None
