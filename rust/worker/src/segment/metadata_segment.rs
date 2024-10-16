@@ -145,7 +145,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider.create::<u32, Vec<u32>>() {
+            None => match blockfile_provider.create::<u32, Vec<u32>>().await {
                 Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
@@ -175,7 +175,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider.create::<u32, u32>() {
+            None => match blockfile_provider.create::<u32, u32>().await {
                 Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
@@ -235,7 +235,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<&str, RoaringBitmap>() {
+                None => match blockfile_provider.create::<&str, RoaringBitmap>().await {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -273,7 +273,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<bool, RoaringBitmap>() {
+                None => match blockfile_provider.create::<bool, RoaringBitmap>().await {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -311,7 +311,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<f32, RoaringBitmap>() {
+                None => match blockfile_provider.create::<f32, RoaringBitmap>().await {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
@@ -349,7 +349,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider.create::<u32, RoaringBitmap>() {
+                None => match blockfile_provider.create::<u32, RoaringBitmap>().await {
                     Ok(writer) => (writer, None),
                     Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                 },
