@@ -565,7 +565,7 @@ impl<'me> MetadataIndexReader<'me> {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
                     let read = blockfile_reader
-                        .get_range(metadata_key..metadata_key, ..*k)
+                        .get_range(metadata_key..=metadata_key, ..*k)
                         .await;
                     match read {
                         Ok(records) => {
@@ -583,7 +583,7 @@ impl<'me> MetadataIndexReader<'me> {
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
                     let read = blockfile_reader
-                        .get_range(metadata_key..metadata_key, ..*k)
+                        .get_range(metadata_key..=metadata_key, ..*k)
                         .await;
                     match read {
                         Ok(records) => {
