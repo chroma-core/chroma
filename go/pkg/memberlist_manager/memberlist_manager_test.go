@@ -94,7 +94,7 @@ func TestMemberlistStore(t *testing.T) {
 	memberlistName := "test-memberlist"
 	namespace := "chroma"
 	memberlist := Memberlist{}
-	cr_memberlist := memberlistToCr(memberlist, namespace, memberlistName, "0")
+	cr_memberlist := memberlist.toCr(namespace, memberlistName, "0")
 
 	// Following the assumptions of the real system, we initialize the CR with no members.
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), cr_memberlist)
@@ -151,7 +151,7 @@ func TestMemberlistManager(t *testing.T) {
 	memberlist_name := "test-memberlist"
 	namespace := "chroma"
 	initialMemberlist := Memberlist{}
-	initialCrMemberlist := memberlistToCr(initialMemberlist, namespace, memberlist_name, "0")
+	initialCrMemberlist := initialMemberlist.toCr(namespace, memberlist_name, "0")
 
 	// Create a fake kubernetes client
 	clientset, err := utils.GetTestKubenertesInterface()
