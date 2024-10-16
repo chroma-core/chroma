@@ -77,7 +77,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 return Err(Box::new(e));
             }
         }
-        let record_segment_flusher = input.record_segment_writer.clone().commit();
+        let record_segment_flusher = input.record_segment_writer.clone().commit().await;
         let record_segment_flush_info = match record_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.record_segment_writer.id;
@@ -105,7 +105,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
             }
         };
 
-        let hnsw_segment_flusher = input.hnsw_segment_writer.clone().commit();
+        let hnsw_segment_flusher = input.hnsw_segment_writer.clone().commit().await;
         let hnsw_segment_flush_info = match hnsw_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.hnsw_segment_writer.id;
@@ -133,7 +133,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
             }
         };
 
-        let metadata_segment_flusher = metadata_segment_writer.commit();
+        let metadata_segment_flusher = metadata_segment_writer.commit().await;
         let metadata_segment_flush_info = match metadata_segment_flusher {
             Ok(flusher) => {
                 let segment_id = input.metadata_segment_writer.id;

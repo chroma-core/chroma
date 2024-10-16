@@ -350,9 +350,11 @@ mod test {
                 .expect("Metadata writer: write to blockfile failed");
             let record_flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             record_segment.file_path = record_flusher
                 .flush()

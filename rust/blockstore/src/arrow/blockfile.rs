@@ -10,7 +10,10 @@ use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
-use crate::BlockfileError;
+use crate::{
+    BlockfileError, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
+    BlockfileWriterSplitMode,
+};
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
@@ -20,6 +23,26 @@ use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
+pub(super) struct ArrowBlockfileWriterOptions {
+    split_mode: BlockfileWriterSplitMode,
+    #[allow(dead_code)]
+    mutation_ordering: BlockfileWriterMutationOrdering,
+}
+
+impl From<BlockfileWriterOptions> for ArrowBlockfileWriterOptions {
+    fn from(options: BlockfileWriterOptions) -> Self {
+        if options.mutation_ordering == BlockfileWriterMutationOrdering::Sorted {
+            unimplemented!();
+        }
+
+        Self {
+            split_mode: options.split_mode,
+            mutation_ordering: options.mutation_ordering,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ArrowBlockfileWriter {
     block_manager: BlockManager,
@@ -28,6 +51,7 @@ pub struct ArrowBlockfileWriter {
     root: RootWriter,
     id: Uuid,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
+    options: ArrowBlockfileWriterOptions,
 }
 // TODO: method visibility should not be pub(crate)
 
@@ -50,6 +74,7 @@ impl ArrowBlockfileWriter {
         id: Uuid,
         block_manager: BlockManager,
         root_manager: RootManager,
+        options: ArrowBlockfileWriterOptions,
     ) -> Self {
         let initial_block = block_manager.create::<K, V>();
         let sparse_index = SparseIndexWriter::new(id, initial_block.id);
@@ -68,6 +93,7 @@ impl ArrowBlockfileWriter {
             root: root_writer,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            options,
         }
     }
 
@@ -76,6 +102,7 @@ impl ArrowBlockfileWriter {
         block_manager: BlockManager,
         root_manager: RootManager,
         new_root: RootWriter,
+        options: ArrowBlockfileWriterOptions,
     ) -> Self {
         tracing::debug!("Constructed blockfile writer from existing root {:?}", id);
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
@@ -87,12 +114,17 @@ impl ArrowBlockfileWriter {
             root: new_root,
             id,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            options,
         }
     }
 
-    pub(crate) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    pub(crate) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
+        if self.options.split_mode == BlockfileWriterSplitMode::AtCommit {
+            self.split_all::<K, V>();
+        }
+
         let mut blocks = Vec::new();
         for (_, delta) in self.block_deltas.lock().drain() {
             let mut removed = false;
@@ -116,6 +148,29 @@ impl ArrowBlockfileWriter {
         );
 
         Ok(flusher)
+    }
+
+    fn split_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, delta: &BlockDelta) {
+        let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+        for (split_key, new_delta) in new_blocks {
+            self.root.sparse_index.add_block(split_key, new_delta.id);
+            let mut deltas = self.block_deltas.lock();
+            deltas.insert(new_delta.id, new_delta);
+        }
+    }
+
+    fn split_all<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) {
+        let block_ids = self.root.sparse_index.block_ids();
+        for block_id in block_ids {
+            let delta = {
+                let block_deltas = self.block_deltas.lock();
+                block_deltas.get(&block_id).unwrap().clone()
+            };
+
+            if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+                self.split_delta::<K, V>(&delta);
+            }
+        }
     }
 
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
@@ -176,13 +231,11 @@ impl ArrowBlockfileWriter {
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
         delta.add(prefix, key, value);
-        if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-            let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
-            for (split_key, new_delta) in new_blocks {
-                self.root.sparse_index.add_block(split_key, new_delta.id);
-                let mut deltas = self.block_deltas.lock();
-                deltas.insert(new_delta.id, new_delta);
-            }
+
+        if self.options.split_mode == BlockfileWriterSplitMode::OnMutations
+            && delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes()
+        {
+            self.split_delta::<K, V>(&delta);
         }
 
         Ok(())
@@ -676,7 +729,7 @@ mod tests {
         let value2 = vec![4, 5, 6];
         writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &[u32]>(&id).await.unwrap();
@@ -714,7 +767,7 @@ mod tests {
                 }
             }
             // commit.
-            let flusher = writer.commit::<&str, u32>().unwrap();
+            let flusher = writer.commit::<&str, u32>().await.unwrap();
             flusher.flush::<&str, u32>().await.unwrap();
 
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
@@ -777,7 +830,7 @@ mod tests {
                 writer.set(prefix, key.as_str(), i).await.unwrap();
             }
             // commit.
-            let flusher = writer.commit::<&str, u32>().unwrap();
+            let flusher = writer.commit::<&str, u32>().await.unwrap();
             flusher.flush::<&str, u32>().await.unwrap();
 
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
@@ -892,7 +945,7 @@ mod tests {
         let value2 = vec![4, 5, 6];
         writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &[u32]>(&id).await.unwrap();
@@ -904,8 +957,7 @@ mod tests {
         assert_eq!(value, [4, 5, 6]);
     }
 
-    #[tokio::test]
-    async fn test_splitting() {
+    async fn test_splitting(options: BlockfileWriterOptions) {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -917,7 +969,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .get_writer::<&str, Vec<u32>>(options)
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -929,7 +981,7 @@ mod tests {
             writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -964,7 +1016,7 @@ mod tests {
             writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -998,7 +1050,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1019,6 +1071,16 @@ mod tests {
             }
             _ => panic!("Unexpected reader type"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_splitting_on_mutation() {
+        test_splitting(BlockfileWriterOptions::default()).await;
+    }
+
+    #[tokio::test]
+    async fn test_splitting_on_commit() {
+        test_splitting(BlockfileWriterOptions::new().split_at_commit()).await;
     }
 
     #[tokio::test]
@@ -1051,7 +1113,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1095,7 +1157,7 @@ mod tests {
                 .unwrap();
         }
 
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1132,7 +1194,7 @@ mod tests {
             writer.set("key", key, value).await.unwrap();
         }
 
-        let flusher = writer.commit::<f32, String>().unwrap();
+        let flusher = writer.commit::<f32, String>().await.unwrap();
         flusher.flush::<f32, String>().await.unwrap();
 
         let reader = provider.open::<f32, &str>(&id).await.unwrap();
@@ -1169,7 +1231,10 @@ mod tests {
             let value = roaring::RoaringBitmap::from_iter(0..i);
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, roaring::RoaringBitmap>().unwrap();
+        let flusher = writer
+            .commit::<&str, roaring::RoaringBitmap>()
+            .await
+            .unwrap();
         flusher
             .flush::<&str, roaring::RoaringBitmap>()
             .await
@@ -1216,7 +1281,7 @@ mod tests {
             writer.set("key", key, value).await.unwrap();
         }
 
-        let flusher = writer.commit::<u32, u32>().unwrap();
+        let flusher = writer.commit::<u32, u32>().await.unwrap();
         flusher.flush::<u32, u32>().await.unwrap();
 
         let reader = blockfile_provider.open::<u32, u32>(&id).await.unwrap();
@@ -1260,7 +1325,7 @@ mod tests {
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, &DataRecord>().unwrap();
+        let flusher = writer.commit::<&str, &DataRecord>().await.unwrap();
         flusher.flush::<&str, &DataRecord>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1312,7 +1377,7 @@ mod tests {
             .set("key", "2", val_2_large.to_string())
             .await
             .unwrap();
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1351,7 +1416,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1377,7 +1442,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         // Check that the deleted keys are gone
@@ -1417,7 +1482,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1465,7 +1530,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
@@ -1481,7 +1546,7 @@ mod tests {
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         let id_2 = flusher.id();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
@@ -1514,7 +1579,7 @@ mod tests {
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         let id_3 = flusher.id();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
@@ -1556,7 +1621,7 @@ mod tests {
             writer.set("prefix", fixed_key, value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, u32>().unwrap();
+        let flusher = writer.commit::<&str, u32>().await.unwrap();
         flusher.flush::<&str, u32>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();

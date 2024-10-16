@@ -821,9 +821,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         Ok(())
     }
 
-    fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
         let full_text_flusher = match self.full_text_index_writer {
-            Some(flusher) => match flusher.commit() {
+            Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
                 Err(e) => return Err(Box::new(e)),
             },
@@ -831,7 +831,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         };
 
         let string_metadata_flusher = match self.string_metadata_index_writer {
-            Some(flusher) => match flusher.commit() {
+            Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
                 Err(e) => return Err(Box::new(e)),
             },
@@ -839,7 +839,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         };
 
         let bool_metadata_flusher = match self.bool_metadata_index_writer {
-            Some(flusher) => match flusher.commit() {
+            Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
                 Err(e) => return Err(Box::new(e)),
             },
@@ -847,7 +847,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         };
 
         let f32_metadata_flusher = match self.f32_metadata_index_writer {
-            Some(flusher) => match flusher.commit() {
+            Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
                 Err(e) => return Err(Box::new(e)),
             },
@@ -855,7 +855,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         };
 
         let u32_metadata_flusher = match self.u32_metadata_index_writer {
-            Some(flusher) => match flusher.commit() {
+            Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
                 Err(e) => return Err(Box::new(e)),
             },
@@ -1390,9 +1390,11 @@ mod test {
                 .expect("Apply materialized log to record segment failed");
             let record_flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             record_segment.file_path = record_flusher
                 .flush()
@@ -1460,9 +1462,11 @@ mod test {
             .expect("Apply materialized log to record segment failed");
         let record_flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         record_segment.file_path = record_flusher
             .flush()
@@ -1540,9 +1544,11 @@ mod test {
             .expect("Apply materialized log to record segment failed");
         let record_flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         record_segment.file_path = record_flusher
             .flush()
@@ -1672,9 +1678,11 @@ mod test {
                 .expect("Apply materialized log to record segment failed");
             let record_flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             record_segment.file_path = record_flusher
                 .flush()
@@ -1749,9 +1757,11 @@ mod test {
             .expect("Apply materialized log to record segment failed");
         let record_flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         record_segment.file_path = record_flusher
             .flush()
@@ -1915,9 +1925,11 @@ mod test {
                 .expect("Apply materialized log to record segment failed");
             let record_flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             record_segment.file_path = record_flusher
                 .flush()
@@ -1974,9 +1986,11 @@ mod test {
             .expect("Apply materialized log to record segment failed");
         let record_flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         record_segment.file_path = record_flusher
             .flush()
@@ -2127,9 +2141,11 @@ mod test {
                 .expect("Apply materialized log to record segment failed");
             let record_flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             record_segment.file_path = record_flusher
                 .flush()
@@ -2184,9 +2200,11 @@ mod test {
             .expect("Apply materialized log to record segment failed");
         let record_flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         record_segment.file_path = record_flusher
             .flush()

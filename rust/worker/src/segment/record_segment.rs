@@ -461,12 +461,32 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
         Ok(())
     }
 
-    fn commit(mut self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(mut self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
         // Commit all the blockfiles
-        let flusher_user_id_to_id = self.user_id_to_id.take().unwrap().commit::<&str, u32>();
-        let flusher_id_to_user_id = self.id_to_user_id.take().unwrap().commit::<u32, String>();
-        let flusher_id_to_data = self.id_to_data.take().unwrap().commit::<u32, &DataRecord>();
-        let flusher_max_offset_id = self.max_offset_id.take().unwrap().commit::<&str, u32>();
+        let flusher_user_id_to_id = self
+            .user_id_to_id
+            .take()
+            .unwrap()
+            .commit::<&str, u32>()
+            .await;
+        let flusher_id_to_user_id = self
+            .id_to_user_id
+            .take()
+            .unwrap()
+            .commit::<u32, String>()
+            .await;
+        let flusher_id_to_data = self
+            .id_to_data
+            .take()
+            .unwrap()
+            .commit::<u32, &DataRecord>()
+            .await;
+        let flusher_max_offset_id = self
+            .max_offset_id
+            .take()
+            .unwrap()
+            .commit::<&str, u32>()
+            .await;
 
         let flusher_user_id_to_id = match flusher_user_id_to_id {
             Ok(f) => f,

@@ -15,7 +15,7 @@ pub enum BlockfileWriter {
 }
 
 impl BlockfileWriter {
-    pub fn commit<
+    pub async fn commit<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
@@ -26,7 +26,7 @@ impl BlockfileWriter {
                 Ok(flusher) => Ok(BlockfileFlusher::MemoryBlockfileFlusher(flusher)),
                 Err(e) => Err(e),
             },
-            BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit::<K, V>() {
+            BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit::<K, V>().await {
                 Ok(flusher) => Ok(BlockfileFlusher::ArrowBlockfileFlusher(flusher)),
                 Err(e) => Err(e),
             },

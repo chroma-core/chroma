@@ -229,7 +229,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
         Ok(())
     }
 
-    fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
         let res = self.hnsw_index_provider.commit(self.index.clone());
         match res {
             Ok(_) => Ok(self),

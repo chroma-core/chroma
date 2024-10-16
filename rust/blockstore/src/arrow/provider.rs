@@ -9,8 +9,7 @@ use crate::{
     key::KeyWrapper,
     memory::storage::Readable,
     provider::{CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
-    BlockfileWriterSplitMode, Key, Value,
+    BlockfileReader, BlockfileWriter, BlockfileWriterOptions, Key, Value,
 };
 use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
@@ -70,14 +69,6 @@ impl ArrowBlockfileProvider {
         &self,
         options: BlockfileWriterOptions,
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
-        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unsorted {
-            unimplemented!();
-        }
-
-        if options.split_mode != BlockfileWriterSplitMode::OnMutations {
-            unimplemented!();
-        }
-
         if let Some(fork_from) = options.fork {
             tracing::info!("Forking blockfile from {:?}", fork_from);
             let new_id = Uuid::new_v4();
@@ -94,6 +85,7 @@ impl ArrowBlockfileProvider {
                 self.block_manager.clone(),
                 self.root_manager.clone(),
                 new_root,
+                options.into(),
             );
             Ok(BlockfileWriter::ArrowBlockfileWriter(file))
         } else {
@@ -103,6 +95,7 @@ impl ArrowBlockfileProvider {
                 new_id,
                 self.block_manager.clone(),
                 self.root_manager.clone(),
+                options.into(),
             );
             Ok(BlockfileWriter::ArrowBlockfileWriter(file))
         }
