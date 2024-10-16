@@ -130,7 +130,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_ssl_enabled: Optional[bool] = False
 
     chroma_server_ssl_verify: Optional[Union[bool, str]] = None
-    chroma_server_api_default_path: Optional[str] = APIVersion.V2
+    chroma_server_api_default_path: Optional[APIVersion] = APIVersion.V2
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 

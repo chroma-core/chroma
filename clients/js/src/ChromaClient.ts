@@ -13,7 +13,7 @@ import type {
   GetCollectionParams,
   GetOrCreateCollectionParams,
   ListCollectionsParams,
-  TenantAndDatabases,
+  UserIdentity,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
 
@@ -96,7 +96,7 @@ export class ChromaClient {
 
   /** @ignore */
   async init(): Promise<void> {
-    await this.resolveTenantAndDatabases();
+    await this.getUserIdentity();
 
     if (!this._initPromise) {
       this._initPromise = validateTenantDatabase(
@@ -116,11 +116,10 @@ export class ChromaClient {
    * @throws {Error} If there is an issue resolving the tenant and database.
    *
    */
-  async resolveTenantAndDatabases(): Promise<void> {
-    const response = (await this.api.getUserIdentity(
+  async getUserIdentity(): Promise<void> {
+    const user_identity = (await this.api.getUserIdentity(
       this.api.options,
-    )) as TenantAndDatabases;
-    const user_identity = response as TenantAndDatabases;
+    )) as UserIdentity;
     const user_tenant = user_identity.tenant;
     const user_databases = user_identity.databases;
 

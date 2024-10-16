@@ -259,7 +259,7 @@ export type DeleteParams = {
   whereDocument?: WhereDocument;
 };
 
-export type TenantAndDatabases = {
+export type UserIdentity = {
   tenant: string;
   databases: string[];
 };
