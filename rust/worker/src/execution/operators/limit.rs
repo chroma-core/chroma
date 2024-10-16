@@ -143,11 +143,13 @@ where
     }
 }
 
-// This struct help to find the actual index of an offset id given its index in an
-// imaginary segment where the offset ids in the tombstone has been removed.
+// This struct help to find the actual index of an offset id in the compact segment
+// given its index in an imaginary segment where the offset ids in the tombstone
+// has been removed.
+//
 // The given index must be less than the length of the imaginary segment.
-// The tombstone should be a sorted vec of (index, offset_id) tuples
-// The offset ids in the tombstone must be present in the compact segment
+// The tombstone should be a sorted vec of (index, offset_id) tuples.
+// The offset ids in the tombstone must be present in the compact segment.
 struct CompactPart<'me> {
     index: usize,
     record_segment: &'me RecordSegmentReader<'me>,
@@ -158,9 +160,9 @@ struct CompactPart<'me> {
 impl<'me> AsyncPart<(usize, u32), LimitError> for CompactPart<'me> {
     async fn pred(&self, cursor: &(usize, u32)) -> Result<bool, LimitError> {
         Ok(cursor.1
-            < self
+            <= self
                 .record_segment
-                .get_offset_id_at_index(self.index + cursor.0 + 1)
+                .get_offset_id_at_index(self.index + cursor.0)
                 .await
                 .map_err(|_| LimitError::RecordSegmentReaderError)?)
     }
@@ -171,15 +173,17 @@ impl<'me> CompactPart<'me> {
         Ok(self
             .locate(self.tombstone)
             .await?
-            .unwrap_or_else(|index| index))
+            .unwrap_or_else(|index| index)
+            + self.index)
     }
 }
 
 // This struct helps to find the starting indexes in both log and compact segment
 // given a number of smallest offset ids to skip and the tombstone of
 // offset ids that should be ignored in the compact segment.
-// The tombstone should be a sorted vec of (index, offset_id) tuples
-// The offset ids in the tombstone must be present in the compact segment
+//
+// The tombstone should be a sorted vec of (index, offset_id) tuples.
+// The offset ids in the tombstone must be present in the compact segment.
 struct SkipCmp<'me> {
     skip: usize,
     sorted_log_oids: &'me Vec<(usize, u32)>,
@@ -230,16 +234,30 @@ impl<'me> AsyncCmp<(usize, u32), LimitError> for SkipCmp<'me> {
 
 impl<'me> SkipCmp<'me> {
     async fn skip_start(&self) -> Result<(usize, usize), LimitError> {
-        let log_start = self
-            .locate(self.sorted_log_oids)
-            .await?
-            .unwrap_or_else(|index| index);
-        let compact_part = CompactPart {
-            index: self.skip - log_start,
-            record_segment: self.record_segment,
-            tombstone: self.tombstone,
+        let log_start = if self.skip > 0
+            && self.record_count > self.tombstone.len()
+            && !self.sorted_log_oids.is_empty()
+        {
+            self.locate(self.sorted_log_oids)
+                // The binary search can only be performed when both log and compact segment are not empty.
+                .await?
+                .unwrap_or_else(|index| index)
+        } else if self.record_count == self.tombstone.len() {
+            self.skip
+        } else {
+            0
         };
-        Ok((log_start, compact_part.partition_point().await?))
+        let compact_start = if self.record_count > self.tombstone.len() {
+            let compact_part = CompactPart {
+                index: self.skip - log_start,
+                record_segment: self.record_segment,
+                tombstone: self.tombstone,
+            };
+            compact_part.partition_point().await?
+        } else {
+            0
+        };
+        Ok((log_start, compact_start))
     }
 }
 
@@ -359,12 +377,13 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                                 .get_offset_id_at_index(compact_index)
                                 .await
                                 .map_err(|_| LimitError::RecordSegmentReaderError)?;
-                            let log_oid = log_oid_sorted_vec[log_index].1;
                             if rbm.contains(compact_oid) {
                                 compact_index += 1;
                                 continue;
-                            } else if log_index < log_count && log_oid < compact_oid {
-                                merged_result.push(log_oid);
+                            } else if log_index < log_count
+                                && log_oid_sorted_vec[log_index].1 < compact_oid
+                            {
+                                merged_result.push(log_oid_sorted_vec[log_index].1);
                                 log_index += 1;
                             } else {
                                 merged_result.push(compact_oid);
