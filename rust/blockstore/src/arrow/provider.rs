@@ -2,7 +2,7 @@ use super::{
     block::{delta::BlockDelta, Block, BlockLoadError},
     blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
-    sparse_index::SparseIndex,
+    root::{FromBlockError, RootReader, RootWriter},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
 use crate::{
@@ -27,7 +27,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ArrowBlockfileProvider {
     block_manager: BlockManager,
-    sparse_index_manager: SparseIndexManager,
+    root_manager: RootManager,
 }
 
 impl ArrowBlockfileProvider {
@@ -35,11 +35,11 @@ impl ArrowBlockfileProvider {
         storage: Storage,
         max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
-        sparse_index_cache: Box<dyn PersistentCache<Uuid, SparseIndex>>,
+        root_cache: Box<dyn PersistentCache<Uuid, RootReader>>,
     ) -> Self {
         Self {
             block_manager: BlockManager::new(storage.clone(), max_block_size_bytes, block_cache),
-            sparse_index_manager: SparseIndexManager::new(storage, sparse_index_cache),
+            root_manager: RootManager::new(storage, root_cache),
         }
     }
 
@@ -51,10 +51,10 @@ impl ArrowBlockfileProvider {
         &self,
         id: &uuid::Uuid,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
-        let sparse_index = self.sparse_index_manager.get::<K>(id).await;
-        match sparse_index {
-            Ok(Some(sparse_index)) => Ok(BlockfileReader::ArrowBlockfileReader(
-                ArrowBlockfileReader::new(*id, self.block_manager.clone(), sparse_index),
+        let root = self.root_manager.get::<K>(id).await;
+        match root {
+            Ok(Some(root)) => Ok(BlockfileReader::ArrowBlockfileReader(
+                ArrowBlockfileReader::new(self.block_manager.clone(), root),
             )),
             Ok(None) => Err(Box::new(OpenError::NotFound)),
             Err(e) => Err(Box::new(OpenError::Other(Box::new(e)))),
@@ -73,14 +73,14 @@ impl ArrowBlockfileProvider {
         let file = ArrowBlockfileWriter::new::<K, V>(
             new_id,
             self.block_manager.clone(),
-            self.sparse_index_manager.clone(),
+            self.root_manager.clone(),
         );
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 
     pub async fn clear(&self) -> Result<(), CacheError> {
         self.block_manager.block_cache.clear().await?;
-        self.sparse_index_manager.cache.clear().await?;
+        self.root_manager.cache.clear().await?;
         Ok(())
     }
 
@@ -90,19 +90,15 @@ impl ArrowBlockfileProvider {
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
         tracing::info!("Forking blockfile from {:?}", id);
         let new_id = Uuid::new_v4();
-        let new_sparse_index = self
-            .sparse_index_manager
-            .fork::<K>(id, new_id)
-            .await
-            .map_err(|e| {
-                tracing::error!("Error forking sparse index: {:?}", e);
-                Box::new(CreateError::Other(Box::new(e)))
-            })?;
-        let file = ArrowBlockfileWriter::from_sparse_index(
+        let new_root = self.root_manager.fork::<K>(id, new_id).await.map_err(|e| {
+            tracing::error!("Error forking root: {:?}", e);
+            Box::new(CreateError::Other(Box::new(e)))
+        })?;
+        let file = ArrowBlockfileWriter::from_root(
             new_id,
             self.block_manager.clone(),
-            self.sparse_index_manager.clone(),
-            new_sparse_index,
+            self.root_manager.clone(),
+            new_root,
         );
         Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
@@ -124,18 +120,17 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
                 return Err(e);
             }
         };
-        let sparse_index_cache = match chroma_cache::from_config_persistent(
-            &blockfile_config
-                .sparse_index_manager_config
-                .sparse_index_cache_config,
-        )
-        .await
-        {
-            Ok(cache) => cache,
-            Err(e) => {
-                return Err(e);
-            }
-        };
+        let sparse_index_cache: Box<dyn PersistentCache<_, _>> =
+            match chroma_cache::from_config_persistent(
+                &blockfile_config.root_manager_config.root_cache_config,
+            )
+            .await
+            {
+                Ok(cache) => cache,
+                Err(e) => {
+                    return Err(e);
+                }
+            };
         Ok(ArrowBlockfileProvider::new(
             storage.clone(),
             blockfile_config.block_manager_config.max_block_size_bytes,
@@ -353,8 +348,12 @@ impl ChromaError for BlockFlushError {
     }
 }
 
+// ==============
+// Root Manager
+// ==============
+
 #[derive(Error, Debug)]
-pub(super) enum SparseIndexManagerError {
+pub(super) enum RootManagerError {
     #[error("Not found")]
     NotFound,
     #[error(transparent)]
@@ -363,42 +362,48 @@ pub(super) enum SparseIndexManagerError {
     UUIDParseError(#[from] uuid::Error),
     #[error(transparent)]
     StorageGetError(#[from] chroma_storage::GetError),
+    #[error(transparent)]
+    FromBlockError(#[from] FromBlockError),
 }
 
-impl ChromaError for SparseIndexManagerError {
+impl ChromaError for RootManagerError {
     fn code(&self) -> ErrorCodes {
         match self {
-            SparseIndexManagerError::NotFound => ErrorCodes::NotFound,
-            SparseIndexManagerError::BlockLoadError(e) => e.code(),
-            SparseIndexManagerError::StorageGetError(e) => e.code(),
-            SparseIndexManagerError::UUIDParseError(_) => ErrorCodes::DataLoss,
+            RootManagerError::NotFound => ErrorCodes::NotFound,
+            RootManagerError::BlockLoadError(e) => e.code(),
+            RootManagerError::StorageGetError(e) => e.code(),
+            RootManagerError::UUIDParseError(_) => ErrorCodes::DataLoss,
+            RootManagerError::FromBlockError(e) => e.code(),
         }
     }
 }
 
 #[derive(Clone)]
-pub(super) struct SparseIndexManager {
-    cache: Arc<dyn PersistentCache<Uuid, SparseIndex>>,
+pub(super) struct RootManager {
+    cache: Arc<dyn PersistentCache<Uuid, RootReader>>,
     storage: Storage,
 }
 
-impl SparseIndexManager {
-    pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, SparseIndex>>) -> Self {
-        let cache: Arc<dyn PersistentCache<Uuid, SparseIndex>> = cache.into();
+impl RootManager {
+    pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, RootReader>>) -> Self {
+        let cache: Arc<dyn PersistentCache<Uuid, RootReader>> = cache.into();
         Self { cache, storage }
     }
 
     pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
         &self,
         id: &Uuid,
-    ) -> Result<Option<SparseIndex>, SparseIndexManagerError> {
+    ) -> Result<Option<RootReader>, RootManagerError> {
         let index = self.cache.get(id).await.ok().flatten();
         match index {
             Some(index) => Ok(Some(index)),
             None => {
-                tracing::info!("Cache miss - fetching sparse index from storage");
+                tracing::info!("Cache miss - fetching root from storage");
+                // TODO(hammadb): For legacy and temporary development purposes, we are reading the file
+                // from a fixed location. The path is sparse_index/ for legacy reasons.
+                // This will be replaced with a full prefix-based storage shortly
                 let key = format!("sparse_index/{}", id);
-                tracing::debug!("Reading sparse index from storage with key: {}", key);
+                tracing::debug!("Reading root from storage with key: {}", key);
                 // TODO: This should pass through NAC as well.
                 let stream = self.storage.get_stream(&key).await;
                 let mut buf: Vec<u8> = Vec::new();
@@ -410,11 +415,8 @@ impl SparseIndexManager {
                                     buf.extend(chunk);
                                 }
                                 Err(e) => {
-                                    tracing::error!(
-                                        "Error reading sparse index from storage: {}",
-                                        e
-                                    );
-                                    return Err(SparseIndexManagerError::StorageGetError(e));
+                                    tracing::error!("Error reading root from storage: {}", e);
+                                    return Err(RootManagerError::StorageGetError(e));
                                 }
                             }
                         }
@@ -427,30 +429,27 @@ impl SparseIndexManager {
                                 // the sparse index copies the block so it can live as long as it needs to independently
                                 let promoted_block: &'new Block =
                                     unsafe { std::mem::transmute(block_ref) };
-                                let index = SparseIndex::from_block::<K>(promoted_block);
-                                match index {
-                                    Ok(index) => {
-                                        self.cache.insert(*id, index.clone()).await;
-                                        Ok(Some(index))
+                                let root = RootReader::from_block::<K>(promoted_block);
+                                match root {
+                                    Ok(root) => {
+                                        self.cache.insert(*id, root.clone()).await;
+                                        Ok(Some(root))
                                     }
                                     Err(e) => {
-                                        tracing::error!(
-                                            "Error turning block into sparse index: {}",
-                                            e
-                                        );
-                                        Err(SparseIndexManagerError::UUIDParseError(e))
+                                        tracing::error!("Error turning block into root: {}", e);
+                                        Err(RootManagerError::FromBlockError(e))
                                     }
                                 }
                             }
                             Err(e) => {
                                 tracing::error!("Error turning bytes into block: {}", e);
-                                Err(SparseIndexManagerError::BlockLoadError(e))
+                                Err(RootManagerError::BlockLoadError(e))
                             }
                         }
                     }
                     Err(e) => {
-                        tracing::error!("Error reading sparse index from storage: {}", e);
-                        Err(SparseIndexManagerError::StorageGetError(e))
+                        tracing::error!("Error reading root from storage: {}", e);
+                        Err(RootManagerError::StorageGetError(e))
                     }
                 }
             }
@@ -459,33 +458,33 @@ impl SparseIndexManager {
 
     pub async fn flush<'read, K: ArrowWriteableKey + 'read>(
         &self,
-        index: &SparseIndex,
+        root: &RootWriter,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let as_block = index.to_block::<K>();
+        let as_block = root.to_block::<K>();
         match as_block {
             Ok(block) => {
                 let bytes = match block.to_bytes() {
                     Ok(bytes) => bytes,
                     Err(e) => {
-                        tracing::error!("Failed to convert sparse index to bytes");
+                        tracing::error!("Failed to convert root to bytes");
                         return Err(Box::new(e));
                     }
                 };
-                let key = format!("sparse_index/{}", index.id);
+                let key = format!("sparse_index/{}", root.id);
                 let res = self.storage.put_bytes(&key, bytes).await;
                 match res {
                     Ok(_) => {
-                        tracing::info!("Sparse index written to storage");
+                        tracing::info!("Root written to storage");
                         Ok(())
                     }
                     Err(e) => {
-                        tracing::error!("Error writing sparse index to storage");
+                        tracing::error!("Error writing root to storage");
                         Err(Box::new(e))
                     }
                 }
             }
             Err(e) => {
-                tracing::error!("Failed to convert sparse index to block");
+                tracing::error!("Failed to convert root to block");
                 Err(e)
             }
         }
@@ -495,29 +494,15 @@ impl SparseIndexManager {
         &self,
         old_id: &Uuid,
         new_id: Uuid,
-    ) -> Result<SparseIndex, SparseIndexManagerError> {
-        tracing::info!("Forking sparse index from {:?}", old_id);
+    ) -> Result<RootWriter, RootManagerError> {
+        tracing::info!("Forking root from {:?}", old_id);
         let original = self.get::<K::ReadableKey<'key>>(old_id).await?;
         match original {
             Some(original) => {
                 let forked = original.fork(new_id);
                 Ok(forked)
             }
-            None => Err(SparseIndexManagerError::NotFound),
-        }
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum SparseIndexFlushError {
-    #[error("Not found")]
-    NotFound,
-}
-
-impl ChromaError for SparseIndexFlushError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            SparseIndexFlushError::NotFound => ErrorCodes::NotFound,
+            None => Err(RootManagerError::NotFound),
         }
     }
 }

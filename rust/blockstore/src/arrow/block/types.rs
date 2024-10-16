@@ -1,4 +1,5 @@
 use std::cmp::Ordering::{Equal, Greater, Less};
+use std::collections::HashMap;
 use std::io::SeekFrom;
 
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
@@ -377,8 +378,16 @@ impl Block {
     }
 
     /// Returns the number of items in the block
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.data.num_rows()
+    }
+
+    /// Returns a reference to metadata of the block if any is present
+    /// ### Notes
+    /// - The metadata is stored in the Arrow RB schema as custom metadata
+    pub(crate) fn metadata(&self) -> &HashMap<String, String> {
+        let schema = self.data.schema_ref();
+        schema.metadata()
     }
 
     /*
