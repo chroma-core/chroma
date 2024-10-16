@@ -142,31 +142,35 @@ impl RootWriter {
             };
         }
 
+        let mut schema_fields = Vec::new();
+        let mut data_arrays: Vec<Arc<dyn Array>> = Vec::new();
+
         // NOTE(hammadb) This could be done as one pass over the sparse index but
         // this is simpler to write and this it not performance critical / impact is minimal
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
+        schema_fields.push(prefix_field);
+        schema_fields.push(key_field);
+        data_arrays.push(Arc::new(prefix_arr));
+        data_arrays.push(Arc::new(key_arr));
         let (built_ids, id_field) = self.ids_as_arrow(&sparse_index_data);
-        let (built_counts, count_field) = self.counts_as_arrow(&sparse_index_data);
+        schema_fields.push(id_field);
+        data_arrays.push(Arc::new(built_ids));
+
+        // MIGRATION(10/16/2024 @hammadb) -> Only RootWriter >= V1_1 will write a count field
+        if self.version >= Version::V1_1 {
+            let (built_counts, count_field) = self.counts_as_arrow(&sparse_index_data);
+            schema_fields.push(count_field);
+            data_arrays.push(Arc::new(built_counts));
+        }
 
         let metadata = HashMap::from_iter(vec![
             ("version".to_string(), self.version.to_string()),
             ("id".to_string(), self.id.to_string()),
         ]);
 
-        let schema = Arc::new(Schema::new_with_metadata(
-            vec![prefix_field, key_field, id_field, count_field],
-            metadata,
-        ));
+        let schema = Arc::new(Schema::new_with_metadata(schema_fields, metadata));
 
-        let record_batch = match RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(prefix_arr),
-                Arc::new(key_arr),
-                Arc::new(built_ids),
-                Arc::new(built_counts),
-            ],
-        ) {
+        let record_batch = match RecordBatch::try_new(schema, data_arrays) {
             Ok(record_batch) => record_batch,
             Err(e) => return Err(Box::new(ToBytesError::ArrowError(e))),
         };
@@ -492,7 +496,8 @@ mod test {
 
         // Check the version is still v1
         assert_eq!(root_reader.version, Version::V1);
-        // Check that the counts map is just 0
+        // Check that the counts map is just 0, even though we set it, it should be 0 since to_bytes
+        // does not write the count field for v1
         for (key, _) in root_reader.sparse_index.data.forward.iter() {
             assert_eq!(
                 root_reader
