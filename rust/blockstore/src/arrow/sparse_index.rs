@@ -179,6 +179,12 @@ impl SparseIndexWriter {
         }
     }
 
+    #[allow(dead_code)]
+    pub(super) fn block_ids(&self) -> Vec<Uuid> {
+        let data = self.data.lock();
+        data.forward.values().copied().collect()
+    }
+
     pub(super) fn get_target_block_id(&self, search_key: &CompositeKey) -> Uuid {
         let data = self.data.lock();
         let forward = &data.forward;

@@ -4,6 +4,7 @@ use crate::{
             data_record::DataRecordStorage, data_record_size_tracker::DataRecordSizeTracker,
             BlockDelta, BlockStorage,
         },
+        types::BuilderMutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -50,8 +51,8 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         validity_bytes * 2
     }
 
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        match &delta.builder {
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
+        match &delta {
             BlockStorage::DataRecord(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type"),
         }
@@ -64,7 +65,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         }
     }
 
-    fn get_delta_builder() -> BlockStorage {
+    fn get_delta_builder(_: BuilderMutationOrderHint) -> BlockStorage {
         BlockStorage::DataRecord(DataRecordStorage::new())
     }
 
@@ -246,8 +247,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockDelta,
+        delta: &mut BlockStorage,
     ) {
-        delta.add(prefix, key, &value);
+        <&DataRecord>::add(prefix, key.into(), &value, delta);
     }
 }
