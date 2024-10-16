@@ -4,6 +4,7 @@ use crate::{
             single_column_size_tracker::SingleColumnSizeTracker,
             single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
         },
+        types::BuilderMutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -28,10 +29,10 @@ impl ArrowWriteableValue for u32 {
         0 // We don't support None values for UInt32Array
     }
 
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        match &delta.builder {
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
+        match &delta {
             BlockStorage::UInt32(builder) => builder.add(prefix, key, value),
-            _ => panic!("Invalid builder type: {:?}", &delta.builder),
+            _ => panic!("Invalid builder type: {:?}", &delta),
         }
     }
 
@@ -42,8 +43,8 @@ impl ArrowWriteableValue for u32 {
         }
     }
 
-    fn get_delta_builder() -> BlockStorage {
-        BlockStorage::UInt32(SingleColumnStorage::new())
+    fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage {
+        BlockStorage::UInt32(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
@@ -66,7 +67,7 @@ impl ArrowWriteableValue for u32 {
     }
 }
 
-impl ArrowReadableValue<'_> for u32 {
+impl<'a> ArrowReadableValue<'a> for u32 {
     fn get(array: &Arc<dyn Array>, index: usize) -> u32 {
         let array = array.as_any().downcast_ref::<UInt32Array>().unwrap();
         array.value(index)
@@ -75,8 +76,8 @@ impl ArrowReadableValue<'_> for u32 {
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockDelta,
+        builder: &mut BlockStorage,
     ) {
-        delta.add(prefix, key, value);
+        u32::add(prefix, key.into(), value, builder);
     }
 }
