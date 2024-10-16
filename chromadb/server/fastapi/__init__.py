@@ -230,7 +230,7 @@ class FastAPI(Server):
         )
 
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}",
+            "/api/v2/tenants/{tenant}/databases/{database_name}",
             self.get_database,
             methods=["GET"],
             response_model=None,
@@ -251,81 +251,81 @@ class FastAPI(Server):
         )
 
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections",
             self.list_collections,
             methods=["GET"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections_count",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections_count",
             self.count_collections,
             methods=["GET"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections",
             self.create_collection,
             methods=["POST"],
             response_model=None,
         )
 
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/add",
             self.add,
             methods=["POST"],
             status_code=status.HTTP_201_CREATED,
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/update",
             self.update,
             methods=["POST"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/upsert",
             self.upsert,
             methods=["POST"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/get",
             self.get,
             methods=["POST"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
             self.delete,
             methods=["POST"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/count",
             self.count,
             methods=["GET"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/query",
             self.get_nearest_neighbors,
             methods=["POST"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_name}",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_name}",
             self.get_collection,
             methods=["GET"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}",
             self.update_collection,
             methods=["PUT"],
             response_model=None,
         )
         self.router.add_api_route(
-            "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_name}",
+            "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_name}",
             self.delete_collection,
             methods=["DELETE"],
             response_model=None,
@@ -547,7 +547,12 @@ class FastAPI(Server):
                 user_id="", tenant=DEFAULT_TENANT, databases=[DEFAULT_DATABASE]
             )
 
-        return self.authn_provider.authenticate_or_raise(dict(request.headers))
+        return cast(
+            UserIdentity,
+            await to_thread.run_sync(
+                lambda: cast(ServerAuthenticationProvider, self.authn_provider).authenticate_or_raise(dict(request.headers))  # type: ignore
+            ),
+        )
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     async def create_database(
@@ -583,14 +588,14 @@ class FastAPI(Server):
     async def get_database(
         self,
         request: Request,
-        database: str,
+        database_name: str,
         tenant: str,
     ) -> Database:
         self.auth_request(
             request.headers,
             AuthzAction.GET_DATABASE,
             tenant,
-            database,
+            database_name,
             None,
         )
 
@@ -598,7 +603,7 @@ class FastAPI(Server):
             Database,
             await to_thread.run_sync(
                 self._api.get_database,
-                database,
+                database_name,
                 tenant,
                 limiter=self._capacity_limiter,
             ),
@@ -656,7 +661,7 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[CollectionModel]:
@@ -664,7 +669,7 @@ class FastAPI(Server):
             request.headers,
             AuthzAction.LIST_COLLECTIONS,
             tenant,
-            database,
+            database_name,
             None,
         )
 
@@ -675,7 +680,7 @@ class FastAPI(Server):
                 limit,
                 offset,
                 tenant,
-                database,
+                database_name,
                 limiter=self._capacity_limiter,
             ),
         )
@@ -687,13 +692,13 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
     ) -> int:
         self.auth_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
             tenant,
-            database,
+            database_name,
             None,
         )
 
@@ -702,7 +707,7 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api.count_collections,
                 tenant,
-                database,
+                database_name,
                 limiter=self._capacity_limiter,
             ),
         )
@@ -712,7 +717,7 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
         body: CreateCollection = Body(...),
     ) -> CollectionModel:
         def process_create_collection(
@@ -748,7 +753,7 @@ class FastAPI(Server):
                 process_create_collection,
                 request,
                 tenant,
-                database,
+                database_name,
                 await request.body(),
                 limiter=self._capacity_limiter,
             ),
@@ -760,14 +765,14 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
         collection_name: str,
     ) -> CollectionModel:
         self.auth_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
             tenant,
-            database,
+            database_name,
             collection_name,
         )
 
@@ -778,7 +783,7 @@ class FastAPI(Server):
                 collection_name,
                 None,  # id
                 tenant,
-                database,
+                database_name,
                 limiter=self._capacity_limiter,
             ),
         )
@@ -788,7 +793,7 @@ class FastAPI(Server):
     async def update_collection(
         self,
         tenant: str,
-        database: str,
+        database_name: str,
         collection_id: str,
         request: Request,
         body: UpdateCollection = Body(...),
@@ -801,7 +806,7 @@ class FastAPI(Server):
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
                 tenant,
-                database,
+                database_name,
                 collection_id,
             )
             return self._api._modify(
@@ -824,13 +829,13 @@ class FastAPI(Server):
         request: Request,
         collection_name: str,
         tenant: str,
-        database: str,
+        database_name: str,
     ) -> None:
         self.auth_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
             tenant,
-            database,
+            database_name,
             collection_name,
         )
 
@@ -838,7 +843,7 @@ class FastAPI(Server):
             self._api.delete_collection,
             collection_name,
             tenant,
-            database,
+            database_name,
             limiter=self._capacity_limiter,
         )
 
@@ -847,7 +852,7 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
         collection_id: str,
         body: AddEmbedding = Body(...),
     ) -> bool:
@@ -859,7 +864,7 @@ class FastAPI(Server):
                     request.headers,
                     AuthzAction.ADD,
                     tenant,
-                    database,
+                    database_name,
                     collection_id,
                 )
                 return self._api._add(
@@ -893,7 +898,7 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
         collection_id: str,
         body: UpdateEmbedding = Body(...),
     ) -> None:
@@ -904,7 +909,7 @@ class FastAPI(Server):
                 request.headers,
                 AuthzAction.UPDATE,
                 tenant,
-                database,
+                database_name,
                 collection_id,
             )
 
@@ -931,7 +936,7 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
         collection_id: str,
         body: AddEmbedding = Body(...),
     ) -> None:
@@ -942,7 +947,7 @@ class FastAPI(Server):
                 request.headers,
                 AuthzAction.UPSERT,
                 tenant,
-                database,
+                database_name,
                 collection_id,
             )
 
@@ -972,7 +977,7 @@ class FastAPI(Server):
         self,
         collection_id: str,
         tenant: str,
-        database: str,
+        database_name: str,
         request: Request,
         body: GetEmbedding = Body(...),
     ) -> GetResult:
@@ -982,7 +987,7 @@ class FastAPI(Server):
                 request.headers,
                 AuthzAction.GET,
                 tenant,
-                database,
+                database_name,
                 collection_id,
             )
             return self._api._get(
@@ -1019,7 +1024,7 @@ class FastAPI(Server):
         self,
         collection_id: str,
         tenant: str,
-        database: str,
+        database_name: str,
         request: Request,
         body: DeleteEmbedding = Body(...),
     ) -> None:
@@ -1029,7 +1034,7 @@ class FastAPI(Server):
                 request.headers,
                 AuthzAction.DELETE,
                 tenant,
-                database,
+                database_name,
                 collection_id,
             )
             return self._api._delete(
@@ -1051,14 +1056,14 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        database: str,
+        database_name: str,
         collection_id: str,
     ) -> int:
         self.auth_request(
             request.headers,
             AuthzAction.COUNT,
             tenant,
-            database,
+            database_name,
             collection_id,
         )
 
@@ -1096,7 +1101,7 @@ class FastAPI(Server):
     async def get_nearest_neighbors(
         self,
         tenant: str,
-        database: str,
+        database_name: str,
         collection_id: str,
         request: Request,
         body: QueryEmbedding = Body(...),
@@ -1108,7 +1113,7 @@ class FastAPI(Server):
                 request.headers,
                 AuthzAction.QUERY,
                 tenant,
-                database,
+                database_name,
                 collection_id,
             )
 
