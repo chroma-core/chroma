@@ -283,7 +283,7 @@ impl<
         key_range: KeyRange,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone, // todo: can remove Clone bound?
+        PrefixRange: RangeBounds<&'prefix str> + Clone,
         KeyRange: RangeBounds<K> + Clone,
     {
         match self {
