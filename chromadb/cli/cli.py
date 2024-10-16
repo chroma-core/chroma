@@ -104,9 +104,9 @@ def vacuum(
     """
     Vacuum the database. This may result in a small increase in performance.
 
-    If you recently upgraded Chroma from a version below 0.6 to 0.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
+    If you recently upgraded Chroma from a version below 0.5.6 to 0.5.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
 
-    The execution time of this command scales with the size of your database. It block both reads and writes to the database while it is running.
+    The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
     """
     console = Console(
         highlight=False
@@ -148,7 +148,7 @@ def vacuum(
         collections = client.list_collections()
         task = progress.add_task("Purging the log...", total=len(collections))
         try:
-            # Cleaning the log after upgrading to >=0.6 is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
+            # Cleaning the log after upgrading to >=0.5.6 is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
             # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
             trigger_vector_segments_max_seq_id_migration(
                 sqlite, system.instance(SegmentManager)
