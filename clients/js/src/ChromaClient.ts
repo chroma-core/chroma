@@ -155,7 +155,7 @@ export class ChromaClient {
    */
   async reset(): Promise<boolean> {
     await this.init();
-    return await this.api.postV2Reset(this.api.options);
+    return await this.api.reset(this.api.options);
   }
 
   /**
@@ -169,7 +169,7 @@ export class ChromaClient {
    * ```
    */
   async version(): Promise<string> {
-    return await this.api.getV2Version(this.api.options);
+    return await this.api.version(this.api.options);
   }
 
   /**
@@ -183,7 +183,7 @@ export class ChromaClient {
    * ```
    */
   async heartbeat(): Promise<number> {
-    const response = await this.api.getV2Heartbeat(this.api.options);
+    const response = await this.api.heartbeat(this.api.options);
     return response["nanosecond heartbeat"];
   }
 

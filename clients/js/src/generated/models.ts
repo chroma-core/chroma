@@ -37,9 +37,6 @@ export namespace Api {
 
 	}
 
-	export interface AddV1201Response {
-	}
-
 	export interface ADelete200Response {
 	}
 
@@ -50,12 +47,6 @@ export namespace Api {
 	}
 
 	export interface CountCollections200Response {
-	}
-
-	export interface CountCollectionsV1200Response {
-	}
-
-	export interface CountV1200Response {
 	}
 
 	export interface CreateCollection {
@@ -81,17 +72,11 @@ export namespace Api {
 	export interface CreateCollection200Response {
 	}
 
-	export interface CreateCollectionV1200Response {
-	}
-
 	export interface CreateDatabase {
 		name: string;
 	}
 
 	export interface CreateDatabase200Response {
-	}
-
-	export interface CreateDatabaseV1200Response {
 	}
 
 	export interface CreateTenant {
@@ -101,13 +86,7 @@ export namespace Api {
 	export interface CreateTenant200Response {
 	}
 
-	export interface CreateTenantV1200Response {
-	}
-
 	export interface DeleteCollection200Response {
-	}
-
-	export interface DeleteCollectionV1200Response {
 	}
 
 	export interface DeleteEmbedding {
@@ -129,19 +108,10 @@ export namespace Api {
 
 	}
 
-	export interface DeleteV1200Response {
-	}
-
 	export interface GetCollection200Response {
 	}
 
-	export interface GetCollectionV1200Response {
-	}
-
 	export interface GetDatabase200Response {
-	}
-
-	export interface GetDatabaseV1200Response {
 	}
 
 	export interface GetEmbedding {
@@ -178,19 +148,10 @@ export namespace Api {
 	export interface GetNearestNeighbors200Response {
 	}
 
-	export interface GetNearestNeighborsV1200Response {
-	}
-
 	export interface GetTenant200Response {
 	}
 
-	export interface GetTenantV1200Response {
-	}
-
 	export interface GetUserIdentity200Response {
-	}
-
-	export interface GetV1200Response {
 	}
 
 	export interface HTTPValidationError {
@@ -209,13 +170,7 @@ export namespace Api {
 	export interface ListCollections200Response {
 	}
 
-	export interface ListCollectionsV1200Response {
-	}
-
 	export interface PreFlightChecks200Response {
-	}
-
-	export interface PreFlightChecks200Response2 {
 	}
 
 	export interface QueryEmbedding {
@@ -267,9 +222,6 @@ export namespace Api {
 	export interface UpdateCollection200Response {
 	}
 
-	export interface UpdateCollectionV1200Response {
-	}
-
 	export interface UpdateEmbedding {
 		embeddings?: (Api.UpdateEmbedding.Embedding[]) | null;
 		metadatas?: ((Api.UpdateEmbedding.Metadatum | null)[]) | null;
@@ -291,13 +243,7 @@ export namespace Api {
 
 	}
 
-	export interface UpdateV1200Response {
-	}
-
 	export interface Upsert200Response {
-	}
-
-	export interface UpsertV1200Response {
 	}
 
 	export interface ValidationError {
