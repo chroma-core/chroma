@@ -584,7 +584,8 @@ impl Debug for SparseIndexReader {
     }
 }
 
-pub(super) fn get_target_block_id(
+// Helper function to get the target block id for a given key
+fn get_target_block_id(
     search_key: &CompositeKey,
     forward: &BTreeMap<SparseIndexDelimiter, Uuid>,
 ) -> Uuid {
