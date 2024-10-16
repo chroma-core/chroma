@@ -143,7 +143,7 @@ class IncludeEnum(str, Enum):
 
 # This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
 # However, this provokes an incompatibility with the Overrides library and Python 3.7
-Include = List[IncludeEnum]
+Include = List[Union[IncludeEnum, str]]
 IncludeMetadataDocuments = Field(default=["metadatas", "documents"])
 IncludeMetadataDocumentsEmbeddings = Field(
     default=["metadatas", "documents", "embeddings"]

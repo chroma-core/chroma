@@ -1,7 +1,15 @@
 import asyncio
+import os
+import re
+import shutil
+import uuid
 from typing import Any, Callable, Generator, cast
 from unittest.mock import patch
+
+import psutil
+
 import chromadb
+from chromadb import AsyncClientAPI
 from chromadb.config import Settings
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
@@ -20,9 +28,13 @@ def ephemeral_api() -> Generator[ClientAPI, None, None]:
 def persistent_api() -> Generator[ClientAPI, None, None]:
     client = chromadb.PersistentClient(
         path=tempfile.gettempdir() + "/test_server",
+        settings=Settings(
+            allow_reset=True,
+        ),
     )
     yield client
     client.clear_system_cache()
+    shutil.rmtree(tempfile.gettempdir() + "/test_server", ignore_errors=True)
 
 
 HttpAPIFactory = Callable[..., ClientAPI]
@@ -99,3 +111,204 @@ def test_http_client_with_inconsistent_port_settings(
             str(e)
             == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"
         )
+
+
+def test_persistent_client_close() -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+    persistent_api = chromadb.PersistentClient(
+        path=os.path.join(tempfile.gettempdir(), "test_server-" + uuid.uuid4().hex),
+        settings=Settings(),
+    )
+    current_process = psutil.Process()
+    col = persistent_api.create_collection("test")
+    temp_persist_dir = persistent_api.get_settings().persist_directory
+    col1 = persistent_api.create_collection("test1" + uuid.uuid4().hex)
+    col.add(ids=["1"], documents=["test"])
+    col1.add(ids=["1"], documents=["test1"])
+    open_files = current_process.open_files()
+    filtered_open_files = [
+        file for file in open_files if re.search(re.escape(temp_persist_dir), file.path)
+    ]
+    assert len(filtered_open_files) > 0
+    persistent_api.close()
+    open_files = current_process.open_files()
+    post_filtered_open_files = [
+        file
+        for file in open_files
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
+    ]
+    assert len(post_filtered_open_files) == 0
+
+
+def test_persistent_client_use_after_close() -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+    persistent_api = chromadb.PersistentClient(
+        path=os.path.join(tempfile.gettempdir(), "test_server-" + uuid.uuid4().hex),
+        settings=Settings(),
+    )
+    current_process = psutil.Process()
+    col = persistent_api.create_collection("test" + uuid.uuid4().hex)
+    temp_persist_dir = persistent_api.get_settings().persist_directory
+    col.add(ids=["1"], documents=["test"])
+    open_files = current_process.open_files()
+    filtered_open_files = [
+        file
+        for file in open_files
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
+    ]
+    assert len(filtered_open_files) > 0
+    persistent_api.close()
+    open_files = current_process.open_files()
+    post_filtered_open_files = [
+        file
+        for file in open_files
+        if re.search(re.escape(temp_persist_dir) + ".*chroma.sqlite3", file.path)
+        or re.search(re.escape(temp_persist_dir) + ".*data_level0.bin", file.path)
+    ]
+    assert len(post_filtered_open_files) == 0
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.add(ids=["1"], documents=["test"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.delete(ids=["1"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.update(ids=["1"], documents=["test1231"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.upsert(ids=["1"], documents=["test1231"])
+    with pytest.raises(RuntimeError, match="Component not running"):
+        col.count()
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.create_collection("test1")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.get_collection("test")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.get_or_create_collection("test")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.list_collections()
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.delete_collection("test")
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.count_collections()
+    with pytest.raises(RuntimeError, match="Component not running"):
+        persistent_api.heartbeat()
+
+
+def get_connection_count(api_client: ClientAPI) -> int:
+    if isinstance(api_client, AsyncClientAPI):
+        connections = 0
+        for k, client in api_client._server._clients.items():
+            _pool = client._transport._pool  # type: ignore
+            connections += len(_pool._connections)
+        return connections
+    else:
+        _pool = api_client._server._session._transport._pool  # type: ignore
+        return len(_pool._connections)
+
+
+def test_http_client_close(client: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+
+    if client.get_settings().chroma_api_impl == "chromadb.api.segment.SegmentAPI":
+        pytest.skip("Skipping test for persistent clients.")
+
+    async def run_in_async(c: AsyncClientAPI):
+        col = await c.create_collection("test" + uuid.uuid4().hex)
+        await col.add(ids=["1"], documents=["test"])
+        assert get_connection_count(client) > 0
+        await c.close()
+        assert get_connection_count(client) == 0
+
+    if isinstance(client, AsyncClientAPI):
+        asyncio.get_event_loop().run_until_complete(
+            run_in_async(cast(AsyncClientAPI, client))
+        )
+    else:
+        col = client.create_collection("test" + uuid.uuid4().hex)
+        col.add(ids=["1"], documents=["test"])
+        assert get_connection_count(client) > 0
+        client.close()
+        assert get_connection_count(client) == 0
+
+
+def test_http_client_use_after_close(client: ClientAPI) -> None:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY") == "1":
+        pytest.skip(
+            "Skipping test that closes the persistent client in integration test"
+        )
+
+    if client.get_settings().chroma_api_impl == "chromadb.api.segment.SegmentAPI":
+        pytest.skip("Skipping test for persistent clients.")
+
+    async def run_in_async(c: AsyncClientAPI):
+        col = await c.create_collection("test" + uuid.uuid4().hex)
+        await col.add(ids=["1"], documents=["test"])
+        assert get_connection_count(client) > 0
+        await c.close()
+        assert get_connection_count(client) == 0
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await c.heartbeat()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await col.add(ids=["1"], documents=["test"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await col.delete(ids=["1"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await col.update(ids=["1"], documents=["test1231"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await col.upsert(ids=["1"], documents=["test1231"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await col.count()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await c.create_collection("test1")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await c.get_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await c.get_or_create_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            await c.list_collections()
+
+    if isinstance(client, AsyncClientAPI):
+        asyncio.get_event_loop().run_until_complete(
+            run_in_async(cast(AsyncClientAPI, client))
+        )
+    else:
+        col = client.create_collection("test" + uuid.uuid4().hex)
+        col.add(ids=["1"], documents=["test"])
+        assert get_connection_count(client) > 0
+        client.close()
+        assert get_connection_count(client) == 0
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.heartbeat()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.add(ids=["1"], documents=["test"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.delete(ids=["1"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.update(ids=["1"], documents=["test1231"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.upsert(ids=["1"], documents=["test1231"])
+        with pytest.raises(RuntimeError, match="Component not running"):
+            col.count()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.create_collection("test1")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.get_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.get_or_create_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.list_collections()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.delete_collection("test")
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.count_collections()
+        with pytest.raises(RuntimeError, match="Component not running"):
+            client.heartbeat()

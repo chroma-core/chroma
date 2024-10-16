@@ -319,6 +319,11 @@ class AsyncBaseAPI(ABC):
         """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the client and release any resources."""
+        pass
+
 
 class AsyncClientAPI(AsyncBaseAPI, ABC):
     tenant: str
@@ -521,6 +526,11 @@ class AsyncAdminAPI(ABC):
         """
         pass
 
+    @abstractmethod
+    async def close(self) -> None:
+        """Closes the admin client and releases any resources."""
+        pass
+
 
 class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
@@ -584,4 +594,9 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    async def close(self) -> None:
         pass

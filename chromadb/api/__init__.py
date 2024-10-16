@@ -328,6 +328,11 @@ class BaseAPI(ABC):
         """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
+    @abstractmethod
+    def close(self) -> None:
+        """Close the client and release any resources."""
+        pass
+
 
 class ClientAPI(BaseAPI, ABC):
     tenant: str
@@ -528,6 +533,11 @@ class AdminAPI(ABC):
             tenant: The name of the tenant to get.
 
         """
+        pass
+
+    @abstractmethod
+    def close(self) -> None:
+        """Close the client and release any resources."""
         pass
 
 

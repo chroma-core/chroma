@@ -73,6 +73,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             for header, value in _headers.items():
                 self._session.headers[header] = value.get_secret_value()
 
+    @override
+    def start(self) -> None:
+        super().start()
+
     def _make_request(self, method: str, path: str, **kwargs: Dict[str, Any]) -> Any:
         # If the request has json in kwargs, use orjson to serialize it,
         # remove it from kwargs, and add it to the content parameter
@@ -93,6 +97,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
+        self._raise_for_running()
         resp_json = self._make_request("get", "/heartbeat")
         return int(resp_json["nanosecond heartbeat"])
 
@@ -104,6 +109,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
     ) -> None:
         """Creates a database"""
+        self._raise_for_running()
         self._make_request(
             "post",
             "/databases",
@@ -119,6 +125,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
     ) -> Database:
         """Returns a database"""
+        self._raise_for_running()
         resp_json = self._make_request(
             "get",
             "/databases/" + name,
@@ -131,11 +138,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
+        self._raise_for_running()
         self._make_request("post", "/tenants", json={"name": name})
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> Tenant:
+        self._raise_for_running()
         resp_json = self._make_request("get", "/tenants/" + name)
         return Tenant(name=resp_json["name"])
 
@@ -149,6 +158,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
         """Returns a list of all collections"""
+        self._raise_for_running()
         json_collections = self._make_request(
             "get",
             "/collections",
@@ -174,6 +184,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
         """Returns a count of collections"""
+        self._raise_for_running()
         resp_json = self._make_request(
             "get",
             "/count_collections",
@@ -193,6 +204,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Creates a collection"""
+        self._raise_for_running()
         resp_json = self._make_request(
             "post",
             "/collections",
@@ -218,6 +230,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Returns a collection"""
+        self._raise_for_running()
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
 
@@ -246,6 +259,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self._raise_for_running()
         return self.create_collection(
             name=name,
             metadata=metadata,
@@ -264,6 +278,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         new_metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         """Updates a collection"""
+        self._raise_for_running()
         self._make_request(
             "put",
             "/collections/" + str(id),
@@ -279,6 +294,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         """Deletes a collection"""
+        self._raise_for_running()
         self._make_request(
             "delete",
             "/collections/" + name,
@@ -292,6 +308,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         collection_id: UUID,
     ) -> int:
         """Returns the number of embeddings in the database"""
+        self._raise_for_running()
         resp_json = self._make_request(
             "get",
             "/collections/" + str(collection_id) + "/count",
@@ -305,6 +322,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         collection_id: UUID,
         n: int = 10,
     ) -> GetResult:
+        self._raise_for_running()
         return cast(
             GetResult,
             self._get(
@@ -329,6 +347,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
+        self._raise_for_running()
         if page and page_size:
             offset = (page - 1) * page_size
             limit = page_size
@@ -367,6 +386,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         where_document: Optional[WhereDocument] = {},
     ) -> None:
         """Deletes embeddings from the database"""
+        self._raise_for_running()
         self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/delete",
@@ -393,6 +413,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         Submits a batch of embeddings to the database
         """
+        self._raise_for_running()
         self._make_request(
             "post",
             url,
@@ -420,6 +441,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
+        self._raise_for_running()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings),
@@ -446,6 +468,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
+        self._raise_for_running()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings)
@@ -474,6 +497,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
+        self._raise_for_running()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings),
@@ -497,6 +521,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         """Gets the nearest neighbors of a single embedding"""
+        self._raise_for_running()
         resp_json = self._make_request(
             "post",
             "/collections/" + str(collection_id) + "/query",
@@ -526,6 +551,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def reset(self) -> bool:
         """Resets the database"""
+        self._raise_for_running()
         resp_json = self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
@@ -533,6 +559,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def get_version(self) -> str:
         """Returns the version of the server"""
+        self._raise_for_running()
         resp_json = self._make_request("get", "/version")
         return cast(str, resp_json)
 
@@ -544,7 +571,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     def get_max_batch_size(self) -> int:
+        self._raise_for_running()
         if self._max_batch_size == -1:
             resp_json = self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
+
+    @trace_method("FastAPI.close", OpenTelemetryGranularity.OPERATION)
+    @override
+    def close(self) -> None:
+        self._raise_for_running()
+        self._session.close()
+        self._system.stop()
