@@ -1090,6 +1090,32 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			};
 		},
 		/**
+		 * @summary Get User Identity
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		getUserIdentity(options: RequestInit = {}): FetchArgs {
+			let localVarPath = `/api/v2/auth/identity`;
+			const localVarPathQueryStart = localVarPath.indexOf("?");
+			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
+			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
+			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+			if (localVarPathQueryStart !== -1) {
+				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+			}
+
+			localVarRequestOptions.headers = localVarHeaderParameter;
+
+			const localVarQueryParameterString = localVarQueryParameter.toString();
+			if (localVarQueryParameterString) {
+				localVarPath += "?" + localVarQueryParameterString;
+			}
+			return {
+				url: localVarPath,
+				options: localVarRequestOptions,
+			};
+		},
+		/**
 		 * @summary Root
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
@@ -1469,32 +1495,6 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			let localVarPath = `/api/v2/reset`;
 			const localVarPathQueryStart = localVarPath.indexOf("?");
 			const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-			if (localVarPathQueryStart !== -1) {
-				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-			}
-
-			localVarRequestOptions.headers = localVarHeaderParameter;
-
-			const localVarQueryParameterString = localVarQueryParameter.toString();
-			if (localVarQueryParameterString) {
-				localVarPath += "?" + localVarQueryParameterString;
-			}
-			return {
-				url: localVarPath,
-				options: localVarRequestOptions,
-			};
-		},
-		/**
-		 * @summary Resolve Tenant And Databases
-		 * @param {RequestInit} [options] Override http request option.
-		 * @throws {RequiredError}
-		 */
-		resolveTenantAndDatabases(options: RequestInit = {}): FetchArgs {
-			let localVarPath = `/api/v2/auth/identity`;
-			const localVarPathQueryStart = localVarPath.indexOf("?");
-			const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
 			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
 			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
 			if (localVarPathQueryStart !== -1) {
@@ -2576,6 +2576,28 @@ export const ApiApiFp = function(configuration?: Configuration) {
 			};
 		},
 		/**
+		 * @summary Get User Identity
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		getUserIdentity(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetUserIdentity200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getUserIdentity(options);
+			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+					const contentType = response.headers.get('Content-Type');
+					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+
+					if (response.status === 200) {
+						if (mimeType === 'application/json') {
+							return response.json() as any;
+						}
+						throw response;
+					}
+					throw response;
+				});
+			};
+		},
+		/**
 		 * @summary Root
 		 * @param {RequestInit} [options] Override http request option.
 		 * @throws {RequiredError}
@@ -2874,28 +2896,6 @@ export const ApiApiFp = function(configuration?: Configuration) {
 		 */
 		postV2Reset(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<boolean> {
 			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).postV2Reset(options);
-			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-					const contentType = response.headers.get('Content-Type');
-					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-					if (response.status === 200) {
-						if (mimeType === 'application/json') {
-							return response.json() as any;
-						}
-						throw response;
-					}
-					throw response;
-				});
-			};
-		},
-		/**
-		 * @summary Resolve Tenant And Databases
-		 * @param {RequestInit} [options] Override http request option.
-		 * @throws {RequiredError}
-		 */
-		resolveTenantAndDatabases(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ResolveTenantAndDatabases200Response> {
-			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).resolveTenantAndDatabases(options);
 			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
 				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
 					const contentType = response.headers.get('Content-Type');
@@ -3401,6 +3401,15 @@ export class ApiApi extends BaseAPI {
 	}
 
 	/**
+	 * @summary Get User Identity
+	 * @param {RequestInit} [options] Override http request option.
+	 * @throws {RequiredError}
+	 */
+	public getUserIdentity(options?: RequestInit) {
+		return ApiApiFp(this.configuration).getUserIdentity(options)(this.fetch, this.basePath);
+	}
+
+	/**
 	 * @summary Root
 	 * @param {RequestInit} [options] Override http request option.
 	 * @throws {RequiredError}
@@ -3525,15 +3534,6 @@ export class ApiApi extends BaseAPI {
 	 */
 	public postV2Reset(options?: RequestInit) {
 		return ApiApiFp(this.configuration).postV2Reset(options)(this.fetch, this.basePath);
-	}
-
-	/**
-	 * @summary Resolve Tenant And Databases
-	 * @param {RequestInit} [options] Override http request option.
-	 * @throws {RequiredError}
-	 */
-	public resolveTenantAndDatabases(options?: RequestInit) {
-		return ApiApiFp(this.configuration).resolveTenantAndDatabases(options)(this.fetch, this.basePath);
 	}
 
 	/**

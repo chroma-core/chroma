@@ -187,6 +187,9 @@ export namespace Api {
 	export interface GetTenantV1200Response {
 	}
 
+	export interface GetUserIdentity200Response {
+	}
+
 	export interface GetV1200Response {
 	}
 
@@ -241,9 +244,6 @@ export namespace Api {
 		export interface QueryEmbedding2 {
 		}
 
-	}
-
-	export interface ResolveTenantAndDatabases200Response {
 	}
 
 	export interface Update200Response {

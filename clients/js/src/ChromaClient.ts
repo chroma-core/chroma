@@ -117,7 +117,7 @@ export class ChromaClient {
    *
    */
   async resolveTenantAndDatabases(): Promise<void> {
-    const response = (await this.api.resolveTenantAndDatabases(
+    const response = (await this.api.getUserIdentity(
       this.api.options,
     )) as TenantAndDatabases;
     const user_identity = response as TenantAndDatabases;
