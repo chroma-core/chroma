@@ -44,7 +44,7 @@ pub enum BlockKeyArrowBuilder {
 }
 
 impl BlockKeyArrowBuilder {
-    pub(super) fn add_key(&mut self, key: CompositeKey) {
+    pub(crate) fn add_key(&mut self, key: CompositeKey) {
         match key.key {
             KeyWrapper::String(value) => {
                 let builder = match self {

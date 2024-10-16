@@ -386,28 +386,28 @@ impl<'me> MetadataIndexWriter<'me> {
         Ok(())
     }
 
-    pub fn commit(self) -> Result<MetadataIndexFlusher, MetadataIndexError> {
+    pub async fn commit(self) -> Result<MetadataIndexFlusher, MetadataIndexError> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<&str, RoaringBitmap>() {
+                match blockfile_writer.commit::<&str, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::StringMetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }
             }
             MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<u32, RoaringBitmap>() {
+                match blockfile_writer.commit::<u32, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::U32MetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }
             }
             MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<f32, RoaringBitmap>() {
+                match blockfile_writer.commit::<f32, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::F32MetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }
             }
             MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<bool, RoaringBitmap>() {
+                match blockfile_writer.commit::<bool, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::BoolMetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }
@@ -764,7 +764,7 @@ mod test {
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_string(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
-        let flusher = md_writer.commit().unwrap();
+        let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -781,7 +781,7 @@ mod test {
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
-        let flusher = md_writer.commit().unwrap();
+        let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -798,7 +798,7 @@ mod test {
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
-        let flusher = md_writer.commit().unwrap();
+        let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -815,7 +815,7 @@ mod test {
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
-        let flusher = md_writer.commit().unwrap();
+        let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -833,7 +833,7 @@ mod test {
         let mut writer = MetadataIndexWriter::new_string(blockfile_writer, None);
         writer.set("key", "value", 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -854,7 +854,7 @@ mod test {
         let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         writer.set("key", 1, 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -875,7 +875,7 @@ mod test {
         let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         writer.set("key", 1.0, 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -896,7 +896,7 @@ mod test {
         let mut writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
         writer.set("key", true, 1).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -920,7 +920,7 @@ mod test {
         writer.set("key2", "value", 3).await.unwrap();
         writer.set("key2", "value2", 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -949,7 +949,7 @@ mod test {
         writer.set("key2", 1, 3).await.unwrap();
         writer.set("key2", 2, 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -978,7 +978,7 @@ mod test {
         writer.set("key2", 1.0, 3).await.unwrap();
         writer.set("key2", 2.0, 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1007,7 +1007,7 @@ mod test {
         writer.set("key2", true, 3).await.unwrap();
         writer.set("key2", false, 4).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1037,7 +1037,7 @@ mod test {
         writer.set("key1", 4, 4).await.unwrap();
         writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1070,7 +1070,7 @@ mod test {
         writer.set("key1", 4, 4).await.unwrap();
         writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1104,7 +1104,7 @@ mod test {
         writer.set("key1", 4, 4).await.unwrap();
         writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1137,7 +1137,7 @@ mod test {
         writer.set("key1", 4, 4).await.unwrap();
         writer.set("key2", 5, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1171,7 +1171,7 @@ mod test {
         writer.set("key1", 4.0, 4).await.unwrap();
         writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1205,7 +1205,7 @@ mod test {
         writer.set("key1", 4.0, 4).await.unwrap();
         writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1240,7 +1240,7 @@ mod test {
         writer.set("key1", 4.0, 4).await.unwrap();
         writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1273,7 +1273,7 @@ mod test {
         writer.set("key1", 4.0, 4).await.unwrap();
         writer.set("key2", 5.0, 5).await.unwrap();
         writer.write_to_blockfile().await.unwrap();
-        let flusher = writer.commit().unwrap();
+        let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
@@ -1304,7 +1304,7 @@ mod test {
     //     let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
     //     writer.set("key1", 1, 1).await.unwrap();
     //     writer.write_to_blockfile().await.unwrap();
-    //     let flusher = writer.commit().unwrap();
+    //     let flusher = writer.commit().await.unwrap();
     //     flusher.flush().await.unwrap();
 
     //     let blockfile_reader = provider
@@ -1323,7 +1323,7 @@ mod test {
     //     let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, Some(reader));
     //     writer.set("key1", 1, 2).await.unwrap();
     //     writer.write_to_blockfile().await.unwrap();
-    //     let flusher = writer.commit().unwrap();
+    //     let flusher = writer.commit().await.unwrap();
     //     flusher.flush().await.unwrap();
 
     //     let blockfile_reader = provider
