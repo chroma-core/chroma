@@ -63,14 +63,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # Get the root system component we want to interact with
         self._server = self._system.instance(AsyncServerAPI)
 
-        user_identity = await self.resolve_tenant_and_databases()
+        user_identity = await self.get_user_identity()
 
         maybe_tenant, maybe_database = SharedSystemClient.maybe_set_tenant_and_database(
-            settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            tenant,
-            database,
-            user_identity.tenant,
-            user_identity.databases,
+            user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            tenant=tenant,
+            database=database,
         )
         if maybe_tenant:
             self.tenant = maybe_tenant
@@ -107,8 +106,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         )
 
     @override
-    async def resolve_tenant_and_databases(self) -> UserIdentity:
-        return await self._server.resolve_tenant_and_databases()
+    async def get_user_identity(self) -> UserIdentity:
+        return await self._server.get_user_identity()
 
     @override
     async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:

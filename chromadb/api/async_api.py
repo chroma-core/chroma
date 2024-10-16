@@ -321,7 +321,7 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    async def resolve_tenant_and_databases(self) -> UserIdentity:
+    async def get_user_identity(self) -> UserIdentity:
         """Resolve the tenant and databases for the client. Returns the default
         values if can't be resolved.
 

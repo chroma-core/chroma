@@ -330,7 +330,7 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def resolve_tenant_and_databases(self) -> UserIdentity:
+    def get_user_identity(self) -> UserIdentity:
         """Resolve the tenant and databases for the client. Returns the default
         values if can't be resolved.
 

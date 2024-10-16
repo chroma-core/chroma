@@ -61,14 +61,13 @@ class Client(SharedSystemClient, ClientAPI):
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
 
-        user_identity = self.resolve_tenant_and_databases()
+        user_identity = self.get_user_identity()
 
         maybe_tenant, maybe_database = SharedSystemClient.maybe_set_tenant_and_database(
-            settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            tenant,
-            database,
-            user_identity.tenant,
-            user_identity.databases,
+            user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            tenant=tenant,
+            database=database,
         )
         if maybe_tenant:
             self.tenant = maybe_tenant
@@ -96,9 +95,9 @@ class Client(SharedSystemClient, ClientAPI):
     # endregion
 
     @override
-    def resolve_tenant_and_databases(self) -> UserIdentity:
+    def get_user_identity(self) -> UserIdentity:
         try:
-            return self._server.resolve_tenant_and_databases()
+            return self._server.get_user_identity()
         except httpx.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
@@ -106,8 +105,8 @@ class Client(SharedSystemClient, ClientAPI):
         # Propagate ChromaErrors
         except ChromaError as e:
             raise e
-        except Exception:
-            raise ValueError("Could not resolve tenant and database.")
+        except Exception as e:
+            raise ValueError(str(e))
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking

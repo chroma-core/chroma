@@ -1,6 +1,7 @@
-from typing import ClassVar, Dict, Optional, Tuple, List
+from typing import ClassVar, Dict, Optional, Tuple
 import uuid
 
+from chromadb.auth import UserIdentity
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.config import Settings, System
@@ -95,9 +96,8 @@ class SharedSystemClient:
 
     @staticmethod
     def _singleton_tenant_database_if_applicable(
+        user_identity: UserIdentity,
         overwrite_singleton_tenant_database_access_from_auth: bool,
-        user_tenant: Optional[str],
-        user_databases: Optional[List[str]],
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         If settings.chroma_overwrite_singleton_tenant_database_access_from_auth
@@ -118,6 +118,8 @@ class SharedSystemClient:
             return None, None
         tenant = None
         database = None
+        user_tenant = user_identity.tenant
+        user_databases = user_identity.databases
         if user_tenant and user_tenant != "*":
             tenant = user_tenant
         if user_databases and len(user_databases) == 1 and user_databases[0] != "*":
@@ -126,19 +128,17 @@ class SharedSystemClient:
 
     @staticmethod
     def maybe_set_tenant_and_database(
+        user_identity: UserIdentity,
         overwrite_singleton_tenant_database_access_from_auth: bool,
         tenant: Optional[str] = None,
         database: Optional[str] = None,
-        user_tenant: Optional[str] = None,
-        user_databases: Optional[List[str]] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
         (
             new_tenant,
             new_database,
         ) = SharedSystemClient._singleton_tenant_database_if_applicable(
-            overwrite_singleton_tenant_database_access_from_auth,
-            user_tenant,
-            user_databases,
+            user_identity=user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=overwrite_singleton_tenant_database_access_from_auth,
         )
 
         if (not tenant or tenant == DEFAULT_TENANT) and new_tenant:

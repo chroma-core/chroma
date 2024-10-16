@@ -139,11 +139,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         resp_json = self._make_request("get", "/tenants/" + name)
         return Tenant(name=resp_json["name"])
 
-    @trace_method(
-        "FastAPI.resolve_tenant_and_databases", OpenTelemetryGranularity.OPERATION
-    )
+    @trace_method("FastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
     @override
-    def resolve_tenant_and_databases(self) -> UserIdentity:
+    def get_user_identity(self) -> UserIdentity:
         return UserIdentity(**self._make_request("get", "/auth/identity"))
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)

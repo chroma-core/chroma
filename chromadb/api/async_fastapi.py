@@ -183,11 +183,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         return Tenant(name=resp_json["name"])
 
-    @trace_method(
-        "AsyncFastAPI.resolve_tenant_and_databases", OpenTelemetryGranularity.OPERATION
-    )
+    @trace_method("AsyncFastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
     @override
-    async def resolve_tenant_and_databases(self) -> UserIdentity:
+    async def get_user_identity(self) -> UserIdentity:
         return UserIdentity(**(await self._make_request("get", "/auth/identity")))
 
     @trace_method("AsyncFastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
