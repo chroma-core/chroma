@@ -477,9 +477,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 
     /// Returns all arrow records whose key > supplied key.
-    pub(crate) async fn get_gt<'a>(
+    pub(crate) async fn get_gt(
         &'me self,
-        prefix: &'a str,
+        prefix: &str,
         key: K,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         // Get all block ids that contain keys > key from sparse index for this prefix.
