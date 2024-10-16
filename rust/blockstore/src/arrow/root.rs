@@ -73,7 +73,7 @@ pub(super) struct RootWriter {
     pub(super) sparse_index: SparseIndexWriter,
     // Metadata
     pub(super) id: Uuid,
-    version: Version,
+    pub(super) version: Version,
 }
 
 impl RootWriter {
@@ -98,17 +98,10 @@ impl RootWriter {
 
     fn counts_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (UInt32Array, Field) {
         let mut count_builder = UInt32Builder::new();
-        // Version 1.0 does not have counts, so we default to 0
-        // Since we don't currently write a blockfile to a new version, we don't need to worry about
-        // the case where the version is 1.1 but the count is not set
-        if self.version < Version::V1_1 {
-            for _ in 0..sparse_index_data.forward.len() {
-                count_builder.append_value(0);
-            }
-        } else {
-            for (_, value) in sparse_index_data.counts.iter() {
-                count_builder.append_value(*value);
-            }
+        // We assume the count is always set, so if upgrading from V1 to V1.1 we will always have
+        // a count
+        for (_, value) in sparse_index_data.counts.iter() {
+            count_builder.append_value(*value);
         }
         (
             count_builder.finish(),

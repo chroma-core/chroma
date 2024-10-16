@@ -90,8 +90,8 @@ impl ArrowBlockfileWriter {
         }
     }
 
-    pub(crate) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        self,
+    pub(crate) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut blocks = Vec::new();
         for (_, delta) in self.block_deltas.lock().drain() {
@@ -108,6 +108,45 @@ impl ArrowBlockfileWriter {
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                 let block = self.block_manager.commit::<K, V>(delta);
                 blocks.push(block);
+            }
+        }
+
+        // MIGRATION(10/15/2024 @hammadb) Get all the blocks and manually update the sparse index
+        if self.root.version == Version::V1 {
+            self.root.version = Version::V1_1;
+            let block_ids;
+            // Guard the sparse index data access with a lock
+            // otherwise we have to hold the lock across an await
+            {
+                let sparse_index_data = self.root.sparse_index.data.lock();
+                block_ids = sparse_index_data
+                    .forward
+                    .values()
+                    .copied()
+                    .collect::<Vec<Uuid>>();
+            }
+            for block_id in block_ids.iter() {
+                let block = self.block_manager.get(block_id).await;
+                match block {
+                    Ok(Some(block)) => {
+                        match self
+                            .root
+                            .sparse_index
+                            .set_count(*block_id, block.len() as u32)
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(Box::new(e));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                }
             }
         }
 
@@ -702,7 +741,7 @@ mod tests {
         let value2 = vec![4, 5, 6];
         writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &[u32]>(&id).await.unwrap();
@@ -737,7 +776,7 @@ mod tests {
                 }
             }
             // commit.
-            let flusher = writer.commit::<&str, u32>().unwrap();
+            let flusher = writer.commit::<&str, u32>().await.unwrap();
             flusher.flush::<&str, u32>().await.unwrap();
 
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
@@ -797,7 +836,7 @@ mod tests {
                 writer.set(prefix, key.as_str(), i).await.unwrap();
             }
             // commit.
-            let flusher = writer.commit::<&str, u32>().unwrap();
+            let flusher = writer.commit::<&str, u32>().await.unwrap();
             flusher.flush::<&str, u32>().await.unwrap();
 
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
@@ -909,7 +948,7 @@ mod tests {
         let value2 = vec![4, 5, 6];
         writer.set(prefix_2, key2, value2).await.unwrap();
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &[u32]>(&id).await.unwrap();
@@ -943,7 +982,7 @@ mod tests {
             writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -978,7 +1017,7 @@ mod tests {
             writer.set("key", key.as_str(), value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1012,7 +1051,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1062,7 +1101,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1103,7 +1142,7 @@ mod tests {
                 .unwrap();
         }
 
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1137,7 +1176,7 @@ mod tests {
             writer.set("key", key, value).await.unwrap();
         }
 
-        let flusher = writer.commit::<f32, String>().unwrap();
+        let flusher = writer.commit::<f32, String>().await.unwrap();
         flusher.flush::<f32, String>().await.unwrap();
 
         let reader = provider.open::<f32, &str>(&id).await.unwrap();
@@ -1173,7 +1212,10 @@ mod tests {
             let value = roaring::RoaringBitmap::from_iter(0..i);
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, roaring::RoaringBitmap>().unwrap();
+        let flusher = writer
+            .commit::<&str, roaring::RoaringBitmap>()
+            .await
+            .unwrap();
         flusher
             .flush::<&str, roaring::RoaringBitmap>()
             .await
@@ -1217,7 +1259,7 @@ mod tests {
             writer.set("key", key, value).await.unwrap();
         }
 
-        let flusher = writer.commit::<u32, u32>().unwrap();
+        let flusher = writer.commit::<u32, u32>().await.unwrap();
         flusher.flush::<u32, u32>().await.unwrap();
 
         let reader = blockfile_provider.open::<u32, u32>(&id).await.unwrap();
@@ -1258,7 +1300,7 @@ mod tests {
             writer.set("key", key.as_str(), &value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, &DataRecord>().unwrap();
+        let flusher = writer.commit::<&str, &DataRecord>().await.unwrap();
         flusher.flush::<&str, &DataRecord>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1307,7 +1349,7 @@ mod tests {
             .set("key", "2", val_2_large.to_string())
             .await
             .unwrap();
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1343,7 +1385,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
@@ -1366,7 +1408,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let flusher = writer.commit::<&str, String>().unwrap();
+        let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
         // Check that the deleted keys are gone
@@ -1403,7 +1445,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
@@ -1448,7 +1490,7 @@ mod tests {
             let value = vec![i];
             writer.set("key", key.as_str(), value).await.unwrap();
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
@@ -1464,7 +1506,7 @@ mod tests {
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         let id_2 = flusher.id();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
@@ -1497,7 +1539,7 @@ mod tests {
                 .await
                 .expect("Delete failed");
         }
-        let flusher = writer.commit::<&str, Vec<u32>>().unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         let id_3 = flusher.id();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
@@ -1536,7 +1578,7 @@ mod tests {
             writer.set("prefix", fixed_key, value).await.unwrap();
         }
 
-        let flusher = writer.commit::<&str, u32>().unwrap();
+        let flusher = writer.commit::<&str, u32>().await.unwrap();
         flusher.flush::<&str, u32>().await.unwrap();
 
         let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();

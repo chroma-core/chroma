@@ -62,6 +62,7 @@ impl CompactSegment {
             .expect("Should be able to write to blockfile.");
         self.metadata.file_path = metadata_writer
             .commit()
+            .await
             .expect("Should be able to commit metadata.")
             .flush()
             .await
@@ -78,6 +79,7 @@ impl CompactSegment {
 
         self.record.file_path = record_writer
             .commit()
+            .await
             .expect("Should be able to commit metadata.")
             .flush()
             .await

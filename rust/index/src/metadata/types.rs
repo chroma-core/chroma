@@ -386,28 +386,28 @@ impl<'me> MetadataIndexWriter<'me> {
         Ok(())
     }
 
-    pub fn commit(self) -> Result<MetadataIndexFlusher, MetadataIndexError> {
+    pub async fn commit(self) -> Result<MetadataIndexFlusher, MetadataIndexError> {
         match self {
             MetadataIndexWriter::StringMetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<&str, RoaringBitmap>() {
+                match blockfile_writer.commit::<&str, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::StringMetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }
             }
             MetadataIndexWriter::U32MetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<u32, RoaringBitmap>() {
+                match blockfile_writer.commit::<u32, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::U32MetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }
             }
             MetadataIndexWriter::F32MetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<f32, RoaringBitmap>() {
+                match blockfile_writer.commit::<f32, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::F32MetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }
             }
             MetadataIndexWriter::BoolMetadataIndexWriter(blockfile_writer, _, _) => {
-                match blockfile_writer.commit::<bool, RoaringBitmap>() {
+                match blockfile_writer.commit::<bool, RoaringBitmap>().await {
                     Ok(flusher) => Ok(MetadataIndexFlusher::BoolMetadataIndexFlusher(flusher)),
                     Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                 }

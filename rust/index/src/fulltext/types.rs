@@ -319,13 +319,16 @@ impl<'me> FullTextIndexWriter<'me> {
         Ok(())
     }
 
-    pub fn commit(self) -> Result<FullTextIndexFlusher, FullTextIndexError> {
+    pub async fn commit(self) -> Result<FullTextIndexFlusher, FullTextIndexError> {
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
-            .commit::<u32, Vec<u32>>()?;
-        let frequencies_blockfile_flusher =
-            self.frequencies_blockfile_writer.commit::<u32, String>()?;
+            .commit::<u32, Vec<u32>>()
+            .await?;
+        let frequencies_blockfile_flusher = self
+            .frequencies_blockfile_writer
+            .commit::<u32, String>()
+            .await?;
         Ok(FullTextIndexFlusher {
             posting_lists_blockfile_flusher,
             frequencies_blockfile_flusher,

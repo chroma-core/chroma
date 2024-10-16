@@ -56,7 +56,7 @@ mod tests {
 
                 // commit the writer
                 future::block_on(async {
-                    let flusher = writer.commit::<&str, u32>().unwrap();
+                    let flusher = writer.commit::<&str, u32>().await.unwrap();
                     flusher.flush::<&str, u32>().await.unwrap();
                 });
 

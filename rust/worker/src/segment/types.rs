@@ -811,7 +811,7 @@ pub trait SegmentWriter<'a> {
         &self,
         records: Chunk<MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError>;
-    fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
+    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
 }
 
 // This needs to be public for testing
@@ -940,9 +940,11 @@ mod tests {
                 .expect("Apply materialized log failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             let flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             metadata_segment.file_path = metadata_flusher
                 .flush()
@@ -1036,10 +1038,12 @@ mod tests {
             .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         metadata_segment.file_path = metadata_flusher
             .flush()
@@ -1229,9 +1233,11 @@ mod tests {
                 .expect("Apply materialized log failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             let flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             metadata_segment.file_path = metadata_flusher
                 .flush()
@@ -1316,10 +1322,12 @@ mod tests {
             .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         metadata_segment.file_path = metadata_flusher
             .flush()
@@ -1510,9 +1518,11 @@ mod tests {
                 .expect("Apply materialized log failed");
             let metadata_flusher = metadata_writer
                 .commit()
+                .await
                 .expect("Commit for metadata writer failed");
             let flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             metadata_segment.file_path = metadata_flusher
                 .flush()
@@ -1617,10 +1627,12 @@ mod tests {
             .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         let metadata_flusher = metadata_writer
             .commit()
+            .await
             .expect("Commit for metadata writer failed");
         metadata_segment.file_path = metadata_flusher
             .flush()
@@ -1802,6 +1814,7 @@ mod tests {
                 .expect("Apply materialized log failed");
             let flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         }
@@ -1967,6 +1980,7 @@ mod tests {
             .expect("Error applying materialized log chunk");
         let flusher = segment_writer
             .commit()
+            .await
             .expect("Commit for segment writer failed");
         record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         // Read.
