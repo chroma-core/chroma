@@ -1,7 +1,4 @@
-use super::block::{
-    delta::BlockDelta,
-    delta::{BlockKeyArrowBuilder, BlockStorage},
-};
+use super::block::delta::{BlockDelta, BlockKeyArrowBuilder, BlockStorage};
 use crate::{key::KeyWrapper, Key, Value};
 use arrow::{array::Array, datatypes::Field};
 use std::sync::Arc;
@@ -17,6 +14,12 @@ pub trait ArrowWriteableKey: Key + Default {
     ) -> BlockKeyArrowBuilder;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuilderMutationOrderHint {
+    Unordered,
+    Ordered,
+}
+
 pub trait ArrowWriteableValue: Value {
     type ArrowBuilder;
     type SizeTracker;
@@ -25,10 +28,10 @@ pub trait ArrowWriteableValue: Value {
 
     fn offset_size(item_count: usize) -> usize;
     fn validity_size(item_count: usize) -> usize;
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta);
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage);
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta);
-    fn get_delta_builder() -> BlockStorage;
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder;
+    fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage;
     fn prepare(value: Self) -> Self::PreparedValue;
     fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder);
     fn finish(builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>);
@@ -40,7 +43,7 @@ pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut BlockDelta,
+        delta: &mut BlockStorage,
     );
 }
 
@@ -50,6 +53,6 @@ pub trait ArrowReadableValue<'referred_data>: Sized {
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockDelta,
+        delta: &mut BlockStorage,
     );
 }

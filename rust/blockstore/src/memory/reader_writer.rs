@@ -186,7 +186,7 @@ impl<
     pub(crate) fn get_at_index(
         &'storage self,
         index: usize,
-    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+    ) -> Result<(&'storage str, K, V), Box<dyn ChromaError>> {
         let res = V::get_at_index(&self.storage, index);
         let (key, value) = match res {
             Some((key, value)) => (key, value),

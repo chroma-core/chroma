@@ -20,7 +20,12 @@ serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 arrow = "52.0.0"
 thiserror = "1.0.50"
-uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+uuid = { version = "1.6.1", features = [
+   "v4",
+   "fast-rng",
+   "macro-diagnostics",
+   "serde",
+] }
 async-trait = "0.1.74"
 roaring = "0.10.3"
 futures = "0.3"
@@ -57,6 +62,7 @@ rand_xorshift = "0.3.0"
 rayon = "1.8.0"
 shuttle = "0.7.1"
 tempfile = "3.8.1"
+itertools = "0.13.0"
 
 [profile.release]
 debug = 2
