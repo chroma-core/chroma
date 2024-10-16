@@ -15,6 +15,7 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
 use parking_lot::Mutex;
+use std::collections::HashSet;
 use std::mem::transmute;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
@@ -94,7 +95,9 @@ impl ArrowBlockfileWriter {
         mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut blocks = Vec::new();
+        let mut handled_blocks = HashSet::new();
         for (_, delta) in self.block_deltas.lock().drain() {
+            handled_blocks.insert(delta.id);
             let mut removed = false;
             // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
@@ -122,6 +125,7 @@ impl ArrowBlockfileWriter {
                 block_ids = sparse_index_data
                     .forward
                     .values()
+                    .filter(|block_id| !handled_blocks.contains(block_id))
                     .copied()
                     .collect::<Vec<Uuid>>();
             }
@@ -704,17 +708,24 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
 #[cfg(test)]
 mod tests {
+    use crate::arrow::blockfile::ArrowBlockfileWriter;
+    use crate::arrow::provider::{BlockManager, RootManager};
+    use crate::arrow::root::{RootWriter, Version};
+    use crate::arrow::sparse_index::SparseIndexWriter;
     use crate::{
         arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, arrow::provider::ArrowBlockfileProvider,
     };
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
+    use parking_lot::Mutex;
     use proptest::prelude::*;
     use proptest::test_runner::Config;
     use rand::seq::IteratorRandom;
     use std::collections::HashMap;
+    use std::sync::Arc;
     use tokio::runtime::Runtime;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_count() {
@@ -1584,5 +1595,60 @@ mod tests {
         let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
         let value = reader.get("prefix", fixed_key).await.unwrap();
         assert_eq!(value, n - 1);
+    }
+
+    #[tokio::test]
+    async fn test_v1_to_v1_1_migration() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let root_manager = RootManager::new(storage.clone(), root_cache);
+        let block_manager = BlockManager::new(storage.clone(), 8 * 1024 * 1024, block_cache);
+
+        // Manually create a v1 blockfile with no counts
+        let initial_block = block_manager.create::<&str, String>();
+        let sparse_index = SparseIndexWriter::new(initial_block.id);
+        let file_id = Uuid::new_v4();
+        let root_writer = RootWriter::new(Version::V1, file_id, sparse_index);
+
+        let block_deltas = Arc::new(Mutex::new(HashMap::new()));
+        {
+            let mut block_deltas_map = block_deltas.lock();
+            block_deltas_map.insert(initial_block.id, initial_block);
+        }
+
+        let writer = ArrowBlockfileWriter {
+            block_manager,
+            root_manager: root_manager.clone(),
+            block_deltas,
+            root: root_writer,
+            id: Uuid::new_v4(),
+            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+        };
+
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = format!("{:04}", i);
+            writer
+                .set("key", key.as_str(), value.to_string())
+                .await
+                .unwrap();
+        }
+
+        let flusher = writer.commit::<&str, String>().await.unwrap();
+        flusher.flush::<&str, String>().await.unwrap();
+
+        // Get the RootReader and verify the counts
+        let root_reader = root_manager.get::<&str>(&file_id).await.unwrap().unwrap();
+        let count_in_index: u32 = root_reader
+            .sparse_index
+            .data
+            .forward
+            .iter()
+            .map(|x| x.1.count)
+            .sum();
+        assert_eq!(count_in_index, n);
     }
 }
