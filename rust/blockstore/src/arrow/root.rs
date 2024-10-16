@@ -1,6 +1,6 @@
 use super::{
     block::{Block, BlockToBytesError},
-    sparse_index::{SparseIndexReader, SparseIndexValue, SparseIndexWriter},
+    sparse_index::{SparseIndexReader, SparseIndexValue, SparseIndexWriter, SparseIndexWriterData},
     types::{ArrowReadableKey, ArrowWriteableKey},
 };
 use crate::{arrow::sparse_index::SparseIndexDelimiter, key::CompositeKey};
@@ -85,6 +85,37 @@ impl RootWriter {
         }
     }
 
+    fn ids_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (BinaryArray, Field) {
+        let mut ids_builder = BinaryBuilder::new();
+        for (_, value) in sparse_index_data.forward.iter() {
+            ids_builder.append_value(value.into_bytes());
+        }
+        (
+            ids_builder.finish(),
+            Field::new("id", DataType::Binary, false),
+        )
+    }
+
+    fn counts_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (UInt32Array, Field) {
+        let mut count_builder = UInt32Builder::new();
+        // Version 1.0 does not have counts, so we default to 0
+        // Since we don't currently write a blockfile to a new version, we don't need to worry about
+        // the case where the version is 1.1 but the count is not set
+        if self.version < Version::V1_1 {
+            for _ in 0..sparse_index_data.forward.len() {
+                count_builder.append_value(0);
+            }
+        } else {
+            for (_, value) in sparse_index_data.counts.iter() {
+                count_builder.append_value(*value);
+            }
+        }
+        (
+            count_builder.finish(),
+            Field::new("count", DataType::UInt32, false),
+        )
+    }
+
     pub(super) fn to_bytes<K: ArrowWriteableKey>(&self) -> Result<Vec<u8>, Box<dyn ChromaError>> {
         // Serialize the sparse index as an arrow record batch
         // TODO(hammadb): Note that this should ideally use the Block API to serialize the sparse
@@ -105,10 +136,8 @@ impl RootWriter {
         }
         let mut key_builder =
             K::get_arrow_builder(sparse_index_data.forward.len(), prefix_cap, key_cap);
-        let mut ids_builder = BinaryBuilder::new();
-        let mut count_builder = UInt32Builder::new();
 
-        for (key, value) in sparse_index_data.forward.iter() {
+        for (key, _) in sparse_index_data.forward.iter() {
             match key {
                 SparseIndexDelimiter::Start => key_builder.add_key(CompositeKey {
                     prefix: "START".to_string(),
@@ -118,16 +147,13 @@ impl RootWriter {
                     key_builder.add_key(k.clone());
                 }
             };
-            ids_builder.append_value(value.into_bytes());
         }
 
-        for (_, value) in sparse_index_data.counts.iter() {
-            count_builder.append_value(*value);
-        }
-
+        // NOTE(hammadb) This could be done as one pass over the sparse index but
+        // this is simpler to write and this it not performance critical / impact is minimal
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-        let built_ids = ids_builder.finish();
-        let built_counts = count_builder.finish();
+        let (built_ids, id_field) = self.ids_as_arrow(&sparse_index_data);
+        let (built_counts, count_field) = self.counts_as_arrow(&sparse_index_data);
 
         let metadata = HashMap::from_iter(vec![
             ("version".to_string(), self.version.to_string()),
@@ -135,12 +161,7 @@ impl RootWriter {
         ]);
 
         let schema = Arc::new(Schema::new_with_metadata(
-            vec![
-                prefix_field,
-                key_field,
-                Field::new("id", DataType::Binary, false),
-                Field::new("count", DataType::UInt32, false),
-            ],
+            vec![prefix_field, key_field, id_field, count_field],
             metadata,
         ));
 
