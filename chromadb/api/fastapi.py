@@ -122,7 +122,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         resp_json = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{name}",
-            params={"tenant": tenant},
         )
         return Database(
             id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
