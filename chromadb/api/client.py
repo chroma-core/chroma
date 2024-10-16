@@ -22,6 +22,7 @@ from chromadb.api.types import (
     URIs,
 )
 from chromadb.auth import UserIdentity
+from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
@@ -63,7 +64,7 @@ class Client(SharedSystemClient, ClientAPI):
 
         user_identity = self.get_user_identity()
 
-        maybe_tenant, maybe_database = SharedSystemClient.maybe_set_tenant_and_database(
+        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
             user_identity,
             overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
             tenant=tenant,

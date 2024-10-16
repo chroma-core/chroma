@@ -3,6 +3,7 @@ from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
 from chromadb.auth import UserIdentity
+from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
 from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.models.AsyncCollection import AsyncCollection
@@ -65,7 +66,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
         user_identity = await self.get_user_identity()
 
-        maybe_tenant, maybe_database = SharedSystemClient.maybe_set_tenant_and_database(
+        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
             user_identity,
             overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
             tenant=tenant,
