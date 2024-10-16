@@ -196,6 +196,17 @@ class FastAPI(Server):
 
         self.router = ChromaAPIRouter()
 
+        self.setup_v2_routes()
+        self.setup_v1_routes()
+
+        self._app.include_router(self.router)
+
+        use_route_names_as_operation_ids(self._app)
+        instrument_fastapi(self._app)
+        telemetry_client = self._system.instance(ProductTelemetryClient)
+        telemetry_client.capture(ServerStartEvent())
+
+    def setup_v2_routes(self) -> None:
         self.router.add_api_route("/api/v2", self.root, methods=["GET"])
         self.router.add_api_route("/api/v2/reset", self.reset, methods=["POST"])
         self.router.add_api_route("/api/v2/version", self.version, methods=["GET"])
@@ -206,7 +217,7 @@ class FastAPI(Server):
 
         self.router.add_api_route(
             "/api/v2/auth/identity",
-            self.resolve_tenant_and_databases,
+            self.get_user_identity,
             methods=["GET"],
             response_model=None,
         )
@@ -320,9 +331,10 @@ class FastAPI(Server):
             response_model=None,
         )
 
-        # ======================================================================
+    def setup_v1_routes(self) -> None:
+        # =====================================================================
         # OLD ROUTES FOR BACKWARDS COMPATIBILITY — WILL BE REMOVED
-        # ======================================================================
+        # =====================================================================
 
         self.router.add_api_route("/api/v1", self.root, methods=["GET"])
         self.router.add_api_route("/api/v1/reset", self.reset, methods=["POST"])
@@ -441,14 +453,7 @@ class FastAPI(Server):
             response_model=None,
         )
 
-        # ======================================================================
-
-        self._app.include_router(self.router)
-
-        use_route_names_as_operation_ids(self._app)
-        instrument_fastapi(self._app)
-        telemetry_client = self._system.instance(ProductTelemetryClient)
-        telemetry_client.capture(ServerStartEvent())
+        # =====================================================================
 
     def shutdown(self) -> None:
         self._system.stop()
@@ -532,10 +537,8 @@ class FastAPI(Server):
         )
         return
 
-    @trace_method(
-        "FastAPI.resolve_tenant_and_databases", OpenTelemetryGranularity.OPERATION
-    )
-    async def resolve_tenant_and_databases(
+    @trace_method("FastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
+    async def get_user_identity(
         self,
         request: Request,
     ) -> UserIdentity:
@@ -544,8 +547,7 @@ class FastAPI(Server):
                 user_id="", tenant=DEFAULT_TENANT, databases=[DEFAULT_DATABASE]
             )
 
-        identity = self.authn_provider.authenticate_or_raise(dict(request.headers))
-        return cast(UserIdentity, await to_thread.run_sync(lambda: identity))
+        return self.authn_provider.authenticate_or_raise(dict(request.headers))
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     async def create_database(
@@ -1156,9 +1158,9 @@ class FastAPI(Server):
             ),
         )
 
-    # ==========================================================================
-    # OLD CONTROLLERS FOR BACKWARD COMPATIBILITY — WILL BE REMOVED
-    # ==========================================================================
+    # =========================================================================
+    # OLD V1 FUNCTIONS FOR BACKWARD COMPATIBILITY — WILL BE REMOVED
+    # =========================================================================
 
     @trace_method(
         "auth_and_get_tenant_and_database_for_request",
@@ -1841,4 +1843,4 @@ class FastAPI(Server):
 
         return nnresult
 
-    # ==========================================================================
+    # =========================================================================

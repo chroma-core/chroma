@@ -162,7 +162,7 @@ class SegmentAPI(ServerAPI):
         )
 
     @override
-    def resolve_tenant_and_databases(self) -> UserIdentity:
+    def get_user_identity(self) -> UserIdentity:
         return UserIdentity(
             user_id="",
             tenant=DEFAULT_TENANT,
