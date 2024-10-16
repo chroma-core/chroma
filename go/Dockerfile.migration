@@ -5,9 +5,9 @@ RUN apt upgrade -y
 RUN apt install -y curl jq
 RUN curl -sSf https://atlasgo.sh | sh -s -- --community
 
-COPY ./go/migrations migrations
-COPY ./go/atlas.hcl atlas.hcl
+COPY ./go/pkg/sysdb/metastore/db/migrations migrations
+COPY ./go/pkg/sysdb/metastore/db/atlas.hcl atlas.hcl
 
 FROM arigaio/atlas:latest as logservice-migration
-COPY ./go/database/log/migrations migrations
-COPY ./go/database/log/atlas.hcl atlas.hcl
+COPY ./go/pkg/log/store/migrations migrations
+COPY ./go/pkg/log/store/atlas.hcl atlas.hcl
