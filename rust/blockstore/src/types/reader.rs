@@ -109,7 +109,7 @@ impl<
     pub async fn get_at_index(
         &'referred_data self,
         index: usize,
-    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+    ) -> Result<(&'referred_data str, K, V), Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_at_index(index),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get_at_index(index).await,

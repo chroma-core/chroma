@@ -4,6 +4,7 @@ use crate::{
             single_column_size_tracker::SingleColumnSizeTracker,
             single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
         },
+        types::BuilderMutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -29,8 +30,8 @@ impl ArrowWriteableValue for Vec<u32> {
         0 // We don't support None values for Int32Array
     }
 
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        match &delta.builder {
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
+        match &delta {
             BlockStorage::VecUInt32(builder) => {
                 builder.add(prefix, key, value);
             }
@@ -47,8 +48,8 @@ impl ArrowWriteableValue for Vec<u32> {
         }
     }
 
-    fn get_delta_builder() -> BlockStorage {
-        BlockStorage::VecUInt32(SingleColumnStorage::new())
+    fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage {
+        BlockStorage::VecUInt32(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
@@ -125,8 +126,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockDelta,
+        delta: &mut BlockStorage,
     ) {
-        delta.add(prefix, key, value.to_vec());
+        <Vec<u32>>::add(prefix, key.into(), value.to_vec(), delta);
     }
 }

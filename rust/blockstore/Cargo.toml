@@ -29,6 +29,7 @@ chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-types = { workspace = true }
+itertools = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
