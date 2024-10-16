@@ -14,6 +14,7 @@ import (
 //go:generate mockery --name=Catalog
 type Catalog interface {
 	ResetState(ctx context.Context) error
+	CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (*model.Collection, bool, error)
 	CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error)
 	GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error)
 	DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error
