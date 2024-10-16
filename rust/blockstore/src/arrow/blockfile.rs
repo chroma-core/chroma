@@ -4,10 +4,10 @@ use super::{block::delta::BlockDelta, provider::BlockManager};
 use super::{
     block::Block,
     flusher::ArrowBlockfileFlusher,
-    sparse_index::SparseIndex,
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
 use crate::arrow::root::CURRENT_VERSION;
+use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
 use crate::BlockfileError;
@@ -52,9 +52,7 @@ impl ArrowBlockfileWriter {
         root_manager: RootManager,
     ) -> Self {
         let initial_block = block_manager.create::<K, V>();
-        // TODO: we can update the constructor to take the initial block instead of having a seperate method
-        let sparse_index = SparseIndex::new(id);
-        sparse_index.add_initial_block(initial_block.id);
+        let sparse_index = SparseIndexWriter::new(id, initial_block.id);
         let root_writer = RootWriter::new(CURRENT_VERSION, id, sparse_index);
 
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
@@ -376,12 +374,11 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<(&'me str, K, V), Box<dyn ChromaError>> {
         let mut block_offset = 0;
         let mut block = None;
-        let sparse_index_len = self.root.sparse_index.data.lock().len();
+        let sparse_index_len = self.root.sparse_index.len();
         for i in 0..sparse_index_len {
-            let uuid = {
-                let data = self.root.sparse_index.data.lock();
-                *data.forward.iter().nth(i).unwrap().1
-            };
+            // This unwrap is safe because we are iterating over the sparse index
+            // within its len. The sparse index reader is immutable and cannot be modified
+            let uuid = *self.root.sparse_index.data.forward.iter().nth(i).unwrap().1;
             block = match self.get_block(uuid).await {
                 Ok(Some(block)) => Some(block),
                 Ok(None) => {
@@ -608,12 +605,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     // Count the total number of records.
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         let mut block_ids: Vec<Uuid> = vec![];
-        {
-            let lock_guard = self.root.sparse_index.data.lock();
-            let curr_iter = lock_guard.forward.iter();
-            for (_, block_id) in curr_iter {
-                block_ids.push(*block_id);
-            }
+        let curr_iter = self.root.sparse_index.data.forward.iter();
+        for (_, block_id) in curr_iter {
+            block_ids.push(*block_id);
         }
         // Preload all blocks in parallel using the load_blocks helper
         self.load_blocks(&block_ids).await;
