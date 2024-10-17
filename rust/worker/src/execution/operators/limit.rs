@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, sync::atomic};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -85,179 +85,118 @@ impl ChromaError for LimitError {
     }
 }
 
-// Sadly the std binary search cannot be directly used with async
-// The following implementation is based on std implementation
-#[async_trait]
-trait AsyncCmp<T, E>
-where
-    T: Sync,
-{
-    // Returns how `cursor` compares with target
-    async fn cmp(&self, cursor: &T) -> Result<Ordering, E>;
-    async fn locate(&self, sorted_elements: &[T]) -> Result<Result<usize, usize>, E> {
+// This struct aims to help scanning a number of elements from a fixed offset in the imaginary
+// segment where the log is compacted and the element in the mask is ignored.
+struct SkipScanner<'me> {
+    log_oids: &'me RoaringBitmap,
+    record_segment: &'me RecordSegmentReader<'me>,
+    mask: &'me RoaringBitmap,
+}
+
+impl<'me> SkipScanner<'me> {
+    // Find the rank of the target offset id in the imaginary segment
+    async fn joint_rank(&self, target: u32) -> Result<usize, LimitError> {
+        // # of elements strictly less than target in materialized log
+        let log_rank =
+            self.log_oids.rank(target) as usize - self.log_oids.contains(target) as usize;
+        // # of elements strictly less than target in the record segment
+        let record_rank = self
+            .record_segment
+            .get_offset_id_rank(target)
+            .await
+            .map_err(|_| LimitError::RecordSegmentReaderError)?;
+        // # of elements strictly less than target in the mask
+        let mask_rank = self.mask.rank(target) as usize - self.mask.contains(target) as usize;
+        Ok(log_rank + record_rank - mask_rank)
+    }
+
+    // Skip to the start in log and record segment
+    // The following implementation is based on std implementation
+    async fn skip_to_start(&self, skip: usize) -> Result<(usize, usize), LimitError> {
         use Ordering::*;
-        let mut size = sorted_elements.len();
-        if size == 0 {
-            return Ok(Err(0));
+        if skip == 0 {
+            return Ok((0, 0));
         }
-        let mut base = 0usize;
+
+        let mut size = self
+            .record_segment
+            .get_current_max_offset_id()
+            .load(atomic::Ordering::Relaxed)
+            .max(self.log_oids.max().unwrap_or(0));
+        if size == 0 {
+            return Ok((0, 0));
+        }
+
+        let mut base = 0;
         while size > 1 {
             let half = size / 2;
             let mid = base + half;
 
-            let cmp = self.cmp(&sorted_elements[mid]).await?;
+            let cmp = self.joint_rank(mid).await?.cmp(&skip);
             base = if cmp == Greater { base } else { mid };
             size -= half;
         }
 
-        Ok(match self.cmp(&sorted_elements[base]).await? {
-            Equal => Ok(base),
-            Less => Err(base + 1),
-            Greater => Err(base),
-        })
-    }
-}
-
-#[async_trait]
-trait AsyncPart<T, E>
-where
-    T: Sync,
-{
-    // Returns true on first partition
-    async fn pred(&self, cursor: &T) -> Result<bool, E>;
-}
-
-#[async_trait]
-impl<T, E, P> AsyncCmp<T, E> for P
-where
-    T: Sync,
-    P: AsyncPart<T, E> + Sync,
-{
-    async fn cmp(&self, cursor: &T) -> Result<Ordering, E> {
-        use Ordering::*;
-        if self.pred(cursor).await? {
-            Ok(Less)
-        } else {
-            Ok(Greater)
-        }
-    }
-}
-
-// This struct help to find the actual index of an offset id in the compact segment
-// given its index in an imaginary segment where the offset ids in the tombstone
-// has been removed.
-//
-// The given index must be less than the length of the imaginary segment.
-// The tombstone should be a sorted vec of (index, offset_id) tuples.
-// The offset ids in the tombstone must be present in the compact segment.
-struct CompactPart<'me> {
-    index: usize,
-    record_segment: &'me RecordSegmentReader<'me>,
-    tombstone: &'me Vec<(usize, u32)>,
-}
-
-#[async_trait]
-impl<'me> AsyncPart<(usize, u32), LimitError> for CompactPart<'me> {
-    async fn pred(&self, cursor: &(usize, u32)) -> Result<bool, LimitError> {
-        Ok(cursor.1
-            <= self
-                .record_segment
-                .get_offset_id_at_index(self.index + cursor.0)
+        Ok((
+            self.log_oids.rank(base) as usize - self.log_oids.contains(base) as usize,
+            self.record_segment
+                .get_offset_id_rank(base)
                 .await
-                .map_err(|_| LimitError::RecordSegmentReaderError)?)
+                .map_err(|_| LimitError::RecordSegmentReaderError)?,
+        ))
     }
-}
 
-impl<'me> CompactPart<'me> {
-    async fn partition_point(&self) -> Result<usize, LimitError> {
-        Ok(self
-            .locate(self.tombstone)
-            .await?
-            .unwrap_or_else(|index| index)
-            + self.index)
-    }
-}
+    // Skip to the start in the log and record segment, then scan for the specified number of offset ids
+    async fn skip_and_scan(
+        &self,
+        skip: usize,
+        mut fetch: usize,
+    ) -> Result<RoaringBitmap, LimitError> {
+        let record_count = self
+            .record_segment
+            .count()
+            .await
+            .map_err(|_| LimitError::RecordSegmentReaderError)?;
+        let (mut log_index, mut record_index) = self.skip_to_start(skip).await?;
+        let mut merged_result = Vec::new();
 
-// This struct helps to find the starting indexes in both log and compact segment
-// given a number of smallest offset ids to skip and the tombstone of
-// offset ids that should be ignored in the compact segment.
-//
-// The tombstone should be a sorted vec of (index, offset_id) tuples.
-// The offset ids in the tombstone must be present in the compact segment.
-struct SkipCmp<'me> {
-    skip: usize,
-    sorted_log_oids: &'me Vec<(usize, u32)>,
-    record_count: usize,
-    record_segment: &'me RecordSegmentReader<'me>,
-    tombstone: &'me Vec<(usize, u32)>,
-}
-
-#[async_trait]
-impl<'me> AsyncCmp<(usize, u32), LimitError> for SkipCmp<'me> {
-    async fn cmp(&self, cursor: &(usize, u32)) -> Result<Ordering, LimitError> {
-        use Ordering::*;
-        let (log_index, _) = cursor;
-        if log_index + 1 < self.sorted_log_oids.len() && self.skip > *log_index {
-            let compact_part = CompactPart {
-                index: self.skip - log_index - 1,
-                record_segment: self.record_segment,
-                tombstone: self.tombstone,
-            };
-            if self.sorted_log_oids[log_index + 1].1
-                < self
-                    .record_segment
-                    .get_offset_id_at_index(compact_part.partition_point().await?)
+        while fetch > 0 {
+            let log_oid = self.log_oids.select(log_index as u32);
+            let record_oid = (record_index < record_count).then_some(
+                self.record_segment
+                    .get_offset_id_at_index(record_index)
                     .await
-                    .map_err(|_| LimitError::RecordSegmentReaderError)?
-            {
-                return Ok(Less);
-            }
-        } else if 0 < *log_index && self.skip + 1 < self.record_count + log_index {
-            let compact_part = CompactPart {
-                index: self.skip - log_index + 1,
-                record_segment: self.record_segment,
-                tombstone: self.tombstone,
+                    .map_err(|_| LimitError::RecordSegmentReaderError)?,
+            );
+            match (log_oid, record_oid) {
+                (_, Some(oid)) if self.mask.contains(oid) => {
+                    record_index += 1;
+                    continue;
+                }
+                (Some(l), Some(r)) => {
+                    if l < r {
+                        merged_result.push(l);
+                        log_index += 1;
+                    } else {
+                        merged_result.push(r);
+                        record_index += 1;
+                    }
+                }
+                (None, Some(oid)) => {
+                    merged_result.push(oid);
+                    record_index += 1;
+                }
+                (Some(oid), None) => {
+                    merged_result.push(oid);
+                    log_index += 1;
+                }
+                _ => {}
             };
-            if self
-                .record_segment
-                .get_offset_id_at_index(compact_part.partition_point().await?)
-                .await
-                .map_err(|_| LimitError::RecordSegmentReaderError)?
-                < self.sorted_log_oids[log_index - 1].1
-            {
-                return Ok(Greater);
-            }
+            fetch -= 1;
         }
-        Ok(Equal)
-    }
-}
 
-impl<'me> SkipCmp<'me> {
-    async fn skip_start(&self) -> Result<(usize, usize), LimitError> {
-        let log_start = if self.skip > 0
-            && self.record_count > self.tombstone.len()
-            && !self.sorted_log_oids.is_empty()
-        {
-            // The binary search can only be performed when both log and compact segment are not empty.
-            self.locate(self.sorted_log_oids)
-                .await?
-                .unwrap_or_else(|index| index)
-        } else if self.record_count == self.tombstone.len() {
-            self.skip
-        } else {
-            0
-        };
-        let compact_start = if self.record_count > self.tombstone.len() {
-            let compact_part = CompactPart {
-                index: self.skip - log_start,
-                record_segment: self.record_segment,
-                tombstone: self.tombstone,
-            };
-            compact_part.partition_point().await?
-        } else {
-            0
-        };
-        Ok((log_start, compact_start))
+        Ok(RoaringBitmap::from_sorted_iter(merged_result)
+            .expect("Merged offset ids should be sorted"))
     }
 }
 
@@ -341,59 +280,24 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
             }
             Exclude(rbm) => {
                 if let Some(reader) = record_segment_reader.as_ref() {
-                    let compact_count = reader
+                    let record_count = reader
                         .count()
                         .await
                         .map_err(|_| LimitError::RecordSegmentReaderError)?;
                     let log_count = materialized_log_oids.len() as usize;
-                    let filter_match_count = log_count + compact_count - rbm.len() as usize;
+                    let filter_match_count = log_count + record_count - rbm.len() as usize;
                     let truncated_skip = (input.skip as usize).min(filter_match_count);
-
-                    let log_oid_sorted_vec =
-                        materialized_log_oids.into_iter().enumerate().collect();
-                    let tombstone = rbm.iter().enumerate().collect();
-
-                    let skip_cmp = SkipCmp {
-                        skip: truncated_skip,
-                        sorted_log_oids: &log_oid_sorted_vec,
-                        record_count: compact_count,
-                        record_segment: reader,
-                        tombstone: &tombstone,
-                    };
-
-                    let (mut log_index, mut compact_index) = skip_cmp.skip_start().await?;
-                    let mut truncated_fetch = (input.fetch.unwrap_or(u32::MAX) as usize)
+                    let truncated_fetch = (input.fetch.unwrap_or(u32::MAX) as usize)
                         .min(filter_match_count - truncated_skip);
 
-                    let mut merged_result = Vec::new();
-                    while truncated_fetch > 0
-                        && (log_index < log_count || compact_index < compact_count)
-                    {
-                        if compact_index == compact_count {
-                            merged_result.push(log_oid_sorted_vec[log_index].1);
-                            log_index += 1;
-                        } else {
-                            let compact_oid = reader
-                                .get_offset_id_at_index(compact_index)
-                                .await
-                                .map_err(|_| LimitError::RecordSegmentReaderError)?;
-                            if rbm.contains(compact_oid) {
-                                compact_index += 1;
-                                continue;
-                            } else if log_index < log_count
-                                && log_oid_sorted_vec[log_index].1 < compact_oid
-                            {
-                                merged_result.push(log_oid_sorted_vec[log_index].1);
-                                log_index += 1;
-                            } else {
-                                merged_result.push(compact_oid);
-                                compact_index += 1;
-                            }
-                        }
-                        truncated_fetch -= 1;
-                    }
-                    RoaringBitmap::from_sorted_iter(merged_result)
-                        .expect("Merged offset ids should be sorted")
+                    let skip_scanner = SkipScanner {
+                        log_oids: &materialized_log_oids,
+                        record_segment: reader,
+                        mask: rbm,
+                    };
+                    skip_scanner
+                        .skip_and_scan(truncated_skip, truncated_fetch)
+                        .await?
                 } else {
                     materialized_log_oids.remove_smallest(input.skip as u64);
                     if let Some(take_count) = input.fetch {

@@ -5,6 +5,7 @@ use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
@@ -831,6 +832,36 @@ impl RecordSegmentReader<'_> {
                 Err(e)
             }
         }
+    }
+
+    // Find the rank of the given offset id in the record segment
+    // The implemention is based on std binary search
+    pub(crate) async fn get_offset_id_rank(
+        &self,
+        target: u32,
+    ) -> Result<usize, Box<dyn ChromaError>> {
+        use Ordering::*;
+        let mut size = self.count().await?;
+        if size == 0 {
+            return Ok(0);
+        }
+        let mut base = 0;
+        while size > 1 {
+            let half = size / 2;
+            let mid = base + half;
+
+            let cmp = self.get_offset_id_at_index(mid).await?.cmp(&target);
+            base = if cmp == Greater { base } else { mid };
+            size -= half;
+        }
+
+        Ok(
+            match self.get_offset_id_at_index(base).await?.cmp(&target) {
+                Equal => base,
+                Less => base + 1,
+                Greater => base,
+            },
+        )
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
