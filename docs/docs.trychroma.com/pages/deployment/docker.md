@@ -269,3 +269,112 @@ chromaClient.heartbeat()
 
 {% /tab %}
 {% /tabs %}
+
+## Observability with Docker
+
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
+
+Tracing is configured with four environment variables:
+
+- `CHROMA_OTEL_COLLECTION_ENDPOINT`: where to send observability data. Example: `api.honeycomb.com`.
+- `CHROMA_OTEL_SERVICE_NAME`: Service name for OTel traces. Default: `chromadb`.
+- `CHROMA_OTEL_COLLECTION_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
+- `CHROMA_OTEL_GRANULARITY`: A value from the [OpenTelemetryGranularity enum](https://github.com/chroma-core/chroma/tree/main/chromadb/telemetry/opentelemetry/__init__.py). Specifies how detailed tracing should be.
+
+Here is an example of how to create an observability stack with Docker-Compose. The stack is composed of a Chroma server, an [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector), and [Zipkin](https://zipkin.io/).
+
+Set the values for the observability and [authentication](/deployment/docker#authentication-with-docker) environment variables to suit your needs.
+
+Create the following `otel-collector-config.yaml`:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+  zipkin:
+    endpoint: "http://zipkin:9411/api/v2/spans"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [zipkin, debug]
+```
+
+This is the configuration file for the OpenTelemetry Collector:
+* The `recievers` section specifies that the OpenTelemetry protocol (OTLP) will be used to receive data over GRPC and HTTP.
+* `exporters` defines that telemetry data is logged to the console (`debug`), and sent to a `zipkin` server (defined bellow in `docker-compose.yml`).
+* The `service` section ties everything together, defining a `traces` pipeline receiving data through our `otlp` receiver and exporting data to `zipkin` and via logging.
+
+Create the following `docker-compose.yml`:
+
+```yaml
+version: '3.9'
+networks:
+  net:
+
+services:
+  zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "9411:9411"
+    depends_on: [otel-collector]
+    networks:
+      - net
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ${PWD}/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"  # OTLP
+      - "4318:4318"
+      - "55681:55681" # Legacy
+    networks:
+      - net
+  server:
+    image: ghcr.io/chroma-core/chroma:0.5.13
+    volumes:
+      - index_data:/index_data
+    ports:
+      - "8000:8000"
+    networks:
+      - net
+    environment:
+      - CHROMA_SERVER_AUTHN_PROVIDER=${CHROMA_SERVER_AUTHN_PROVIDER}
+      - CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=${CHROMA_SERVER_AUTHN_CREDENTIALS_FILE}
+      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMA_SERVER_AUTHN_CREDENTIALS}
+      - CHROMA_OTEL_COLLECTION_ENDPOINT=http://otel-collector:4317/
+      - CHROMA_OTEL_EXPORTER_HEADERS=${CHROMA_OTEL_EXPORTER_HEADERS:-{}}
+      - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME:-chroma}
+      - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY:-all}
+    depends_on:
+      - otel-collector
+      - zipkin
+
+
+volumes:
+  index_data:
+    driver: local
+  backups:
+    driver: local
+```
+
+To start the stack, run from the root of the repo:
+
+```bash
+docker compose up --build -d
+```
+
+Once the stack is running, you can access Zipkin at http://localhost:9411 when running locally to see your traces.
+
+{% note type="tip" title="Traces" %}
+Traces in Zipkin will start appearing after you make a request to Chroma.
+{% /note %}

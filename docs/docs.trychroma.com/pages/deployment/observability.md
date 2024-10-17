@@ -20,27 +20,17 @@ Tracing is configured with four environment variables:
 
 - `CHROMA_OTEL_COLLECTION_ENDPOINT`: where to send observability data. Example: `api.honeycomb.com`.
 - `CHROMA_OTEL_SERVICE_NAME`: Service name for OTel traces. Default: `chromadb`.
-- `CHROMA_OTEL_COLLECTION_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys.
+- `CHROMA_OTEL_COLLECTION_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
 - `CHROMA_OTEL_GRANULARITY`: A value from the [OpenTelemetryGranularity enum](https://github.com/chroma-core/chroma/tree/main/chromadb/telemetry/opentelemetry/__init__.py). Specifies how detailed tracing should be.
 
-## Local Observability Stack (🐳👀📚)
-
-Chroma also comes with a local observability stack. The stack is composed of Chroma Server (the one you know and ❤️), [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector), and [Zipkin](https://zipkin.io/).
-
-To start the stack, run from the root of the repo:
-
-```bash
-docker compose -f examples/observability/docker-compose.local-observability.yml up --build -d
-```
-
-Once the stack is running, you can access Zipkin at http://localhost:9411
-
-{% note type="tip" title="Traces" %}
-Traces in Zipkin will start appearing after you make a request to Chroma.
-{% /note %}
+We also have dedicated observability guides for various deployments:
+* [Docker](/deployment/docker#observability-with-docker)
+* [AWS](/deployment/aws#observability-with-AWS)
+* [GCP](/deployment/gcp#observability-with-GCP)
+* [Azure](/deployment/azure#observability-with-Azure)
 
 ## Client (SDK) Observability
 
-See
+Several observability platforms offer built-in integrations for Chroma, allowing you to monitor your application's interactions with the Chroma server:
 - [OpenLLMetry Integration](/integrations/openllmetry).
 - [OpenLIT Integration](/integrations/openlit).

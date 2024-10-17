@@ -22,7 +22,7 @@ If you are using Chroma in production, please fill out [this form](https://airta
 ### Cloud Providers
 
 * [AWS](/deployment/aws)
-* GCP - Coming Soon!
+* [GCP](/deployment/gcp)
 * Azure - Coming Soon!
 
 ***
@@ -34,4 +34,4 @@ Running a server in production requires a few additional steps to ensure the ser
 * [🚀 Performance](/deployment/performance)
 * [👀 Observability](/deployment/observability)
 * [✈️ Migration](/deployment/migration)
-* [🔒 Auth](/deployment/auth)                   |
+* [🔒 Auth](/deployment/auth)

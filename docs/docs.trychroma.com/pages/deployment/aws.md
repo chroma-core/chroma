@@ -276,6 +276,27 @@ chromaClient.heartbeat()
 {% /tab %}
 {% /tabs %}
 
+## Observability with AWS
+
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
+
+Tracing is configured with four environment variables:
+
+- `CHROMA_OTEL_COLLECTION_ENDPOINT`: where to send observability data. Example: `api.honeycomb.com`.
+- `CHROMA_OTEL_SERVICE_NAME`: Service name for OTel traces. Default: `chromadb`.
+- `CHROMA_OTEL_COLLECTION_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
+- `CHROMA_OTEL_GRANULARITY`: A value from the [OpenTelemetryGranularity enum](https://github.com/chroma-core/chroma/tree/main/chromadb/telemetry/opentelemetry/__init__.py). Specifies how detailed tracing should be.
+
+To enable tracing on your Chroma server, simply pass your desired values as parameters when creating your Cloudformation stack:
+
+```shell
+aws cloudformation create-stack --stack-name my-chroma-stack --template-url https://s3.amazonaws.com/public.trychroma.com/cloudformation/latest/chroma.cf.json \
+ --parameters ParameterKey=ChromaOtelCollectionEndpoint,ParameterValue="api.honeycomb.com" \
+ ParameterKey=ChromaOtelServiceName,ParameterValue="chromadb" \
+ ParameterKey=ChromaOtelCollectionHeaders,ParameterValue="{'x-honeycomb-team': 'abc'}" \
+ ParameterKey=ChromaOtelGranularity,ParameterValue="all" \
+```
+
 ## Troubleshooting
 
 #### Error: No default VPC for this user
