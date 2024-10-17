@@ -19,6 +19,7 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
+use tracing::span::Id;
 use uuid::Uuid;
 
 pub(super) const CURRENT_VERSION: Version = Version::V1_1;
@@ -352,12 +353,10 @@ impl RootReader {
             counts = Some(count_arr);
         }
 
-        let sparse_index_len = prefix_arr.len();
         let mut forward = BTreeMap::new();
-        for i in 0..sparse_index_len {
+        for (i, block_id) in ids.iter().enumerate() {
             let prefix = prefix_arr.value(i);
-            let key = K::get(key_arr, i);
-            let block_id = ids[i];
+            let key: K = K::get(key_arr, i);
 
             let count = match counts {
                 Some(count_arr) => count_arr.value(i),
@@ -368,13 +367,13 @@ impl RootReader {
                 "START" => {
                     forward.insert(
                         SparseIndexDelimiter::Start,
-                        SparseIndexValue::new(block_id, count),
+                        SparseIndexValue::new(*block_id, count),
                     );
                 }
                 _ => {
                     forward.insert(
                         SparseIndexDelimiter::Key(CompositeKey::new(prefix.to_string(), key)),
-                        SparseIndexValue::new(block_id, count),
+                        SparseIndexValue::new(*block_id, count),
                     );
                 }
             }
