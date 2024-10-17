@@ -547,6 +547,8 @@ class FastAPI(Server):
             None,
         )
 
+        add_attributes_to_current_span({"tenant": tenant})
+
         api_collection_models = cast(
             Sequence[CollectionModel],
             await to_thread.run_sync(
@@ -575,6 +577,8 @@ class FastAPI(Server):
             database_name,
             None,
         )
+
+        add_attributes_to_current_span({"tenant": tenant})
 
         return cast(
             int,
@@ -611,6 +615,8 @@ class FastAPI(Server):
                 database,
                 create.name,
             )
+
+            add_attributes_to_current_span({"tenant": tenant})
 
             return self._api.create_collection(
                 name=create.name,
@@ -650,6 +656,8 @@ class FastAPI(Server):
             collection_name,
         )
 
+        add_attributes_to_current_span({"tenant": tenant})
+
         api_collection_model = cast(
             CollectionModel,
             await to_thread.run_sync(
@@ -683,6 +691,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
@@ -712,6 +721,7 @@ class FastAPI(Server):
             database_name,
             collection_name,
         )
+        add_attributes_to_current_span({"tenant": tenant})
 
         await to_thread.run_sync(
             self._api.delete_collection,
@@ -741,6 +751,7 @@ class FastAPI(Server):
                     database_name,
                     collection_id,
                 )
+                add_attributes_to_current_span({"tenant": tenant})
                 return self._api._add(
                     collection_id=_uuid(collection_id),
                     ids=add.ids,
@@ -786,6 +797,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._update(
                 collection_id=_uuid(collection_id),
@@ -824,6 +836,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._upsert(
                 collection_id=_uuid(collection_id),
@@ -864,6 +877,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            add_attributes_to_current_span({"tenant": tenant})
             return self._api._get(
                 collection_id=_uuid(collection_id),
                 ids=get.ids,
@@ -911,6 +925,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            add_attributes_to_current_span({"tenant": tenant})
             return self._api._delete(
                 collection_id=_uuid(collection_id),
                 ids=delete.ids,
@@ -940,6 +955,7 @@ class FastAPI(Server):
             database_name,
             collection_id,
         )
+        add_attributes_to_current_span({"tenant": tenant})
 
         return cast(
             int,
@@ -990,6 +1006,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._query(
                 collection_id=_uuid(collection_id),
