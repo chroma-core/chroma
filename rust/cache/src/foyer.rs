@@ -5,8 +5,9 @@ use std::time::Duration;
 use chroma_error::ChromaError;
 use clap::Parser;
 use foyer::{
-    CacheBuilder, DirectFsDeviceOptionsBuilder, FifoConfig, HybridCacheBuilder, InvalidRatioPicker,
-    LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig, StorageKey, StorageValue, TracingConfig,
+    CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
+    InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
+    StorageKey, StorageValue, TracingOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -240,20 +241,15 @@ where
     pub async fn hybrid(
         config: &FoyerCacheConfig,
     ) -> Result<FoyerHybridCache<K, V>, Box<dyn ChromaError>> {
-        let tracing_config = TracingConfig::default();
-        tracing_config
-            .set_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _));
-        tracing_config
-            .set_record_hybrid_get_threshold(Duration::from_micros(config.trace_get_us as _));
-        tracing_config
-            .set_record_hybrid_obtain_threshold(Duration::from_micros(config.trace_obtain_us as _));
-        tracing_config
-            .set_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _));
-        tracing_config
-            .set_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
+        let tracing_options = TracingOptions::new()
+            .with_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _))
+            .with_record_hybrid_get_threshold(Duration::from_micros(config.trace_get_us as _))
+            .with_record_hybrid_obtain_threshold(Duration::from_micros(config.trace_obtain_us as _))
+            .with_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _))
+            .with_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
 
         let builder = HybridCacheBuilder::<K, V>::new()
-            .with_tracing_config(tracing_config)
+            .with_tracing_options(tracing_options)
             .memory(config.mem * MIB)
             .with_shards(config.shards);
 
@@ -278,21 +274,24 @@ where
 
         let mut builder = builder
             .with_weighter(|_, v| v.weight())
-            .storage()
-            .with_device_config(
-                DirectFsDeviceOptionsBuilder::new(dir)
+            .storage(Engine::Large)
+            .with_device_options(
+                DirectFsDeviceOptions::new(dir)
                     .with_capacity(config.disk * MIB)
-                    .with_file_size(config.file_size * MIB)
-                    .build(),
+                    .with_file_size(config.file_size * MIB),
             )
             .with_flush(config.flush)
-            .with_indexer_shards(config.shards)
-            .with_recover_concurrency(config.recover_concurrency)
-            .with_flushers(config.flushers)
-            .with_reclaimers(config.reclaimers)
-            .with_eviction_pickers(vec![Box::new(InvalidRatioPicker::new(
-                config.invalid_ratio,
-            ))]);
+            .with_large_object_disk_cache_options(
+                LargeEngineOptions::new()
+                    .with_indexer_shards(config.shards)
+                    .with_recover_concurrency(config.recover_concurrency)
+                    .with_flushers(config.flushers)
+                    .with_reclaimers(config.reclaimers)
+                    .with_eviction_pickers(vec![
+                        Box::new(InvalidRatioPicker::new(config.invalid_ratio)),
+                        Box::new(FifoPicker::default()),
+                    ]),
+            );
 
         if config.admission_rate_limit > 0 {
             builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
@@ -357,18 +356,6 @@ where
     pub async fn memory(
         config: &FoyerCacheConfig,
     ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
-        let tracing_config = TracingConfig::default();
-        tracing_config
-            .set_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _));
-        tracing_config
-            .set_record_hybrid_get_threshold(Duration::from_micros(config.trace_get_us as _));
-        tracing_config
-            .set_record_hybrid_obtain_threshold(Duration::from_micros(config.trace_obtain_us as _));
-        tracing_config
-            .set_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _));
-        tracing_config
-            .set_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
-
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
             .build();
@@ -405,18 +392,6 @@ where
             }
         }
         let evl = TokioEventListener(tx, std::marker::PhantomData);
-
-        let tracing_config = TracingConfig::default();
-        tracing_config
-            .set_record_hybrid_insert_threshold(Duration::from_micros(config.trace_insert_us as _));
-        tracing_config
-            .set_record_hybrid_get_threshold(Duration::from_micros(config.trace_get_us as _));
-        tracing_config
-            .set_record_hybrid_obtain_threshold(Duration::from_micros(config.trace_obtain_us as _));
-        tracing_config
-            .set_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _));
-        tracing_config
-            .set_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
 
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
