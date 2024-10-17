@@ -9,7 +9,7 @@ def test_rendezvous_hash() -> None:
     def mock_hasher(member: str, key: str) -> int:
         return members.index(member)  # Highest index wins
 
-    assert assign(key, members, mock_hasher) == "c"
+    assert assign(key, members, mock_hasher, 1)[0] == "c"
 
 
 def test_even_distribution() -> None:
@@ -22,7 +22,7 @@ def test_even_distribution() -> None:
     num_keys = 1000
     for i in range(num_keys):
         key = f"key_{i}"
-        node = assign(key, nodes, murmur3hasher)
+        node = assign(key, nodes, murmur3hasher, 1)[0]
         key_distribution[node] += 1
 
     # Check if keys are somewhat evenly distributed
