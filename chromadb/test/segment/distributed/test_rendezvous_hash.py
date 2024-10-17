@@ -28,3 +28,27 @@ def test_even_distribution() -> None:
     # Check if keys are somewhat evenly distributed
     for node in nodes:
         assert abs(key_distribution[node] - num_keys / len(nodes)) < tolerance
+
+
+def test_multi_assign_even_distribution() -> None:
+    member_count = 10
+    tolerance = 75
+    nodes = [str(i) for i in range(member_count)]
+
+    # Test if keys are evenly distributed across nodes
+    key_distribution = {node: 0 for node in nodes}
+    num_keys = 10000
+    replication = 3
+    for i in range(num_keys):
+        key = f"key_{i}"
+        nodes_assigned = assign(key, nodes, murmur3hasher, replication)
+        # Should be three unique nodes
+        assert len(set(nodes_assigned)) == replication
+        for node in nodes_assigned:
+            key_distribution[node] += 1
+
+    # Check if keys are somewhat evenly distributed
+    for node in nodes:
+        # 3k keys expected for each node (10000 keys / 10 nodes * 3 replication)
+        expected = num_keys / len(nodes) * replication
+        assert abs(key_distribution[node] - expected) < tolerance
