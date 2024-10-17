@@ -6,7 +6,8 @@ use super::{
 use crate::{arrow::sparse_index::SparseIndexDelimiter, key::CompositeKey};
 use arrow::{
     array::{
-        Array, BinaryArray, BinaryBuilder, RecordBatch, StringArray, UInt32Array, UInt32Builder,
+        Array, BinaryArray, BinaryBuilder, RecordBatch, StringArray, StringBuilder, UInt32Array,
+        UInt32Builder,
     },
     datatypes::{DataType, Field, Schema},
 };
@@ -85,18 +86,32 @@ impl RootWriter {
         }
     }
 
-    fn ids_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (BinaryArray, Field) {
-        let mut ids_builder = BinaryBuilder::new();
-        for (_, value) in sparse_index_data.forward.iter() {
-            ids_builder.append_value(value.into_bytes());
+    fn ids_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (Arc<dyn Array>, Field) {
+        if self.version == Version::V1 {
+            let mut ids_builder = StringBuilder::new();
+            for (_, value) in sparse_index_data.forward.iter() {
+                ids_builder.append_value(value.to_string());
+            }
+            (
+                Arc::new(ids_builder.finish()),
+                Field::new("id", DataType::Utf8, false),
+            )
+        } else {
+            let mut ids_builder = BinaryBuilder::new();
+            for (_, value) in sparse_index_data.forward.iter() {
+                ids_builder.append_value(value.into_bytes());
+            }
+            (
+                Arc::new(ids_builder.finish()),
+                Field::new("id", DataType::Binary, false),
+            )
         }
-        (
-            ids_builder.finish(),
-            Field::new("id", DataType::Binary, false),
-        )
     }
 
-    fn counts_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (UInt32Array, Field) {
+    fn counts_as_arrow(
+        &self,
+        sparse_index_data: &SparseIndexWriterData,
+    ) -> (Arc<dyn Array>, Field) {
         let mut count_builder = UInt32Builder::new();
         // We assume the count is always set, so if upgrading from V1 to V1.1 we will always have
         // a count
@@ -104,7 +119,7 @@ impl RootWriter {
             count_builder.append_value(*value);
         }
         (
-            count_builder.finish(),
+            Arc::new(count_builder.finish()),
             Field::new("count", DataType::UInt32, false),
         )
     }
@@ -154,13 +169,13 @@ impl RootWriter {
         data_arrays.push(Arc::new(key_arr));
         let (built_ids, id_field) = self.ids_as_arrow(&sparse_index_data);
         schema_fields.push(id_field);
-        data_arrays.push(Arc::new(built_ids));
+        data_arrays.push(built_ids);
 
         // MIGRATION(10/16/2024 @hammadb) -> Only RootWriter >= V1_1 will write a count field
         if self.version >= Version::V1_1 {
             let (built_counts, count_field) = self.counts_as_arrow(&sparse_index_data);
             schema_fields.push(count_field);
-            data_arrays.push(Arc::new(built_counts));
+            data_arrays.push(built_counts);
         }
 
         let metadata = HashMap::from_iter(vec![
@@ -301,12 +316,31 @@ impl RootReader {
         // The sparse index copies the data so it can live as long as it needs to independently
         let record_batch: &'data RecordBatch = unsafe { std::mem::transmute(&record_batch) };
         let key_arr = record_batch.column(1);
-        let id_arr = record_batch
-            .column(2)
-            .as_any()
-            .downcast_ref::<BinaryArray>()
-            .expect("ID array to be a BinaryArray");
+        let mut ids: Vec<uuid::Uuid> = Vec::new();
+        // Versions after V1 store uuid as bytes
+        if version == Version::V1 {
+            let id_array = record_batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("ID array to be a StringArray");
 
+            for i in 0..id_array.len() {
+                let id = Uuid::parse_str(id_array.value(i)).expect("ID to be a valid UUID");
+                ids.push(id);
+            }
+        } else {
+            let id_arr = record_batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("ID array to be a BinaryArray");
+
+            for i in 0..id_arr.len() {
+                let id = Uuid::from_slice(id_arr.value(i)).expect("ID to be a valid UUID");
+                ids.push(id);
+            }
+        }
         // Version 1.1 is the first version to have a count column
         let mut counts = None;
         if version >= Version::V1_1 {
@@ -323,10 +357,7 @@ impl RootReader {
         for i in 0..sparse_index_len {
             let prefix = prefix_arr.value(i);
             let key = K::get(key_arr, i);
-            let block_id = match Uuid::from_slice(id_arr.value(i)) {
-                Ok(block_id) => block_id,
-                Err(e) => return Err(FromBytesError::UuidParseError(e)),
-            };
+            let block_id = ids[i];
 
             let count = match counts {
                 Some(count_arr) => count_arr.value(i),
