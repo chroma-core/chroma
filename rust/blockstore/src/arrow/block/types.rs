@@ -1,6 +1,7 @@
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::collections::HashMap;
 use std::io::SeekFrom;
+use std::ops::{Bound, RangeBounds};
 
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
 use arrow::array::ArrayData;
@@ -118,8 +119,59 @@ impl Block {
         delta
     }
 
+    /// Binary search the block to find the last index of the specified prefix.
+    /// Returns None if prefix does not exist in the block.
+    ///
+    /// Partly based on `std::slice::binary_search_by`: https://doc.rust-lang.org/src/core/slice/mod.rs.html#2770
+    #[inline]
+    fn binary_search_last_index(&self, prefix: &str) -> Option<usize> {
+        let mut size = self.len();
+        if size == 0 {
+            return None;
+        }
+
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut base = self.len() - 1;
+
+        // This loop intentionally doesn't have an early exit if the comparison
+        // returns Equal. We want the number of loop iterations to depend *only*
+        // on the size of the input slice so that the CPU can reliably predict
+        // the loop count.
+        while size > 1 {
+            let half = size / 2;
+            let mid = base - half;
+
+            // SAFETY: the call is made safe by the following inconstants:
+            // - `mid < size`: by definition
+            // - `mid >= 0`: `mid = size - 1 - size / 2 - size / 4 ...`
+            let cmp = prefix_array.value(mid).cmp(prefix);
+
+            base = if cmp == Greater { mid } else { base };
+            size -= half;
+        }
+
+        // SAFETY: `base` is always in [0, size) because `base < size` by init.
+        // `base` should be the last index where the element matches the target prefix,
+        // or 0 if the first element is already larger than the target prefix.
+        match prefix_array.value(base).cmp(prefix) {
+            Less => None,
+            Equal => Some(base),
+            Greater => {
+                if base > 0 && prefix_array.value(base - 1) == prefix {
+                    Some(base - 1)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     /// Binary search the blockfile to find the partition point of the specified prefix and key.
-    /// The implementation is based on [`std::slice::partition_point`].
     ///
     /// `(prefix, key)` serves as the search key, and it is sorted in ascending order.
     /// The partition predicate is defined by: `|x| x < (prefix, key)`.
@@ -127,7 +179,7 @@ impl Block {
     /// The code is a result of inlining this predicate in [`std::slice::partition_point`].
     /// If the key is unspecified (i.e. `None`), we find the first index of the prefix.
     ///
-    /// [`std::slice::partition_point`]: std::slice::partition_point
+    /// Partly based on `std::slice::binary_search_by`: https://doc.rust-lang.org/src/core/slice/mod.rs.html#2770
     #[inline]
     fn binary_search_index<'me, K: ArrowReadableKey<'me>>(
         &'me self,
@@ -214,32 +266,6 @@ impl Block {
             )
     }
 
-    #[inline]
-    fn scan_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        range: impl Iterator<Item = usize>,
-    ) -> Vec<(K, V)> {
-        let prefix_array = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .expect("The prefix array should be a string arrary.");
-        let mut result = Vec::new();
-        for index in range {
-            if prefix_array.value(index) == prefix {
-                result.push((
-                    K::get(self.data.column(1), index),
-                    V::get(self.data.column(2), index),
-                ));
-            } else {
-                break;
-            }
-        }
-        result
-    }
-
     /*
         ===== Block Queries =====
     */
@@ -260,80 +286,75 @@ impl Block {
         }
     }
 
-    /// Get all the values for a given prefix in the block
+    /// Get all the values for a given prefix & key range in the block
     /// ### Panics
     /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+    /// - If at least one end of the prefix range is excluded (currently unsupported)
+    pub fn get_range<
+        'prefix,
+        'me,
+        K: ArrowReadableKey<'me>,
+        V: ArrowReadableValue<'me>,
+        PrefixRange,
+        KeyRange,
+    >(
         &'me self,
-        prefix: &str,
-    ) -> Vec<(K, V)> {
-        self.scan_prefix(
-            prefix,
-            self.binary_search_index(prefix, Option::<&K>::None)..self.len(),
-        )
-    }
-
-    /// Get all the values for a given prefix in the block where the key is greater than the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_gt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        let index = self.binary_search_index(prefix, Some(&key));
-        if self.match_prefix_key_at_index(prefix, &key, index) {
-            self.scan_prefix(prefix, index + 1..self.len())
-        } else {
-            self.scan_prefix(prefix, index..self.len())
-        }
-    }
-
-    /// Get all the values for a given prefix in the block where the key is greater than or equal to the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_gte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        self.scan_prefix(
-            prefix,
-            self.binary_search_index(prefix, Some(&key))..self.len(),
-        )
-    }
-
-    /// Get all the values for a given prefix in the block where the key is less than the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_lt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        let mut result = self.scan_prefix(
-            prefix,
-            (0..self.binary_search_index(prefix, Some(&key))).rev(),
-        );
-        result.reverse();
-        result
-    }
-
-    /// Get all the values for a given prefix in the block where the key is less than or equal to the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_lte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        let index = self.binary_search_index(prefix, Some(&key));
-        let mut result = if self.match_prefix_key_at_index(prefix, &key, index) {
-            self.scan_prefix(prefix, (0..=index).rev())
-        } else {
-            self.scan_prefix(prefix, (0..index).rev())
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> Vec<(K, V)>
+    where
+        PrefixRange: RangeBounds<&'prefix str>,
+        KeyRange: RangeBounds<K>,
+    {
+        let start_index = match prefix_range.start_bound() {
+            Bound::Included(prefix) => match key_range.start_bound() {
+                Bound::Included(key) => self.binary_search_index(prefix, Some(key)),
+                Bound::Excluded(key) => {
+                    let index = self.binary_search_index(prefix, Some(key));
+                    if self.match_prefix_key_at_index(prefix, key, index) {
+                        index + 1
+                    } else {
+                        index
+                    }
+                }
+                Bound::Unbounded => self.binary_search_index::<K>(prefix, None),
+            },
+            Bound::Excluded(_) => {
+                unimplemented!("Excluded prefix range is not currently supported")
+            }
+            Bound::Unbounded => 0,
         };
-        result.reverse();
+
+        let end_index = match prefix_range.end_bound() {
+            Bound::Included(prefix) => match key_range.end_bound() {
+                Bound::Included(key) => {
+                    let index = self.binary_search_index(prefix, Some(key));
+                    if self.match_prefix_key_at_index(prefix, key, index) {
+                        index + 1
+                    } else {
+                        index
+                    }
+                }
+                Bound::Excluded(key) => self.binary_search_index(prefix, Some(key)),
+                Bound::Unbounded => match self.binary_search_last_index(prefix) {
+                    Some(last_index_of_prefix) => last_index_of_prefix + 1, // (add 1 because end_index is exclusive below)
+                    None => start_index, // prefix does not exist in the block so we shouldn't return anything
+                },
+            },
+            Bound::Excluded(_) => {
+                unimplemented!("Excluded prefix range is not currently supported")
+            }
+            Bound::Unbounded => self.len(),
+        };
+
+        let mut result = Vec::new();
+
+        for index in start_index..end_index {
+            result.push((
+                K::get(self.data.column(1), index),
+                V::get(self.data.column(2), index),
+            ));
+        }
         result
     }
 
