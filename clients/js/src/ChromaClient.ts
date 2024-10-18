@@ -45,6 +45,10 @@ export class ChromaClient {
    * @ignore
    */
   private _initPromise: Promise<void> | undefined;
+  /**
+   * @ignore
+   */
+  private _checkedIdentity: boolean = false;
 
   /**
    * Creates a new ChromaClient instance.
@@ -96,8 +100,9 @@ export class ChromaClient {
 
   /** @ignore */
   async init(): Promise<void> {
-    if (this.authProvider !== undefined) {
+    if (this.authProvider !== undefined && !this._checkedIdentity) {
       await this.getUserIdentity();
+      this._checkedIdentity = true;
     }
 
     if (!this._initPromise) {

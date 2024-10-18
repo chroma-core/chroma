@@ -4,10 +4,13 @@ import subprocess
 import sys
 import tempfile
 from types import ModuleType
+from unittest.mock import patch
 
 from multiprocessing.connection import Connection
 
-from chromadb.config import Settings, System
+from chromadb.config import System
+from chromadb.test.conftest import _fastapi_fixture
+from chromadb.api import ServerAPI
 
 base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
@@ -81,12 +84,11 @@ def install(pkg: str, path: str) -> int:
     )
 
 
-def try_old_client(old_version: str, conn: Connection) -> None:
+def try_old_client(old_version: str, port: int, conn: Connection) -> None:
     try:
         old_module = switch_to_version(old_version)
-        api = old_module.HttpClient(
-            host="localhost",
-        )
+        with patch("chromadb.api.client.Client._validate_tenant_database"):
+            api = old_module.HttpClient(port=port)
 
         # Try a few operations and ensure they work
         col = api.get_or_create_collection(name="test")
@@ -102,8 +104,12 @@ def try_old_client(old_version: str, conn: Connection) -> None:
 
 def test_http_client_bw_compatibility() -> None:
     # Start the v2 server
-    system = System(Settings())
-    system.start()
+    api_fixture = _fastapi_fixture()
+    sys: System = next(api_fixture)
+    sys.reset_state()
+    api = sys.instance(ServerAPI)
+    api.heartbeat()
+    port = sys.settings.chroma_server_http_port
 
     old_version = "0.5.11"  # Module with known v1 client
     install_version(old_version)
@@ -112,7 +118,7 @@ def test_http_client_bw_compatibility() -> None:
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=try_old_client,
-        args=(old_version, conn2),
+        args=(old_version, port, conn2),
     )
     p.start()
     p.join()
