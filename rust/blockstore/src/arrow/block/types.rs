@@ -121,7 +121,8 @@ impl Block {
 
     /// Binary search the block to find the last index of the specified prefix.
     /// Returns None if prefix does not exist in the block.
-    /// [`std::slice::partition_point`]: std::slice::partition_point
+    ///
+    /// Partly based on `std::slice::binary_search_by`: https://doc.rust-lang.org/src/core/slice/mod.rs.html#2770
     #[inline]
     fn binary_search_last_index(&self, prefix: &str) -> Option<usize> {
         let mut size = self.len();
@@ -146,8 +147,8 @@ impl Block {
             let mid = base - half;
 
             // SAFETY: the call is made safe by the following inconstants:
-            // - `mid >= 0`: by definition
-            // - `mid < size`: `mid = size / 2 - size / 4 - size / 8 ...`
+            // - `mid < size`: by definition
+            // - `mid >= 0`: `mid = size - 1 - size / 2 - size / 4 ...`
             let cmp = prefix_array.value(mid).cmp(prefix);
 
             base = if cmp == Greater { mid } else { base };
@@ -171,7 +172,6 @@ impl Block {
     }
 
     /// Binary search the blockfile to find the partition point of the specified prefix and key.
-    /// The implementation is based on [`std::slice::partition_point`].
     ///
     /// `(prefix, key)` serves as the search key, and it is sorted in ascending order.
     /// The partition predicate is defined by: `|x| x < (prefix, key)`.
@@ -179,7 +179,7 @@ impl Block {
     /// The code is a result of inlining this predicate in [`std::slice::partition_point`].
     /// If the key is unspecified (i.e. `None`), we find the first index of the prefix.
     ///
-    /// [`std::slice::partition_point`]: std::slice::partition_point
+    /// Partly based on `std::slice::binary_search_by`: https://doc.rust-lang.org/src/core/slice/mod.rs.html#2770
     #[inline]
     fn binary_search_index<'me, K: ArrowReadableKey<'me>>(
         &'me self,
