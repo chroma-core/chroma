@@ -1,7 +1,7 @@
 import chromadb
 import chromadb.config
-from chromadb.server.fastapi.v1 import FastAPIWithV1
+from chromadb.server.fastapi import FastAPI
 
 settings = chromadb.config.Settings()
-server = FastAPIWithV1(settings)
+server = FastAPI(settings)
 app = server.app()
