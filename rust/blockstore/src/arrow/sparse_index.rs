@@ -1,5 +1,5 @@
 use super::types::ArrowReadableKey;
-use crate::key::{CompositeKey, KeyWrapper};
+use crate::key::CompositeKey;
 use chroma_error::ChromaError;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -361,19 +361,14 @@ impl SparseIndexReader {
         result_uuids
     }
 
-    pub(super) fn get_block_ids_range<
-        'prefix,
-        'a,
-        K: ArrowReadableKey<'a> + Into<KeyWrapper>,
-        PrefixRange,
-        KeyRange,
-    >(
+    pub(super) fn get_block_ids_range<'prefix, 'referred_data, K, PrefixRange, KeyRange>(
         &self,
         // These key ranges are flattened instead of using a single RangeBounds<CompositeKey> because not all keys have a well-defined min and max value. E.x. if the key is a string, there would be no way to get the range for all keys within a specific prefix.
         prefix_range: PrefixRange,
         key_range: KeyRange,
     ) -> Vec<Uuid>
     where
+        K: ArrowReadableKey<'referred_data>,
         PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
     {
