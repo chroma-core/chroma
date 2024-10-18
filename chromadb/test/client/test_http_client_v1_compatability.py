@@ -1,9 +1,4 @@
 import multiprocessing
-import os
-import subprocess
-import sys
-import tempfile
-from types import ModuleType
 from unittest.mock import patch
 
 from multiprocessing.connection import Connection
@@ -11,82 +6,14 @@ from multiprocessing.connection import Connection
 from chromadb.config import System
 from chromadb.test.conftest import _fastapi_fixture
 from chromadb.api import ServerAPI
-
-base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
+from chromadb.test.utils.cross_version import switch_to_version, install_version
 
 VERSIONED_MODULES = ["pydantic", "numpy"]
 
 
-def get_path_to_version_install(version: str) -> str:
-    return base_install_dir + "/" + version
-
-
-def switch_to_version(version: str) -> ModuleType:
-    module_name = "chromadb"
-    old_modules = {
-        n: m
-        for n, m in sys.modules.items()
-        if n == module_name
-        or (n.startswith(module_name + "."))
-        or n in VERSIONED_MODULES
-        or (any(n.startswith(m + ".") for m in VERSIONED_MODULES))
-    }
-    for n in old_modules:
-        del sys.modules[n]
-    # Load the target version and override the path to the installed version
-    # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    sys.path.insert(0, get_path_to_version_install(version))
-    import chromadb
-
-    assert chromadb.__version__ == version
-    return chromadb
-
-
-def get_path_to_version_library(version: str) -> str:
-    return get_path_to_version_install(version) + "/chromadb/__init__.py"
-
-
-def install_version(version: str) -> None:
-    # Check if already installed
-    version_library = get_path_to_version_library(version)
-    if os.path.exists(version_library):
-        return
-    path = get_path_to_version_install(version)
-    install(f"chromadb=={version}", path)
-
-
-def install(pkg: str, path: str) -> int:
-    # -q -q to suppress pip output to ERROR level
-    # https://pip.pypa.io/en/stable/cli/pip/#quiet
-    print("Purging pip cache")
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "cache",
-            "purge",
-        ]
-    )
-    print(f"Installing chromadb version {pkg} to {path}")
-    return subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "-q",
-            "-q",
-            "install",
-            pkg,
-            "--no-binary=chroma-hnswlib",
-            "--target={}".format(path),
-        ]
-    )
-
-
 def try_old_client(old_version: str, port: int, conn: Connection) -> None:
     try:
-        old_module = switch_to_version(old_version)
+        old_module = switch_to_version(old_version, VERSIONED_MODULES)
         settings = old_module.Settings()
         settings.chroma_server_http_port = port
         with patch("chromadb.api.client.Client._validate_tenant_database"):
