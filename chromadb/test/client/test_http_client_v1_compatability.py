@@ -87,8 +87,10 @@ def install(pkg: str, path: str) -> int:
 def try_old_client(old_version: str, port: int, conn: Connection) -> None:
     try:
         old_module = switch_to_version(old_version)
+        settings = old_module.Settings()
+        settings.chroma_server_http_port = port
         with patch("chromadb.api.client.Client._validate_tenant_database"):
-            api = old_module.HttpClient(port=port)
+            api = old_module.HttpClient(settings=settings, port=port)
 
         # Try a few operations and ensure they work
         col = api.get_or_create_collection(name="test")
