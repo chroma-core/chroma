@@ -10,6 +10,8 @@ from anyio import (
 )
 from fastapi import Request, Body
 from fastapi import HTTPException, status
+from fastapi.routing import APIRoute
+from fastapi import FastAPI as _FastAPI
 
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.types import (
@@ -48,6 +50,20 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.types import Collection as CollectionModel
+from chromadb.telemetry.opentelemetry.fastapi import instrument_fastapi
+from chromadb.telemetry.product import ProductTelemetryClient
+from chromadb.telemetry.product.events import ServerStartEvent
+
+
+def use_route_names_as_operation_ids(app: _FastAPI) -> None:
+    """
+    Simplify operation IDs so that generated API clients have simpler function
+    names.
+    Should be called only after all routes have been added.
+    """
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.operation_id = route.name
 
 
 class FastAPIWithV1(FastAPI):
@@ -55,6 +71,13 @@ class FastAPIWithV1(FastAPI):
         super().__init__(settings)
 
         self.setup_v1_routes()
+
+        self._app.include_router(self.router)
+
+        use_route_names_as_operation_ids(self._app)
+        instrument_fastapi(self._app)
+        telemetry_client = self._system.instance(ProductTelemetryClient)
+        telemetry_client.capture(ServerStartEvent())
 
     def setup_v1_routes(self) -> None:
         # =====================================================================
