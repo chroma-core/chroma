@@ -1,6 +1,7 @@
 from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
 from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer
@@ -160,6 +161,14 @@ class SegmentAPI(ServerAPI):
             name=name,
         )
 
+    @override
+    def get_user_identity(self) -> UserIdentity:
+        return UserIdentity(
+            user_id="",
+            tenant=DEFAULT_TENANT,
+            databases=[DEFAULT_DATABASE],
+        )
+
     @trace_method("SegmentAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> t.Tenant:
@@ -309,6 +318,8 @@ class SegmentAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)
@@ -360,6 +371,8 @@ class SegmentAPI(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
@@ -402,6 +415,8 @@ class SegmentAPI(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
@@ -446,6 +461,8 @@ class SegmentAPI(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
@@ -489,6 +506,8 @@ class SegmentAPI(ServerAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         add_attributes_to_current_span(
             {
@@ -547,6 +566,8 @@ class SegmentAPI(ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         add_attributes_to_current_span(
             {
@@ -613,7 +634,12 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
-    def _count(self, collection_id: UUID) -> int:
+    def _count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
         coll = self._get_collection(collection_id)
         return self._executor.count(CountPlan(Scan(coll)))
@@ -641,6 +667,8 @@ class SegmentAPI(ServerAPI):
         where: Where = {},
         where_document: WhereDocument = {},
         include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         add_attributes_to_current_span(
             {
@@ -693,7 +721,13 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
-    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+    def _peek(
+        self,
+        collection_id: UUID,
+        n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
         return self._get(collection_id, limit=n)  # type: ignore
 

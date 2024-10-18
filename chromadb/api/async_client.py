@@ -2,6 +2,8 @@ import httpx
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
+from chromadb.auth import UserIdentity
+from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
 from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.models.AsyncCollection import AsyncCollection
@@ -55,14 +57,28 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # Create an admin client for verifying that databases and tenants exist
         self = cls(settings=settings)
         SharedSystemClient._populate_data_from_system(self._system)
-        self._admin_client = AsyncAdminClient.from_system(self._system)
-        await self._validate_tenant_database(tenant=tenant, database=database)
 
         self.tenant = tenant
         self.database = database
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(AsyncServerAPI)
+
+        user_identity = await self.get_user_identity()
+
+        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+            user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            user_provided_tenant=tenant,
+            user_provided_database=database,
+        )
+        if maybe_tenant:
+            self.tenant = maybe_tenant
+        if maybe_database:
+            self.database = maybe_database
+
+        self._admin_client = AsyncAdminClient.from_system(self._system)
+        await self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
         self._submit_client_start_event()
 
@@ -89,6 +105,10 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         raise NotImplementedError(
             "AsyncClient cannot be created synchronously. Use .from_system_async() instead."
         )
+
+    @override
+    async def get_user_identity(self) -> UserIdentity:
+        return await self._server.get_user_identity()
 
     @override
     async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
@@ -236,6 +256,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             id=id,
             new_name=new_name,
             new_metadata=new_metadata,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -270,6 +292,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -289,6 +313,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -308,6 +334,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -348,6 +376,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             page_size=page_size,
             where_document=where_document,
             include=include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def _delete(
@@ -362,6 +392,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             ids=ids,
             where=where,
             where_document=where_document,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -381,6 +413,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             where=where,
             where_document=where_document,
             include=include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override

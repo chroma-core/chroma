@@ -21,6 +21,8 @@ from chromadb.api.types import (
     QueryResult,
     URIs,
 )
+from chromadb.auth import UserIdentity
+from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
@@ -56,12 +58,26 @@ class Client(SharedSystemClient, ClientAPI):
         super().__init__(settings=settings)
         self.tenant = tenant
         self.database = database
-        # Create an admin client for verifying that databases and tenants exist
-        self._admin_client = AdminClient.from_system(self._system)
-        self._validate_tenant_database(tenant=tenant, database=database)
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
+
+        user_identity = self.get_user_identity()
+
+        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+            user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            user_provided_tenant=tenant,
+            user_provided_database=database,
+        )
+        if maybe_tenant:
+            self.tenant = maybe_tenant
+        if maybe_database:
+            self.database = maybe_database
+
+        # Create an admin client for verifying that databases and tenants exist
+        self._admin_client = AdminClient.from_system(self._system)
+        self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
         self._submit_client_start_event()
 
@@ -78,6 +94,20 @@ class Client(SharedSystemClient, ClientAPI):
         return instance
 
     # endregion
+
+    @override
+    def get_user_identity(self) -> UserIdentity:
+        try:
+            return self._server.get_user_identity()
+        except httpx.ConnectError:
+            raise ValueError(
+                "Could not connect to a Chroma server. Are you sure it is running?"
+            )
+        # Propagate ChromaErrors
+        except ChromaError as e:
+            raise e
+        except Exception as e:
+            raise ValueError(str(e))
 
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking
@@ -186,6 +216,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> None:
         return self._server._modify(
             id=id,
+            tenant=self.tenant,
+            database=self.database,
             new_name=new_name,
             new_metadata=new_metadata,
         )
@@ -217,6 +249,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._add(
             ids=ids,
+            tenant=self.tenant,
+            database=self.database,
             collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -236,6 +270,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._update(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -255,6 +291,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._upsert(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -291,6 +329,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> GetResult:
         return self._server._get(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             where=where,
             sort=sort,
@@ -311,6 +351,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> None:
         self._server._delete(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             where=where,
             where_document=where_document,
@@ -328,6 +370,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> QueryResult:
         return self._server._query(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,

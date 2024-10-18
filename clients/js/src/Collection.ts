@@ -71,6 +71,8 @@ export class Collection {
     await this.client.init();
 
     await this.client.api.add(
+      this.client.tenant,
+      this.client.database,
       this.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
       (await prepareRecordRequest(
@@ -104,6 +106,8 @@ export class Collection {
     await this.client.init();
 
     await this.client.api.upsert(
+      this.client.tenant,
+      this.client.database,
       this.id,
       // TODO: For some reason the auto generated code requires metadata to be defined here.
       (await prepareRecordRequest(
@@ -126,6 +130,8 @@ export class Collection {
   async count(): Promise<number> {
     await this.client.init();
     return (await this.client.api.count(
+      this.client.tenant,
+      this.client.database,
       this.id,
       this.client.api.options,
     )) as number;
@@ -168,6 +174,8 @@ export class Collection {
 
     const resp = (await this.client.api.aGet(
       this.id,
+      this.client.tenant,
+      this.client.database,
       {
         ids: idsArray,
         where,
@@ -205,6 +213,8 @@ export class Collection {
     await this.client.init();
 
     await this.client.api.update(
+      this.client.tenant,
+      this.client.database,
       this.id,
       await prepareRecordRequest(params, this.embeddingFunction, true),
       this.client.api.options,
@@ -266,6 +276,8 @@ export class Collection {
         : toArrayOfArrays<number>(queryEmbeddings);
 
     return (await this.client.api.getNearestNeighbors(
+      this.client.tenant,
+      this.client.database,
       this.id,
       {
         query_embeddings: arrayQueryEmbeddings,
@@ -303,6 +315,8 @@ export class Collection {
     await this.client.init();
     return this.client.api
       .updateCollection(
+        this.client.tenant,
+        this.client.database,
         this.id,
         {
           new_name: name,
@@ -342,6 +356,8 @@ export class Collection {
     await this.client.init();
     return (await this.client.api.aGet(
       this.id,
+      this.client.tenant,
+      this.client.database,
       {
         limit,
       },
@@ -377,6 +393,8 @@ export class Collection {
     if (ids !== undefined) idsArray = toArray(ids);
     await this.client.api.aDelete(
       this.id,
+      this.client.tenant,
+      this.client.database,
       { ids: idsArray, where: where, where_document: whereDocument },
       this.client.api.options,
     );

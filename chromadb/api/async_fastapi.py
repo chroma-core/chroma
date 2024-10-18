@@ -6,6 +6,7 @@ from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
+from chromadb.auth import UserIdentity
 from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.api.configuration import CollectionConfigurationInternal
@@ -142,9 +143,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> None:
         await self._make_request(
             "post",
-            "/databases",
+            f"/tenants/{tenant}/databases",
             json={"name": name},
-            params={"tenant": tenant},
         )
 
     @trace_method("AsyncFastAPI.get_database", OpenTelemetryGranularity.OPERATION)
@@ -156,7 +156,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> Database:
         response = await self._make_request(
             "get",
-            "/databases/" + name,
+            f"/tenants/{tenant}/databases/{name}",
             params={"tenant": tenant},
         )
 
@@ -183,6 +183,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         return Tenant(name=resp_json["name"])
 
+    @trace_method("AsyncFastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def get_user_identity(self) -> UserIdentity:
+        return UserIdentity(**(await self._make_request("get", "/auth/identity")))
+
     @trace_method("AsyncFastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
     @override
     async def list_collections(
@@ -194,11 +199,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> Sequence[CollectionModel]:
         resp_json = await self._make_request(
             "get",
-            "/collections",
+            f"/tenants/{tenant}/databases/{database}/collections",
             params=BaseHTTPClient._clean_params(
                 {
-                    "tenant": tenant,
-                    "database": database,
                     "limit": limit,
                     "offset": offset,
                 }
@@ -217,8 +220,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> int:
         resp_json = await self._make_request(
             "get",
-            "/count_collections",
-            params={"tenant": tenant, "database": database},
+            f"/tenants/{tenant}/databases/{database}/collections_count",
         )
 
         return cast(int, resp_json)
@@ -237,14 +239,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         """Creates a collection"""
         resp_json = await self._make_request(
             "post",
-            "/collections",
+            f"/tenants/{tenant}/databases/{database}/collections",
             json={
                 "name": name,
                 "metadata": metadata,
                 "configuration": configuration.to_json() if configuration else None,
                 "get_or_create": get_or_create,
             },
-            params={"tenant": tenant, "database": database},
         )
 
         model = CollectionModel.from_json(resp_json)
@@ -263,13 +264,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         if (name is None and id is None) or (name is not None and id is not None):
             raise ValueError("Name or id must be specified, but not both")
 
-        params = {"tenant": tenant, "database": database}
+        params: Dict[str, str] = {}
         if id is not None:
             params["type"] = str(id)
 
         resp_json = await self._make_request(
             "get",
-            "/collections/" + name if name else str(id),
+            f"/tenants/{tenant}/databases/{database}/collections/{name}",
             params=params,
         )
 
@@ -305,10 +306,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         await self._make_request(
             "put",
-            "/collections/" + str(id),
+            f"/tenants/{tenant}/databases/{database}/collections/{id}",
             json={"new_metadata": new_metadata, "new_name": new_name},
         )
 
@@ -322,8 +325,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> None:
         await self._make_request(
             "delete",
-            "/collections/" + name,
-            params={"tenant": tenant, "database": database},
+            f"/tenants/{tenant}/databases/{database}/collections/{name}",
         )
 
     @trace_method("AsyncFastAPI._count", OpenTelemetryGranularity.OPERATION)
@@ -331,11 +333,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def _count(
         self,
         collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> int:
         """Returns the number of embeddings in the database"""
         resp_json = await self._make_request(
             "get",
-            "/collections/" + str(collection_id) + "/count",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
         )
 
         return cast(int, resp_json)
@@ -346,12 +350,18 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         collection_id: UUID,
         n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        return await self._get(
+        resp = await self._get(
             collection_id,
+            tenant=tenant,
+            database=database,
             limit=n,
             include=["embeddings", "documents", "metadatas"],  # type: ignore[list-item]
         )
+
+        return resp
 
     @trace_method("AsyncFastAPI._get", OpenTelemetryGranularity.OPERATION)
     @override
@@ -367,6 +377,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         if page and page_size:
             offset = (page - 1) * page_size
@@ -374,7 +386,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         resp_json = await self._make_request(
             "post",
-            "/collections/" + str(collection_id) + "/get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
             json={
                 "ids": ids,
                 "where": where,
@@ -404,10 +416,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         await self._make_request(
             "post",
-            "/collections/" + str(collection_id) + "/delete",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
             json={"where": where, "ids": ids, "where_document": where_document},
         )
         return None
@@ -449,6 +463,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         batch = (
             ids,
@@ -458,7 +474,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             uris,
         )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
-        await self._submit_batch(batch, "/collections/" + str(collection_id) + "/add")
+        await self._submit_batch(
+            batch,
+            f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/add",
+        )
         return True
 
     @trace_method("AsyncFastAPI._update", OpenTelemetryGranularity.ALL)
@@ -471,6 +490,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         batch = (
             ids,
@@ -484,7 +505,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(
-            batch, "/collections/" + str(collection_id) + "/update"
+            batch,
+            f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/update",
         )
 
         return True
@@ -499,6 +521,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
         batch = (
             ids,
@@ -509,7 +533,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         )
         validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(
-            batch, "/collections/" + str(collection_id) + "/upsert"
+            batch,
+            f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/upsert",
         )
         return True
 
@@ -523,10 +548,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         where: Optional[Where] = {},
         where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         resp_json = await self._make_request(
             "post",
-            "/collections/" + str(collection_id) + "/query",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
             json={
                 "query_embeddings": convert_np_embeddings_to_list(query_embeddings)
                 if query_embeddings is not None

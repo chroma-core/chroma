@@ -13,6 +13,7 @@ import type {
   GetCollectionParams,
   GetOrCreateCollectionParams,
   ListCollectionsParams,
+  UserIdentity,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
 
@@ -27,11 +28,11 @@ export class ChromaClient {
   /**
    * @ignore
    */
-  private tenant: string;
+  public tenant: string;
   /**
    * @ignore
    */
-  private database: string;
+  public database: string;
   /**
    * @ignore
    */
@@ -94,8 +95,12 @@ export class ChromaClient {
   }
 
   /** @ignore */
-  init(): Promise<void> {
+  async init(): Promise<void> {
     if (!this._initPromise) {
+      if (this.authProvider !== undefined) {
+        await this.getUserIdentity();
+      }
+
       this._initPromise = validateTenantDatabase(
         this._adminClient,
         this.tenant,
@@ -104,6 +109,40 @@ export class ChromaClient {
     }
 
     return this._initPromise;
+  }
+
+  /**
+   * Tries to set the tenant and database for the client.
+   *
+   * @returns {Promise<void>} A promise that resolves when the tenant/database is resolved.
+   * @throws {Error} If there is an issue resolving the tenant and database.
+   *
+   */
+  async getUserIdentity(): Promise<void> {
+    const user_identity = (await this.api.getUserIdentity(
+      this.api.options,
+    )) as UserIdentity;
+    const user_tenant = user_identity.tenant;
+    const user_databases = user_identity.databases;
+
+    if (
+      user_tenant !== null &&
+      user_tenant !== undefined &&
+      user_tenant !== "*" &&
+      this.tenant == DEFAULT_TENANT
+    ) {
+      this.tenant = user_tenant;
+    }
+
+    if (
+      user_databases !== null &&
+      user_databases !== undefined &&
+      user_databases.length == 1 &&
+      user_databases[0] !== "*" &&
+      this.database == DEFAULT_DATABASE
+    ) {
+      this.database = user_databases[0];
+    }
   }
 
   /**
@@ -120,7 +159,7 @@ export class ChromaClient {
    */
   async reset(): Promise<boolean> {
     await this.init();
-    return await this.api.reset(this.api.options);
+    return await this.api.postV2Reset(this.api.options);
   }
 
   /**
@@ -134,7 +173,7 @@ export class ChromaClient {
    * ```
    */
   async version(): Promise<string> {
-    return await this.api.version(this.api.options);
+    return await this.api.getV2Version(this.api.options);
   }
 
   /**
@@ -148,7 +187,7 @@ export class ChromaClient {
    * ```
    */
   async heartbeat(): Promise<number> {
-    const response = await this.api.heartbeat(this.api.options);
+    const response = await this.api.getV2Heartbeat(this.api.options);
     return response["nanosecond heartbeat"];
   }
 
@@ -269,10 +308,10 @@ export class ChromaClient {
   > {
     await this.init();
     return (await this.api.listCollections(
-      limit,
-      offset,
       this.tenant,
       this.database,
+      limit,
+      offset,
       this.api.options,
     )) as CollectionParams[];
   }
@@ -320,9 +359,9 @@ export class ChromaClient {
     await this.init();
 
     const response = (await this.api.getCollection(
-      name,
       this.tenant,
       this.database,
+      name,
       this.api.options,
     )) as CollectionParams;
 
