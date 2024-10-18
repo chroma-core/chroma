@@ -8,6 +8,7 @@ use core::ops::BitOr;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::ops::Bound;
 use std::sync::Arc;
 
 #[derive(Debug, Error)]
@@ -563,7 +564,9 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lt(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(metadata_key..=metadata_key, ..*k)
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -579,7 +582,9 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lt(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(metadata_key..=metadata_key, ..*k)
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -605,7 +610,9 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lte(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(metadata_key..=metadata_key, ..=*k)
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -621,7 +628,9 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lte(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(metadata_key..=metadata_key, ..=*k)
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -647,7 +656,12 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gt(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(
+                            metadata_key..=metadata_key,
+                            (Bound::Excluded(*k), Bound::Unbounded),
+                        )
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -663,7 +677,12 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gt(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(
+                            metadata_key..=metadata_key,
+                            (Bound::Excluded(*k), Bound::Unbounded),
+                        )
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -689,7 +708,9 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gte(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(metadata_key..=metadata_key, *k..)
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
@@ -705,7 +726,9 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gte(metadata_key, *k).await;
+                    let read = blockfile_reader
+                        .get_range(metadata_key..=metadata_key, *k..)
+                        .await;
                     match read {
                         Ok(records) => {
                             let mut result = RoaringBitmap::new();
