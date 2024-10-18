@@ -11,6 +11,8 @@ from overrides import override
 
 logger = logging.getLogger(__name__)
 
+POSTHOG_EVENT_SETTINGS = {"$process_person_profile": False}
+
 
 class Posthog(ProductTelemetryClient):
     def __init__(self, system: System):
@@ -53,7 +55,7 @@ class Posthog(ProductTelemetryClient):
             posthog.capture(
                 self.user_id,
                 event.name,
-                {**event.properties, **self.context},
+                {**event.properties, **POSTHOG_EVENT_SETTINGS, **self.context},
             )
         except Exception as e:
             logger.error(f"Failed to send telemetry event {event.name}: {e}")
