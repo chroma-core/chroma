@@ -19,7 +19,6 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tracing::span::Id;
 use uuid::Uuid;
 
 pub(super) const CURRENT_VERSION: Version = Version::V1_1;
