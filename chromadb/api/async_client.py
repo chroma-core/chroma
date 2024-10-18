@@ -69,8 +69,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         maybe_tenant, maybe_database = maybe_set_tenant_and_database(
             user_identity,
             overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            tenant=tenant,
-            database=database,
+            user_provided_tenant=tenant,
+            user_provided_database=database,
         )
         if maybe_tenant:
             self.tenant = maybe_tenant
