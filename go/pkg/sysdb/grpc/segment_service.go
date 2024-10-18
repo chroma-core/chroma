@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -18,23 +19,18 @@ func (s *Server) CreateSegment(ctx context.Context, req *coordinatorpb.CreateSeg
 
 	segment, err := convertSegmentToModel(segmentpb)
 	if err != nil {
-		log.Error("convert segment to model error", zap.Error(err))
-		res.Status = failResponseWithError(common.ErrSegmentIDFormat, errorCode)
-		return res, nil
+		log.Error("CreateSegment failed. convert segment to model error", zap.Error(err), zap.String("request", segmentpb.String()))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
 	err = s.coordinator.CreateSegment(ctx, segment)
 	if err != nil {
+		log.Error("CreateSegment failed", zap.Error(err), zap.String("request", segmentpb.String()))
 		if err == common.ErrSegmentUniqueConstraintViolation {
-			log.Error("segment id already exist", zap.Error(err))
-			res.Status = failResponseWithError(err, 409)
-			return res, nil
+			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
-		log.Error("create segment error", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
-		return res, nil
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	res.Status = setResponseStatus(successCode)
 
 	return res, nil
 }
@@ -48,16 +44,14 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 
 	parsedSegmentID, err := types.ToUniqueID(segmentID)
 	if err != nil {
-		log.Error("segment id format error", zap.String("segment.id", *segmentID))
-		res.Status = failResponseWithError(common.ErrSegmentIDFormat, errorCode)
-		return res, nil
+		log.Error("GetSegments failed. segment id format error", zap.Error(err), zap.String("request", req.String()))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
 	parsedCollectionID, err := types.ToUniqueID(&collectionID)
 	if err != nil {
-		log.Error("collection id format error", zap.String("collectionpd.id", collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
-		return res, nil
+		log.Error("GetSegments failed. collection id format error", zap.Error(err), zap.String("request", req.String()))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	var scopeValue *string
 	if scope == nil {
@@ -68,9 +62,8 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 	}
 	segments, err := s.coordinator.GetSegments(ctx, parsedSegmentID, segmentType, scopeValue, parsedCollectionID)
 	if err != nil {
-		log.Error("get segments error", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
-		return res, nil
+		log.Error("GetSegments failed.", zap.Error(err), zap.String("request", req.String()))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
 	segmentpbList := make([]*coordinatorpb.Segment, 0, len(segments))
@@ -79,7 +72,7 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 		segmentpbList = append(segmentpbList, segmentpb)
 	}
 	res.Segments = segmentpbList
-	res.Status = setResponseStatus(successCode)
+	log.Info("GetSegments success", zap.Any("request", req.String()), zap.Any("response", res.String()))
 	return res, nil
 }
 
@@ -88,29 +81,24 @@ func (s *Server) DeleteSegment(ctx context.Context, req *coordinatorpb.DeleteSeg
 	res := &coordinatorpb.DeleteSegmentResponse{}
 	parsedSegmentID, err := types.Parse(segmentID)
 	if err != nil {
-		log.Error(err.Error(), zap.String("segment.id", segmentID))
-		res.Status = failResponseWithError(common.ErrSegmentIDFormat, errorCode)
-		return res, nil
+		log.Error("DeleteSegment failed. segment id format error", zap.Error(err), zap.String("request", req.String()))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	collectionID := req.GetCollection()
 	parsedCollectionID, err := types.Parse(collectionID)
 	if err != nil {
-		log.Error(err.Error(), zap.String("collection.id", collectionID))
-		res.Status = failResponseWithError(common.ErrCollectionIDFormat, errorCode)
-		return res, nil
+		log.Error("DeleteSegment failed. collection id format error", zap.Error(err), zap.String("request", req.String()))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	err = s.coordinator.DeleteSegment(ctx, parsedSegmentID, parsedCollectionID)
 	if err != nil {
+		log.Error("DeleteSegment failed", zap.Error(err), zap.String("request", req.String()))
 		if err == common.ErrSegmentDeleteNonExistingSegment {
-			log.Error(err.Error(), zap.String("segment.id", segmentID))
-			res.Status = failResponseWithError(err, 404)
-			return res, nil
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
-		log.Error(err.Error(), zap.String("segment.id", segmentID))
-		res.Status = failResponseWithError(err, errorCode)
-		return res, nil
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	res.Status = setResponseStatus(successCode)
+	log.Info("DeleteSegment success", zap.Any("request", req.String()))
 	return res, nil
 }
 
@@ -133,18 +121,16 @@ func (s *Server) UpdateSegment(ctx context.Context, req *coordinatorpb.UpdateSeg
 	} else {
 		modelMetadata, err := convertSegmentMetadataToModel(metadata)
 		if err != nil {
-			log.Error("convert segment metadata to model error", zap.Error(err))
-			res.Status = failResponseWithError(err, errorCode)
-			return res, nil
+			log.Error("UpdateSegment failed", zap.Error(err), zap.String("request", req.String()))
+			return res, grpcutils.BuildInternalGrpcError(err.Error())
 		}
 		updateSegment.Metadata = modelMetadata
 	}
 	_, err := s.coordinator.UpdateSegment(ctx, updateSegment)
 	if err != nil {
-		log.Error("update segment error", zap.Error(err))
-		res.Status = failResponseWithError(err, errorCode)
-		return res, nil
+		log.Error("UpdateSegment failed", zap.Error(err), zap.String("request", req.String()))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	res.Status = setResponseStatus(successCode)
+	log.Info("UpdateSegment success", zap.Any("request", req.String()))
 	return res, nil
 }
