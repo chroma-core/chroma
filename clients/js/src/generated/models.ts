@@ -13,200 +13,297 @@
  */
 
 export namespace Api {
-  export interface Add201Response {}
+	export interface Add201Response {
+	}
 
-  export interface AddEmbedding {
-    embeddings?: Api.AddEmbedding.Embedding[] | null;
-    metadatas?: (Api.AddEmbedding.Metadatum | null)[] | null;
-    documents?: (string | null)[] | null;
-    uris?: (string | null)[] | null;
-    ids: string[];
-  }
+	export interface AddEmbedding {
+		embeddings?: (Api.AddEmbedding.Embedding[]) | null;
+		metadatas?: ((Api.AddEmbedding.Metadatum | null)[]) | null;
+		documents?: ((string | null)[]) | null;
+		uris?: ((string | null)[]) | null;
+		ids: string[];
+	}
 
-  /**
-   * @export
-   * @namespace AddEmbedding
-   */
-  export namespace AddEmbedding {
-    export interface Embedding {}
+	/**
+	 * @export
+	 * @namespace AddEmbedding
+	 */
+	export namespace AddEmbedding {
+		export interface Embedding {
+		}
 
-    export interface Metadatum {}
-  }
+		export interface Metadatum {
+		}
 
-  export interface ADelete200Response {}
+	}
 
-  export interface AGet200Response {}
+	export interface AddV1201Response {
+	}
 
-  export interface Count200Response {}
+	export interface ADelete200Response {
+	}
 
-  export interface CountCollections200Response {}
+	export interface AGet200Response {
+	}
 
-  export interface CreateCollection {
-    name: string;
-    configuration: Api.CreateCollection.Configuration | null;
-    metadata?: Api.CreateCollection.Metadata | null;
-    get_or_create?: boolean;
-  }
+	export interface Count200Response {
+	}
 
-  /**
-   * @export
-   * @namespace CreateCollection
-   */
-  export namespace CreateCollection {
-    export interface Configuration {}
+	export interface CountCollections200Response {
+	}
 
-    export interface Metadata {}
-  }
+	export interface CountCollectionsV1200Response {
+	}
 
-  export interface CreateCollection200Response {}
+	export interface CountV1200Response {
+	}
 
-  export interface CreateDatabase {
-    name: string;
-  }
+	export interface CreateCollection {
+		name: string;
+		configuration?: Api.CreateCollection.Configuration | null;
+		metadata?: Api.CreateCollection.Metadata | null;
+		'get_or_create'?: boolean;
+	}
 
-  export interface CreateDatabase200Response {}
+	/**
+	 * @export
+	 * @namespace CreateCollection
+	 */
+	export namespace CreateCollection {
+		export interface Configuration {
+		}
 
-  export interface CreateTenant {
-    name: string;
-  }
+		export interface Metadata {
+		}
 
-  export interface CreateTenant200Response {}
+	}
 
-  export interface DeleteCollection200Response {}
+	export interface CreateCollection200Response {
+	}
 
-  export interface DeleteEmbedding {
-    ids?: string[] | null;
-    where?: Api.DeleteEmbedding.Where | null;
-    where_document?: Api.DeleteEmbedding.WhereDocument | null;
-  }
+	export interface CreateCollectionV1200Response {
+	}
 
-  /**
-   * @export
-   * @namespace DeleteEmbedding
-   */
-  export namespace DeleteEmbedding {
-    export interface Where {}
+	export interface CreateDatabase {
+		name: string;
+	}
 
-    export interface WhereDocument {}
-  }
+	export interface CreateDatabase200Response {
+	}
 
-  export interface GetCollection200Response {}
+	export interface CreateDatabaseV1200Response {
+	}
 
-  export interface GetDatabase200Response {}
+	export interface CreateTenant {
+		name: string;
+	}
 
-  export interface GetEmbedding {
-    ids?: string[] | null;
-    where?: Api.GetEmbedding.Where | null;
-    where_document?: Api.GetEmbedding.WhereDocument | null;
-    sort?: string | null;
-    /**
-     * @type {number | null}
-     * @memberof GetEmbedding
-     */
-    limit?: number | null;
-    /**
-     * @type {number | null}
-     * @memberof GetEmbedding
-     */
-    offset?: number | null;
-    include?: Api.IncludeEnum[];
-  }
+	export interface CreateTenant200Response {
+	}
 
-  /**
-   * @export
-   * @namespace GetEmbedding
-   */
-  export namespace GetEmbedding {
-    export interface Where {}
+	export interface CreateTenantV1200Response {
+	}
 
-    export interface WhereDocument {}
-  }
+	export interface DeleteCollection200Response {
+	}
 
-  export interface GetNearestNeighbors200Response {}
+	export interface DeleteCollectionV1200Response {
+	}
 
-  export interface GetTenant200Response {}
+	export interface DeleteEmbedding {
+		ids?: (string[]) | null;
+		where?: Api.DeleteEmbedding.Where | null;
+		'where_document'?: Api.DeleteEmbedding.WhereDocument | null;
+	}
 
-  export interface HTTPValidationError {
-    detail?: Api.ValidationError[];
-  }
+	/**
+	 * @export
+	 * @namespace DeleteEmbedding
+	 */
+	export namespace DeleteEmbedding {
+		export interface Where {
+		}
 
-  export enum IncludeEnum {
-    Documents = "documents",
-    Embeddings = "embeddings",
-    Metadatas = "metadatas",
-    Distances = "distances",
-    Uris = "uris",
-    Data = "data",
-  }
+		export interface WhereDocument {
+		}
 
-  export interface ListCollections200Response {}
+	}
 
-  export interface PreFlightChecks200Response {}
+	export interface DeleteV1200Response {
+	}
 
-  export interface QueryEmbedding {
-    where?: Api.QueryEmbedding.Where | null;
-    where_document?: Api.QueryEmbedding.WhereDocument | null;
-    query_embeddings: Api.QueryEmbedding.QueryEmbedding2[];
-    /**
-     * @type {number}
-     * @memberof QueryEmbedding
-     */
-    n_results?: number;
-    include?: Api.IncludeEnum[];
-  }
+	export interface GetCollection200Response {
+	}
 
-  /**
-   * @export
-   * @namespace QueryEmbedding
-   */
-  export namespace QueryEmbedding {
-    export interface Where {}
+	export interface GetCollectionV1200Response {
+	}
 
-    export interface WhereDocument {}
+	export interface GetDatabase200Response {
+	}
 
-    export interface QueryEmbedding2 {}
-  }
+	export interface GetDatabaseV1200Response {
+	}
 
-  export interface Update200Response {}
+	export interface GetEmbedding {
+		ids?: (string[]) | null;
+		where?: Api.GetEmbedding.Where | null;
+		'where_document'?: Api.GetEmbedding.WhereDocument | null;
+		sort?: string | null;
+		/**
+		 * @type {number | null}
+		 * @memberof GetEmbedding
+		 */
+		limit?: number | null;
+		/**
+		 * @type {number | null}
+		 * @memberof GetEmbedding
+		 */
+		offset?: number | null;
+		include?: Api.IncludeEnum[];
+	}
 
-  export interface UpdateCollection {
-    new_name?: string | null;
-    new_metadata?: Api.UpdateCollection.NewMetadata | null;
-  }
+	/**
+	 * @export
+	 * @namespace GetEmbedding
+	 */
+	export namespace GetEmbedding {
+		export interface Where {
+		}
 
-  /**
-   * @export
-   * @namespace UpdateCollection
-   */
-  export namespace UpdateCollection {
-    export interface NewMetadata {}
-  }
+		export interface WhereDocument {
+		}
 
-  export interface UpdateCollection200Response {}
+	}
 
-  export interface UpdateEmbedding {
-    embeddings?: Api.UpdateEmbedding.Embedding[] | null;
-    metadatas?: (Api.UpdateEmbedding.Metadatum | null)[] | null;
-    documents?: (string | null)[] | null;
-    uris?: (string | null)[] | null;
-    ids: string[];
-  }
+	export interface GetNearestNeighbors200Response {
+	}
 
-  /**
-   * @export
-   * @namespace UpdateEmbedding
-   */
-  export namespace UpdateEmbedding {
-    export interface Embedding {}
+	export interface GetNearestNeighborsV1200Response {
+	}
 
-    export interface Metadatum {}
-  }
+	export interface GetTenant200Response {
+	}
 
-  export interface Upsert200Response {}
+	export interface GetTenantV1200Response {
+	}
 
-  export interface ValidationError {
-    loc: (string | number)[];
-    msg: string;
-    type: string;
-  }
+	export interface GetUserIdentity200Response {
+	}
+
+	export interface GetV1200Response {
+	}
+
+	export interface HTTPValidationError {
+		detail?: Api.ValidationError[];
+	}
+
+	export enum IncludeEnum {
+		Documents = 'documents',
+		Embeddings = 'embeddings',
+		Metadatas = 'metadatas',
+		Distances = 'distances',
+		Uris = 'uris',
+		Data = 'data'
+	}
+
+	export interface ListCollections200Response {
+	}
+
+	export interface ListCollectionsV1200Response {
+	}
+
+	export interface PreFlightChecks200Response {
+	}
+
+	export interface PreFlightChecks200Response2 {
+	}
+
+	export interface QueryEmbedding {
+		where?: Api.QueryEmbedding.Where | null;
+		'where_document'?: Api.QueryEmbedding.WhereDocument | null;
+		'query_embeddings': Api.QueryEmbedding.QueryEmbedding2[];
+		/**
+		 * @type {number}
+		 * @memberof QueryEmbedding
+		 */
+		'n_results'?: number;
+		include?: Api.IncludeEnum[];
+	}
+
+	/**
+	 * @export
+	 * @namespace QueryEmbedding
+	 */
+	export namespace QueryEmbedding {
+		export interface Where {
+		}
+
+		export interface WhereDocument {
+		}
+
+		export interface QueryEmbedding2 {
+		}
+
+	}
+
+	export interface Update200Response {
+	}
+
+	export interface UpdateCollection {
+		'new_name'?: string | null;
+		'new_metadata'?: Api.UpdateCollection.NewMetadata | null;
+	}
+
+	/**
+	 * @export
+	 * @namespace UpdateCollection
+	 */
+	export namespace UpdateCollection {
+		export interface NewMetadata {
+		}
+
+	}
+
+	export interface UpdateCollection200Response {
+	}
+
+	export interface UpdateCollectionV1200Response {
+	}
+
+	export interface UpdateEmbedding {
+		embeddings?: (Api.UpdateEmbedding.Embedding[]) | null;
+		metadatas?: ((Api.UpdateEmbedding.Metadatum | null)[]) | null;
+		documents?: ((string | null)[]) | null;
+		uris?: ((string | null)[]) | null;
+		ids: string[];
+	}
+
+	/**
+	 * @export
+	 * @namespace UpdateEmbedding
+	 */
+	export namespace UpdateEmbedding {
+		export interface Embedding {
+		}
+
+		export interface Metadatum {
+		}
+
+	}
+
+	export interface UpdateV1200Response {
+	}
+
+	export interface Upsert200Response {
+	}
+
+	export interface UpsertV1200Response {
+	}
+
+	export interface ValidationError {
+		loc: (string | number)[];
+		msg: string;
+		'type': string;
+	}
+
 }
