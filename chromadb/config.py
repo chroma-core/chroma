@@ -176,7 +176,7 @@ class Settings(BaseSettings):  # type: ignore
         f"{APIVersion.V1}/version": ["GET"],
     }
     # Overwrite singleton tenant and database access from the auth provider
-    # if applicable. See chromadb/server/fastapi/__init__.py's
+    # if applicable. See chromadb/auth/utils/__init__.py's
     # authenticate_and_authorize_or_raise method.
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 

@@ -96,7 +96,9 @@ export class ChromaClient {
 
   /** @ignore */
   async init(): Promise<void> {
-    await this.getUserIdentity();
+    if (this.authProvider !== undefined) {
+      await this.getUserIdentity();
+    }
 
     if (!this._initPromise) {
       this._initPromise = validateTenantDatabase(
@@ -126,7 +128,8 @@ export class ChromaClient {
     if (
       user_tenant !== null &&
       user_tenant !== undefined &&
-      user_tenant !== "*"
+      user_tenant !== "*" &&
+      this.tenant == DEFAULT_TENANT
     ) {
       this.tenant = user_tenant;
     }
@@ -135,7 +138,8 @@ export class ChromaClient {
       user_databases !== null &&
       user_databases !== undefined &&
       user_databases.length == 1 &&
-      user_databases[0] !== "*"
+      user_databases[0] !== "*" &&
+      this.database == DEFAULT_DATABASE
     ) {
       this.database = user_databases[0];
     }
