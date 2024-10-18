@@ -98,7 +98,6 @@ impl ArrowBlockfileWriter {
         let mut handled_blocks = HashSet::new();
         for (_, delta) in self.block_deltas.lock().drain() {
             handled_blocks.insert(delta.id);
-
             let mut removed = false;
             // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
@@ -110,7 +109,6 @@ impl ArrowBlockfileWriter {
                     .sparse_index
                     .set_count(delta.id, delta.len() as u32)
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-
                 let block = self.block_manager.commit::<K, V>(delta);
                 blocks.push(block);
             }

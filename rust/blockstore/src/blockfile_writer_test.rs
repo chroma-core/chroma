@@ -1,3 +1,5 @@
+/// This test uses the proptest-state-machine crate to generate a sequence of transitions for a blockfile writer and compares the result after every commit with a reference implementation.
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -9,7 +11,6 @@ mod tests {
     use proptest::test_runner::Config;
     use proptest_state_machine::prop_state_machine;
     use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
-    use tempfile::TempDir;
     use uuid::Uuid;
 
     use crate::arrow::provider::ArrowBlockfileProvider;
@@ -38,7 +39,7 @@ mod tests {
         type Transition = Transition;
 
         fn init_state() -> proptest::prelude::BoxedStrategy<Self::State> {
-            (500..1_000usize)
+            (500..1_000usize) // The block size is somewhat arbitrary; the min needs to be more than the largest possible block (after padding) containing a single entry. But it should be small enough that block splitting is likely to occur.
                 .prop_map(|block_size_bytes| RefState {
                     generated_max_block_size_bytes: block_size_bytes,
                     store: BTreeMap::new(),
@@ -63,12 +64,15 @@ mod tests {
             }
 
             prop_oneof![
+                // 57% chance of setting a new key
                 4 => key_and_prefix_generator.prop_map(|(prefix, key, value)| {
                     Transition::Set(prefix, key, value)
                 }),
+                // 28% chance of deleting an existing key
                 2 => (0..keys.len()).prop_map(move |i| {
                     Transition::Delete(keys[i].0.clone(), keys[i].1.clone())
                 }),
+                // 14% chance of committing
                 1 => Just(Transition::Commit)
             ]
             .boxed()
@@ -82,7 +86,7 @@ mod tests {
                         .insert((prefix.clone(), key.clone()), value.clone());
                 }
                 Transition::Delete(prefix, key) => {
-                    state.store.remove(&(prefix.clone(), key.clone())); // todo: need clones?
+                    state.store.remove(&(prefix.clone(), key.clone()));
                 }
                 Transition::Commit => {
                     state.last_commit = Some(state.store.clone());
@@ -94,7 +98,6 @@ mod tests {
     }
 
     struct BlockfileWriterWrapper {
-        tmp_dir: TempDir,
         provider: ArrowBlockfileProvider,
         last_blockfile_id: Option<Uuid>,
         writer: BlockfileWriter,
@@ -121,7 +124,6 @@ mod tests {
             let writer = provider.create::<&str, String>().unwrap();
 
             BlockfileWriterWrapper {
-                tmp_dir,
                 provider,
                 last_blockfile_id: None,
                 writer,
@@ -130,7 +132,7 @@ mod tests {
 
         fn apply(
             mut state: Self::SystemUnderTest,
-            ref_state: &<Self::Reference as proptest_state_machine::ReferenceStateMachine>::State,
+            _: &<Self::Reference as proptest_state_machine::ReferenceStateMachine>::State,
             transition: <Self::Reference as proptest_state_machine::ReferenceStateMachine>::Transition,
         ) -> Self::SystemUnderTest {
             match transition {
