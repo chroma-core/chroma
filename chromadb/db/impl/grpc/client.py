@@ -220,26 +220,33 @@ class GrpcSysDB(SysDB):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
-        request = CreateCollectionRequest(
-            id=id.hex,
-            name=name,
-            configuration_json_str=configuration.to_json_str(),
-            metadata=to_proto_update_metadata(metadata) if metadata else None,
-            dimension=dimension,
-            get_or_create=get_or_create,
-            tenant=tenant,
-            database=database,
-        )
-        response = self._sys_db_stub.CreateCollection(
-            request, timeout=self._request_timeout_seconds
-        )
+        try:
+            request = CreateCollectionRequest(
+                id=id.hex,
+                name=name,
+                configuration_json_str=configuration.to_json_str(),
+                metadata=to_proto_update_metadata(metadata) if metadata else None,
+                dimension=dimension,
+                get_or_create=get_or_create,
+                tenant=tenant,
+                database=database,
+            )
+            response = self._sys_db_stub.CreateCollection(
+                request, timeout=self._request_timeout_seconds
+            )
+            collection = from_proto_collection(response.collection)
+            return collection, response.created
+
+        except grpc.RpcError as e:
+            logger.info(f"failed to create collection, error: {e}")
+            if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+                raise UniqueConstraintError()
+            raise NotFoundError()
         # TODO: this needs to be changed to try, catch instead of checking the status code
-        if response.status.code != 200:
-            logger.info(f"failed to create collection, response: {response}")
-        if response.status.code == 409:
-            raise UniqueConstraintError()
-        collection = from_proto_collection(response.collection)
-        return collection, response.created
+        # if response.status.code != 200:
+        #     logger.info(f"failed to create collection, response: {response}")
+        # if response.status.code == 409:
+        #     raise UniqueConstraintError()
 
     @overrides
     def delete_collection(

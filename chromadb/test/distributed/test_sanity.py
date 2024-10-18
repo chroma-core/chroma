@@ -96,3 +96,23 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
         10,
         query_embeddings=[random_query_1, random_query_2],
     )
+
+@skip_if_not_cluster()
+def test_duplicate_create(
+    client: ClientAPI,
+) -> None:
+    reset(client)
+    collection = client.create_collection(
+        name="test",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+    )
+
+    try:
+        client.create_collection(
+            name="test",
+            metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+        )
+        assert False, "Expected exception"
+    except Exception as e:
+        print("Collection creation failed as expected with error ", e)
+        assert "already exists" in str(e)
