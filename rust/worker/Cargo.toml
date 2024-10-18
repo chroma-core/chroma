@@ -74,5 +74,9 @@ criterion = { workspace = true }
 chroma-test = { workspace = true }
 
 [[bench]]
-name = "metadata_filtering"
+name = "filter"
+harness = false
+
+[[bench]]
+name = "limit"
 harness = false
