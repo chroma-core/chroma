@@ -98,6 +98,11 @@ impl ArrowBlockfileWriter {
         let mut handled_blocks = HashSet::new();
         for (_, delta) in self.block_deltas.lock().drain() {
             handled_blocks.insert(delta.id);
+            self.root
+                .sparse_index
+                .set_count(delta.id, delta.len() as u32)
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
             let mut removed = false;
             // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
@@ -105,10 +110,6 @@ impl ArrowBlockfileWriter {
                 removed = self.root.sparse_index.remove_block(&delta.id);
             }
             if !removed {
-                self.root
-                    .sparse_index
-                    .set_count(delta.id, delta.len() as u32)
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                 let block = self.block_manager.commit::<K, V>(delta);
                 blocks.push(block);
             }
@@ -226,15 +227,17 @@ impl ArrowBlockfileWriter {
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
             let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
             for (split_key, new_delta) in new_blocks {
-                match self.root.sparse_index.add_block(split_key, new_delta.id) {
-                    Ok(_) => {
-                        let mut deltas = self.block_deltas.lock();
-                        deltas.insert(new_delta.id, new_delta);
-                    }
-                    Err(e) => {
-                        return Err(Box::new(e));
-                    }
-                };
+                self.root
+                    .sparse_index
+                    .add_block(split_key, new_delta.id)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                self.root
+                    .sparse_index
+                    .set_count(new_delta.id, new_delta.len() as u32)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
+                let mut deltas = self.block_deltas.lock();
+                deltas.insert(new_delta.id, new_delta);
             }
         }
 
