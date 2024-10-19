@@ -23,13 +23,13 @@ func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDa
 	}
 	_, err := s.coordinator.CreateDatabase(ctx, createDatabase)
 	if err != nil {
-		log.Error("error CreateDatabase", zap.Any("request", req), zap.Error(err))
+		log.Error("error CreateDatabase", zap.String("request", req.String()), zap.Error(err))
 		if errors.Is(err, common.ErrDatabaseUniqueConstraintViolation) {
 			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	log.Info("CreateDatabase success", zap.Any("request", req))
+	log.Info("CreateDatabase success", zap.String("request", req.String()))
 	return res, nil
 }
 
@@ -41,7 +41,7 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 	}
 	database, err := s.coordinator.GetDatabase(ctx, getDatabase)
 	if err != nil {
-		log.Error("error GetDatabase", zap.Any("request", req), zap.Error(err))
+		log.Error("error GetDatabase", zap.String("request", req.String()), zap.Error(err))
 		if err == common.ErrDatabaseNotFound || err == common.ErrTenantNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
@@ -52,7 +52,7 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 		Name:   database.Name,
 		Tenant: database.Tenant,
 	}
-	log.Info("GetDatabase success", zap.Any("request", req))
+	log.Info("GetDatabase success", zap.String("request", req.String()))
 	return res, nil
 }
 
@@ -63,13 +63,13 @@ func (s *Server) CreateTenant(ctx context.Context, req *coordinatorpb.CreateTena
 	}
 	_, err := s.coordinator.CreateTenant(ctx, createTenant)
 	if err != nil {
-		log.Error("error CreateTenant", zap.Any("request", req), zap.Error(err))
+		log.Error("error CreateTenant", zap.String("request", req.String()), zap.Error(err))
 		if err == common.ErrTenantUniqueConstraintViolation {
 			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	log.Info("CreateTenant success", zap.Any("request", req))
+	log.Info("CreateTenant success", zap.String("request", req.String()))
 	return res, nil
 }
 
@@ -80,7 +80,7 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 	}
 	tenant, err := s.coordinator.GetTenant(ctx, getTenant)
 	if err != nil {
-		log.Error("error GetTenant", zap.Any("request", req), zap.Error(err))
+		log.Error("error GetTenant", zap.String("request", req.String()), zap.Error(err))
 		if err == common.ErrTenantNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
@@ -89,17 +89,17 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 	res.Tenant = &coordinatorpb.Tenant{
 		Name: tenant.Name,
 	}
-	log.Info("GetTenant success", zap.Any("request", req))
+	log.Info("GetTenant success", zap.String("request", req.String()))
 	return res, nil
 }
 
 func (s *Server) SetLastCompactionTimeForTenant(ctx context.Context, req *coordinatorpb.SetLastCompactionTimeForTenantRequest) (*emptypb.Empty, error) {
 	err := s.coordinator.SetTenantLastCompactionTime(ctx, req.TenantLastCompactionTime.TenantId, req.TenantLastCompactionTime.LastCompactionTime)
 	if err != nil {
-		log.Error("error SetTenantLastCompactionTime", zap.Any("request", req.TenantLastCompactionTime), zap.Error(err))
+		log.Error("error SetTenantLastCompactionTime", zap.String("request", req.String()), zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	log.Info("SetLastCompactionTimeForTenant success", zap.Any("request", req))
+	log.Info("SetLastCompactionTimeForTenant success", zap.String("request", req.String()))
 	return &emptypb.Empty{}, nil
 }
 
@@ -117,6 +117,6 @@ func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 			LastCompactionTime: tenant.LastCompactionTime,
 		})
 	}
-	log.Info("GetLastCompactionTimeForTenant success", zap.Any("request", req))
+	log.Info("GetLastCompactionTimeForTenant success", zap.String("request", req.String()))
 	return res, nil
 }

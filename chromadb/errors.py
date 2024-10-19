@@ -147,6 +147,17 @@ class VersionMismatchError(ChromaError):
         return "VersionMismatchError"
 
 
+class InternalError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 500
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "InternalError"
+
+
 class RateLimitError(ChromaError):
     @overrides
     def code(self) -> int:

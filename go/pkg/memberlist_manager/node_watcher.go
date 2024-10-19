@@ -75,7 +75,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Added", zap.String("key", key), zap.Any("pod name", objPod.Name))
+				log.Debug("Kubernetes Pod Added", zap.String("key", key), zap.Any("pod name", objPod.Name))
 				name := objPod.Name
 				w.notify(name)
 			} else {
@@ -89,7 +89,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Updated", zap.String("key", key), zap.String("pod name", objPod.Name))
+				log.Debug("Kubernetes Pod Updated", zap.String("key", key), zap.String("pod name", objPod.Name))
 				name := objPod.Name
 				w.notify(name)
 			} else {
@@ -103,7 +103,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Deleted", zap.String("pod name", objPod.Name))
+				log.Debug("Kubernetes Pod Deleted", zap.String("pod name", objPod.Name))
 				name := objPod.Name
 				// The contract for GetStatus is that if the ip is not in this map, then it returns NotReady
 				w.notify(name)
@@ -172,6 +172,6 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 			}
 		}
 	}
-	log.Info("ListReadyMembers", zap.Any("memberlist", memberlist))
+	log.Debug("ListReadyMembers", zap.Any("memberlist", memberlist))
 	return memberlist, nil
 }
