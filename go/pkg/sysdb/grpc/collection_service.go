@@ -3,7 +3,6 @@ package grpc
 import (
 	"context"
 	"encoding/json"
-	"strconv"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -53,7 +52,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	res := &coordinatorpb.CreateCollectionResponse{}
 	createCollection, err := convertToCreateCollectionModel(req)
 	if err != nil {
-		log.Error("CreateCollection failed. error converting to create collection model", zap.Error(err), zap.String("collection_id", req.Id))
+		log.Error("CreateCollection failed. error converting to create collection model", zap.Error(err), zap.String("collection_id", req.Id), zap.String("collection_name", req.Name))
 		res.Collection = &coordinatorpb.Collection{
 			Id:                   req.Id,
 			Name:                 req.Name,
@@ -68,7 +67,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	}
 	collection, created, err := s.coordinator.CreateCollection(ctx, createCollection)
 	if err != nil {
-		log.Error("CreateCollection failed. error creating collection", zap.Error(err), zap.String("collection_id", req.Id))
+		log.Error("CreateCollection failed. error creating collection", zap.Error(err), zap.String("collection_id", req.Id), zap.String("collection_name", req.Name))
 		res.Collection = &coordinatorpb.Collection{
 			Id:                   req.Id,
 			Name:                 req.Name,
@@ -86,7 +85,7 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	}
 	res.Collection = convertCollectionToProto(collection)
 	res.Created = created
-	log.Info("CreateCollection finished.", zap.String("collection_id", res.Collection.Id), zap.String("created", strconv.FormatBool(res.Created)))
+	log.Info("CreateCollection finished.", zap.String("collection_id", req.Id), zap.String("collection_name", req.Name), zap.Bool("created", created))
 	return res, nil
 }
 
@@ -102,13 +101,13 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 
 	parsedCollectionID, err := types.ToUniqueID(collectionID)
 	if err != nil {
-		log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.String("collection_id", *collectionID))
+		log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
 	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName, limit, offset)
 	if err != nil {
-		log.Error("GetCollections failed ", zap.Error(err), zap.String("collection_id", *collectionID))
+		log.Error("GetCollections failed. ", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Collections = make([]*coordinatorpb.Collection, 0, len(collections))
@@ -116,7 +115,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		collectionpb := convertCollectionToProto(collection)
 		res.Collections = append(res.Collections, collectionpb)
 	}
-	log.Info("GetCollections succeeded", zap.String("collection_id", *collectionID), zap.Any("response", res.Collections), zap.String("parsed_collection_id", parsedCollectionID.String()))
+	log.Info("GetCollections succeeded", zap.Any("response", res.Collections), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
 	return res, nil
 }
 
@@ -203,15 +202,15 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 }
 
 func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
-	blob, err := json.Marshal(req)
+	_, err := json.Marshal(req)
 	if err != nil {
-		log.Error("FlushCollectionCompaction failed. error marshalling request", zap.Error(err), zap.String("request", string(blob)))
+		log.Error("FlushCollectionCompaction failed. error marshalling request", zap.Error(err), zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
 	err = grpcutils.BuildErrorForUUID(collectionID, "collection", err)
 	if err != nil {
-		log.Error("FlushCollectionCompaction failed. error parsing collection id", zap.Error(err), zap.String("request", string(blob)))
+		log.Error("FlushCollectionCompaction failed. error parsing collection id", zap.Error(err), zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	segmentCompactionInfo := make([]*model.FlushSegmentCompaction, 0, len(req.SegmentCompactionInfo))
@@ -219,7 +218,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		segmentID, err := types.ToUniqueID(&flushSegmentCompaction.SegmentId)
 		err = grpcutils.BuildErrorForUUID(segmentID, "segment", err)
 		if err != nil {
-			log.Error("FlushCollectionCompaction failed. error parsing segment id", zap.Error(err), zap.String("request", string(blob)))
+			log.Error("FlushCollectionCompaction failed. error parsing segment id", zap.Error(err), zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
 			return nil, grpcutils.BuildInternalGrpcError(err.Error())
 		}
 		filePaths := make(map[string][]string)
@@ -240,7 +239,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
-		log.Error("FlushCollectionCompaction failed", zap.Error(err), zap.String("request", string(blob)))
+		log.Error("FlushCollectionCompaction failed", zap.Error(err), zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res := &coordinatorpb.FlushCollectionCompactionResponse{
@@ -248,6 +247,6 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		CollectionVersion:  flushCollectionInfo.CollectionVersion,
 		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
 	}
-	log.Info("FlushCollectionCompaction succeeded", zap.String("request", string(blob)))
+	log.Info("FlushCollectionCompaction succeeded", zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
 	return res, nil
 }

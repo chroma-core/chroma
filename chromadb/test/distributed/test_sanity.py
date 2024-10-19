@@ -97,8 +97,9 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
         query_embeddings=[random_query_1, random_query_2],
     )
 
+
 @skip_if_not_cluster()
-def test_duplicate_create(
+def test_duplicate_collection_create(
     client: ClientAPI,
 ) -> None:
     reset(client)
@@ -110,9 +111,28 @@ def test_duplicate_create(
     try:
         client.create_collection(
             name="test",
-            metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+            },
         )
         assert False, "Expected exception"
     except Exception as e:
         print("Collection creation failed as expected with error ", e)
-        assert "already exists" in str(e)
+        assert "UniqueConstraint" in e.args[0]
+
+
+@skip_if_not_cluster()
+def test_not_existing_collection_delete(
+    client: ClientAPI,
+) -> None:
+    try:
+        reset(client)
+        collection = client.delete_collection(
+            name="test101",
+        )
+        assert False, "Expected exception"
+    except Exception as e:
+        print("Collection deletion failed as expected with error ", e)
+        assert "does not exist" in e.args[0]
