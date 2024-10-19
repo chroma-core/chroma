@@ -16,14 +16,25 @@ def async_to_sync(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, R]:
 
     def sync_wrapper(*args, **kwargs):  # type: ignore
         loop = None
+
+        def new_event_loop():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            return new_loop
+
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = None
 
-        if loop.is_running():
-            return func(*args, **kwargs)
+        if loop is None or loop.is_closed():
+            loop = new_event_loop()
+
+        try:
+            if loop.is_running():
+                return func(*args, **kwargs)
+        except RuntimeError:
+            loop = new_event_loop()
 
         result = loop.run_until_complete(func(*args, **kwargs))
 
