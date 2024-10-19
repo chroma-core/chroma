@@ -2,7 +2,7 @@ use crate::{system::ReceiverForMessage, utils::get_panic_message};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
-use std::{fmt::Debug, panic::AssertUnwindSafe};
+use std::{any::type_name, fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -23,7 +23,9 @@ where
     // It would have been nice to do this with a default trait for result
     // but that's not stable in rust yet.
     async fn run(&self, input: &I) -> Result<O, Self::Error>;
-    fn get_name(&self) -> &'static str;
+    fn get_name(&self) -> &'static str {
+        type_name::<Self>()
+    }
     fn get_type(&self) -> OperatorType {
         OperatorType::Other
     }
