@@ -7,11 +7,12 @@ use crate::{
         },
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        MaterializedLogRecord,
+        LogMaterializer,
     },
     sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb},
 };
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_types::{Chunk, Collection, LogRecord, Segment, SegmentScope, SegmentType};
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
@@ -74,13 +75,36 @@ pub enum ScanError {
     RecordSegmentReaderCreation(#[from] RecordSegmentReaderCreationError),
     #[error("Error when capturing system time: {0}")]
     SystemTime(#[from] SystemTimeError),
-    #[error("err")]
-    Err,
+    #[error("Version mismatch")]
+    VersionMismatch,
+}
+
+impl ChromaError for ScanError {
+    fn code(&self) -> ErrorCodes {
+        use ScanError::*;
+        match self {
+            GetCollection(e) => e.code(),
+            GetSegment(e) => e.code(),
+            HNSWSegmentReaderCreation(e) => e.code(),
+            MetadataSegmentReaderCreation(e) => e.code(),
+            NoCollection => ErrorCodes::NotFound,
+            NoCollectionDimension => ErrorCodes::InvalidArgument,
+            NoSegment => ErrorCodes::NotFound,
+            PullLog(e) => e.code(),
+            RecordSegmentReaderCreation(e) => e.code(),
+            SystemTime(_) => ErrorCodes::Internal,
+            VersionMismatch => ErrorCodes::VersionMismatch,
+        }
+    }
 }
 
 impl ScanOutput {
-    async fn materialized_logs(&self) -> Result<Chunk<MaterializedLogRecord>, ScanError> {
-        todo!()
+    async fn log_materialized(&self) -> Result<LogMaterializer, ScanError> {
+        Ok(LogMaterializer::new(
+            self.record_segment_reader().await?,
+            self.logs.clone(),
+            None,
+        ))
     }
 
     async fn knn_segment_reader(&self) -> Result<DistributedHNSWSegmentReader, ScanError> {
@@ -147,13 +171,19 @@ impl ScanOperator {
     }
 
     async fn get_collection(&self) -> Result<Collection, ScanError> {
-        self.sysdb
+        let collection = self
+            .sysdb
             .clone()
             .get_collections(Some(self.collection), None, None, None)
             .await?
             // Each collection should have a single UUID
             .pop()
-            .ok_or(ScanError::NoCollection)
+            .ok_or(ScanError::NoCollection)?;
+        if collection.version != self.version as i32 {
+            Err(ScanError::VersionMismatch)
+        } else {
+            Ok(collection)
+        }
     }
 
     async fn get_segment(&self, scope: SegmentScope) -> Result<Segment, ScanError> {

@@ -321,7 +321,7 @@ impl GrpcSysDb {
 #[derive(Error, Debug)]
 // TODO: This should use our sysdb errors from the proto definition
 // We will have to do an error uniformization pass at some point
-pub(crate) enum GetCollectionsError {
+pub enum GetCollectionsError {
     #[error("Failed to fetch")]
     FailedToGetCollections(#[from] tonic::Status),
     #[error("Failed to convert proto collection")]
@@ -340,7 +340,7 @@ impl ChromaError for GetCollectionsError {
 #[derive(Error, Debug)]
 // TODO: This should use our sysdb errors from the proto definition
 // We will have to do an error uniformization pass at some point
-pub(crate) enum GetSegmentsError {
+pub enum GetSegmentsError {
     #[error("Failed to fetch")]
     FailedToGetSegments(#[from] tonic::Status),
     #[error("Failed to convert proto segment")]
