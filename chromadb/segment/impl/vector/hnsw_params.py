@@ -11,6 +11,7 @@ param_validators: Dict[str, Validator] = {
     "hnsw:space": lambda p: bool(re.match(r"^(l2|cosine|ip)$", str(p))),
     "hnsw:construction_ef": lambda p: isinstance(p, int),
     "hnsw:search_ef": lambda p: isinstance(p, int),
+    "hnsw:random_seed": lambda p : isinstance(p, int),
     "hnsw:M": lambda p: isinstance(p, int),
     "hnsw:num_threads": lambda p: isinstance(p, int),
     "hnsw:resize_factor": lambda p: isinstance(p, (int, float)),
@@ -47,6 +48,7 @@ class HnswParams(Params):
     space: str
     construction_ef: int
     search_ef: int
+    random_seed: int
     M: int
     num_threads: int
     resize_factor: float
@@ -56,6 +58,7 @@ class HnswParams(Params):
         self.space = str(metadata.get("hnsw:space", "l2"))
         self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
         self.search_ef = int(metadata.get("hnsw:search_ef", 10))
+        self.random_seed = int(metadata.get("hnsw:random_seed", 42))
         self.M = int(metadata.get("hnsw:M", 16))
         self.num_threads = int(
             metadata.get("hnsw:num_threads", multiprocessing.cpu_count())
