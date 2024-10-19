@@ -12,9 +12,7 @@ use chroma_types::{
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
-use worker::execution::operators::metadata_filtering::{
-    MetadataFilteringInput, MetadataFilteringOperator,
-};
+use worker::execution::operators::filter::{FilterInput, FilterOperator};
 
 const DOCUMENT_LENGTH: usize = 64;
 const EMBEDDING_DIMENSION: usize = 6;
@@ -112,17 +110,17 @@ fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
     .collect()
 }
 
-fn bench_metadata_filtering(criterion: &mut Criterion) {
+fn bench_filter(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
     let logen = LogGenerator {
         generator: log_generator,
     };
 
-    let routine = |metadata_filter_input| async move {
-        MetadataFilteringOperator::new()
-            .run(&metadata_filter_input)
+    let routine = |filter_input| async move {
+        FilterOperator::new()
+            .run(&filter_input)
             .await
-            .expect("Metadata filtering should not fail.");
+            .expect("Filter should not fail.");
     };
 
     for record_count in [1000, 10000, 100000] {
@@ -131,19 +129,17 @@ fn bench_metadata_filtering(criterion: &mut Criterion) {
 
         for (op, where_clause) in baseline_where_clauses() {
             let setup = || {
-                MetadataFilteringInput::new(
+                FilterInput::new(
                     compact.blockfile_provider.clone(),
                     compact.record.clone(),
                     compact.metadata.clone(),
                     Chunk::new(Vec::new().into()),
                     None,
                     where_clause.clone(),
-                    None,
-                    None,
                 )
             };
             bench(
-                format!("metadata-filtering-{}-{}", record_count, op).as_str(),
+                format!("filter-{}-{}", record_count, op).as_str(),
                 criterion,
                 &runtime,
                 setup,
@@ -153,5 +149,5 @@ fn bench_metadata_filtering(criterion: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_metadata_filtering);
+criterion_group!(benches, bench_filter);
 criterion_main!(benches);

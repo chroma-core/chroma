@@ -12,5 +12,6 @@ pub(super) mod register;
 pub(super) mod write_segments;
 
 // Required for benchmark
-pub mod hydrate_metadata_results;
-pub mod metadata_filtering;
+pub mod filter;
+pub mod limit;
+pub mod projection;
