@@ -15,3 +15,4 @@ pub(super) mod write_segments;
 pub mod filter;
 pub mod limit;
 pub mod projection;
+pub mod scan;
