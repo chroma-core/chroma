@@ -202,7 +202,8 @@ impl SparseIndexWriter {
         if data.len() > 1 {
             if let Some(start_key) = data.reverse.remove(block_id) {
                 data.forward.remove(&start_key);
-                data.counts.remove(&start_key).expect("Invariant violation");
+                // data.counts is not guaranteed to be in sync with forward, so ignore the result if the key doesn't exist
+                let _ = data.counts.remove(&start_key);
             }
             removed = true;
         }
@@ -235,11 +236,10 @@ impl SparseIndexWriter {
             data.reverse.remove(&id);
             data.forward.insert(SparseIndexDelimiter::Start, id);
             data.reverse.insert(id, SparseIndexDelimiter::Start);
-            let old_count = data
-                .counts
-                .remove(&key_copy)
-                .expect("Invariant violation. This should always be populated if forward is");
-            data.counts.insert(SparseIndexDelimiter::Start, old_count);
+            // data.counts is not guaranteed to be in sync with forward
+            if let Some(old_count) = data.counts.remove(&key_copy) {
+                data.counts.insert(SparseIndexDelimiter::Start, old_count);
+            }
         }
     }
 
