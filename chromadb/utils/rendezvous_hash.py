@@ -1,6 +1,7 @@
 # An implementation of https://en.wikipedia.org/wiki/Rendezvous_hashing
-from typing import Callable, List, cast
+from typing import Callable, List, Tuple
 import mmh3
+import heapq
 
 Hasher = Callable[[str, str], int]
 Member = str
@@ -8,26 +9,43 @@ Members = List[str]
 Key = str
 
 
-def assign(key: Key, members: Members, hasher: Hasher) -> Member:
-    """Assigns a key to a member using the rendezvous hashing algorithm"""
+def assign(
+    key: Key, members: Members, hasher: Hasher, replication: int
+) -> List[Member]:
+    """Assigns a key to a member using the rendezvous hashing algorithm
+    Args:
+        key: The key to assign
+        members: The list of members to assign the key to
+        hasher: The hashing function to use
+        replication: The number of members to assign the key to
+    Returns:
+        A list of members that the key has been assigned to
+    """
+
+    if replication > len(members):
+        raise ValueError(
+            "Replication factor cannot be greater than the number of members"
+        )
     if len(members) == 0:
         raise ValueError("Cannot assign key to empty memberlist")
     if len(members) == 1:
-        return members[0]
+        # Don't copy the input list for some safety
+        return [members[0]]
     if key == "":
         raise ValueError("Cannot assign empty key")
 
-    max_score = -1
-    max_member = None
-
+    member_score_heap: List[Tuple[int, Member]] = []
     for member in members:
-        score = hasher(member, key)
-        if score > max_score:
-            max_score = score
-            max_member = member
+        score = -hasher(member, key)
+        # Invert the score since heapq is a min heap
+        heapq.heappush(member_score_heap, (score, member))
 
-    max_member = cast(Member, max_member)
-    return max_member
+    output_members: List[Member] = []
+    for _ in range(replication):
+        member_and_score = heapq.heappop(member_score_heap)
+        output_members.append(member_and_score[1])
+
+    return output_members
 
 
 def merge_hashes(x: int, y: int) -> int:
