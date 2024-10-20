@@ -69,7 +69,7 @@ queryService:
     tag: 'query-service'
   env:
   cache:
-    hostPath: '/var/cache/chroma'
+    hostPath: '/local/cache/chroma'
     mountPath: '/cache/'
 
 
@@ -79,7 +79,7 @@ compactionService:
     tag: 'compaction-service'
   env:
   cache:
-    hostPath: '/var/cache/chroma'
+    hostPath: '/local/cache/chroma'
     mountPath: '/cache/'
   replicaCount: 1
 
