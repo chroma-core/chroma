@@ -21,6 +21,7 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
+    IncludeEnum,
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -74,7 +75,16 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
+        await self._client._add(
+            ids=ids,
+            collection_id=self.id,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=self.tenant,
+            database=self.database,
+        )
 
     async def count(self) -> int:
         """The total number of embeddings added to the database
@@ -83,7 +93,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             int: The total number of embeddings added to the database
 
         """
-        return await self._client._count(collection_id=self.id)
+        return await self._client._count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )
 
     async def get(
         self,
@@ -92,7 +106,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],
+        include: Include = [IncludeEnum.metadatas, IncludeEnum.documents],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -117,14 +131,16 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         ) = self._validate_and_prepare_get_request(ids, where, where_document, include)
 
         get_results = await self._client._get(
-            self.id,
-            valid_ids,
-            valid_where,
-            None,
-            limit,
-            offset,
+            collection_id=self.id,
+            ids=valid_ids,
+            where=valid_where,
+            sort=None,
+            limit=limit,
+            offset=offset,
             where_document=valid_where_document,
             include=valid_include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
         return self._transform_get_response(get_results, valid_include)
@@ -138,11 +154,18 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             GetResult: A GetResult object containing the results.
         """
-        return self._transform_peek_response(await self._client._peek(self.id, limit))
+        return self._transform_peek_response(
+            await self._client._peek(
+                collection_id=self.id,
+                n=limit,
+                tenant=self.tenant,
+                database=self.database,
+            )
+        )
 
     async def query(
         self,
-        query_embeddings: Optional[
+        query_embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -154,7 +177,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = [
+            IncludeEnum.metadatas,
+            IncludeEnum.documents,
+            IncludeEnum.distances,
+        ],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -201,6 +228,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             where=valid_where,
             where_document=valid_where_document,
             include=include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
         return self._transform_query_response(query_results, include)
@@ -230,7 +259,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def update(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -262,12 +291,21 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ids, embeddings, metadatas, documents, images, uris
         )
 
-        await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
+        await self._client._update(
+            collection_id=self.id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=self.tenant,
+            database=self.database,
+        )
 
     async def upsert(
         self,
         ids: OneOrMany[ID],
-        embeddings: Optional[
+        embeddings: Optional[  # type: ignore[type-arg]
             Union[
                 OneOrMany[Embedding],
                 OneOrMany[np.ndarray],
@@ -306,6 +344,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def delete(
@@ -331,4 +371,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ids, where, where_document
         )
 
-        await self._client._delete(self.id, ids, where, where_document)
+        await self._client._delete(
+            collection_id=self.id, ids=ids, where=where, where_document=where_document
+        )
