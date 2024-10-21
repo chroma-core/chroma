@@ -145,6 +145,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 
             let mut item_count = 0;
             let mut iter = storage.iter();
+            let mut first = true;
             while let Some((key, value)) = iter.next() {
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();
@@ -167,7 +168,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                     + value_offset_bytes
                     + value_validity_bytes;
 
-                if total_size > split_size {
+                if !first && total_size > split_size {
                     split_key = match iter.next() {
                         None => {
                             // Remove the last item since we are splitting at the end
@@ -180,6 +181,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                     };
                     break;
                 }
+                first = false;
             }
         }
 

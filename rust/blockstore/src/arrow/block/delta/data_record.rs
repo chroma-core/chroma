@@ -238,6 +238,7 @@ impl DataRecordStorage {
 
         let inner = self.inner.read();
         let mut iter = inner.storage.iter();
+        let mut first = true;
 
         while let Some((key, (id, embedding, metadata, document))) = iter.next() {
             prefix_size += key.prefix.len();
@@ -275,7 +276,7 @@ impl DataRecordStorage {
                 + document_offset
                 + validity_bytes;
 
-            if total_size > split_size {
+            if !first && total_size > split_size {
                 split_key = match iter.next() {
                     Some((key, _)) => Some(key.clone()),
                     None => {
@@ -291,6 +292,7 @@ impl DataRecordStorage {
                 };
                 break;
             }
+            first = false;
         }
 
         SplitInformation {
