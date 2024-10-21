@@ -13,6 +13,7 @@ pub(super) mod write_segments;
 
 // Required for benchmark
 pub mod filter;
+pub mod knn;
 pub mod limit;
 pub mod projection;
 pub mod scan;
