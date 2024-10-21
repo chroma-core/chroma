@@ -13,7 +13,7 @@ use crate::{
 };
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::{hnsw_provider::HnswIndexProvider, IndexConfig, IndexConfigFromSegmentError};
 use chroma_types::{Chunk, Collection, LogRecord, Segment, SegmentScope, SegmentType};
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 use thiserror::Error;
@@ -59,7 +59,9 @@ pub enum ScanError {
     GetCollection(#[from] GetCollectionsError),
     #[error("Error when getting segment: {0}")]
     GetSegment(#[from] GetSegmentsError),
-    #[error("Unable to create hnsw segment reader: {0}")]
+    #[error("Error when getting HNSW index config: {0}")]
+    HNSWConfigError(#[from] IndexConfigFromSegmentError),
+    #[error("Unable to create HNSW segment reader: {0}")]
     HNSWSegmentReaderCreation(#[from] DistributedHNSWSegmentFromSegmentError),
     #[error("Unable to create metadata segment reader: {0}")]
     MetadataSegmentReaderCreation(#[from] MetadataSegmentError),
@@ -85,6 +87,7 @@ impl ChromaError for ScanError {
         match self {
             GetCollection(e) => e.code(),
             GetSegment(e) => e.code(),
+            HNSWConfigError(e) => e.code(),
             HNSWSegmentReaderCreation(e) => e.code(),
             MetadataSegmentReaderCreation(e) => e.code(),
             NoCollection => ErrorCodes::NotFound,
@@ -99,7 +102,7 @@ impl ChromaError for ScanError {
 }
 
 impl ScanOutput {
-    async fn log_materialized(&self) -> Result<LogMaterializer, ScanError> {
+    pub async fn log_materializer(&self) -> Result<LogMaterializer, ScanError> {
         Ok(LogMaterializer::new(
             self.record_segment_reader().await?,
             self.logs.clone(),
@@ -107,7 +110,7 @@ impl ScanOutput {
         ))
     }
 
-    async fn knn_segment_reader(&self) -> Result<DistributedHNSWSegmentReader, ScanError> {
+    pub async fn knn_segment_reader(&self) -> Result<DistributedHNSWSegmentReader, ScanError> {
         DistributedHNSWSegmentReader::from_segment(
             &self.knn,
             self.collection
@@ -120,11 +123,21 @@ impl ScanOutput {
         .map_err(|e| (*e).into())
     }
 
-    async fn metadata_segment_reader(&self) -> Result<MetadataSegmentReader, ScanError> {
+    pub fn knn_config(&self) -> Result<IndexConfig, ScanError> {
+        Ok(IndexConfig::from_segment(
+            &self.knn,
+            self.collection
+                .dimension
+                .ok_or(ScanError::NoCollectionDimension)?,
+        )
+        .map_err(|e| *e)?)
+    }
+
+    pub async fn metadata_segment_reader(&self) -> Result<MetadataSegmentReader, ScanError> {
         Ok(MetadataSegmentReader::from_segment(&self.metadata, &self.blockfile).await?)
     }
 
-    async fn record_segment_reader(&self) -> Result<Option<RecordSegmentReader>, ScanError> {
+    pub async fn record_segment_reader(&self) -> Result<Option<RecordSegmentReader>, ScanError> {
         use RecordSegmentReaderCreationError::UninitializedSegment;
         match RecordSegmentReader::from_segment(&self.record, &self.blockfile).await {
             Ok(reader) => Ok(Some(reader)),
