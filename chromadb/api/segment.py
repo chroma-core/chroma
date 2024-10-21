@@ -363,6 +363,7 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def _add(
         self,
         ids: IDs,
@@ -659,6 +660,7 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
+    @rate_limit
     def _query(
         self,
         collection_id: UUID,
