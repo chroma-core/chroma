@@ -66,6 +66,7 @@ collection_st = st.shared(
         with_hnsw_params=True,
         with_persistent_hnsw_params=st.just(True),
         # Makes it more likely to find persist-related bugs (by default these are set to 2000).
+        # Lower values make it more likely that a test will trigger a persist to disk.
         max_hnsw_batch_size=10,
         max_hnsw_sync_threshold=10,
     ),
@@ -74,10 +75,10 @@ collection_st = st.shared(
 
 
 @st.composite
-def collection_and_embeddings_strategy(
+def collection_and_recordset_strategy(
     draw: st.DrawFn,
 ) -> Tuple[strategies.Collection, strategies.RecordSet]:
-    collection_strategy = draw(
+    collection = draw(
         strategies.collections(
             with_hnsw_params=True,
             with_persistent_hnsw_params=st.just(True),
@@ -86,20 +87,20 @@ def collection_and_embeddings_strategy(
             max_hnsw_sync_threshold=10,
         )
     )
-    embeddings_strategy = draw(strategies.recordsets(st.just(collection_strategy)))
-    return collection_strategy, embeddings_strategy
+    recordset = draw(strategies.recordsets(st.just(collection)))
+    return collection, recordset
 
 
 @given(
-    collection_and_embeddings_strategies=st.lists(
-        collection_and_embeddings_strategy(),
+    collection_and_recordset_strategies=st.lists(
+        collection_and_recordset_strategy(),
         min_size=1,
         unique_by=(lambda x: x[0].name, lambda x: x[0].name),
     )
 )
 def test_persist(
     settings: Settings,
-    collection_and_embeddings_strategies: List[
+    collection_and_recordsets_strategies: List[
         Tuple[strategies.Collection, strategies.RecordSet]
     ],
 ) -> None:
@@ -110,23 +111,23 @@ def test_persist(
     client_1.reset()
     for (
         collection_strategy,
-        embeddings_strategy,
-    ) in collection_and_embeddings_strategies:
+        recordset_strategy,
+    ) in collection_and_recordsets_strategies:
         coll = client_1.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,  # type: ignore[arg-type]
             embedding_function=collection_strategy.embedding_function,
         )
 
-        coll.add(**embeddings_strategy)  # type: ignore[arg-type]
+        coll.add(**recordset_strategy)  # type: ignore[arg-type]
 
-        invariants.count(coll, embeddings_strategy)
-        invariants.metadatas_match(coll, embeddings_strategy)
-        invariants.documents_match(coll, embeddings_strategy)
-        invariants.ids_match(coll, embeddings_strategy)
+        invariants.count(coll, recordset_strategy)
+        invariants.metadatas_match(coll, recordset_strategy)
+        invariants.documents_match(coll, recordset_strategy)
+        invariants.ids_match(coll, recordset_strategy)
         invariants.ann_accuracy(
             coll,
-            embeddings_strategy,
+            recordset_strategy,
             embedding_function=collection_strategy.embedding_function,
         )
 
@@ -140,19 +141,19 @@ def test_persist(
 
     for (
         collection_strategy,
-        embeddings_strategy,
-    ) in collection_and_embeddings_strategies:
+        recordset_strategy,
+    ) in collection_and_recordsets_strategies:
         coll = client_2.get_collection(
             name=collection_strategy.name,
             embedding_function=collection_strategy.embedding_function,
         )
-        invariants.count(coll, embeddings_strategy)
-        invariants.metadatas_match(coll, embeddings_strategy)
-        invariants.documents_match(coll, embeddings_strategy)
-        invariants.ids_match(coll, embeddings_strategy)
+        invariants.count(coll, recordset_strategy)
+        invariants.metadatas_match(coll, recordset_strategy)
+        invariants.documents_match(coll, recordset_strategy)
+        invariants.ids_match(coll, recordset_strategy)
         invariants.ann_accuracy(
             coll,
-            embeddings_strategy,
+            recordset_strategy,
             embedding_function=collection_strategy.embedding_function,
         )
 
