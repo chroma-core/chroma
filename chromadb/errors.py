@@ -158,6 +158,17 @@ class RateLimitError(ChromaError):
         return "RateLimitError"
 
 
+class QuotaError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 400
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "QuotaError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidCollection": InvalidCollectionException,
