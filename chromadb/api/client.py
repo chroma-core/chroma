@@ -304,6 +304,8 @@ class Client(SharedSystemClient, ClientAPI):
     def _count(self, collection_id: UUID) -> int:
         return self._server._count(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -311,6 +313,8 @@ class Client(SharedSystemClient, ClientAPI):
         return self._server._peek(
             collection_id=collection_id,
             n=n,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
