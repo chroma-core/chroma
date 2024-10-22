@@ -840,7 +840,6 @@ impl RecordSegmentReader<'_> {
         &self,
         target_oid: u32,
     ) -> Result<usize, Box<dyn ChromaError>> {
-        use Ordering::*;
         let mut size = self.count().await?;
         if size == 0 {
             return Ok(0);
@@ -851,15 +850,15 @@ impl RecordSegmentReader<'_> {
             let mid = base + half;
 
             let cmp = self.get_offset_id_at_index(mid).await?.cmp(&target_oid);
-            base = if cmp == Greater { base } else { mid };
+            base = if cmp == Ordering::Greater { base } else { mid };
             size -= half;
         }
 
         Ok(
             match self.get_offset_id_at_index(base).await?.cmp(&target_oid) {
-                Equal => base,
-                Less => base + 1,
-                Greater => base,
+                Ordering::Equal => base,
+                Ordering::Less => base + 1,
+                Ordering::Greater => base,
             },
         )
     }

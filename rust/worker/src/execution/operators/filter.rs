@@ -107,14 +107,13 @@ pub enum FilterError {
 
 impl ChromaError for FilterError {
     fn code(&self) -> ErrorCodes {
-        use FilterError::*;
         match self {
-            RecordSegmentReaderCreationError(e) => e.code(),
-            LogMaterializationError(e) => e.code(),
-            IndexError(e) => e.code(),
-            MetadataSegmentReaderError(e) => e.code(),
-            RecordSegmentReaderError => ErrorCodes::Internal,
-            InvalidInput => ErrorCodes::InvalidArgument,
+            FilterError::RecordSegmentReaderCreationError(e) => e.code(),
+            FilterError::LogMaterializationError(e) => e.code(),
+            FilterError::IndexError(e) => e.code(),
+            FilterError::MetadataSegmentReaderError(e) => e.code(),
+            FilterError::RecordSegmentReaderError => ErrorCodes::Internal,
+            FilterError::InvalidInput => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -179,17 +178,15 @@ impl<'me> MetadataLogReader<'me> {
         val: &MetadataValue,
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
-        use Bound::*;
-        use PrimitiveOperator::*;
         if let Some(btm) = self.compact_metadata.get(key) {
             let bounds = match op {
-                Equal => (Included(&val), Included(&val)),
-                GreaterThan => (Excluded(&val), Unbounded),
-                GreaterThanOrEqual => (Included(&val), Unbounded),
-                LessThan => (Unbounded, Excluded(&val)),
-                LessThanOrEqual => (Unbounded, Included(&val)),
+                PrimitiveOperator::Equal => (Bound::Included(&val), Bound::Included(&val)),
+                PrimitiveOperator::GreaterThan => (Bound::Excluded(&val), Bound::Unbounded),
+                PrimitiveOperator::GreaterThanOrEqual => (Bound::Included(&val), Bound::Unbounded),
+                PrimitiveOperator::LessThan => (Bound::Unbounded, Bound::Excluded(&val)),
+                PrimitiveOperator::LessThanOrEqual => (Bound::Unbounded, Bound::Included(&val)),
                 // Inequality filter is not supported at metadata provider level
-                NotEqual => return Err(FilterError::InvalidInput),
+                PrimitiveOperator::NotEqual => return Err(FilterError::InvalidInput),
             };
             Ok(btm
                 .range::<&MetadataValue, _>(bounds)
@@ -225,9 +222,8 @@ impl<'me> MetadataProvider<'me> {
         &self,
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
-        use MetadataProvider::*;
         match self {
-            CompactData(metadata_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader) => {
                 if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
                     Ok(reader
                         .search(query)
@@ -237,7 +233,7 @@ impl<'me> MetadataProvider<'me> {
                     Ok(RoaringBitmap::new())
                 }
             }
-            Log(metadata_log_reader) => Ok(metadata_log_reader
+            MetadataProvider::Log(metadata_log_reader) => Ok(metadata_log_reader
                 .document
                 .iter()
                 .filter_map(|(oid, doc)| doc.contains(query).then_some(oid))
@@ -251,25 +247,22 @@ impl<'me> MetadataProvider<'me> {
         val: &MetadataValue,
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
-        use MetadataProvider::*;
-        use MetadataValue::*;
-        use PrimitiveOperator::*;
         match self {
-            CompactData(metadata_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader) => {
                 let (metadata_index_reader, kw) = match val {
-                    Bool(b) => (
+                    MetadataValue::Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
                         &(*b).into(),
                     ),
-                    Int(i) => (
+                    MetadataValue::Int(i) => (
                         metadata_segment_reader.u32_metadata_index_reader.as_ref(),
                         &(*i as u32).into(),
                     ),
-                    Float(f) => (
+                    MetadataValue::Float(f) => (
                         metadata_segment_reader.f32_metadata_index_reader.as_ref(),
                         &(*f as f32).into(),
                     ),
-                    Str(s) => (
+                    MetadataValue::Str(s) => (
                         metadata_segment_reader
                             .string_metadata_index_reader
                             .as_ref(),
@@ -278,19 +271,19 @@ impl<'me> MetadataProvider<'me> {
                 };
                 if let Some(reader) = metadata_index_reader {
                     match op {
-                        Equal => Ok(reader.get(key, kw).await?),
-                        GreaterThan => Ok(reader.gt(key, kw).await?),
-                        GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
-                        LessThan => Ok(reader.lt(key, kw).await?),
-                        LessThanOrEqual => Ok(reader.lte(key, kw).await?),
+                        PrimitiveOperator::Equal => Ok(reader.get(key, kw).await?),
+                        PrimitiveOperator::GreaterThan => Ok(reader.gt(key, kw).await?),
+                        PrimitiveOperator::GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
+                        PrimitiveOperator::LessThan => Ok(reader.lt(key, kw).await?),
+                        PrimitiveOperator::LessThanOrEqual => Ok(reader.lte(key, kw).await?),
                         // Inequality filter is not supported at metadata provider level
-                        NotEqual => Err(FilterError::InvalidInput),
+                        PrimitiveOperator::NotEqual => Err(FilterError::InvalidInput),
                     }
                 } else {
                     Ok(RoaringBitmap::new())
                 }
             }
-            Log(metadata_log_reader) => metadata_log_reader.get(key, val, op),
+            MetadataProvider::Log(metadata_log_reader) => metadata_log_reader.get(key, val, op),
         }
     }
 }
@@ -307,13 +300,17 @@ impl<'me> RoaringMetadataFilter<'me> for Where {
         &'me self,
         meta_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        use Where::*;
         match self {
-            DirectWhereComparison(direct_comparison) => direct_comparison.eval(meta_provider).await,
-            DirectWhereDocumentComparison(direct_document_comparison) => {
+            Where::DirectWhereComparison(direct_comparison) => {
+                direct_comparison.eval(meta_provider).await
+            }
+            Where::DirectWhereDocumentComparison(direct_document_comparison) => {
                 direct_document_comparison.eval(meta_provider).await
             }
-            WhereChildren(where_children) => Box::pin(where_children.eval(meta_provider)).await,
+            Where::WhereChildren(where_children) => {
+                // Box::pin is required to avoid infinite size future when recurse in async
+                Box::pin(where_children.eval(meta_provider)).await
+            }
         }
     }
 }
@@ -323,50 +320,60 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
         &'me self,
         meta_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        use MetadataSetValue::*;
-        use PrimitiveOperator::*;
-        use SetOperator::*;
-        use SignedRoaringBitmap::*;
         let result = match &self.comparison {
             WhereComparison::Primitive(primitive_operator, metadata_value) => {
                 match primitive_operator {
                     // We convert the inequality check in to an equality check, and then negate the result
-                    NotEqual => Exclude(
+                    PrimitiveOperator::NotEqual => SignedRoaringBitmap::Exclude(
                         meta_provider
-                            .filter_by_metadata(&self.key, metadata_value, &Equal)
+                            .filter_by_metadata(
+                                &self.key,
+                                metadata_value,
+                                &PrimitiveOperator::Equal,
+                            )
                             .await?,
                     ),
-                    Equal | GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual => {
-                        Include(
-                            meta_provider
-                                .filter_by_metadata(&self.key, metadata_value, primitive_operator)
-                                .await?,
-                        )
-                    }
+                    PrimitiveOperator::Equal
+                    | PrimitiveOperator::GreaterThan
+                    | PrimitiveOperator::GreaterThanOrEqual
+                    | PrimitiveOperator::LessThan
+                    | PrimitiveOperator::LessThanOrEqual => SignedRoaringBitmap::Include(
+                        meta_provider
+                            .filter_by_metadata(&self.key, metadata_value, primitive_operator)
+                            .await?,
+                    ),
                 }
             }
             WhereComparison::Set(set_operator, metadata_set_value) => {
                 let child_values: Vec<_> = match metadata_set_value {
-                    Bool(vec) => vec.iter().map(|b| MetadataValue::Bool(*b)).collect(),
-                    Int(vec) => vec.iter().map(|i| MetadataValue::Int(*i)).collect(),
-                    Float(vec) => vec.iter().map(|f| MetadataValue::Float(*f)).collect(),
-                    Str(vec) => vec.iter().map(|s| MetadataValue::Str(s.clone())).collect(),
+                    MetadataSetValue::Bool(vec) => {
+                        vec.iter().map(|b| MetadataValue::Bool(*b)).collect()
+                    }
+                    MetadataSetValue::Int(vec) => {
+                        vec.iter().map(|i| MetadataValue::Int(*i)).collect()
+                    }
+                    MetadataSetValue::Float(vec) => {
+                        vec.iter().map(|f| MetadataValue::Float(*f)).collect()
+                    }
+                    MetadataSetValue::Str(vec) => {
+                        vec.iter().map(|s| MetadataValue::Str(s.clone())).collect()
+                    }
                 };
                 let mut child_evals = Vec::with_capacity(child_values.len());
                 for val in child_values {
                     let eval = meta_provider
-                        .filter_by_metadata(&self.key, &val, &Equal)
+                        .filter_by_metadata(&self.key, &val, &PrimitiveOperator::Equal)
                         .await?;
                     match set_operator {
-                        In => child_evals.push(Include(eval)),
-                        NotIn => child_evals.push(Exclude(eval)),
+                        SetOperator::In => child_evals.push(SignedRoaringBitmap::Include(eval)),
+                        SetOperator::NotIn => child_evals.push(SignedRoaringBitmap::Exclude(eval)),
                     };
                 }
                 match set_operator {
-                    In => child_evals
+                    SetOperator::In => child_evals
                         .into_iter()
                         .fold(SignedRoaringBitmap::empty(), BitOr::bitor),
-                    NotIn => child_evals
+                    SetOperator::NotIn => child_evals
                         .into_iter()
                         .fold(SignedRoaringBitmap::full(), BitAnd::bitand),
                 }
@@ -381,14 +388,12 @@ impl<'me> RoaringMetadataFilter<'me> for DirectDocumentComparison {
         &'me self,
         meta_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        use DocumentOperator::*;
-        use SignedRoaringBitmap::*;
         let contain = meta_provider
             .filter_by_document(self.document.as_str())
             .await?;
         match self.operator {
-            Contains => Ok(Include(contain)),
-            NotContains => Ok(Exclude(contain)),
+            DocumentOperator::Contains => Ok(SignedRoaringBitmap::Include(contain)),
+            DocumentOperator::NotContains => Ok(SignedRoaringBitmap::Exclude(contain)),
         }
     }
 }
@@ -398,16 +403,15 @@ impl<'me> RoaringMetadataFilter<'me> for WhereChildren {
         &'me self,
         meta_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        use BooleanOperator::*;
         let mut child_evals = Vec::new();
         for child in &self.children {
             child_evals.push(child.eval(meta_provider).await?);
         }
         match self.operator {
-            And => Ok(child_evals
+            BooleanOperator::And => Ok(child_evals
                 .into_iter()
                 .fold(SignedRoaringBitmap::full(), BitAnd::bitand)),
-            Or => Ok(child_evals
+            BooleanOperator::Or => Ok(child_evals
                 .into_iter()
                 .fold(SignedRoaringBitmap::empty(), BitOr::bitor)),
         }
@@ -423,7 +427,6 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     }
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        use SignedRoaringBitmap::*;
         trace!(
             "[FilterOperator] segment id: {}",
             input.record_segment.id.to_string()
@@ -476,7 +479,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 
         // Get offset ids corresponding to user ids
         let (user_log_oids, user_compact_oids) = if let Some(uids) = input.query_ids.as_ref() {
-            let log_oids = Include(
+            let log_oids = SignedRoaringBitmap::Include(
                 metadata_log_reader.search_user_ids(
                     uids.iter()
                         .map(|s| s.as_str())
@@ -491,7 +494,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                         compact_oids.insert(oid);
                     }
                 }
-                Include(compact_oids)
+                SignedRoaringBitmap::Include(compact_oids)
             } else {
                 SignedRoaringBitmap::full()
             };
@@ -512,9 +515,9 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         let compact_oids = if let Some(clause) = input.where_clause.as_ref() {
             clause.eval(&compact_metadata_provider).await?
                 & user_compact_oids
-                & Exclude(metadata_log_reader.touched_oids)
+                & SignedRoaringBitmap::Exclude(metadata_log_reader.touched_oids)
         } else {
-            user_compact_oids & Exclude(metadata_log_reader.touched_oids)
+            user_compact_oids & SignedRoaringBitmap::Exclude(metadata_log_reader.touched_oids)
         };
 
         Ok(FilterOutput {

@@ -76,11 +76,10 @@ pub enum LimitError {
 
 impl ChromaError for LimitError {
     fn code(&self) -> ErrorCodes {
-        use LimitError::*;
         match self {
-            RecordSegmentReaderCreationError(e) => e.code(),
-            LogMaterializationError(e) => e.code(),
-            RecordSegmentReaderError => ErrorCodes::Internal,
+            LimitError::RecordSegmentReaderCreationError(e) => e.code(),
+            LimitError::LogMaterializationError(e) => e.code(),
+            LimitError::RecordSegmentReaderError => ErrorCodes::Internal,
         }
     }
 }
@@ -113,7 +112,6 @@ impl<'me> SkipScanner<'me> {
     // Skip to the start in log and record segment
     // The following implementation is based on std implementation
     async fn skip_to_start(&self, skip: usize) -> Result<(usize, usize), LimitError> {
-        use Ordering::*;
         if skip == 0 {
             return Ok((0, 0));
         }
@@ -133,7 +131,7 @@ impl<'me> SkipScanner<'me> {
             let mid = base + half;
 
             let cmp = self.joint_rank(mid).await?.cmp(&skip);
-            base = if cmp == Greater { base } else { mid };
+            base = if cmp == Ordering::Greater { base } else { mid };
             size -= half;
         }
 
@@ -209,7 +207,6 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
     }
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        use SignedRoaringBitmap::*;
         trace!(
             "[LimitOperator] segment id: {}",
             input.record_segment.id.to_string()
@@ -236,8 +233,8 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 
         // Materialize the filtered offset ids from the materialized log
         let mut materialized_log_oids = match &input.log_oids {
-            Include(rbm) => rbm.clone(),
-            Exclude(rbm) => {
+            SignedRoaringBitmap::Include(rbm) => rbm.clone(),
+            SignedRoaringBitmap::Exclude(rbm) => {
                 // Materialize the logs
                 let materializer = LogMaterializer::new(
                     record_segment_reader.clone(),
@@ -269,7 +266,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 
         // Materialize all filtered offset ids with the compact segment
         let materialized_oids = match &input.compact_oids {
-            Include(rbm) => {
+            SignedRoaringBitmap::Include(rbm) => {
                 let mut merged_oids = materialized_log_oids | rbm;
                 merged_oids.remove_smallest(input.skip as u64);
                 if let Some(take_count) = input.fetch {
@@ -278,7 +275,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                     merged_oids
                 }
             }
-            Exclude(rbm) => {
+            SignedRoaringBitmap::Exclude(rbm) => {
                 if let Some(reader) = record_segment_reader.as_ref() {
                     let record_count = reader
                         .count()
