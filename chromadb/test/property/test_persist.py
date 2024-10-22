@@ -100,7 +100,7 @@ def collection_and_recordset_strategy(
 )
 def test_persist(
     settings: Settings,
-    collection_and_recordsets_strategies: List[
+    collection_and_recordset_strategies: List[
         Tuple[strategies.Collection, strategies.RecordSet]
     ],
 ) -> None:
@@ -112,7 +112,7 @@ def test_persist(
     for (
         collection_strategy,
         recordset_strategy,
-    ) in collection_and_recordsets_strategies:
+    ) in collection_and_recordset_strategies:
         coll = client_1.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,  # type: ignore[arg-type]
@@ -142,7 +142,7 @@ def test_persist(
     for (
         collection_strategy,
         recordset_strategy,
-    ) in collection_and_recordsets_strategies:
+    ) in collection_and_recordset_strategies:
         coll = client_2.get_collection(
             name=collection_strategy.name,
             embedding_function=collection_strategy.embedding_function,
