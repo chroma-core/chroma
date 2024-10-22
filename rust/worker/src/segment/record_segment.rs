@@ -838,7 +838,7 @@ impl RecordSegmentReader<'_> {
     // The implemention is based on std binary search
     pub(crate) async fn get_offset_id_rank(
         &self,
-        target: u32,
+        target_oid: u32,
     ) -> Result<usize, Box<dyn ChromaError>> {
         use Ordering::*;
         let mut size = self.count().await?;
@@ -850,13 +850,13 @@ impl RecordSegmentReader<'_> {
             let half = size / 2;
             let mid = base + half;
 
-            let cmp = self.get_offset_id_at_index(mid).await?.cmp(&target);
+            let cmp = self.get_offset_id_at_index(mid).await?.cmp(&target_oid);
             base = if cmp == Greater { base } else { mid };
             size -= half;
         }
 
         Ok(
-            match self.get_offset_id_at_index(base).await?.cmp(&target) {
+            match self.get_offset_id_at_index(base).await?.cmp(&target_oid) {
                 Equal => base,
                 Less => base + 1,
                 Greater => base,

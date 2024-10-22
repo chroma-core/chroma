@@ -200,21 +200,21 @@ impl<'me> MetadataLogReader<'me> {
         }
     }
 
-    pub(crate) fn search_user_ids(&self, uids: &[String]) -> RoaringBitmap {
+    pub(crate) fn search_user_ids(&self, uids: &[&str]) -> RoaringBitmap {
         uids.iter()
-            .filter_map(|uid| self.uid_to_oid.get(uid.as_str()))
+            .filter_map(|uid| self.uid_to_oid.get(uid))
             .collect()
     }
 }
 
 pub(crate) enum MetadataProvider<'me> {
-    Compact(&'me MetadataSegmentReader<'me>),
+    CompactData(&'me MetadataSegmentReader<'me>),
     Log(&'me MetadataLogReader<'me>),
 }
 
 impl<'me> MetadataProvider<'me> {
     pub(crate) fn from_metadata_segment_reader(reader: &'me MetadataSegmentReader<'me>) -> Self {
-        Self::Compact(reader)
+        Self::CompactData(reader)
     }
 
     pub(crate) fn from_metadata_log_reader(reader: &'me MetadataLogReader<'me>) -> Self {
@@ -227,7 +227,7 @@ impl<'me> MetadataProvider<'me> {
     ) -> Result<RoaringBitmap, FilterError> {
         use MetadataProvider::*;
         match self {
-            Compact(metadata_segment_reader) => {
+            CompactData(metadata_segment_reader) => {
                 if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
                     Ok(reader
                         .search(query)
@@ -255,7 +255,7 @@ impl<'me> MetadataProvider<'me> {
         use MetadataValue::*;
         use PrimitiveOperator::*;
         match self {
-            Compact(metadata_segment_reader) => {
+            CompactData(metadata_segment_reader) => {
                 let (metadata_index_reader, kw) = match val {
                     Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
@@ -476,7 +476,14 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 
         // Get offset ids corresponding to user ids
         let (user_log_oids, user_compact_oids) = if let Some(uids) = input.query_ids.as_ref() {
-            let log_oids = Include(metadata_log_reader.search_user_ids(uids));
+            let log_oids = Include(
+                metadata_log_reader.search_user_ids(
+                    uids.iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                ),
+            );
             let compact_oids = if let Some(reader) = record_segment_reader.as_ref() {
                 let mut compact_oids = RoaringBitmap::new();
                 for uid in uids {
