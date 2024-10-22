@@ -75,27 +75,17 @@ fn bench_filter(criterion: &mut Criterion) {
         generator: add_generator_0,
     };
 
-    let routine = |filter_input| async move {
-        FilterOperator::new()
-            .run(&filter_input)
-            .await
-            .expect("Filter should not fail.");
+    let routine = |_filter_input| async move {
+        // TODO: Run filter operator
     };
 
     for record_count in [1000, 10000, 100000] {
         let mut compact = TestSegment::default();
         runtime.block_on(async { compact.populate_with_generator(record_count, &logen).await });
 
-        for (op, where_clause) in baseline_where_clauses() {
+        for (op, _where_clause) in baseline_where_clauses() {
             let setup = || {
-                FilterInput::new(
-                    compact.blockfile_provider.clone(),
-                    compact.record.clone(),
-                    compact.metadata.clone(),
-                    Chunk::new(Vec::new().into()),
-                    None,
-                    where_clause.clone(),
-                )
+                // TODO: Construct filter input
             };
             bench_run(
                 format!("metadata-filtering-{}-{}", record_count, op).as_str(),
