@@ -5,14 +5,12 @@ use chroma_test::benchmark::{bench, tokio_multi_thread};
 use chroma_test::log::{offset_as_id, random_document, random_embedding, LogGenerator};
 use chroma_test::segment::CompactSegment;
 use chroma_types::{
-    BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
+    BooleanOperator, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
     MetadataValue, Operation, OperationRecord, PrimitiveOperator, UpdateMetadataValue, Where,
     WhereChildren, WhereComparison,
 };
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use worker::execution::operator::Operator;
-use worker::execution::operators::filter::{FilterInput, FilterOperator};
 
 const DOCUMENT_LENGTH: usize = 64;
 const EMBEDDING_DIMENSION: usize = 6;
@@ -116,27 +114,17 @@ fn bench_filter(criterion: &mut Criterion) {
         generator: log_generator,
     };
 
-    let routine = |filter_input| async move {
-        FilterOperator::new()
-            .run(&filter_input)
-            .await
-            .expect("Filter should not fail.");
+    let routine = |_filter_input| async move {
+        // TODO: Run filter operator
     };
 
     for record_count in [1000, 10000, 100000] {
         let mut compact = CompactSegment::default();
         runtime.block_on(async { compact.populate_with_generator(record_count, &logen).await });
 
-        for (op, where_clause) in baseline_where_clauses() {
+        for (op, _where_clause) in baseline_where_clauses() {
             let setup = || {
-                FilterInput::new(
-                    compact.blockfile_provider.clone(),
-                    compact.record.clone(),
-                    compact.metadata.clone(),
-                    Chunk::new(Vec::new().into()),
-                    None,
-                    where_clause.clone(),
-                )
+                // TODO: Construct filter input
             };
             bench(
                 format!("filter-{}-{}", record_count, op).as_str(),
