@@ -158,12 +158,13 @@ pub(super) async fn get_record_segment_by_collection_id(
 /// * `ctx` - The component context
 /// # Panics
 /// This function panics if the result channel is not set
-pub(super) fn terminate_with_error<Output, C>(
-    mut result_channel: Option<tokio::sync::oneshot::Sender<Result<Output, Box<dyn ChromaError>>>>,
-    error: Box<dyn ChromaError>,
+pub(super) fn terminate_with_error<Output, C, E>(
+    mut result_channel: Option<tokio::sync::oneshot::Sender<Result<Output, E>>>,
+    error: E,
     ctx: &ComponentContext<C>,
 ) where
     C: Component,
+    E: ChromaError,
 {
     let result_channel = result_channel
         .take()

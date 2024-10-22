@@ -6,114 +6,63 @@ use std::{
 use crate::{
     execution::operator::Operator,
     segment::{
-        metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
-        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
+        metadata_segment::MetadataSegmentReader, LogMaterializerError, MaterializedLogRecord,
     },
 };
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_types::{
     BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
-    LogRecord, MaterializedLogOperation, MetadataSetValue, MetadataValue, PrimitiveOperator,
-    Segment, SetOperator, SignedRoaringBitmap, Where, WhereChildren, WhereComparison,
+    MaterializedLogOperation, MetadataSetValue, MetadataValue, PrimitiveOperator, SetOperator,
+    SignedRoaringBitmap, Where, WhereChildren, WhereComparison,
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
-/// # Description
-/// The `MetadataFilteringOperator` should produce the offset ids of the matching documents.
-///
-/// # Input
-/// - `blockfile_provider` / `record_segment` / `metadata_segment`: handles to the underlying data.
-/// - `log_record`: the chunk of log that is not yet compacted, representing the latest updates.
-/// - `query_ids`: user provided ids, which must be a superset of returned documents.
-/// - `where_clause`: a boolean predicate on the metadata and the content of the document.
-///
-/// # Output
-/// - `log_record`: the same `log_record` from the input.
-/// - `log_oids`: the offset ids to include or exclude from the log.
-/// - `compact_oids`: the offset ids to include or exclude from the record segment.
-///
-/// # Note
-/// - The `MetadataProvider` enum can be viewed as an universal interface for the metadata and document index.
-/// - In the output, `log_mask` should be a subset of `offset_ids`
+use super::scan::{ScanError, ScanOutput};
 
-#[derive(Debug)]
-pub struct FilterOperator {}
-
-impl FilterOperator {
-    pub fn new() -> Box<Self> {
-        Box::new(FilterOperator {})
-    }
+#[derive(Clone, Debug)]
+pub struct FilterOperator {
+    pub query_ids: Option<Vec<String>>,
+    pub where_clause: Option<Where>,
 }
 
 #[derive(Debug)]
 pub struct FilterInput {
-    blockfile_provider: BlockfileProvider,
-    record_segment: Segment,
-    metadata_segment: Segment,
-    log_record: Chunk<LogRecord>,
-    query_ids: Option<Vec<String>>,
-    where_clause: Option<Where>,
+    scan: ScanOutput,
 }
 
-impl FilterInput {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        blockfile_provider: BlockfileProvider,
-        record_segment: Segment,
-        metadata_segment: Segment,
-        log_record: Chunk<LogRecord>,
-        query_ids: Option<Vec<String>>,
-        where_clause: Option<Where>,
-    ) -> Self {
-        Self {
-            blockfile_provider,
-            record_segment,
-            metadata_segment,
-            log_record,
-            query_ids,
-            where_clause,
-        }
+impl From<ScanOutput> for FilterInput {
+    fn from(value: ScanOutput) -> Self {
+        Self { scan: value }
     }
 }
 
 #[derive(Debug)]
 pub struct FilterOutput {
-    pub log_records: Chunk<LogRecord>,
+    pub scan: ScanOutput,
     pub log_oids: SignedRoaringBitmap,
     pub compact_oids: SignedRoaringBitmap,
 }
 
 #[derive(Error, Debug)]
 pub enum FilterError {
-    #[error("Error creating record segment reader {0}")]
-    RecordSegmentReaderCreationError(#[from] RecordSegmentReaderCreationError),
-    #[error("Error materializing logs {0}")]
-    LogMaterializationError(#[from] LogMaterializerError),
-    #[error("Error filtering documents by where or where_document clauses {0}")]
+    #[error("Error reading metadata index: {0}")]
     IndexError(#[from] MetadataIndexError),
-    #[error("Error from metadata segment reader {0}")]
-    MetadataSegmentReaderError(#[from] MetadataSegmentError),
-    #[error("Error reading from record segment")]
-    RecordSegmentReaderError,
-    #[error("Invalid input")]
-    InvalidInput,
+    #[error("Error materializing log: {0}")]
+    LogMaterializer(#[from] LogMaterializerError),
+    #[error("Error processing scan output: {0}")]
+    Scan(#[from] ScanError),
 }
 
 impl ChromaError for FilterError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FilterError::RecordSegmentReaderCreationError(e) => e.code(),
-            FilterError::LogMaterializationError(e) => e.code(),
             FilterError::IndexError(e) => e.code(),
-            FilterError::MetadataSegmentReaderError(e) => e.code(),
-            FilterError::RecordSegmentReaderError => ErrorCodes::Internal,
-            FilterError::InvalidInput => ErrorCodes::InvalidArgument,
+            FilterError::LogMaterializer(e) => e.code(),
+            FilterError::Scan(e) => e.code(),
         }
     }
 }
@@ -185,8 +134,9 @@ impl<'me> MetadataLogReader<'me> {
                 PrimitiveOperator::GreaterThanOrEqual => (Bound::Included(&val), Bound::Unbounded),
                 PrimitiveOperator::LessThan => (Bound::Unbounded, Bound::Excluded(&val)),
                 PrimitiveOperator::LessThanOrEqual => (Bound::Unbounded, Bound::Included(&val)),
-                // Inequality filter is not supported at metadata provider level
-                PrimitiveOperator::NotEqual => return Err(FilterError::InvalidInput),
+                PrimitiveOperator::NotEqual => unreachable!(
+                    "Inequality filter should be handled above the metadata provider level"
+                ),
             };
             Ok(btm
                 .range::<&MetadataValue, _>(bounds)
@@ -276,8 +226,9 @@ impl<'me> MetadataProvider<'me> {
                         PrimitiveOperator::GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
                         PrimitiveOperator::LessThan => Ok(reader.lt(key, kw).await?),
                         PrimitiveOperator::LessThanOrEqual => Ok(reader.lte(key, kw).await?),
-                        // Inequality filter is not supported at metadata provider level
-                        PrimitiveOperator::NotEqual => Err(FilterError::InvalidInput),
+                        PrimitiveOperator::NotEqual => unreachable!(
+                            "Inequality filter should be handled above the metadata provider level"
+                        ),
                     }
                 } else {
                     Ok(RoaringBitmap::new())
@@ -422,63 +373,25 @@ impl<'me> RoaringMetadataFilter<'me> for WhereChildren {
 impl Operator<FilterInput, FilterOutput> for FilterOperator {
     type Error = FilterError;
 
-    fn get_name(&self) -> &'static str {
-        "FilterOperator"
-    }
-
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        trace!(
-            "[FilterOperator] segment id: {}",
-            input.record_segment.id.to_string()
-        );
+        trace!("[{}]: {:?}", self.get_name(), input);
 
-        // Initialize record segment reader
-        let record_segment_reader = match RecordSegmentReader::from_segment(
-            &input.record_segment,
-            &input.blockfile_provider,
-        )
-        .await
-        {
-            Ok(reader) => Ok(Some(reader)),
-            // Uninitialized segment is fine and means that the record
-            // segment is not yet initialized in storage
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
-                Ok(None)
-            }
-            Err(e) => {
-                tracing::error!("Error creating record segment reader {}", e);
-                Err(FilterError::RecordSegmentReaderCreationError(*e))
-            }
-        }?;
-
-        // Materialize the logs
-        let materializer = LogMaterializer::new(
-            record_segment_reader.clone(),
-            input.log_record.clone(),
-            None,
-        );
+        let record_segment_reader = input.scan.record_segment_reader().await?;
+        let materializer = input.scan.log_materializer().await?;
         let materialized_logs = materializer
             .materialize()
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await
-            .map_err(|e| {
-                tracing::error!("Error materializing log: {}", e);
-                FilterError::LogMaterializationError(e)
-            })?;
+            .await?;
         let metadata_log_reader = MetadataLogReader::new(&materialized_logs);
         let log_metadata_provider =
             MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 
-        // Initialize metadata segment reader
-        let metadata_segement_reader =
-            MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
-                .await
-                .map_err(FilterError::MetadataSegmentReaderError)?;
+        let metadata_segement_reader = input.scan.metadata_segment_reader().await?;
         let compact_metadata_provider =
             MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
 
         // Get offset ids corresponding to user ids
-        let (user_log_oids, user_compact_oids) = if let Some(uids) = input.query_ids.as_ref() {
+        let (user_log_oids, user_compact_oids) = if let Some(uids) = self.query_ids.as_ref() {
             let log_oids = SignedRoaringBitmap::Include(
                 metadata_log_reader.search_user_ids(
                     uids.iter()
@@ -504,7 +417,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         };
 
         // Filter the offset ids in the log if the where clause is provided
-        let log_oids = if let Some(clause) = input.where_clause.as_ref() {
+        let log_oids = if let Some(clause) = self.where_clause.as_ref() {
             clause.eval(&log_metadata_provider).await? & user_log_oids
         } else {
             user_log_oids
@@ -512,7 +425,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 
         // Filter the offset ids in the metadata segment if the where clause is provided
         // This always exclude all offsets that is present in the materialized log
-        let compact_oids = if let Some(clause) = input.where_clause.as_ref() {
+        let compact_oids = if let Some(clause) = self.where_clause.as_ref() {
             clause.eval(&compact_metadata_provider).await?
                 & user_compact_oids
                 & SignedRoaringBitmap::Exclude(metadata_log_reader.touched_oids)
@@ -521,7 +434,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         };
 
         Ok(FilterOutput {
-            log_records: input.log_record.clone(),
+            scan: input.scan.clone(),
             log_oids,
             compact_oids,
         })
