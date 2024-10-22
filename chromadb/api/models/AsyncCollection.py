@@ -372,5 +372,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         )
 
         await self._client._delete(
-            collection_id=self.id, ids=ids, where=where, where_document=where_document
+            collection_id=self.id,
+            ids=ids,
+            where=where,
+            where_document=where_document,
+            tenant=self.tenant,
+            database=self.database,
         )

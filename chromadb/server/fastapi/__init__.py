@@ -700,6 +700,8 @@ class FastAPI(Server):
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                tenant=tenant,
+                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -768,6 +770,8 @@ class FastAPI(Server):
                     metadatas=add.metadatas,  # type: ignore
                     documents=add.documents,  # type: ignore
                     uris=add.uris,  # type: ignore
+                    tenant=tenant,
+                    database=database_name,
                 )
 
             return cast(
@@ -812,6 +816,8 @@ class FastAPI(Server):
                 metadatas=update.metadatas,  # type: ignore
                 documents=update.documents,  # type: ignore
                 uris=update.uris,  # type: ignore
+                tenant=tenant,
+                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -854,6 +860,8 @@ class FastAPI(Server):
                 metadatas=upsert.metadatas,  # type: ignore
                 documents=upsert.documents,  # type: ignore
                 uris=upsert.uris,  # type: ignore
+                tenant=tenant,
+                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -891,6 +899,8 @@ class FastAPI(Server):
                 offset=get.offset,
                 where_document=get.where_document,
                 include=get.include,
+                tenant=tenant,
+                database=database_name,
             )
 
         get_result = cast(
@@ -935,6 +945,8 @@ class FastAPI(Server):
                 ids=delete.ids,
                 where=delete.where,
                 where_document=delete.where_document,
+                tenant=tenant,
+                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -966,6 +978,8 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api._count,
                 _uuid(collection_id),
+                tenant,
+                database_name,
                 limiter=self._capacity_limiter,
             ),
         )
@@ -1024,6 +1038,8 @@ class FastAPI(Server):
                 where=query.where,  # type: ignore
                 where_document=query.where_document,  # type: ignore
                 include=query.include,
+                tenant=tenant,
+                database=database_name,
             )
 
         nnresult = cast(
