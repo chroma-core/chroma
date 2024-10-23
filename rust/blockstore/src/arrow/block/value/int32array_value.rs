@@ -14,7 +14,7 @@ use std::{mem::size_of, sync::Arc};
 
 impl ArrowWriteableValue for Vec<u32> {
     type ReadableValue<'referred_data> = &'referred_data [u32];
-    type ValueBuilder = ListBuilder<UInt32Builder>;
+    type ArrowBuilder = ListBuilder<UInt32Builder>;
     type PreparedValue = Vec<u32>;
 
     fn offset_size(item_count: usize) -> usize {
@@ -47,7 +47,7 @@ impl ArrowWriteableValue for Vec<u32> {
         BlockStorage::VecUInt32(SingleColumnStorage::new())
     }
 
-    fn get_value_builder() -> Self::ValueBuilder {
+    fn get_arrow_builder() -> Self::ArrowBuilder {
         ListBuilder::new(UInt32Builder::new())
     }
 
@@ -55,11 +55,11 @@ impl ArrowWriteableValue for Vec<u32> {
         value
     }
 
-    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
         builder.append_value(&UInt32Array::new(value.into(), None));
     }
 
-    fn finish(mut builder: Self::ValueBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
         let value_field = Field::new(
             "value",
             arrow::datatypes::DataType::List(Arc::new(Field::new(

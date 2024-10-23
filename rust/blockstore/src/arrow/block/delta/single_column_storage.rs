@@ -213,7 +213,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         mut key_builder: BlockKeyArrowBuilder,
         metadata: Option<HashMap<String, String>>,
     ) -> (Arc<Schema>, Vec<Arc<dyn Array>>) {
-        let mut value_builder = T::get_value_builder();
+        let mut value_builder = T::get_arrow_builder();
 
         match Arc::try_unwrap(self.inner) {
             Ok(inner) => {
