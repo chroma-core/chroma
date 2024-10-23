@@ -2,19 +2,23 @@ from overrides import override
 from typing import Any, Callable, TypeVar
 from functools import wraps
 
-from chromadb.rate_limit import RateLimitEnforcer
+from chromadb.quota import QuotaEnforcer
 from chromadb.config import System
 
 T = TypeVar("T", bound=Callable[..., Any])
 
 
-class SimpleRateLimitEnforcer(RateLimitEnforcer):
+class SimpleQuotaEnforcer(QuotaEnforcer):
     """
-    A naive implementation of a rate limit enforcer that allows all requests.
+    A naive implementation of a quota enforcer that allows all requests.
     """
 
     def __init__(self, system: System) -> None:
         super().__init__(system)
+
+    @override
+    def enforce(self) -> None:
+        pass
 
     @override
     def rate_limit(self, func: T) -> T:

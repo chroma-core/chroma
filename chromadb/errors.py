@@ -161,7 +161,7 @@ class RateLimitError(ChromaError):
 class QuotaError(ChromaError):
     @overrides
     def code(self) -> int:
-        return 400
+        return 429
 
     @classmethod
     @overrides
