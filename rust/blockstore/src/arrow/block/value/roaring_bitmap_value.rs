@@ -2,7 +2,12 @@ use std::sync::Arc;
 
 use crate::{
     arrow::{
-        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
+        block::delta::{
+            single_column_storage::{
+                SingleColumnStorage, SingleColumnStorageArrowValueCapacityHint,
+            },
+            BlockDelta, BlockStorage,
+        },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -17,6 +22,7 @@ use roaring::RoaringBitmap;
 impl ArrowWriteableValue for RoaringBitmap {
     type ReadableValue<'referred_data> = RoaringBitmap;
     type ArrowBuilder = BinaryBuilder;
+    type ArrowCapacityHint = SingleColumnStorageArrowValueCapacityHint;
     type PreparedValue = Vec<u8>;
 
     fn offset_size(item_count: usize) -> usize {
@@ -49,8 +55,8 @@ impl ArrowWriteableValue for RoaringBitmap {
         BlockStorage::RoaringBitmap(SingleColumnStorage::new())
     }
 
-    fn get_arrow_builder() -> Self::ArrowBuilder {
-        BinaryBuilder::new()
+    fn get_arrow_builder(capacity_hint: Self::ArrowCapacityHint) -> Self::ArrowBuilder {
+        BinaryBuilder::with_capacity(capacity_hint.item_count, capacity_hint.byte_size)
     }
 
     fn prepare(value: Self) -> Self::PreparedValue {
