@@ -29,7 +29,7 @@ pub struct ValueBuilderWrapper {
 
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
-    type ValueBuilder = Option<ValueBuilderWrapper>;
+    type ArrowBuilder = Option<ValueBuilderWrapper>;
     type PreparedValue = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
 
     fn offset_size(item_count: usize) -> usize {
@@ -64,7 +64,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         BlockStorage::DataRecord(DataRecordStorage::new())
     }
 
-    fn get_value_builder() -> Self::ValueBuilder {
+    fn get_arrow_builder() -> Self::ArrowBuilder {
         None
     }
 
@@ -85,7 +85,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         (id, embedding, metadata, document)
     }
 
-    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
         let (id, embedding, metadata, document) = value;
 
         // Lazily init so we know the embedding dimension
@@ -116,7 +116,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         builder.document_builder.append_option(document);
     }
 
-    fn finish(mut builder: Self::ValueBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
         let mut builder = builder.take().unwrap_or(ValueBuilderWrapper {
             id_builder: StringBuilder::new(),
             embedding_builder: FixedSizeListBuilder::new(Float32Builder::new(), 0),

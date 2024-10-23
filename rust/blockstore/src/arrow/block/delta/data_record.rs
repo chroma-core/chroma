@@ -315,7 +315,7 @@ impl DataRecordStorage {
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
         // build arrow key.
         let mut key_builder = key_builder;
-        let mut value_builder = <&DataRecord as ArrowWriteableValue>::get_value_builder();
+        let mut value_builder = <&DataRecord as ArrowWriteableValue>::get_arrow_builder();
 
         match Arc::try_unwrap(self.inner) {
             Ok(inner) => {
