@@ -279,16 +279,6 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		return nil, false, err
 	}
 	result = convertCollectionToModel(collectionList)[0]
-
-	notificationRecord := &dbmodel.Notification{
-		CollectionID: result.ID.String(),
-		Type:         dbmodel.NotificationTypeCreateCollection,
-		Status:       dbmodel.NotificationStatusPending,
-	}
-	err = tc.metaDomain.NotificationDb(txCtx).Insert(notificationRecord)
-	if err != nil {
-		return nil, false, err
-	}
 	return result, true, nil
 }
 
