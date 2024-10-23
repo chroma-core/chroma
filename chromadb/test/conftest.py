@@ -362,12 +362,15 @@ def fastapi_persistent() -> Generator[System, None, None]:
     return _fastapi_fixture(is_persistent=True)
 
 
-def fastapi_ssl() -> Generator[System, None, None]:
+def fastapi_ssl(
+    api_impl: Optional[str] = "chromadb.api.fastapi.FastAPI",
+) -> Generator[System, None, None]:
     generate_self_signed_certificate()
     return _fastapi_fixture(
         is_persistent=False,
         chroma_server_ssl_certfile="./servercert.pem",
         chroma_server_ssl_keyfile="./serverkey.pem",
+        chroma_api_impl=api_impl,
     )
 
 
@@ -386,7 +389,9 @@ def basic_http_client() -> Generator[System, None, None]:
     system.stop()
 
 
-def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None, None]:
+def fastapi_server_basic_auth_valid_cred_single_user(
+    api_impl: Optional[str] = "chromadb.api.fastapi.FastAPI",
+) -> Generator[System, None, None]:
     # This (and similar usage below) should use the delete_on_close parameter
     # instead of delete=False, but it's only available in Python 3.12 and later.
     # We must explicitly close the file before spawning a subprocess to avoid
@@ -401,13 +406,14 @@ def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None
             chroma_server_authn_credentials_file=f.name,
             chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
             chroma_client_auth_credentials="admin:admin",
+            chroma_api_impl=api_impl,
         ):
             yield item
 
 
-def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
-    Generator[System, None, None]
-):
+def fastapi_server_basic_auth_valid_cred_multiple_users(
+    api_impl: Optional[str] = "chromadb.api.fastapi.FastAPI",
+) -> Generator[System, None, None]:
     creds = {
         "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
@@ -424,11 +430,14 @@ def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
             chroma_server_authn_credentials_file=f.name,
             chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
             chroma_client_auth_credentials="admin:admin",
+            chroma_api_impl=api_impl,
         ):
             yield item
 
 
-def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
+def fastapi_server_basic_auth_invalid_cred(
+    api_impl: Optional[str] = "chromadb.api.fastapi.FastAPI",
+) -> Generator[System, None, None]:
     with tempfile.NamedTemporaryFile("w", suffix=".htpasswd", delete=False) as f:
         f.write("admin:$2y$05$e5sRb6NCcSH3YfbIxe1AGu2h5K7OOd982OXKmd8WyQ3DRQ4MvpnZS\n")
         f.close()
@@ -439,6 +448,7 @@ def fastapi_server_basic_auth_invalid_cred() -> Generator[System, None, None]:
             chroma_server_authn_credentials_file=f.name,
             chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
             chroma_client_auth_credentials="admin:admin1",
+            chroma_api_impl=api_impl,
         ):
             yield item
 
@@ -500,9 +510,9 @@ users:
                 yield item
 
 
-def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
-    Generator[System, None, None]
-):
+def fastapi_fixture_admin_and_singleton_tenant_db_user(
+    api_impl: Optional[str] = "chromadb.api.fastapi.FastAPI",
+) -> Generator[System, None, None]:
     with tempfile.NamedTemporaryFile("w", suffix=".authn", delete=False) as f:
         f.write(
             """
@@ -527,6 +537,7 @@ users:
             chroma_client_auth_credentials="admin-token",
             chroma_server_authn_provider="chromadb.auth.token_authn.TokenAuthenticationServerProvider",
             chroma_server_authn_credentials_file=f.name,
+            chroma_api_impl=api_impl,
         ):
             yield item
 
@@ -628,8 +639,34 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
 
 def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
-        fastapi_server_basic_auth_valid_cred_single_user,
-        fastapi_server_basic_auth_valid_cred_multiple_users,
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_single_user,
+                "chromadb.api.fastapi.FastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_single_user_sync",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_single_user,
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_single_user_async",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_multiple_users,
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_multiple_users_async",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_valid_cred_multiple_users,
+                "chromadb.api.fastapi.FastAPI",
+            ),
+            id="fastapi_server_basic_auth_valid_cred_multiple_users_sync",
+        ),
     ]
     return fixtures
 
@@ -644,17 +681,52 @@ def system_fixtures_authn_rbac_authz() -> (
 def system_fixtures_root_and_singleton_tenant_db_user() -> (
     List[Callable[[], Generator[System, None, None]]]
 ):
-    fixtures = [fastapi_fixture_admin_and_singleton_tenant_db_user]
+    fixtures = [
+        pytest.param(
+            (
+                fastapi_fixture_admin_and_singleton_tenant_db_user,
+                "chromadb.api.fastapi.FastAPI",
+            ),
+            id="fastapi_fixture_admin_and_singleton_tenant_db_user_sync",
+        ),
+        pytest.param(
+            (
+                fastapi_fixture_admin_and_singleton_tenant_db_user,
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_fixture_admin_and_singleton_tenant_db_user_async",
+        ),
+    ]
     return fixtures
 
 
 def system_fixtures_wrong_auth() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi_server_basic_auth_invalid_cred]
+    fixtures = [
+        pytest.param(
+            (fastapi_server_basic_auth_invalid_cred, "chromadb.api.fastapi.FastAPI"),
+            id="fastapi_server_basic_auth_invalid_cred_sync",
+        ),
+        pytest.param(
+            (
+                fastapi_server_basic_auth_invalid_cred,
+                "chromadb.api.async_fastapi.AsyncFastAPI",
+            ),
+            id="fastapi_server_basic_auth_invalid_cred_async",
+        ),
+    ]
     return fixtures
 
 
 def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
-    fixtures = [fastapi_ssl]
+    fixtures = [
+        pytest.param(
+            (fastapi_ssl, "chromadb.api.fastapi.FastAPI"), id="fastapi_ssl_sync"
+        ),
+        pytest.param(
+            (fastapi_ssl, "chromadb.api.async_fastapi.AsyncFastAPI"),
+            id="fastapi_ssl_async",
+        ),
+    ]
     return fixtures
 
 
@@ -662,7 +734,7 @@ def system_fixtures_ssl() -> List[Callable[[], Generator[System, None, None]]]:
 def system_wrong_auth(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    yield from request.param[0](request.param[1])
 
 
 @pytest.fixture(scope="module", params=system_fixtures_authn_rbac_authz())
@@ -686,12 +758,12 @@ def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
 
 @pytest.fixture(scope="module", params=system_fixtures_ssl())
 def system_ssl(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    yield from request.param[0](request.param[1])
 
 
 @pytest.fixture(scope="module", params=system_fixtures_auth())
 def system_auth(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    yield from request.param[0](request.param[1])
 
 
 @async_class_to_sync
