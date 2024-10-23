@@ -1,9 +1,10 @@
 use crate::config::QueryServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
+use crate::execution::operators::fetch_log::FetchLogOperator;
+use crate::execution::operators::fetch_segment::FetchSegmentOperator;
 use crate::execution::operators::filter::FilterOperator;
 use crate::execution::operators::limit::LimitOperator;
 use crate::execution::operators::projection::ProjectionOperator;
-use crate::execution::operators::scan::ScanOperator;
 use crate::execution::orchestration::get::GetOrchestrator;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
@@ -428,39 +429,39 @@ impl WorkerServer {
             _ => None,
         };
 
-        let orchestrator = GetOrchestrator {
-            dispatcher: dispatcher.clone(),
+        let orchestrator = GetOrchestrator::new(
+            dispatcher.clone(),
             // TODO: Load the configuration for this
-            queue: 1000,
-            scan: ScanOperator {
+            1000,
+            FetchLogOperator {
                 log_client: self.log.clone(),
                 batch_size: 100,
                 skip: log_position as u32 + 1,
                 fetch: None,
+                collection: collection_uuid,
+            },
+            FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),
                 hnsw: self.hnsw_index_provider.clone(),
                 blockfile: self.blockfile_provider.clone(),
-                // knn: todo!(),
                 metadata: segment_uuid,
-                // record: todo!(),
                 collection: collection_uuid,
                 version: collection_version,
             },
-            filter: FilterOperator {
+            FilterOperator {
                 query_ids,
                 where_clause: clause,
             },
-            limit: LimitOperator {
+            LimitOperator {
                 skip: request.offset.unwrap_or_default(),
                 fetch: request.limit,
             },
-            projection: ProjectionOperator {
+            ProjectionOperator {
                 document: request.include_metadata,
                 embedding: request.include_metadata,
                 metadata: request.include_metadata,
             },
-            result_channel: None,
-        };
+        );
 
         let result = orchestrator.register_and_run(system.clone()).await;
         let result = match result {
