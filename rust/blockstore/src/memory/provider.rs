@@ -46,7 +46,7 @@ impl MemoryBlockfileProvider {
         &self,
         options: BlockfileWriterOptions,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
-        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unsorted {
+        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unordered {
             unimplemented!();
         }
 

@@ -70,7 +70,7 @@ impl ArrowBlockfileProvider {
         &self,
         options: BlockfileWriterOptions,
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
-        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unsorted {
+        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unordered {
             unimplemented!();
         }
 
