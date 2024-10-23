@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 impl ArrowWriteableValue for u32 {
     type ReadableValue<'referred_data> = u32;
-    type ValueBuilder = UInt32Builder;
+    type ArrowBuilder = UInt32Builder;
     type PreparedValue = u32;
 
     fn offset_size(_item_count: usize) -> usize {
@@ -42,7 +42,7 @@ impl ArrowWriteableValue for u32 {
         BlockStorage::UInt32(SingleColumnStorage::new())
     }
 
-    fn get_value_builder() -> Self::ValueBuilder {
+    fn get_arrow_builder() -> Self::ArrowBuilder {
         UInt32Builder::new()
     }
 
@@ -50,11 +50,11 @@ impl ArrowWriteableValue for u32 {
         value
     }
 
-    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
         builder.append_value(value);
     }
 
-    fn finish(mut builder: Self::ValueBuilder) -> (arrow::datatypes::Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder) -> (arrow::datatypes::Field, Arc<dyn Array>) {
         let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
         let value_arr = builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());

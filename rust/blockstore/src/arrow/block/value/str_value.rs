@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 impl ArrowWriteableValue for String {
     type ReadableValue<'referred_data> = &'referred_data str;
-    type ValueBuilder = StringBuilder;
+    type ArrowBuilder = StringBuilder;
     type PreparedValue = String;
 
     fn offset_size(item_count: usize) -> usize {
@@ -43,7 +43,7 @@ impl ArrowWriteableValue for String {
         BlockStorage::String(SingleColumnStorage::new())
     }
 
-    fn get_value_builder() -> Self::ValueBuilder {
+    fn get_arrow_builder() -> Self::ArrowBuilder {
         StringBuilder::new()
     }
 
@@ -51,11 +51,11 @@ impl ArrowWriteableValue for String {
         value
     }
 
-    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
         builder.append_value(value);
     }
 
-    fn finish(mut builder: Self::ValueBuilder) -> (arrow::datatypes::Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder) -> (arrow::datatypes::Field, Arc<dyn Array>) {
         let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
         let value_arr = builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());

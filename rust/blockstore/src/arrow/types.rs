@@ -18,7 +18,7 @@ pub trait ArrowWriteableKey: Key + Default {
 }
 
 pub trait ArrowWriteableValue: Value {
-    type ValueBuilder;
+    type ArrowBuilder;
     type ReadableValue<'referred_data>: ArrowReadableValue<'referred_data>;
     type PreparedValue;
 
@@ -27,10 +27,10 @@ pub trait ArrowWriteableValue: Value {
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta);
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta);
     fn get_delta_builder() -> BlockStorage;
-    fn get_value_builder() -> Self::ValueBuilder;
+    fn get_arrow_builder() -> Self::ArrowBuilder;
     fn prepare(value: Self) -> Self::PreparedValue;
-    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder);
-    fn finish(builder: Self::ValueBuilder) -> (Field, Arc<dyn Array>);
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder);
+    fn finish(builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>);
 }
 
 pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {

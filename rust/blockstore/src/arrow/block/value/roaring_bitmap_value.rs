@@ -16,7 +16,7 @@ use roaring::RoaringBitmap;
 
 impl ArrowWriteableValue for RoaringBitmap {
     type ReadableValue<'referred_data> = RoaringBitmap;
-    type ValueBuilder = BinaryBuilder;
+    type ArrowBuilder = BinaryBuilder;
     type PreparedValue = Vec<u8>;
 
     fn offset_size(item_count: usize) -> usize {
@@ -49,7 +49,7 @@ impl ArrowWriteableValue for RoaringBitmap {
         BlockStorage::RoaringBitmap(SingleColumnStorage::new())
     }
 
-    fn get_value_builder() -> Self::ValueBuilder {
+    fn get_arrow_builder() -> Self::ArrowBuilder {
         BinaryBuilder::new()
     }
 
@@ -63,11 +63,11 @@ impl ArrowWriteableValue for RoaringBitmap {
         serialized
     }
 
-    fn append(value: Self::PreparedValue, builder: &mut Self::ValueBuilder) {
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
         builder.append_value(value);
     }
 
-    fn finish(mut builder: Self::ValueBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
         let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
