@@ -1,4 +1,7 @@
-use crate::{execution::operator::Operator, segment::LogMaterializerError};
+use crate::{
+    execution::operator::Operator,
+    segment::{LogMaterializer, LogMaterializerError},
+};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Metadata;
@@ -8,9 +11,9 @@ use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
 use super::{
-    knn::KNNOutput,
+    fetch_log::FetchLogOutput,
+    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
     limit::LimitOutput,
-    scan::{ScanError, ScanOutput},
 };
 
 #[derive(Clone, Debug)]
@@ -22,23 +25,16 @@ pub struct ProjectionOperator {
 
 #[derive(Debug)]
 pub struct ProjectionInput {
-    scan: ScanOutput,
+    logs: FetchLogOutput,
+    segments: FetchSegmentOutput,
     offset_ids: RoaringBitmap,
-}
-
-impl From<KNNOutput> for ProjectionInput {
-    fn from(value: KNNOutput) -> Self {
-        Self {
-            scan: value.scan,
-            offset_ids: value.distances.into_iter().map(|d| d.oid).collect(),
-        }
-    }
 }
 
 impl From<LimitOutput> for ProjectionInput {
     fn from(value: LimitOutput) -> Self {
         Self {
-            scan: value.scan,
+            logs: value.logs,
+            segments: value.segments,
             offset_ids: value.offset_ids,
         }
     }
@@ -59,24 +55,23 @@ pub struct ProjectionOutput {
 
 #[derive(Error, Debug)]
 pub enum ProjectionError {
+    #[error("Error processing fetch segment output: {0}")]
+    FetchSegment(#[from] FetchSegmentError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading unitialized record segment")]
     RecordSegmentUninitialized,
-    #[error("Error processing scan output: {0}")]
-    Scan(#[from] ScanError),
 }
 
 impl ChromaError for ProjectionError {
     fn code(&self) -> ErrorCodes {
-        use ProjectionError::*;
         match self {
-            LogMaterializer(e) => e.code(),
-            RecordSegment(e) => e.code(),
-            RecordSegmentUninitialized => ErrorCodes::Internal,
-            Scan(e) => e.code(),
+            ProjectionError::FetchSegment(e) => e.code(),
+            ProjectionError::LogMaterializer(e) => e.code(),
+            ProjectionError::RecordSegment(e) => e.code(),
+            ProjectionError::RecordSegmentUninitialized => ErrorCodes::Internal,
         }
     }
 }
@@ -88,8 +83,9 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        let record_segment_reader = input.scan.record_segment_reader().await?;
-        let materializer = input.scan.log_materializer().await?;
+        let record_segment_reader = input.segments.record_segment_reader().await?;
+        let materializer =
+            LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
         let materialized_logs = materializer
             .materialize()
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))

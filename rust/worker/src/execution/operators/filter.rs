@@ -6,7 +6,8 @@ use std::{
 use crate::{
     execution::operator::Operator,
     segment::{
-        metadata_segment::MetadataSegmentReader, LogMaterializerError, MaterializedLogRecord,
+        metadata_segment::MetadataSegmentReader, LogMaterializer, LogMaterializerError,
+        MaterializedLogRecord,
     },
 };
 use chroma_error::{ChromaError, ErrorCodes};
@@ -21,7 +22,10 @@ use thiserror::Error;
 use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
-use super::scan::{ScanError, ScanOutput};
+use super::{
+    fetch_log::FetchLogOutput,
+    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
+};
 
 #[derive(Clone, Debug)]
 pub struct FilterOperator {
@@ -31,38 +35,34 @@ pub struct FilterOperator {
 
 #[derive(Debug)]
 pub struct FilterInput {
-    scan: ScanOutput,
-}
-
-impl From<ScanOutput> for FilterInput {
-    fn from(value: ScanOutput) -> Self {
-        Self { scan: value }
-    }
+    logs: FetchLogOutput,
+    segments: FetchSegmentOutput,
 }
 
 #[derive(Debug)]
 pub struct FilterOutput {
-    pub scan: ScanOutput,
+    pub logs: FetchLogOutput,
+    pub segments: FetchSegmentOutput,
     pub log_oids: SignedRoaringBitmap,
     pub compact_oids: SignedRoaringBitmap,
 }
 
 #[derive(Error, Debug)]
 pub enum FilterError {
+    #[error("Error processing fetch segment output: {0}")]
+    FetchSegment(#[from] FetchSegmentError),
     #[error("Error reading metadata index: {0}")]
     IndexError(#[from] MetadataIndexError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
-    #[error("Error processing scan output: {0}")]
-    Scan(#[from] ScanError),
 }
 
 impl ChromaError for FilterError {
     fn code(&self) -> ErrorCodes {
         match self {
+            FilterError::FetchSegment(e) => e.code(),
             FilterError::IndexError(e) => e.code(),
             FilterError::LogMaterializer(e) => e.code(),
-            FilterError::Scan(e) => e.code(),
         }
     }
 }
@@ -376,8 +376,9 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        let record_segment_reader = input.scan.record_segment_reader().await?;
-        let materializer = input.scan.log_materializer().await?;
+        let record_segment_reader = input.segments.record_segment_reader().await?;
+        let materializer =
+            LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
         let materialized_logs = materializer
             .materialize()
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
@@ -386,7 +387,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         let log_metadata_provider =
             MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 
-        let metadata_segement_reader = input.scan.metadata_segment_reader().await?;
+        let metadata_segement_reader = input.segments.metadata_segment_reader().await?;
         let compact_metadata_provider =
             MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
 
@@ -434,7 +435,8 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         };
 
         Ok(FilterOutput {
-            scan: input.scan.clone(),
+            logs: input.logs.clone(),
+            segments: input.segments.clone(),
             log_oids,
             compact_oids,
         })

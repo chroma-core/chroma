@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    fetch_log::{FetchLogError, FetchLogOutput},
+    fetch_log::FetchLogOutput,
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
     knn::KNNOperator,
 };
@@ -35,8 +35,6 @@ pub struct KNNLogOutput {
 
 #[derive(Error, Debug)]
 pub enum KNNLogError {
-    #[error("Error processing fetch log output: {0}")]
-    FetchLog(#[from] FetchLogError),
     #[error("Error processing fetch segment output: {0}")]
     FetchSegment(#[from] FetchSegmentError),
     #[error("Error materializing log: {0}")]
@@ -46,7 +44,6 @@ pub enum KNNLogError {
 impl ChromaError for KNNLogError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            KNNLogError::FetchLog(e) => e.code(),
             KNNLogError::FetchSegment(e) => e.code(),
             KNNLogError::LogMaterializer(e) => e.code(),
         }
