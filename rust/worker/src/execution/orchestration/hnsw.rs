@@ -173,9 +173,9 @@ impl HnswQueryOrchestrator {
         // pre-allocate the result vectors
         let results = Some(Vec::with_capacity(query_vectors.len()));
         tracing::info!(
-            "Performing KNN for k = {}, allowed_ids = {:?}, num query vectors = {:?}",
+            "Performing KNN for k = {}, num allowed_ids = {:?}, num query vectors = {:?}",
             k,
-            allowed_ids,
+            allowed_ids.len(),
             query_vectors.len()
         );
 
