@@ -9,8 +9,8 @@ use crate::{
     key::KeyWrapper,
     memory::storage::Readable,
     provider::{CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
-    BlockfileWriterSplitMode, Key, Value,
+    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions, Key,
+    Value,
 };
 use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
@@ -71,10 +71,6 @@ impl ArrowBlockfileProvider {
         options: BlockfileWriterOptions,
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
         if options.mutation_ordering != BlockfileWriterMutationOrdering::Unordered {
-            unimplemented!();
-        }
-
-        if options.split_mode != BlockfileWriterSplitMode::OnMutations {
             unimplemented!();
         }
 
