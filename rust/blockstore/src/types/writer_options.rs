@@ -3,8 +3,8 @@ use uuid::Uuid;
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) enum BlockfileWriterMutationOrdering {
     #[default]
-    Unsorted,
-    Sorted,
+    Unordered,
+    Ordered,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -27,14 +27,16 @@ impl BlockfileWriterOptions {
     }
 
     /// No guarantees are made about the order of mutations (calls to `.set()` and `.delete()`).
-    pub fn unsorted_mutations(mut self) -> Self {
-        self.mutation_ordering = BlockfileWriterMutationOrdering::Unsorted;
+    pub fn unordered_mutations(mut self) -> Self {
+        self.mutation_ordering = BlockfileWriterMutationOrdering::Unordered;
         self
     }
 
-    /// Mutations (calls to `.set()` and `.delete()`) are provided in ascending order of keys. This mode should be preferred when possible as it's more efficient than unsorted mutations. Blockfile implementations may panic if mutations are not provided in sorted order when this mode is enabled.
-    pub fn sorted_mutations(mut self) -> Self {
-        self.mutation_ordering = BlockfileWriterMutationOrdering::Sorted;
+    /// Mutations (calls to `.set()` and `.delete()`) are provided in ascending order of keys. This mode should be preferred when possible as it's more efficient than unordered mutations. Blockfile implementations may panic when in this mode if:
+    /// - mutations are not provided in sequential order
+    /// - a key is provided more than once (e.g. a key is provided to both `.set()` and `.delete()`)
+    pub fn ordered_mutations(mut self) -> Self {
+        self.mutation_ordering = BlockfileWriterMutationOrdering::Ordered;
         self
     }
 
