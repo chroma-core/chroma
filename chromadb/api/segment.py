@@ -223,9 +223,7 @@ class SegmentAPI(ServerAPI):
         )
 
         # Get the segment related information for the collection.
-        # NOTE: Below call does not actually create segments in sysdb.
-        # TODO: Move this call out of the manager or change name.
-        segments = self._manager.create_segments(model)
+        segments = self._manager.prepare_segments_for_new_collection(model)
 
         # TODO: Let sysdb create the collection directly from the model
         coll, created = self._sysdb.create_collection(
