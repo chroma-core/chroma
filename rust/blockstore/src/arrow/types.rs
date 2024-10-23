@@ -3,7 +3,7 @@ use super::block::{
     delta::{BlockKeyArrowBuilder, BlockStorage},
 };
 use crate::{key::KeyWrapper, Key, Value};
-use arrow::array::Array;
+use arrow::{array::Array, datatypes::Field};
 use std::sync::Arc;
 
 pub trait ArrowWriteableKey: Key + Default {
@@ -18,13 +18,20 @@ pub trait ArrowWriteableKey: Key + Default {
 }
 
 pub trait ArrowWriteableValue: Value {
+    type ArrowBuilder;
+    type ArrowCapacityHint;
     type ReadableValue<'referred_data>: ArrowReadableValue<'referred_data>;
+    type PreparedValue;
 
     fn offset_size(item_count: usize) -> usize;
     fn validity_size(item_count: usize) -> usize;
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta);
     fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta);
     fn get_delta_builder() -> BlockStorage;
+    fn get_arrow_builder(capacity_hint: Self::ArrowCapacityHint) -> Self::ArrowBuilder;
+    fn prepare(value: Self) -> Self::PreparedValue;
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder);
+    fn finish(builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>);
 }
 
 pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
