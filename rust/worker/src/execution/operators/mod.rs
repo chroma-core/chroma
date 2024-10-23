@@ -12,6 +12,8 @@ pub(super) mod register;
 pub(super) mod write_segments;
 
 // Required for benchmark
+pub mod fetch_log;
+pub mod fetch_segment;
 pub mod filter;
 pub mod limit;
 pub mod projection;
