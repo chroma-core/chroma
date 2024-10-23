@@ -6,8 +6,8 @@ use crate::{
     arrow::types::{ArrowReadableKey, ArrowReadableValue},
     key::{InvalidKeyConversion, KeyWrapper},
     provider::{CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
-    BlockfileWriterSplitMode, Key, Value,
+    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions, Key,
+    Value,
 };
 
 /// A BlockFileProvider that creates HashMapBlockfiles (in-memory blockfiles used for testing).
@@ -51,10 +51,6 @@ impl MemoryBlockfileProvider {
         }
 
         if options.fork.is_some() {
-            unimplemented!();
-        }
-
-        if options.split_mode != BlockfileWriterSplitMode::OnMutations {
             unimplemented!();
         }
 
