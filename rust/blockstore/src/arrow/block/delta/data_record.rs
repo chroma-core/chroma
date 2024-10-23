@@ -23,6 +23,14 @@ struct Inner {
     document_size: usize,
 }
 
+pub struct DataRecordArrowCapacityHint {
+    pub item_count: usize,
+    pub embedding_dimension: usize,
+    pub id_byte_size: usize,
+    pub metadata_byte_size: usize,
+    pub document_byte_size: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct DataRecordStorage {
     inner: Arc<RwLock<Inner>>,
@@ -311,26 +319,32 @@ impl DataRecordStorage {
 
     pub(super) fn into_arrow(
         self,
-        key_builder: BlockKeyArrowBuilder,
+        mut key_builder: BlockKeyArrowBuilder,
     ) -> Result<RecordBatch, arrow::error::ArrowError> {
-        // build arrow key.
-        let mut key_builder = key_builder;
-        let mut value_builder = <&DataRecord as ArrowWriteableValue>::get_arrow_builder();
+        let inner = Arc::try_unwrap(self.inner)
+            .expect(
+                "Invariant violation: SingleColumnStorage inner should have only one reference.",
+            )
+            .into_inner();
+        let storage = inner.storage;
 
-        match Arc::try_unwrap(self.inner) {
-            Ok(inner) => {
-                let inner = inner.into_inner();
-                let storage = inner.storage;
+        let mut value_builder =
+            <&DataRecord as ArrowWriteableValue>::get_arrow_builder(DataRecordArrowCapacityHint {
+                item_count: storage.len(),
+                embedding_dimension: match storage.values().next() {
+                    Some((_, embedding, _, _)) => embedding.len(),
+                    None => 0,
+                },
+                id_byte_size: inner.id_size,
+                metadata_byte_size: inner.metadata_size,
+                document_byte_size: inner.document_size,
+            });
 
-                for (key, value) in storage.into_iter() {
-                    key_builder.add_key(key);
-                    <&DataRecord as ArrowWriteableValue>::append(value, &mut value_builder);
-                }
-            }
-            Err(_) => {
-                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
-            }
+        for (key, value) in storage.into_iter() {
+            key_builder.add_key(key);
+            <&DataRecord as ArrowWriteableValue>::append(value, &mut value_builder);
         }
+
         // Build arrow key with fields.
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
         let (struct_field, value_arr) = <&DataRecord as ArrowWriteableValue>::finish(value_builder);

@@ -14,12 +14,27 @@ pub struct SingleColumnStorage<T: ArrowWriteableValue> {
     inner: Arc<RwLock<Inner<T>>>,
 }
 
+pub struct SingleColumnStorageArrowValueCapacityHint {
+    pub item_count: usize,
+    pub byte_size: usize,
+}
+
 struct Inner<T: ArrowWriteableValue> {
     storage: BTreeMap<CompositeKey, (T::PreparedValue, usize)>,
     size_tracker: SingleColumnSizeTracker,
 }
 
-impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
+impl<T: ArrowWriteableValue> std::fmt::Debug for Inner<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("size_tracker", &self.size_tracker)
+            .finish()
+    }
+}
+
+impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCapacityHint>>
+    SingleColumnStorage<T>
+{
     pub(in crate::arrow) fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(Inner {
@@ -213,19 +228,26 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         mut key_builder: BlockKeyArrowBuilder,
         metadata: Option<HashMap<String, String>>,
     ) -> (Arc<Schema>, Vec<Arc<dyn Array>>) {
-        let mut value_builder = T::get_arrow_builder();
+        let inner = Arc::try_unwrap(self.inner)
+            .expect(
+                "Invariant violation: SingleColumnStorage inner should have only one reference.",
+            )
+            .into_inner();
 
-        match Arc::try_unwrap(self.inner) {
-            Ok(inner) => {
-                let storage = inner.into_inner().storage;
-                for (key, (value, _)) in storage.into_iter() {
-                    key_builder.add_key(key);
-                    T::append(value, &mut value_builder);
-                }
-            }
-            Err(_) => {
-                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
-            }
+        let total_byte_size = inner
+            .storage
+            .iter()
+            .fold(0, |acc, (_, (_, size))| acc + size);
+
+        let mut value_builder = T::get_arrow_builder(SingleColumnStorageArrowValueCapacityHint {
+            item_count: inner.storage.len(),
+            byte_size: total_byte_size,
+        });
+
+        let storage = inner.storage;
+        for (key, (value, _)) in storage.into_iter() {
+            key_builder.add_key(key);
+            T::append(value, &mut value_builder);
         }
 
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();

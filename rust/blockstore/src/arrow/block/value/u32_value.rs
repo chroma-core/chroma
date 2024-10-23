@@ -1,6 +1,11 @@
 use crate::{
     arrow::{
-        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
+        block::delta::{
+            single_column_storage::{
+                SingleColumnStorage, SingleColumnStorageArrowValueCapacityHint,
+            },
+            BlockDelta, BlockStorage,
+        },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -14,6 +19,7 @@ use std::sync::Arc;
 impl ArrowWriteableValue for u32 {
     type ReadableValue<'referred_data> = u32;
     type ArrowBuilder = UInt32Builder;
+    type ArrowCapacityHint = SingleColumnStorageArrowValueCapacityHint;
     type PreparedValue = u32;
 
     fn offset_size(_item_count: usize) -> usize {
@@ -42,8 +48,8 @@ impl ArrowWriteableValue for u32 {
         BlockStorage::UInt32(SingleColumnStorage::new())
     }
 
-    fn get_arrow_builder() -> Self::ArrowBuilder {
-        UInt32Builder::new()
+    fn get_arrow_builder(capacity_hint: Self::ArrowCapacityHint) -> Self::ArrowBuilder {
+        UInt32Builder::with_capacity(capacity_hint.item_count)
     }
 
     fn prepare(value: Self) -> Self::PreparedValue {
