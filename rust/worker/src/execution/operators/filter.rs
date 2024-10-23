@@ -3,13 +3,6 @@ use std::{
     ops::{BitAnd, BitOr, Bound},
 };
 
-use crate::{
-    execution::operator::Operator,
-    segment::{
-        metadata_segment::MetadataSegmentReader, LogMaterializer, LogMaterializerError,
-        MaterializedLogRecord,
-    },
-};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_types::{
@@ -22,6 +15,14 @@ use thiserror::Error;
 use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
+use crate::{
+    execution::operator::Operator,
+    segment::{
+        metadata_segment::MetadataSegmentReader, LogMaterializer, LogMaterializerError,
+        MaterializedLogRecord,
+    },
+};
+
 use super::{
     fetch_log::FetchLogOutput,
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
@@ -31,6 +32,12 @@ use super::{
 pub struct FilterOperator {
     pub query_ids: Option<Vec<String>>,
     pub where_clause: Option<Where>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PreFilterState {
+    pub logs: Option<FetchLogOutput>,
+    pub segments: Option<FetchSegmentOutput>,
 }
 
 #[derive(Debug)]
@@ -53,6 +60,8 @@ pub enum FilterError {
     FetchSegment(#[from] FetchSegmentError),
     #[error("Error reading metadata index: {0}")]
     IndexError(#[from] MetadataIndexError),
+    #[error("Error converting incomplete input")]
+    IncompleteInput,
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
 }
@@ -62,7 +71,24 @@ impl ChromaError for FilterError {
         match self {
             FilterError::FetchSegment(e) => e.code(),
             FilterError::IndexError(e) => e.code(),
+            FilterError::IncompleteInput => ErrorCodes::InvalidArgument,
             FilterError::LogMaterializer(e) => e.code(),
+        }
+    }
+}
+
+impl TryFrom<PreFilterState> for FilterInput {
+    type Error = FilterError;
+
+    fn try_from(value: PreFilterState) -> Result<Self, FilterError> {
+        if let PreFilterState {
+            logs: Some(logs),
+            segments: Some(segments),
+        } = value
+        {
+            Ok(FilterInput { logs, segments })
+        } else {
+            Err(FilterError::IncompleteInput)
         }
     }
 }

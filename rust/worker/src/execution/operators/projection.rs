@@ -1,14 +1,15 @@
+use std::collections::{HashMap, HashSet};
+
+use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Metadata;
+use thiserror::Error;
+use tracing::{error, trace, Instrument, Span};
+
 use crate::{
     execution::operator::Operator,
     segment::{LogMaterializer, LogMaterializerError},
 };
-use async_trait::async_trait;
-use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Metadata;
-use roaring::RoaringBitmap;
-use std::collections::HashMap;
-use thiserror::Error;
-use tracing::{error, trace, Instrument, Span};
 
 use super::{
     fetch_log::FetchLogOutput,
@@ -27,7 +28,7 @@ pub struct ProjectionOperator {
 pub struct ProjectionInput {
     logs: FetchLogOutput,
     segments: FetchSegmentOutput,
-    offset_ids: RoaringBitmap,
+    offset_ids: Vec<u32>,
 }
 
 impl From<LimitOutput> for ProjectionInput {
@@ -35,7 +36,7 @@ impl From<LimitOutput> for ProjectionInput {
         Self {
             logs: value.logs,
             segments: value.segments,
-            offset_ids: value.offset_ids,
+            offset_ids: value.offset_ids.into_iter().collect(),
         }
     }
 }
@@ -91,14 +92,15 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
 
+        let offset_id_set: HashSet<_> = HashSet::from_iter(input.offset_ids.iter().cloned());
+
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
         let oid_to_log_record: HashMap<_, _> = materialized_logs
             .iter()
             .flat_map(|(log, _)| {
-                input
-                    .offset_ids
-                    .contains(log.offset_id)
+                offset_id_set
+                    .contains(&log.offset_id)
                     .then_some((log.offset_id, log))
             })
             .collect();
@@ -106,7 +108,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
         let mut records = Vec::with_capacity(input.offset_ids.len() as usize);
 
         for oid in &input.offset_ids {
-            let record = match oid_to_log_record.get(&oid) {
+            let record = match oid_to_log_record.get(oid) {
                 // The offset id is in the log
                 Some(&log) => ProjectionRecord {
                     id: log.merged_user_id().to_string(),
@@ -120,7 +122,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                 // The offset id is in the record segment
                 None => {
                     if let Some(reader) = record_segment_reader.as_ref() {
-                        let record = reader.get_data_for_offset_id(oid).await?;
+                        let record = reader.get_data_for_offset_id(*oid).await?;
                         ProjectionRecord {
                             id: record.id.to_string(),
                             document: record
