@@ -120,35 +120,42 @@ impl AdmissionControlledS3Storage {
         let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut futures = Vec::new();
-        let mut permits = Vec::new();
         let num_parts = range_and_output_slices.len();
         for (range, output_slice) in range_and_output_slices {
-            // Acquire permit.
-            permits.push(rate_limiter.enter().await);
-            let range_str = format!("bytes={}-{}", range.0, range.1);
-            let fut = storage
-                .fetch_range(key.clone(), range_str)
-                .then(|res| async move {
-                    match res {
-                        Ok(output) => {
-                            let body = output.body;
-                            let mut reader = body.into_async_read();
-                            match reader.read_exact(output_slice).await {
-                                Ok(_) => Ok(()),
-                                Err(e) => {
-                                    tracing::error!("Error reading from s3: {}", e);
-                                    Err(AdmissionControlledS3StorageError::S3GetError(
-                                        S3GetError::ByteStreamError(e.to_string()),
-                                    ))
+            let rate_limiter_clone = rate_limiter.clone();
+            let storage_clone = storage.clone();
+            let key_clone = key.clone();
+            let fut = async move {
+                // Acquire permit.
+                let token = rate_limiter_clone.enter().await;
+                let range_str = format!("bytes={}-{}", range.0, range.1);
+                storage_clone
+                    .fetch_range(key_clone, range_str)
+                    .then(|res| async move {
+                        let _token = token;
+                        match res {
+                            Ok(output) => {
+                                let body = output.body;
+                                let mut reader = body.into_async_read();
+                                match reader.read_exact(output_slice).await {
+                                    Ok(_) => Ok(()),
+                                    Err(e) => {
+                                        tracing::error!("Error reading from s3: {}", e);
+                                        Err(AdmissionControlledS3StorageError::S3GetError(
+                                            S3GetError::ByteStreamError(e.to_string()),
+                                        ))
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                tracing::error!("Error reading from s3: {}", e);
+                                Err(AdmissionControlledS3StorageError::S3GetError(e))
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!("Error reading from s3: {}", e);
-                            Err(AdmissionControlledS3StorageError::S3GetError(e))
-                        }
-                    }
-                });
+                        // _token gets dropped due to RAII and we've released the permit.
+                    })
+                    .await
+            };
             futures.push(fut);
         }
         // Await all futures and return the result.
@@ -157,7 +164,6 @@ impl AdmissionControlledS3Storage {
             .collect::<Vec<_>>()
             .await;
         Ok(Arc::new(output_buffer))
-        // All the permits get dropped due to RAII here.
     }
 
     async fn read_from_storage(
