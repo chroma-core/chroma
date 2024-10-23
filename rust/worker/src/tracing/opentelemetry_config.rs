@@ -37,9 +37,34 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let stdout_layer =
         BunyanFormattingLayer::new(service_name.clone().to_string(), std::io::stdout)
             .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
-    // global filter layer. Don't filter anything at global layer for this crate. And disable
-    // for every other library.
-    let global_layer = EnvFilter::new("none,worker=trace");
+    // global filter layer. Don't filter anything at above trace at the global layer for chroma.
+    // And enable errors for every other library.
+    let global_layer = EnvFilter::new(
+        "error,".to_string()
+            + &vec![
+                "chroma",
+                "chroma-blockstore",
+                "chroma-cache",
+                "chroma-config",
+                "chroma-distance",
+                "chroma-error",
+                "chroma-index",
+                "chroma-storage",
+                "chroma-test",
+                "chroma-types",
+                "compaction_service",
+                "distance_metrics",
+                "full_text",
+                "metadata_filtering",
+                "query_service",
+                "worker",
+            ]
+            .into_iter()
+            .map(|s| s.to_string() + "=trace")
+            .collect::<Vec<String>>()
+            .join(","),
+    );
+
     // Create subscriber.
     let subscriber = tracing_subscriber::registry()
         .with(global_layer)
