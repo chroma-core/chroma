@@ -9,12 +9,13 @@ use tracing::{trace, Instrument, Span};
 
 use crate::{
     execution::operator::Operator,
-    segment::{record_segment::RecordSegmentReader, LogMaterializerError},
+    segment::{record_segment::RecordSegmentReader, LogMaterializer, LogMaterializerError},
 };
 
 use super::{
+    fetch_log::FetchLogOutput,
+    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
     filter::FilterOutput,
-    scan::{ScanError, ScanOutput},
 };
 
 #[derive(Clone, Debug)]
@@ -25,7 +26,8 @@ pub struct LimitOperator {
 
 #[derive(Debug)]
 pub struct LimitInput {
-    scan: ScanOutput,
+    logs: FetchLogOutput,
+    segments: FetchSegmentOutput,
     log_oids: SignedRoaringBitmap,
     compact_oids: SignedRoaringBitmap,
 }
@@ -33,7 +35,8 @@ pub struct LimitInput {
 impl From<FilterOutput> for LimitInput {
     fn from(value: FilterOutput) -> Self {
         Self {
-            scan: value.scan,
+            logs: value.logs,
+            segments: value.segments,
             log_oids: value.log_oids,
             compact_oids: value.compact_oids,
         }
@@ -42,26 +45,27 @@ impl From<FilterOutput> for LimitInput {
 
 #[derive(Debug)]
 pub struct LimitOutput {
-    pub scan: ScanOutput,
+    pub logs: FetchLogOutput,
+    pub segments: FetchSegmentOutput,
     pub offset_ids: RoaringBitmap,
 }
 
 #[derive(Error, Debug)]
 pub enum LimitError {
+    #[error("Error processing fetch segment output: {0}")]
+    FetchSegment(#[from] FetchSegmentError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
-    #[error("Error processing scan output: {0}")]
-    Scan(#[from] ScanError),
 }
 
 impl ChromaError for LimitError {
     fn code(&self) -> ErrorCodes {
         match self {
+            LimitError::FetchSegment(e) => e.code(),
             LimitError::LogMaterializer(e) => e.code(),
             LimitError::RecordSegment(e) => e.code(),
-            LimitError::Scan(e) => e.code(),
         }
     }
 }
@@ -185,11 +189,14 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
+        let record_segment_reader = input.segments.record_segment_reader().await?;
+
         // Materialize the filtered offset ids from the materialized log
         let mut materialized_log_oids = match &input.log_oids {
             SignedRoaringBitmap::Include(rbm) => rbm.clone(),
             SignedRoaringBitmap::Exclude(rbm) => {
-                let materializer = input.scan.log_materializer().await?;
+                let materializer =
+                    LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
                 let materialized_logs = materializer
                     .materialize()
                     .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
@@ -221,7 +228,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                 }
             }
             SignedRoaringBitmap::Exclude(rbm) => {
-                if let Some(reader) = input.scan.record_segment_reader().await? {
+                if let Some(reader) = record_segment_reader {
                     let record_count = reader.count().await?;
                     let log_count = materialized_log_oids.len() as usize;
                     let filter_match_count = log_count + record_count - rbm.len() as usize;
@@ -252,7 +259,8 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         };
 
         Ok(LimitOutput {
-            scan: input.scan.clone(),
+            logs: input.logs.clone(),
+            segments: input.segments.clone(),
             offset_ids: materialized_oids,
         })
     }
