@@ -20,7 +20,7 @@ pub struct SingleColumnStorageArrowValueCapacityHint {
 }
 
 struct Inner<T: ArrowWriteableValue> {
-    storage: BTreeMap<CompositeKey, (T::PreparedValue, usize)>,
+    storage: BTreeMap<CompositeKey, T>,
     size_tracker: SingleColumnSizeTracker,
 }
 
@@ -101,16 +101,14 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
         if inner.storage.contains_key(&composite_key) {
             // subtract the old value size
             // unwrap is safe here because we just checked if the key exists
-            let old_value_size = inner.storage.remove(&composite_key).unwrap().1;
+            let old_value_size = inner.storage.remove(&composite_key).unwrap().get_size();
             inner.size_tracker.subtract_value_size(old_value_size);
             inner.size_tracker.subtract_key_size(key_len);
             inner.size_tracker.subtract_prefix_size(prefix.len());
         }
         let value_size = value.get_size();
 
-        inner
-            .storage
-            .insert(composite_key, (T::prepare(value), value_size));
+        inner.storage.insert(composite_key, value);
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(value_size);
@@ -125,12 +123,12 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
             key,
         });
 
-        if let Some((_, value_size)) = maybe_removed_value {
+        if let Some(value) = maybe_removed_value {
             inner
                 .size_tracker
                 .subtract_prefix_size(maybe_removed_prefix_len);
             inner.size_tracker.subtract_key_size(maybe_removed_key_len);
-            inner.size_tracker.subtract_value_size(value_size);
+            inner.size_tracker.subtract_value_size(value.get_size());
         }
     }
 
@@ -152,7 +150,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
             while let Some((key, value)) = iter.next() {
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();
-                value_size += value.1;
+                value_size += value.get_size();
                 item_count += 1;
 
                 // offset sizing
@@ -177,7 +175,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
                             // Remove the last item since we are splitting at the end
                             prefix_size -= key.prefix.len();
                             key_size -= key.key.get_size();
-                            value_size -= value.1;
+                            value_size -= value.get_size();
                             Some(key.clone())
                         }
                         Some((next_key, _)) => Some(next_key.clone()),
@@ -234,20 +232,15 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
             )
             .into_inner();
 
-        let total_byte_size = inner
-            .storage
-            .iter()
-            .fold(0, |acc, (_, (_, size))| acc + size);
-
         let mut value_builder = T::get_arrow_builder(SingleColumnStorageArrowValueCapacityHint {
             item_count: inner.storage.len(),
-            byte_size: total_byte_size,
+            byte_size: inner.size_tracker.get_value_size(),
         });
 
         let storage = inner.storage;
-        for (key, (value, _)) in storage.into_iter() {
+        for (key, value) in storage.into_iter() {
             key_builder.add_key(key);
-            T::append(value, &mut value_builder);
+            T::append(T::prepare(value), &mut value_builder);
         }
 
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
