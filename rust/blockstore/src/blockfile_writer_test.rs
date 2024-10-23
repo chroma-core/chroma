@@ -123,7 +123,7 @@ mod tests {
                 sparse_index_cache,
             );
             let writer =
-                block_on(provider.get_writer::<&str, String>(BlockfileWriterOptions::default()))
+                block_on(provider.get_writer::<&str, String>(BlockfileWriterOptions::new()))
                     .unwrap();
 
             BlockfileWriterWrapper {
