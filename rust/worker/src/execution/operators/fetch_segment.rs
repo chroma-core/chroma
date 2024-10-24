@@ -66,7 +66,9 @@ pub enum FetchSegmentError {
     NoSegment,
     #[error("Unable to create record segment reader: {0}")]
     RecordSegmentReaderCreation(#[from] RecordSegmentReaderCreationError),
-    #[error("Version mismatch")]
+    // The frontend relies on ths content of the error message here to detect version mismatch
+    // TODO: Refactor frontend to properly detect version mismatch
+    #[error("Collection version mismatch")]
     VersionMismatch,
 }
 
