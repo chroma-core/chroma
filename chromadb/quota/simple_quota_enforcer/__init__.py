@@ -9,7 +9,7 @@ T = TypeVar("T", bound=Callable[..., Any])
 
 class SimpleQuotaEnforcer(QuotaEnforcer):
     """
-    A naive implementation of a rate limit enforcer that allows all requests.
+    A naive implementation of a quota enforcer that allows all requests.
     """
 
     def __init__(self, system: System) -> None:
