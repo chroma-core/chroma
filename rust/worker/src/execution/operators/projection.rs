@@ -14,6 +14,7 @@ use crate::{
 use super::{
     fetch_log::FetchLogOutput,
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
+    knn_projection::KnnProjectionInput,
     limit::LimitOutput,
 };
 
@@ -29,6 +30,16 @@ pub struct ProjectionInput {
     logs: FetchLogOutput,
     segments: FetchSegmentOutput,
     offset_ids: Vec<u32>,
+}
+
+impl From<KnnProjectionInput> for ProjectionInput {
+    fn from(value: KnnProjectionInput) -> Self {
+        Self {
+            logs: value.logs,
+            segments: value.segments,
+            offset_ids: value.distance.into_iter().map(|d| d.oid).collect(),
+        }
+    }
 }
 
 impl From<LimitOutput> for ProjectionInput {

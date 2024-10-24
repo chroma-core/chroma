@@ -17,44 +17,55 @@ use crate::{
 use super::{
     fetch_log::FetchLogOutput,
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-    knn::KNNOperator,
+    filter::FilterOutput,
+    knn::KnnOperator,
 };
 
 #[derive(Debug)]
-struct KNNLogInput {
+pub struct KnnLogInput {
     logs: FetchLogOutput,
     segments: FetchSegmentOutput,
     log_oids: SignedRoaringBitmap,
 }
 
+impl From<FilterOutput> for KnnLogInput {
+    fn from(value: FilterOutput) -> Self {
+        Self {
+            logs: value.logs,
+            segments: value.segments,
+            log_oids: value.log_oids,
+        }
+    }
+}
+
 #[derive(Debug)]
-pub struct KNNLogOutput {
+pub struct KnnLogOutput {
     pub logs: FetchLogOutput,
     pub distances: Vec<Distance>,
 }
 
 #[derive(Error, Debug)]
-pub enum KNNLogError {
+pub enum KnnLogError {
     #[error("Error processing fetch segment output: {0}")]
     FetchSegment(#[from] FetchSegmentError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
 }
 
-impl ChromaError for KNNLogError {
+impl ChromaError for KnnLogError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            KNNLogError::FetchSegment(e) => e.code(),
-            KNNLogError::LogMaterializer(e) => e.code(),
+            KnnLogError::FetchSegment(e) => e.code(),
+            KnnLogError::LogMaterializer(e) => e.code(),
         }
     }
 }
 
 #[async_trait]
-impl Operator<KNNLogInput, KNNLogOutput> for KNNOperator {
-    type Error = KNNLogError;
+impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
+    type Error = KnnLogError;
 
-    async fn run(&self, input: &KNNLogInput) -> Result<KNNLogOutput, KNNLogError> {
+    async fn run(&self, input: &KnnLogInput) -> Result<KnnLogOutput, KnnLogError> {
         let materializer = LogMaterializer::new(
             input.segments.record_segment_reader().await?,
             input.logs.clone(),
@@ -103,7 +114,7 @@ impl Operator<KNNLogInput, KNNLogOutput> for KNNOperator {
                 }
             }
         }
-        Ok(KNNLogOutput {
+        Ok(KnnLogOutput {
             logs: input.logs.clone(),
             distances: heap.into_sorted_vec(),
         })

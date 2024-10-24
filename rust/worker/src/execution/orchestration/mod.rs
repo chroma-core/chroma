@@ -9,3 +9,4 @@ pub(crate) use get_vectors::*;
 pub(crate) use hnsw::*;
 
 pub mod get;
+pub mod knn;

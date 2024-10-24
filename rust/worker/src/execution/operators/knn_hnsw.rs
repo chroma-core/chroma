@@ -7,46 +7,56 @@ use crate::execution::{operator::Operator, utils::Distance};
 
 use super::{
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-    knn::KNNOperator,
+    filter::FilterOutput,
+    knn::KnnOperator,
 };
 
 #[derive(Debug)]
-struct KNNHNSWInput {
+pub struct KnnHnswInput {
     segments: FetchSegmentOutput,
     compact_oids: SignedRoaringBitmap,
 }
 
+impl From<FilterOutput> for KnnHnswInput {
+    fn from(value: FilterOutput) -> Self {
+        Self {
+            segments: value.segments,
+            compact_oids: value.compact_oids,
+        }
+    }
+}
+
 #[derive(Debug)]
-pub struct KNNHNSWOutput {
+pub struct KnnHnswOutput {
     pub segments: FetchSegmentOutput,
     pub distances: Vec<Distance>,
 }
 
 #[derive(Error, Debug)]
-pub enum KNNHNSWError {
+pub enum KnnHnswError {
     #[error("Error processing fetch segment output: {0}")]
     FetchSegment(#[from] FetchSegmentError),
     #[error("Error querying knn index: {0}")]
-    KNNIndex(Box<dyn ChromaError>),
+    KnnIndex(Box<dyn ChromaError>),
 }
 
-impl ChromaError for KNNHNSWError {
+impl ChromaError for KnnHnswError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            KNNHNSWError::FetchSegment(e) => e.code(),
-            KNNHNSWError::KNNIndex(e) => e.code(),
+            KnnHnswError::FetchSegment(e) => e.code(),
+            KnnHnswError::KnnIndex(e) => e.code(),
         }
     }
 }
 
 #[async_trait]
-impl Operator<KNNHNSWInput, KNNHNSWOutput> for KNNOperator {
-    type Error = KNNHNSWError;
+impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
+    type Error = KnnHnswError;
 
-    async fn run(&self, input: &KNNHNSWInput) -> Result<KNNHNSWOutput, KNNHNSWError> {
+    async fn run(&self, input: &KnnHnswInput) -> Result<KnnHnswOutput, KnnHnswError> {
         let (allowed, disallowed) = match &input.compact_oids {
             SignedRoaringBitmap::Include(rbm) if rbm.is_empty() => {
-                return Ok(KNNHNSWOutput {
+                return Ok(KnnHnswOutput {
                     segments: input.segments.clone(),
                     distances: Vec::new(),
                 })
@@ -64,7 +74,7 @@ impl Operator<KNNHNSWInput, KNNHNSWOutput> for KNNOperator {
             &allowed,
             &disallowed,
         ) {
-            Ok((oids, distances)) => Ok(KNNHNSWOutput {
+            Ok((oids, distances)) => Ok(KnnHnswOutput {
                 segments: input.segments.clone(),
                 distances: oids
                     .into_iter()
@@ -73,7 +83,7 @@ impl Operator<KNNHNSWInput, KNNHNSWOutput> for KNNOperator {
                     .map(|(oid, measure)| Distance { oid, measure })
                     .collect(),
             }),
-            Err(e) => Err(KNNHNSWError::KNNIndex(e)),
+            Err(e) => Err(KnnHnswError::KnnIndex(e)),
         }
     }
 }
