@@ -779,7 +779,7 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "fastrand",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.12",
  "http-body 0.4.6",
  "http-body 1.0.1",
@@ -789,7 +789,7 @@ dependencies = [
  "once_cell",
  "pin-project-lite",
  "pin-utils",
- "rustls 0.21.10",
+ "rustls 0.21.12",
  "tokio",
  "tracing",
 ]
@@ -2361,9 +2361,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.24"
+version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb2c4422095b67ee78da96fbb51a4cc413b3b25883c7717ff7ca1ab31022c9c9"
+checksum = "81fe527a889e1532da5c525686d96d4c2e74cdd345badf8dfef9f6b39dd5f5e8"
 dependencies = [
  "bytes",
  "fnv",
@@ -2571,7 +2571,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.12",
  "http-body 0.4.6",
  "httparse",
@@ -2615,7 +2615,7 @@ dependencies = [
  "http 0.2.12",
  "hyper 0.14.28",
  "log",
- "rustls 0.21.10",
+ "rustls 0.21.12",
  "rustls-native-certs",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -2924,7 +2924,7 @@ dependencies = [
  "kube-core",
  "pem",
  "pin-project",
- "rustls 0.21.10",
+ "rustls 0.21.12",
  "rustls-pemfile 1.0.4",
  "secrecy",
  "serde",
@@ -4434,9 +4434,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.10"
+version = "0.21.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d5a6813c0759e4609cd494e8e725babae6a2ca7b62a5536a13daaec6fcb7ba"
+checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
 dependencies = [
  "log",
  "ring",
@@ -5319,7 +5319,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.10",
+ "rustls 0.21.12",
  "tokio",
 ]
 
@@ -5407,7 +5407,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.28",
@@ -5437,7 +5437,7 @@ dependencies = [
  "axum",
  "base64 0.21.7",
  "bytes",
- "h2 0.3.24",
+ "h2 0.3.26",
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.28",
