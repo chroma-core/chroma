@@ -314,18 +314,22 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
+    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         Ok(self.cache.get(key).await?.map(|v| v.value().clone()))
     }
 
+    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
         self.cache.insert(key, value);
     }
 
+    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
         self.cache.remove(key);
     }
 
+    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
         Ok(self.cache.clear().await?)
     }
@@ -407,18 +411,22 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + Weighted + 'static,
 {
+    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         Ok(self.cache.get(key).map(|v| v.value().clone()))
     }
 
+    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
         self.cache.insert(key, value);
     }
 
+    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
         self.cache.remove(key);
     }
 
+    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
         self.cache.clear();
         Ok(())
