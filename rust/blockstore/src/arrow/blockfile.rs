@@ -22,7 +22,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub struct ArrowBlockfileWriter {
+pub struct ArrowUnorderedBlockfileWriter {
     block_manager: BlockManager,
     root_manager: RootManager,
     block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
@@ -46,13 +46,13 @@ impl ChromaError for ArrowBlockfileError {
     }
 }
 
-impl ArrowBlockfileWriter {
+impl ArrowUnorderedBlockfileWriter {
     pub(super) fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         id: Uuid,
         block_manager: BlockManager,
         root_manager: RootManager,
     ) -> Self {
-        let initial_block = block_manager.create::<K, V>();
+        let initial_block = block_manager.create::<K, V, BlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let root_writer = RootWriter::new(CURRENT_VERSION, id, sparse_index);
 
@@ -200,7 +200,7 @@ impl ArrowBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
+                let new_delta = match self.block_manager.fork::<K, V, BlockDelta>(&block.id).await {
                     Ok(delta) => delta,
                     Err(e) => {
                         return Err(Box::new(e));
@@ -223,6 +223,7 @@ impl ArrowBlockfileWriter {
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
         delta.add(prefix, key, value);
+
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
             let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
             for (split_key, new_delta) in new_blocks {
@@ -266,7 +267,7 @@ impl ArrowBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
+                let new_delta = match self.block_manager.fork::<K, V, BlockDelta>(&block.id).await {
                     Ok(delta) => delta,
                     Err(e) => {
                         return Err(Box::new(e));
@@ -300,7 +301,7 @@ pub struct ArrowBlockfileReader<
     V: ArrowReadableValue<'me>,
 > {
     block_manager: BlockManager,
-    root: RootReader,
+    pub(super) root: RootReader,
     loaded_blocks: Arc<Mutex<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
 }
@@ -707,8 +708,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
 #[cfg(test)]
 mod tests {
+    use crate::arrow::block::delta::types::DeltaCommon;
+    use crate::arrow::block::delta::BlockDelta;
     use crate::arrow::block::Block;
-    use crate::arrow::blockfile::ArrowBlockfileWriter;
+    use crate::arrow::blockfile::ArrowUnorderedBlockfileWriter;
     use crate::arrow::provider::{BlockManager, RootManager};
     use crate::arrow::root::{RootWriter, Version};
     use crate::arrow::sparse_index::SparseIndexWriter;
@@ -1658,7 +1661,7 @@ mod tests {
         let block_manager = BlockManager::new(storage.clone(), 8 * 1024 * 1024, block_cache);
 
         // Manually create a v1 blockfile with no counts
-        let initial_block = block_manager.create::<&str, String>();
+        let initial_block = block_manager.create::<&str, String, BlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let file_id = Uuid::new_v4();
         let root_writer = RootWriter::new(Version::V1, file_id, sparse_index);
@@ -1669,7 +1672,7 @@ mod tests {
             block_deltas_map.insert(initial_block.id, initial_block);
         }
 
-        let writer = ArrowBlockfileWriter {
+        let writer = ArrowUnorderedBlockfileWriter {
             block_manager,
             root_manager: root_manager.clone(),
             block_deltas,
@@ -1727,9 +1730,9 @@ mod tests {
         ////////////////////////// STEP 1 //////////////////////////
 
         // Create two blocks with some data, we will make this conceptually a v1 block
-        let old_block_delta_1 = block_manager.create::<&str, String>();
+        let old_block_delta_1 = block_manager.create::<&str, String, BlockDelta>();
         old_block_delta_1.add("prefix", "a", "value_a".to_string());
-        let old_block_delta_2 = block_manager.create::<&str, String>();
+        let old_block_delta_2 = block_manager.create::<&str, String, BlockDelta>();
         old_block_delta_2.add("prefix", "f", "value_b".to_string());
         let old_block_id_1 = old_block_delta_1.id;
         let old_block_id_2 = old_block_delta_2.id;
@@ -1791,7 +1794,7 @@ mod tests {
             .unwrap();
         let second_write_id = writer.id();
         let writer = match writer {
-            BlockfileWriter::ArrowBlockfileWriter(writer) => writer,
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer,
             _ => panic!("Unexpected writer type"),
         };
         assert_eq!(writer.root.version, Version::V1);

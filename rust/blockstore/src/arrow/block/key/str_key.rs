@@ -1,5 +1,5 @@
 use crate::arrow::{
-    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    block::delta::{BlockKeyArrowBuilder, BlockStorage},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
 };
 use arrow::{
@@ -37,7 +37,7 @@ impl<'referred_data> ArrowReadableKey<'referred_data> for &'referred_data str {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut BlockDelta,
+        delta: &mut BlockStorage,
     ) {
         // We could probably enclose this somehow to make it more ergonomic
         V::add_to_delta(prefix, key, value, delta);

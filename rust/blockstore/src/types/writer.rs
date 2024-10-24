@@ -1,4 +1,5 @@
-use crate::arrow::blockfile::ArrowBlockfileWriter;
+use crate::arrow::blockfile::ArrowUnorderedBlockfileWriter;
+use crate::arrow::ordered_blockfile_writer::ArrowOrderedBlockfileWriter;
 use crate::key::KeyWrapper;
 use crate::memory::reader_writer::MemoryBlockfileWriter;
 use chroma_error::ChromaError;
@@ -11,7 +12,8 @@ use super::{BlockfileFlusher, Key, Value};
 #[derive(Clone)]
 pub enum BlockfileWriter {
     MemoryBlockfileWriter(MemoryBlockfileWriter),
-    ArrowBlockfileWriter(ArrowBlockfileWriter),
+    ArrowOrderedBlockfileWriter(ArrowOrderedBlockfileWriter),
+    ArrowUnorderedBlockfileWriter(ArrowUnorderedBlockfileWriter),
 }
 
 impl BlockfileWriter {
@@ -26,10 +28,18 @@ impl BlockfileWriter {
                 Ok(flusher) => Ok(BlockfileFlusher::MemoryBlockfileFlusher(flusher)),
                 Err(e) => Err(e),
             },
-            BlockfileWriter::ArrowBlockfileWriter(writer) => match writer.commit::<K, V>().await {
-                Ok(flusher) => Ok(BlockfileFlusher::ArrowBlockfileFlusher(flusher)),
-                Err(e) => Err(e),
-            },
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
+                match writer.commit::<K, V>().await {
+                    Ok(flusher) => Ok(BlockfileFlusher::ArrowBlockfileFlusher(flusher)),
+                    Err(e) => Err(e),
+                }
+            }
+            BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => {
+                match writer.commit::<K, V>().await {
+                    Ok(flusher) => Ok(BlockfileFlusher::ArrowBlockfileFlusher(flusher)),
+                    Err(e) => Err(e),
+                }
+            }
         }
     }
 
@@ -44,7 +54,12 @@ impl BlockfileWriter {
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.set(prefix, key, value),
-            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.set(prefix, key, value).await,
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
+                writer.set(prefix, key, value).await
+            }
+            BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => {
+                writer.set(prefix, key, value).await
+            }
         }
     }
 
@@ -58,7 +73,10 @@ impl BlockfileWriter {
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.delete::<K, V>(prefix, key),
-            BlockfileWriter::ArrowBlockfileWriter(writer) => {
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
+                writer.delete::<K, V>(prefix, key).await
+            }
+            BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => {
                 writer.delete::<K, V>(prefix, key).await
             }
         }
@@ -67,7 +85,8 @@ impl BlockfileWriter {
     pub fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
-            BlockfileWriter::ArrowBlockfileWriter(writer) => writer.id(),
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer.id(),
+            BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => writer.id(),
         }
     }
 }

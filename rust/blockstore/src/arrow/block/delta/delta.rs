@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
-use super::storage::BlockStorage;
+use super::{storage::BlockStorage, types::DeltaCommon};
 use crate::{
-    arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
+    arrow::{
+        block::Block,
+        types::{ArrowWriteableKey, ArrowWriteableValue, BuilderMutationOrderHint},
+    },
     key::CompositeKey,
 };
 use arrow::array::RecordBatch;
@@ -24,20 +27,34 @@ pub struct BlockDelta {
     pub(in crate::arrow) id: Uuid,
 }
 
-impl BlockDelta {
-    /// Creates a new block delta from a block.
-    /// # Arguments
-    /// - id: the id of the block delta.
+impl DeltaCommon for BlockDelta {
     // NOTE(rescrv):  K is unused, but it is very conceptually easy to think of everything as
     // key-value pairs.  I started to refactor this to remove ArrowWriteableKey, but it was not
     // readable to tell whether I was operating on the key or value type.  Keeping both but
     // suppressing the clippy error is a reasonable alternative.
     #[allow(clippy::extra_unused_type_parameters)]
-    pub fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
+    fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
         BlockDelta {
-            builder: V::get_delta_builder(),
+            builder: V::get_delta_builder(BuilderMutationOrderHint::Unordered),
             id,
         }
+    }
+
+    fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid, block: &Block) -> Self {
+        let delta = BlockDelta::new::<K, V>(id);
+        block.to_block_delta::<K::ReadableKey<'_>, V::ReadableValue<'_>>(delta)
+    }
+
+    fn id(&self) -> Uuid {
+        self.id
+    }
+
+    #[allow(clippy::extra_unused_type_parameters)]
+    fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        self,
+        metadata: Option<HashMap<String, String>>,
+    ) -> RecordBatch {
+        self.builder.into_record_batch::<K>(metadata)
     }
 }
 
@@ -50,7 +67,7 @@ impl BlockDelta {
         value: V,
     ) {
         // TODO: errors?
-        V::add(prefix, key.into(), value, self);
+        V::add(prefix, key.into(), value, &self.builder);
     }
 
     /// Deletes a key from the block delta.
@@ -66,19 +83,6 @@ impl BlockDelta {
     #[allow(clippy::extra_unused_type_parameters)]
     pub(in crate::arrow) fn get_size<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> usize {
         self.builder.get_size::<K>()
-    }
-
-    /// Finishes the block delta and converts it into a record batch.
-    /// # Arguments
-    /// - metadata: the metadata to attach to the record batch.
-    /// # Returns
-    /// A record batch with the key value pairs in the block delta.
-    #[allow(clippy::extra_unused_type_parameters)]
-    pub fn finish<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        self,
-        metadata: Option<HashMap<String, String>>,
-    ) -> RecordBatch {
-        self.builder.into_record_batch::<K>(metadata)
     }
 
     /// Splits the block delta into two block deltas. The split point is the last key
@@ -136,7 +140,11 @@ impl BlockDelta {
 
 #[cfg(test)]
 mod test {
-    use crate::arrow::{block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager};
+    use crate::arrow::{
+        block::{delta::BlockDelta, Block},
+        config::TEST_MAX_BLOCK_SIZE_BYTES,
+        provider::BlockManager,
+    };
     #[cfg(test)]
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
@@ -167,7 +175,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, Vec<u32>>();
+        let delta = block_manager.create::<&str, Vec<u32>, BlockDelta>();
 
         let n = 2000;
         for i in 0..n {
@@ -209,7 +217,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, String>();
+        let delta = block_manager.create::<&str, String, BlockDelta>();
         let delta_id = delta.id;
 
         let n = 2000;
@@ -251,7 +259,10 @@ mod test {
         }
 
         // test fork
-        let forked_block = block_manager.fork::<&str, String>(&delta_id).await.unwrap();
+        let forked_block = block_manager
+            .fork::<&str, String, BlockDelta>(&delta_id)
+            .await
+            .unwrap();
         let new_id = forked_block.id;
         let block = block_manager.commit::<&str, String>(forked_block);
         block_manager.flush(&block).await.unwrap();
@@ -270,7 +281,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<f32, String>();
+        let delta = block_manager.create::<f32, String, BlockDelta>();
 
         let n = 2000;
         for i in 0..n {
@@ -309,7 +320,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<&str, RoaringBitmap>();
+        let delta = block_manager.create::<&str, RoaringBitmap, BlockDelta>();
 
         let n = 2000;
         for i in 0..n {
@@ -356,7 +367,7 @@ mod test {
         let metadata = Some(metadata);
         let metadatas = [None, metadata.clone(), None];
         let documents = [None, Some("test document"), None];
-        let delta = block_manager.create::<&str, &DataRecord>();
+        let delta = block_manager.create::<&str, &DataRecord, BlockDelta>();
 
         //TODO: Option<&T> as opposed to &Option<T>
         let data = vec![
@@ -409,7 +420,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(path));
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<u32, String>();
+        let delta = block_manager.create::<u32, String, BlockDelta>();
 
         let n = 2000;
         for i in 0..n {
@@ -437,7 +448,7 @@ mod test {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
-        let delta = block_manager.create::<u32, u32>();
+        let delta = block_manager.create::<u32, u32, BlockDelta>();
         let delta_id = delta.id;
 
         let n = 2000;
@@ -479,7 +490,10 @@ mod test {
         }
 
         // test fork
-        let forked_block = block_manager.fork::<u32, u32>(&delta_id).await.unwrap();
+        let forked_block = block_manager
+            .fork::<u32, u32, BlockDelta>(&delta_id)
+            .await
+            .unwrap();
         let new_id = forked_block.id;
         let block = block_manager.commit::<u32, u32>(forked_block);
         block_manager.flush(&block).await.unwrap();

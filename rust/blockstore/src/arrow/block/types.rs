@@ -113,7 +113,7 @@ impl Block {
             let key = K::get(self.data.column(1), i);
             let value = V::get(self.data.column(2), i);
 
-            K::add_to_delta(prefix, key, value, &mut delta);
+            K::add_to_delta(prefix, key, value, &mut delta.builder);
         }
         delta
     }
@@ -346,7 +346,7 @@ impl Block {
     pub fn get_at_index<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         index: usize,
-    ) -> Option<(&str, K, V)> {
+    ) -> Option<(&'me str, K, V)> {
         if index >= self.data.num_rows() {
             return None;
         }
@@ -367,8 +367,7 @@ impl Block {
     */
 
     /// Returns the size of the block in bytes
-    #[allow(dead_code)]
-    pub(crate) fn get_size(&self) -> usize {
+    pub fn get_size(&self) -> usize {
         let mut total_size = 0;
         for column in self.data.columns() {
             let array_data = column.to_data();

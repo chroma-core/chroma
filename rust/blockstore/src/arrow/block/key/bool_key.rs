@@ -1,5 +1,5 @@
 use crate::arrow::{
-    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    block::delta::{BlockKeyArrowBuilder, BlockStorage},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
 };
 use arrow::array::{Array, BooleanArray, BooleanBuilder, StringBuilder};
@@ -35,7 +35,7 @@ impl ArrowReadableKey<'_> for bool {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut BlockDelta,
+        delta: &mut BlockStorage,
     ) {
         V::add_to_delta(prefix, key, value, delta);
     }

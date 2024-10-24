@@ -1,7 +1,7 @@
 use uuid::Uuid;
 
-#[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) enum BlockfileWriterMutationOrdering {
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub enum BlockfileWriterMutationOrdering {
     #[default]
     Unordered,
     Ordered,
@@ -29,6 +29,11 @@ impl BlockfileWriterOptions {
     /// - a key is provided more than once (e.g. a key is provided to both `.set()` and `.delete()`)
     pub fn ordered_mutations(mut self) -> Self {
         self.mutation_ordering = BlockfileWriterMutationOrdering::Ordered;
+        self
+    }
+
+    pub fn set_mutation_ordering(mut self, ordering: BlockfileWriterMutationOrdering) -> Self {
+        self.mutation_ordering = ordering;
         self
     }
 
