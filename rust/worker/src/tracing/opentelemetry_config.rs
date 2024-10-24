@@ -44,7 +44,6 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
             + &vec![
                 "chroma",
                 "chroma-blockstore",
-                "chroma-cache",
                 "chroma-config",
                 "chroma-distance",
                 "chroma-error",
