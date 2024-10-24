@@ -249,6 +249,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
 
+    chroma_rate_limit_enforcer_impl: Optional[str] = None
     chroma_quota_enforcer_impl: str = (
         "chromadb.quota.simple_quota_enforcer.SimpleQuotaEnforcer"
     )
