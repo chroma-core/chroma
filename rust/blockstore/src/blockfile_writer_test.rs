@@ -14,7 +14,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::arrow::provider::ArrowBlockfileProvider;
-    use crate::BlockfileWriter;
+    use crate::{BlockfileWriter, BlockfileWriterOptions};
     use chroma_cache::new_cache_for_test;
 
     #[derive(Clone, Debug)]
@@ -121,7 +121,9 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = provider.create::<&str, String>().unwrap();
+            let writer =
+                block_on(provider.get_writer::<&str, String>(BlockfileWriterOptions::new()))
+                    .unwrap();
 
             BlockfileWriterWrapper {
                 provider,
@@ -153,7 +155,12 @@ mod tests {
                     block_on(flusher.flush::<&str, String>()).unwrap();
 
                     state.last_blockfile_id = Some(id);
-                    state.writer = block_on(state.provider.fork::<&str, String>(&id)).unwrap();
+                    state.writer = block_on(
+                        state
+                            .provider
+                            .get_writer::<&str, String>(BlockfileWriterOptions::new().fork(id)),
+                    )
+                    .unwrap();
                 }
             }
 

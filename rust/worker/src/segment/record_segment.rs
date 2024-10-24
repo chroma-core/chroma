@@ -104,25 +104,25 @@ impl RecordSegmentWriter {
             match segment.file_path.len() {
                 0 => {
                     tracing::debug!("No files found, creating new blockfiles for record segment");
-                    let user_id_to_id = match blockfile_provider.create::<&str, u32>() {
+                    let user_id_to_id = match blockfile_provider.create::<&str, u32>().await {
                         Ok(user_id_to_id) => user_id_to_id,
                         Err(e) => {
                             return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
                         }
                     };
-                    let id_to_user_id = match blockfile_provider.create::<u32, String>() {
+                    let id_to_user_id = match blockfile_provider.create::<u32, String>().await {
                         Ok(id_to_user_id) => id_to_user_id,
                         Err(e) => {
                             return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
                         }
                     };
-                    let id_to_data = match blockfile_provider.create::<u32, &DataRecord>() {
+                    let id_to_data = match blockfile_provider.create::<u32, &DataRecord>().await {
                         Ok(id_to_data) => id_to_data,
                         Err(e) => {
                             return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
                         }
                     };
-                    let max_offset_id = match blockfile_provider.create::<&str, u32>() {
+                    let max_offset_id = match blockfile_provider.create::<&str, u32>().await {
                         Ok(max_offset_id) => max_offset_id,
                         Err(e) => {
                             return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))

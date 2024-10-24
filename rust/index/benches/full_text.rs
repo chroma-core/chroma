@@ -25,8 +25,8 @@ async fn compact_log_and_get_reader<'a, T>(
 where
     T: RecordDataset,
 {
-    let postings_blockfile_writer = blockfile_provider.create::<u32, Vec<u32>>().unwrap();
-    let frequencies_blockfile_writer = blockfile_provider.create::<u32, u32>().unwrap();
+    let postings_blockfile_writer = blockfile_provider.create::<u32, Vec<u32>>().await.unwrap();
+    let frequencies_blockfile_writer = blockfile_provider.create::<u32, u32>().await.unwrap();
     let postings_blockfile_id = postings_blockfile_writer.id();
     let frequencies_blockfile_id = frequencies_blockfile_writer.id();
 
