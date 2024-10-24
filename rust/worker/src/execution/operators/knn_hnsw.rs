@@ -37,7 +37,7 @@ pub enum KnnHnswError {
     #[error("Error processing fetch segment output: {0}")]
     FetchSegment(#[from] FetchSegmentError),
     #[error("Error querying knn index: {0}")]
-    KnnIndex(Box<dyn ChromaError>),
+    KnnIndex(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for KnnHnswError {
@@ -68,22 +68,22 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
                 (Vec::new(), rbm.iter().map(|oid| oid as usize).collect())
             }
         };
-        match input.segments.knn_segment_reader().await?.query(
-            &self.embedding,
-            self.fetch as usize,
-            &allowed,
-            &disallowed,
-        ) {
-            Ok((oids, distances)) => Ok(KnnHnswOutput {
-                segments: input.segments.clone(),
-                distances: oids
-                    .into_iter()
+
+        let distances = match input.segments.knn_segment_reader().await? {
+            Some(reader) => {
+                let (oids, distances) =
+                    reader.query(&self.embedding, self.fetch as usize, &allowed, &disallowed)?;
+                oids.into_iter()
                     .map(|oid| oid as u32)
                     .zip(distances)
                     .map(|(oid, measure)| Distance { oid, measure })
-                    .collect(),
-            }),
-            Err(e) => Err(KnnHnswError::KnnIndex(e)),
-        }
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        Ok(KnnHnswOutput {
+            segments: input.segments.clone(),
+            distances,
+        })
     }
 }

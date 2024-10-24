@@ -104,7 +104,7 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
                     merged_distance.push(d.clone());
                     log_index += 1;
                 }
-                _ => {}
+                _ => break,
             }
             fetch -= 1;
         }

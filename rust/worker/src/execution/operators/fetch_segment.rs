@@ -25,9 +25,10 @@ pub struct FetchSegmentOperator {
     pub(crate) sysdb: Box<SysDb>,
     pub hnsw: HnswIndexProvider,
     pub blockfile: BlockfileProvider,
-    // pub knn: Uuid,
-    // pub metadata: Uuid,
-    // pub record: Uuid,
+    // TODO: Enforce uuid
+    pub knn: Option<Uuid>,
+    pub metadata: Option<Uuid>,
+    pub record: Option<Uuid>,
     pub collection: Uuid,
     // Version
     pub version: u32,
@@ -89,8 +90,8 @@ impl ChromaError for FetchSegmentError {
 impl FetchSegmentOutput {
     pub(super) async fn knn_segment_reader(
         &self,
-    ) -> Result<DistributedHNSWSegmentReader, FetchSegmentError> {
-        DistributedHNSWSegmentReader::from_segment(
+    ) -> Result<Option<DistributedHNSWSegmentReader>, FetchSegmentError> {
+        match DistributedHNSWSegmentReader::from_segment(
             &self.knn,
             self.collection
                 .dimension
@@ -98,8 +99,13 @@ impl FetchSegmentOutput {
             self.hnsw.clone(),
         )
         .await
-        .map(|reader| *reader)
-        .map_err(|e| (*e).into())
+        {
+            Ok(reader) => Ok(Some(*reader)),
+            Err(e) => match *e {
+                DistributedHNSWSegmentFromSegmentError::Uninitialized => Ok(None),
+                e => Err(e.into()),
+            },
+        }
     }
 
     pub(super) fn knn_config(&self) -> Result<IndexConfig, FetchSegmentError> {
@@ -123,10 +129,10 @@ impl FetchSegmentOutput {
     ) -> Result<Option<RecordSegmentReader>, FetchSegmentError> {
         match RecordSegmentReader::from_segment(&self.record, &self.blockfile).await {
             Ok(reader) => Ok(Some(reader)),
-            Err(err) if matches!(*err, RecordSegmentReaderCreationError::UninitializedSegment) => {
-                Ok(None)
-            }
-            Err(e) => Err((*e).into()),
+            Err(e) => match *e {
+                RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
+                e => Err(e.into()),
+            },
         }
     }
 }
@@ -138,7 +144,6 @@ impl FetchSegmentOperator {
             .clone()
             .get_collections(Some(self.collection), None, None, None)
             .await?
-            // Each collection should have a single UUID
             .pop()
             .ok_or(FetchSegmentError::NoCollection)?;
         if collection.version != self.version as i32 {
@@ -156,9 +161,9 @@ impl FetchSegmentOperator {
         };
         // TODO: Add segment uuid
         let segment_id = match scope {
-            SegmentScope::VECTOR => None,
-            SegmentScope::METADATA => None,
-            SegmentScope::RECORD => None,
+            SegmentScope::VECTOR => self.knn,
+            SegmentScope::METADATA => self.metadata,
+            SegmentScope::RECORD => self.record,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
         };
         self.sysdb
