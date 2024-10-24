@@ -2,36 +2,49 @@
 title: Chroma
 ---
 
-**Chroma is the AI-native open-source vector database**. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
+<!-- ![](/img/hrm4.svg) -->
 
-New to Chroma? [🔑 Getting Started](./getting-started).
+Chroma is **the world’s most popular open-source vector database**.
 
-[![Discord](https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600)](https://discord.gg/MMeYNTmh3x)
+> 💡 **New to Chroma?** Get up and running in less than 60 seconds.
+>
+> [🔑 Getting Started](/getting-started)
+
+Chroma is AI-native, meaning it has been designed from the ground up to power AI applications. Chroma makes it simple for you to store and retrieve data that is most relevant to your queries, ensuring your LLM has the information it needs to provide accurate and context-aware answers.
+
+Chroma gives you the tools for: (* note - could link to documentation here?)
+- **Vector search** - Use embeddings to search for similar documents or data points
+- **Full-text search** - Search stored documents based on their content
+- **Metadata search** - Search stored documents based on their metadata
+- **Combined Search** - Find similar documents subject to full-text and metadata constraints
+
+Chroma prioritizes:
+- **Simplicity and developer productivity** – Chroma's default functionality lets you get up and running quickly with minimal code.
+- **Portability** – Chroma can run locally on your machine in many different languages, with a hosted version coming soon
+- **Efficiency** - Chroma is lightweight and fast!
+
+Chroma runs where you need it: (* note - could link to example here?)
+- in a Jupyter notebook
+- in a Python script
+- as a single-node server
+- as a distributed cluster
+
+Want to find out more? See our Guides explaining:
+- How Chroma Works
+- Setting Up Clients
+- Working with Collections
+- and more
+
+Chroma is licensed under [Apache 2.0](https://github.com/chroma-core/chroma/blob/main/LICENSE)
+
+[![Discord](https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600&style=social&logo=discord&logoColor=000000&label=&nbsp;)](https://discord.gg/MMeYNTmh3x)
 {% br %}{% /br %}
 [![GitHub stars](https://img.shields.io/github/stars/chroma-core/chroma.svg?style=social&label=Star&maxAge=2400)](https://GitHub.com/chroma-core/chroma/stargazers/)
 
 
 ***
 
-
-![](/img/hrm4.svg)
-
-{% br %}{% /br %}
-
-Chroma gives you the tools to:
-
-- store embeddings and their metadata
-- embed documents and queries
-- search embeddings
-
-Chroma prioritizes:
-
-- simplicity and developer productivity
-- it also happens to be very quick
-
-Chroma runs as a server and provides 1st party `Python` and `JavaScript/TypeScript` client SDKs. Check out the [Colab demo](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing). (yes, it can run in a Jupyter notebook 😄)
-
-Chroma is licensed under [Apache 2.0](https://github.com/chroma-core/chroma/blob/main/LICENSE)
+## Quick install
 
 ### Python
 In Python, Chroma can run in a python script or as a server.
