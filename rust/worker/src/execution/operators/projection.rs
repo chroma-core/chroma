@@ -105,7 +105,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
             })
             .collect();
 
-        let mut records = Vec::with_capacity(input.offset_ids.len() as usize);
+        let mut records = Vec::with_capacity(input.offset_ids.len());
 
         for oid in &input.offset_ids {
             let record = match oid_to_log_record.get(oid) {
