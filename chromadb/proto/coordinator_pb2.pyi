@@ -18,10 +18,8 @@ class CreateDatabaseRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
 
 class CreateDatabaseResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetDatabaseRequest(_message.Message):
     __slots__ = ("name", "tenant")
@@ -32,12 +30,10 @@ class GetDatabaseRequest(_message.Message):
     def __init__(self, name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
 
 class GetDatabaseResponse(_message.Message):
-    __slots__ = ("database", "status")
+    __slots__ = ("database",)
     DATABASE_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
     database: _chroma_pb2.Database
-    status: _chroma_pb2.Status
-    def __init__(self, database: _Optional[_Union[_chroma_pb2.Database, _Mapping]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    def __init__(self, database: _Optional[_Union[_chroma_pb2.Database, _Mapping]] = ...) -> None: ...
 
 class CreateTenantRequest(_message.Message):
     __slots__ = ("name",)
@@ -46,10 +42,8 @@ class CreateTenantRequest(_message.Message):
     def __init__(self, name: _Optional[str] = ...) -> None: ...
 
 class CreateTenantResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetTenantRequest(_message.Message):
     __slots__ = ("name",)
@@ -58,12 +52,10 @@ class GetTenantRequest(_message.Message):
     def __init__(self, name: _Optional[str] = ...) -> None: ...
 
 class GetTenantResponse(_message.Message):
-    __slots__ = ("tenant", "status")
+    __slots__ = ("tenant",)
     TENANT_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
     tenant: _chroma_pb2.Tenant
-    status: _chroma_pb2.Status
-    def __init__(self, tenant: _Optional[_Union[_chroma_pb2.Tenant, _Mapping]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    def __init__(self, tenant: _Optional[_Union[_chroma_pb2.Tenant, _Mapping]] = ...) -> None: ...
 
 class CreateSegmentRequest(_message.Message):
     __slots__ = ("segment",)
@@ -72,10 +64,8 @@ class CreateSegmentRequest(_message.Message):
     def __init__(self, segment: _Optional[_Union[_chroma_pb2.Segment, _Mapping]] = ...) -> None: ...
 
 class CreateSegmentResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class DeleteSegmentRequest(_message.Message):
     __slots__ = ("id", "collection")
@@ -86,10 +76,8 @@ class DeleteSegmentRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., collection: _Optional[str] = ...) -> None: ...
 
 class DeleteSegmentResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetSegmentsRequest(_message.Message):
     __slots__ = ("id", "type", "scope", "collection")
@@ -104,12 +92,10 @@ class GetSegmentsRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[_chroma_pb2.SegmentScope, str]] = ..., collection: _Optional[str] = ...) -> None: ...
 
 class GetSegmentsResponse(_message.Message):
-    __slots__ = ("segments", "status")
+    __slots__ = ("segments",)
     SEGMENTS_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
     segments: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.Segment]
-    status: _chroma_pb2.Status
-    def __init__(self, segments: _Optional[_Iterable[_Union[_chroma_pb2.Segment, _Mapping]]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    def __init__(self, segments: _Optional[_Iterable[_Union[_chroma_pb2.Segment, _Mapping]]] = ...) -> None: ...
 
 class UpdateSegmentRequest(_message.Message):
     __slots__ = ("id", "collection", "metadata", "reset_metadata")
@@ -124,10 +110,8 @@ class UpdateSegmentRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
 
 class UpdateSegmentResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class CreateCollectionRequest(_message.Message):
     __slots__ = ("id", "name", "configuration_json_str", "metadata", "dimension", "get_or_create", "tenant", "database")
@@ -150,14 +134,12 @@ class CreateCollectionRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., configuration_json_str: _Optional[str] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., get_or_create: bool = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
 
 class CreateCollectionResponse(_message.Message):
-    __slots__ = ("collection", "created", "status")
+    __slots__ = ("collection", "created")
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
     CREATED_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
     collection: _chroma_pb2.Collection
     created: bool
-    status: _chroma_pb2.Status
-    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., created: bool = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., created: bool = ...) -> None: ...
 
 class DeleteCollectionRequest(_message.Message):
     __slots__ = ("id", "tenant", "database")
@@ -170,10 +152,8 @@ class DeleteCollectionRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ...) -> None: ...
 
 class DeleteCollectionResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetCollectionsRequest(_message.Message):
     __slots__ = ("id", "name", "tenant", "database", "limit", "offset")
@@ -192,12 +172,10 @@ class GetCollectionsRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
 class GetCollectionsResponse(_message.Message):
-    __slots__ = ("collections", "status")
+    __slots__ = ("collections",)
     COLLECTIONS_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
     collections: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.Collection]
-    status: _chroma_pb2.Status
-    def __init__(self, collections: _Optional[_Iterable[_Union[_chroma_pb2.Collection, _Mapping]]] = ..., status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    def __init__(self, collections: _Optional[_Iterable[_Union[_chroma_pb2.Collection, _Mapping]]] = ...) -> None: ...
 
 class UpdateCollectionRequest(_message.Message):
     __slots__ = ("id", "name", "dimension", "metadata", "reset_metadata")
@@ -214,28 +192,12 @@ class UpdateCollectionRequest(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., dimension: _Optional[int] = ..., metadata: _Optional[_Union[_chroma_pb2.UpdateMetadata, _Mapping]] = ..., reset_metadata: bool = ...) -> None: ...
 
 class UpdateCollectionResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
-
-class Notification(_message.Message):
-    __slots__ = ("id", "collection_id", "type", "status")
-    ID_FIELD_NUMBER: _ClassVar[int]
-    COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
-    TYPE_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    id: int
-    collection_id: str
-    type: str
-    status: str
-    def __init__(self, id: _Optional[int] = ..., collection_id: _Optional[str] = ..., type: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class ResetStateResponse(_message.Message):
-    __slots__ = ("status",)
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: _chroma_pb2.Status
-    def __init__(self, status: _Optional[_Union[_chroma_pb2.Status, _Mapping]] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetLastCompactionTimeForTenantRequest(_message.Message):
     __slots__ = ("tenant_id",)

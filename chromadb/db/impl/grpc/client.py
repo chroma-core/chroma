@@ -5,7 +5,7 @@ from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
-from chromadb.errors import NotFoundError, UniqueConstraintError
+from chromadb.errors import NotFoundError, UniqueConstraintError, InternalError
 from chromadb.proto.convert import (
     from_proto_collection,
     from_proto_segment,
@@ -90,75 +90,101 @@ class GrpcSysDB(SysDB):
     def create_database(
         self, id: UUID, name: str, tenant: str = DEFAULT_TENANT
     ) -> None:
-        request = CreateDatabaseRequest(id=id.hex, name=name, tenant=tenant)
-        response = self._sys_db_stub.CreateDatabase(
-            request, timeout=self._request_timeout_seconds
-        )
-        if response.status.code == 409:
-            raise UniqueConstraintError()
+        try:
+            request = CreateDatabaseRequest(id=id.hex, name=name, tenant=tenant)
+            response = self._sys_db_stub.CreateDatabase(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to create database name {name} and database id {id} for tenant {tenant} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+                raise UniqueConstraintError()
+            raise InternalError()
 
     @overrides
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
-        request = GetDatabaseRequest(name=name, tenant=tenant)
-        response = self._sys_db_stub.GetDatabase(
-            request, timeout=self._request_timeout_seconds
-        )
-        if response.status.code == 404:
-            raise NotFoundError(
-                f"Could not fetch database {name} for tenant {tenant}. Are you sure it exists?"
+        try:
+            request = GetDatabaseRequest(name=name, tenant=tenant)
+            response = self._sys_db_stub.GetDatabase(
+                request, timeout=self._request_timeout_seconds
             )
-        return Database(
-            id=UUID(hex=response.database.id),
-            name=response.database.name,
-            tenant=response.database.tenant,
-        )
+            return Database(
+                id=UUID(hex=response.database.id),
+                name=response.database.name,
+                tenant=response.database.tenant,
+            )
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to get database {name} for tenant {tenant} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
+            raise InternalError()
 
     @overrides
     def create_tenant(self, name: str) -> None:
-        request = CreateTenantRequest(name=name)
-        response = self._sys_db_stub.CreateTenant(
-            request, timeout=self._request_timeout_seconds
-        )
-        if response.status.code == 409:
-            raise UniqueConstraintError()
+        try:
+            request = CreateTenantRequest(name=name)
+            response = self._sys_db_stub.CreateTenant(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.info(f"Failed to create tenant {name} due to error: {e}")
+            if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+                raise UniqueConstraintError()
+            raise InternalError()
 
     @overrides
     def get_tenant(self, name: str) -> Tenant:
-        request = GetTenantRequest(name=name)
-        response = self._sys_db_stub.GetTenant(
-            request, timeout=self._request_timeout_seconds
-        )
-        if response.status.code == 404:
-            raise NotFoundError(
-                f"Could not fetch tenant {name}. Are you sure it exists?"
+        try:
+            request = GetTenantRequest(name=name)
+            response = self._sys_db_stub.GetTenant(
+                request, timeout=self._request_timeout_seconds
             )
-        return Tenant(
-            name=response.tenant.name,
-        )
+            return Tenant(
+                name=response.tenant.name,
+            )
+        except grpc.RpcError as e:
+            logger.info(f"Failed to get tenant {name} due to error: {e}")
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
+            raise InternalError()
 
     @overrides
     def create_segment(self, segment: Segment) -> None:
-        proto_segment = to_proto_segment(segment)
-        request = CreateSegmentRequest(
-            segment=proto_segment,
-        )
-        response = self._sys_db_stub.CreateSegment(
-            request, timeout=self._request_timeout_seconds
-        )
-        if response.status.code == 409:
-            raise UniqueConstraintError()
+        try:
+            proto_segment = to_proto_segment(segment)
+            request = CreateSegmentRequest(
+                segment=proto_segment,
+            )
+            response = self._sys_db_stub.CreateSegment(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.info(f"Failed to create segment {segment}, error: {e}")
+            if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+                raise UniqueConstraintError()
+            raise InternalError()
 
     @overrides
     def delete_segment(self, collection: UUID, id: UUID) -> None:
-        request = DeleteSegmentRequest(
-            id=id.hex,
-            collection=collection.hex,
-        )
-        response = self._sys_db_stub.DeleteSegment(
-            request, timeout=self._request_timeout_seconds
-        )
-        if response.status.code == 404:
-            raise NotFoundError()
+        try:
+            request = DeleteSegmentRequest(
+                id=id.hex,
+                collection=collection.hex,
+            )
+            response = self._sys_db_stub.DeleteSegment(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to delete segment with id {id} for collection {collection} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
+            raise InternalError()
 
     @overrides
     def get_segments(
@@ -168,20 +194,26 @@ class GrpcSysDB(SysDB):
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
     ) -> Sequence[Segment]:
-        request = GetSegmentsRequest(
-            id=id.hex if id else None,
-            type=type,
-            scope=to_proto_segment_scope(scope) if scope else None,
-            collection=collection.hex,
-        )
-        response = self._sys_db_stub.GetSegments(
-            request, timeout=self._request_timeout_seconds
-        )
-        results: List[Segment] = []
-        for proto_segment in response.segments:
-            segment = from_proto_segment(proto_segment)
-            results.append(segment)
-        return results
+        try:
+            request = GetSegmentsRequest(
+                id=id.hex if id else None,
+                type=type,
+                scope=to_proto_segment_scope(scope) if scope else None,
+                collection=collection.hex,
+            )
+            response = self._sys_db_stub.GetSegments(
+                request, timeout=self._request_timeout_seconds
+            )
+            results: List[Segment] = []
+            for proto_segment in response.segments:
+                segment = from_proto_segment(proto_segment)
+                results.append(segment)
+            return results
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to get segment id {id}, type {type}, scope {scope} for collection {collection} due to error: {e}"
+            )
+            raise InternalError()
 
     @overrides
     def update_segment(
@@ -190,23 +222,31 @@ class GrpcSysDB(SysDB):
         id: UUID,
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_metadata = None
-        if metadata != Unspecified():
-            write_metadata = cast(Union[UpdateMetadata, None], metadata)
+        try:
+            write_metadata = None
+            if metadata != Unspecified():
+                write_metadata = cast(Union[UpdateMetadata, None], metadata)
 
-        request = UpdateSegmentRequest(
-            id=id.hex,
-            collection=collection.hex,
-            metadata=to_proto_update_metadata(write_metadata)
-            if write_metadata
-            else None,
-        )
+            request = UpdateSegmentRequest(
+                id=id.hex,
+                collection=collection.hex,
+                metadata=to_proto_update_metadata(write_metadata)
+                if write_metadata
+                else None,
+            )
 
-        if metadata is None:
-            request.ClearField("metadata")
-            request.reset_metadata = True
+            if metadata is None:
+                request.ClearField("metadata")
+                request.reset_metadata = True
 
-        self._sys_db_stub.UpdateSegment(request, timeout=self._request_timeout_seconds)
+            self._sys_db_stub.UpdateSegment(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to update segment with id {id} for collection {collection}, error: {e}"
+            )
+            raise InternalError()
 
     @overrides
     def create_collection(
@@ -220,42 +260,50 @@ class GrpcSysDB(SysDB):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
-        request = CreateCollectionRequest(
-            id=id.hex,
-            name=name,
-            configuration_json_str=configuration.to_json_str(),
-            metadata=to_proto_update_metadata(metadata) if metadata else None,
-            dimension=dimension,
-            get_or_create=get_or_create,
-            tenant=tenant,
-            database=database,
-        )
-        response = self._sys_db_stub.CreateCollection(
-            request, timeout=self._request_timeout_seconds
-        )
-        # TODO: this needs to be changed to try, catch instead of checking the status code
-        if response.status.code != 200:
-            logger.info(f"failed to create collection, response: {response}")
-        if response.status.code == 409:
-            raise UniqueConstraintError()
-        collection = from_proto_collection(response.collection)
-        return collection, response.created
+        try:
+            request = CreateCollectionRequest(
+                id=id.hex,
+                name=name,
+                configuration_json_str=configuration.to_json_str(),
+                metadata=to_proto_update_metadata(metadata) if metadata else None,
+                dimension=dimension,
+                get_or_create=get_or_create,
+                tenant=tenant,
+                database=database,
+            )
+            response = self._sys_db_stub.CreateCollection(
+                request, timeout=self._request_timeout_seconds
+            )
+            collection = from_proto_collection(response.collection)
+            return collection, response.created
+        except grpc.RpcError as e:
+            logger.error(
+                f"Failed to create collection id {id}, name {name} for database {database} and tenant {tenant} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+                raise UniqueConstraintError()
+            raise InternalError()
 
     @overrides
     def delete_collection(
         self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> None:
-        request = DeleteCollectionRequest(
-            id=id.hex,
-            tenant=tenant,
-            database=database,
-        )
-        response = self._sys_db_stub.DeleteCollection(
-            request, timeout=self._request_timeout_seconds
-        )
-        logging.debug(f"delete_collection response: {response}")
-        if response.status.code == 404:
-            raise NotFoundError()
+        try:
+            request = DeleteCollectionRequest(
+                id=id.hex,
+                tenant=tenant,
+                database=database,
+            )
+            response = self._sys_db_stub.DeleteCollection(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.error(
+                f"Failed to delete collection id {id} for database {database} and tenant {tenant} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
+            raise InternalError()
 
     @overrides
     def get_collections(
@@ -267,40 +315,46 @@ class GrpcSysDB(SysDB):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
-        # TODO: implement limit and offset in the gRPC service
-        request = None
-        if id is not None:
-            request = GetCollectionsRequest(
-                id=id.hex,
-                limit=limit,
-                offset=offset,
-            )
-        if name is not None:
-            if tenant is None and database is None:
-                raise ValueError(
-                    "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
+        try:
+            # TODO: implement limit and offset in the gRPC service
+            request = None
+            if id is not None:
+                request = GetCollectionsRequest(
+                    id=id.hex,
+                    limit=limit,
+                    offset=offset,
                 )
-            request = GetCollectionsRequest(
-                name=name,
-                tenant=tenant,
-                database=database,
-                limit=limit,
-                offset=offset,
+            if name is not None:
+                if tenant is None and database is None:
+                    raise ValueError(
+                        "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
+                    )
+                request = GetCollectionsRequest(
+                    name=name,
+                    tenant=tenant,
+                    database=database,
+                    limit=limit,
+                    offset=offset,
+                )
+            if id is None and name is None:
+                request = GetCollectionsRequest(
+                    tenant=tenant,
+                    database=database,
+                    limit=limit,
+                    offset=offset,
+                )
+            response: GetCollectionsResponse = self._sys_db_stub.GetCollections(
+                request, timeout=self._request_timeout_seconds
             )
-        if id is None and name is None:
-            request = GetCollectionsRequest(
-                tenant=tenant,
-                database=database,
-                limit=limit,
-                offset=offset,
+            results: List[Collection] = []
+            for collection in response.collections:
+                results.append(from_proto_collection(collection))
+            return results
+        except grpc.RpcError as e:
+            logger.error(
+                f"Failed to get collections with id {id}, name {name}, tenant {tenant}, database {database} due to error: {e}"
             )
-        response: GetCollectionsResponse = self._sys_db_stub.GetCollections(
-            request, timeout=self._request_timeout_seconds
-        )
-        results: List[Collection] = []
-        for collection in response.collections:
-            results.append(from_proto_collection(collection))
-        return results
+            raise InternalError()
 
     @overrides
     def update_collection(
@@ -310,37 +364,43 @@ class GrpcSysDB(SysDB):
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
-        write_name = None
-        if name != Unspecified():
-            write_name = cast(str, name)
+        try:
+            write_name = None
+            if name != Unspecified():
+                write_name = cast(str, name)
 
-        write_dimension = None
-        if dimension != Unspecified():
-            write_dimension = cast(Union[int, None], dimension)
+            write_dimension = None
+            if dimension != Unspecified():
+                write_dimension = cast(Union[int, None], dimension)
 
-        write_metadata = None
-        if metadata != Unspecified():
-            write_metadata = cast(Union[UpdateMetadata, None], metadata)
+            write_metadata = None
+            if metadata != Unspecified():
+                write_metadata = cast(Union[UpdateMetadata, None], metadata)
 
-        request = UpdateCollectionRequest(
-            id=id.hex,
-            name=write_name,
-            dimension=write_dimension,
-            metadata=to_proto_update_metadata(write_metadata)
-            if write_metadata
-            else None,
-        )
-        if metadata is None:
-            request.ClearField("metadata")
-            request.reset_metadata = True
+            request = UpdateCollectionRequest(
+                id=id.hex,
+                name=write_name,
+                dimension=write_dimension,
+                metadata=to_proto_update_metadata(write_metadata)
+                if write_metadata
+                else None,
+            )
+            if metadata is None:
+                request.ClearField("metadata")
+                request.reset_metadata = True
 
-        response = self._sys_db_stub.UpdateCollection(
-            request, timeout=self._request_timeout_seconds
-        )
-        if response.status.code == 404:
-            raise NotFoundError()
-        if response.status.code == 409:
-            raise UniqueConstraintError()
+            response = self._sys_db_stub.UpdateCollection(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.error(
+                f"Failed to update collection id {id}, name {name} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
+            if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+                raise UniqueConstraintError()
+            raise InternalError()
 
     def reset_and_wait_for_ready(self) -> None:
         self._sys_db_stub.ResetState(Empty(), wait_for_ready=True)
