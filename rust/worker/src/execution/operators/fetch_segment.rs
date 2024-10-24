@@ -26,7 +26,7 @@ pub struct FetchSegmentOperator {
     pub hnsw: HnswIndexProvider,
     pub blockfile: BlockfileProvider,
     // pub knn: Uuid,
-    pub metadata: Uuid,
+    // pub metadata: Uuid,
     // pub record: Uuid,
     pub collection: Uuid,
     // Version
@@ -154,10 +154,10 @@ impl FetchSegmentOperator {
             SegmentScope::RECORD => SegmentType::BlockfileRecord,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
         };
-        // TODO: Add vector and record segment id
+        // TODO: Add segment uuid
         let segment_id = match scope {
             SegmentScope::VECTOR => None,
-            SegmentScope::METADATA => Some(self.metadata),
+            SegmentScope::METADATA => None,
             SegmentScope::RECORD => None,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
         };

@@ -350,7 +350,7 @@ impl WorkerServer {
         request: Request<QueryMetadataRequest>,
     ) -> Result<Response<QueryMetadataResponse>, Status> {
         let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
             Ok(uuid) => uuid,
             Err(_) => {
                 tracing::error!("Invalid Segment UUID");
@@ -441,7 +441,6 @@ impl WorkerServer {
                 sysdb: self.sysdb.clone(),
                 hnsw: self.hnsw_index_provider.clone(),
                 blockfile: self.blockfile_provider.clone(),
-                metadata: segment_uuid,
                 collection: collection_uuid,
                 version: collection_version,
             },
