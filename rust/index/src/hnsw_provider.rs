@@ -438,7 +438,9 @@ impl HnswIndexProvider {
             match self.remove_temporary_files(index_id).await {
                 Ok(_) => {}
                 Err(e) => {
-                    tracing::error!("Failed to remove temporary files: {}", e);
+                    if e.kind() != std::io::ErrorKind::NotFound {
+                        tracing::error!("Failed to remove temporary files: {}", e);
+                    }
                 }
             }
         }
