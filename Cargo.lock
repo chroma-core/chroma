@@ -1153,6 +1153,7 @@ dependencies = [
  "chroma-types",
  "flatbuffers",
  "futures",
+ "guacamole",
  "num_cpus",
  "parking_lot",
  "proptest",
@@ -2358,6 +2359,12 @@ dependencies = [
  "rand_core",
  "subtle",
 ]
+
+[[package]]
+name = "guacamole"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7edce4d0c9e2a7e7fb7d037cf82a57e26379be4e453dd55c813953ba405fb1d1"
 
 [[package]]
 name = "h2"

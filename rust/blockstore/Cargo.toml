@@ -31,6 +31,8 @@ chroma-cache = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
+guacamole = { version = "0.9", default-features = false }
+
 rand = { workspace = true }
 tempfile = { workspace = true }
 proptest = { workspace = true }
