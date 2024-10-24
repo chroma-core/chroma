@@ -65,6 +65,7 @@ understand. We can always add more abstraction later if we need it.
 ```
 */
 #[derive(Debug)]
+#[allow(dead_code)]
 enum ExecutionState {
     Pending,
     PullLogs,
@@ -75,6 +76,7 @@ enum ExecutionState {
 }
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 enum HnswSegmentQueryError {
     #[error(transparent)]
     GetByIdError(#[from] super::common::GetHnswSegmentByIdError),
@@ -101,6 +103,7 @@ impl ChromaError for HnswSegmentQueryError {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct HnswQueryOrchestrator {
     state: ExecutionState,
     // Component Execution
@@ -146,6 +149,7 @@ pub(crate) struct HnswQueryOrchestrator {
     log_position: u64,
 }
 
+#[allow(dead_code)]
 impl HnswQueryOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(

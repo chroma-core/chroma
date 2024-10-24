@@ -76,7 +76,7 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
     type Error = KnnMergeError;
 
     async fn run(&self, input: &KnnMergeInput) -> Result<KnnMergeOutput, KnnMergeError> {
-        let mut fetch = self.fetch.clone();
+        let mut fetch = self.fetch;
         let mut log_index = 0;
         let mut segment_index = 0;
 
