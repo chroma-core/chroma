@@ -18,5 +18,7 @@ pub mod filter;
 pub mod knn;
 pub mod knn_hnsw;
 pub mod knn_log;
+pub mod knn_merge;
+pub mod knn_projection;
 pub mod limit;
 pub mod projection;

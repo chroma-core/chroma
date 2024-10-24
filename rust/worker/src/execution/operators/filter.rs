@@ -58,7 +58,7 @@ pub struct FilterInput {
     pub record_segment: Segment,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FilterOutput {
     pub log_offset_ids: SignedRoaringBitmap,
     pub compact_offset_ids: SignedRoaringBitmap,
