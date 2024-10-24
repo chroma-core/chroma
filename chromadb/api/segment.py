@@ -124,7 +124,7 @@ class SegmentAPI(ServerAPI):
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
         self._executor = self.require(Executor)
-        self._quota = self.require(QuotaEnforcer)
+        self._quota_enforcer = self.require(QuotaEnforcer)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
@@ -382,7 +382,6 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
@@ -427,7 +426,6 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
@@ -474,7 +472,6 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(

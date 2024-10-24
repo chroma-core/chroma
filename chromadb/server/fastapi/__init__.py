@@ -44,8 +44,8 @@ from chromadb.errors import (
     InvalidDimensionException,
     InvalidHTTPVersion,
     RateLimitError,
+    QuotaError,
 )
-from chromadb.quota import QuotaError
 from chromadb.server import Server
 from chromadb.server.fastapi.types import (
     AddEmbedding,
@@ -355,10 +355,7 @@ class FastAPI(Server):
     ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
-            content={
-                "message": f"quota error. resource: {exc.resource} "
-                f"quota: {exc.quota} actual: {exc.actual}"
-            },
+            content={"message": exc.message()},
         )
 
     async def heartbeat(self) -> Dict[str, int]:
