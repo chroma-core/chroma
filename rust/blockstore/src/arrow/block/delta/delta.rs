@@ -145,6 +145,12 @@ mod test {
     use roaring::RoaringBitmap;
     use std::collections::HashMap;
 
+    use guacamole::combinators::*;
+    use guacamole::Guacamole;
+    use uuid::Uuid;
+
+    use super::BlockDelta;
+
     /// Saves a block to a random file under the given path, then loads the block
     /// and validates that the loaded block has the same size as the original block.
     /// ### Returns
@@ -490,5 +496,41 @@ mod test {
             let read = forked_block.get::<u32, u32>("prefix", key);
             assert_eq!(read, Some(i as u32));
         }
+    }
+
+    #[test]
+    fn grow_and_split() {
+        let mut guac = Guacamole::new(42);
+        let builder = BlockDelta::new::<&str, u32>(Uuid::new_v4());
+        const MAGIC_NUMBER: usize = 8;
+        let mut key_value_pairs = vec![];
+        for i in 0..MAGIC_NUMBER {
+            for _ in 0..(1 << (MAGIC_NUMBER - i)) {
+                let mut buffer = vec![0; 1 << i];
+                guac.generate(&mut buffer);
+                let key = buffer
+                    .into_iter()
+                    .map(|x| char::from((x % 26) + b'a'))
+                    .collect::<String>();
+                let value: u32 = any(&mut guac);
+                key_value_pairs.push((key, value));
+            }
+        }
+        for (key, value) in key_value_pairs.iter() {
+            builder.add("", key.as_str(), *value);
+        }
+        let starting_size = builder.get_size::<&str, u32>();
+        fn recursive_split(builder: BlockDelta, max_block_size_bytes: usize) {
+            if max_block_size_bytes == 0 {
+                return;
+            }
+            let base_size = builder.get_size::<&str, u32>();
+            for (_, block) in builder.split::<&str, u32>(max_block_size_bytes) {
+                if block.get_size::<&str, u32>() < base_size {
+                    recursive_split(block, max_block_size_bytes / 2);
+                }
+            }
+        }
+        recursive_split(builder, starting_size / 2);
     }
 }
