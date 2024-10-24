@@ -1,8 +1,13 @@
 use crate::config::QueryServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
+use crate::execution::operators::fetch_log::FetchLogOperator;
+use crate::execution::operators::fetch_segment::FetchSegmentOperator;
+use crate::execution::operators::filter::FilterOperator;
+use crate::execution::operators::limit::LimitOperator;
+use crate::execution::operators::projection::ProjectionOperator;
+use crate::execution::orchestration::get::GetOrchestrator;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
-    MetadataQueryOrchestrator,
 };
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
@@ -345,7 +350,7 @@ impl WorkerServer {
         request: Request<QueryMetadataRequest>,
     ) -> Result<Response<QueryMetadataResponse>, Status> {
         let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
+        let _segment_uuid = match Uuid::parse_str(&request.segment_id) {
             Ok(uuid) => uuid,
             Err(_) => {
                 tracing::error!("Invalid Segment UUID");
@@ -421,24 +426,40 @@ impl WorkerServer {
             _ => None,
         };
 
-        let orchestrator = MetadataQueryOrchestrator::new(
-            system.clone(),
-            &segment_uuid,
-            &collection_uuid,
-            query_ids,
-            self.log.clone(),
-            self.sysdb.clone(),
+        let orchestrator = GetOrchestrator::new(
             dispatcher.clone(),
-            self.blockfile_provider.clone(),
-            clause,
-            request.offset,
-            request.limit,
-            request.include_metadata,
-            collection_version,
-            log_position,
+            // TODO: Load the configuration for this
+            1000,
+            FetchLogOperator {
+                log_client: self.log.clone(),
+                batch_size: 100,
+                skip: log_position as u32 + 1,
+                fetch: None,
+                collection: collection_uuid,
+            },
+            FetchSegmentOperator {
+                sysdb: self.sysdb.clone(),
+                hnsw: self.hnsw_index_provider.clone(),
+                blockfile: self.blockfile_provider.clone(),
+                collection: collection_uuid,
+                version: collection_version,
+            },
+            FilterOperator {
+                query_ids,
+                where_clause: clause,
+            },
+            LimitOperator {
+                skip: request.offset.unwrap_or_default(),
+                fetch: request.limit,
+            },
+            ProjectionOperator {
+                document: request.include_metadata,
+                embedding: request.include_metadata,
+                metadata: request.include_metadata,
+            },
         );
 
-        let result = orchestrator.run().await;
+        let result = orchestrator.register_and_run(system.clone()).await;
         let result = match result {
             Ok(result) => result,
             Err(e) => {
@@ -451,31 +472,24 @@ impl WorkerServer {
         };
 
         let mut output = Vec::new();
-        let (ids, metadatas, documents) = result;
-        if request.include_metadata {
-            for ((id, metadata), document) in ids
-                .into_iter()
-                .zip(metadatas.into_iter())
-                .zip(documents.into_iter())
-            {
+        for record in result.records {
+            let metadata = if request.include_metadata {
+                let mut meta = record.metadata.unwrap_or_default();
+
                 // The transport layer assumes the document exists in the metadata
                 // with the special key "chroma:document"
-                let mut output_metadata = metadata.unwrap_or_default();
-                if let Some(document) = document {
-                    output_metadata
-                        .insert("chroma:document".to_string(), MetadataValue::Str(document));
+                if let Some(doc) = record.document {
+                    meta.insert("chroma:document".to_string(), MetadataValue::Str(doc));
                 }
-                let record = chroma_proto::MetadataEmbeddingRecord {
-                    id,
-                    metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-                };
-                output.push(record);
-            }
-        } else {
-            for id in ids {
-                let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
-                output.push(record);
-            }
+                Some(chroma_proto::UpdateMetadata::from(meta))
+            } else {
+                None
+            };
+
+            output.push(chroma_proto::MetadataEmbeddingRecord {
+                id: record.id,
+                metadata,
+            });
         }
 
         // This is an implementation stub

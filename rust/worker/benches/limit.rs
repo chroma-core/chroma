@@ -3,11 +3,9 @@ use std::iter::once;
 use chroma_test::benchmark::{bench, tokio_multi_thread};
 use chroma_test::log::{offset_as_id, random_document, random_embedding, LogGenerator};
 use chroma_test::segment::CompactSegment;
-use chroma_types::{Chunk, Operation, OperationRecord, SignedRoaringBitmap, UpdateMetadataValue};
+use chroma_types::{Operation, OperationRecord, UpdateMetadataValue};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use worker::execution::operator::Operator;
-use worker::execution::operators::limit::{LimitInput, LimitOperator};
 
 const DOCUMENT_LENGTH: usize = 64;
 const EMBEDDING_DIMENSION: usize = 6;
@@ -30,11 +28,8 @@ fn bench_limit(criterion: &mut Criterion) {
         generator: log_generator,
     };
 
-    let routine = |limit_input| async move {
-        LimitOperator::new()
-            .run(&limit_input)
-            .await
-            .expect("Limit should not fail.");
+    let routine = |_limit_input| async move {
+        // TODO: Run limit operator
     };
 
     for record_count in [1000, 10000, 100000] {
@@ -43,15 +38,7 @@ fn bench_limit(criterion: &mut Criterion) {
 
         for offset in [0, record_count / 2, record_count - LIMIT] {
             let setup = || {
-                LimitInput::new(
-                    compact.blockfile_provider.clone(),
-                    compact.record.clone(),
-                    Chunk::new(Vec::new().into()),
-                    SignedRoaringBitmap::full(),
-                    SignedRoaringBitmap::full(),
-                    offset as u32,
-                    Some(LIMIT as u32),
-                )
+                // TODO: Construct limit input
             };
             bench(
                 format!("limit-{}-{}", record_count, offset).as_str(),
