@@ -251,7 +251,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
 }
 
 type KnnOutput = KnnProjectionOutput;
-type KnnResult = Result<KnnProjectionOutput, KnnError>;
+type KnnResult = Result<KnnOutput, KnnError>;
 
 #[derive(Debug)]
 pub struct KnnOrchestrator {
@@ -284,7 +284,7 @@ impl KnnOrchestrator {
         knn: KnnOperator,
         knn_projection: KnnProjectionOperator,
     ) -> Self {
-        let fetch = knn.fetch.clone();
+        let fetch = knn.fetch;
         Self {
             dispatcher,
             queue,

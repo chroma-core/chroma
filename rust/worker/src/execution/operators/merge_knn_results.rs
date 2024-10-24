@@ -29,6 +29,7 @@ pub struct MergeKnnResultsOperatorInput {
     blockfile_provider: BlockfileProvider,
 }
 
+#[allow(dead_code)]
 impl MergeKnnResultsOperatorInput {
     pub fn new(
         hnsw_result_offset_ids: Vec<usize>,
@@ -52,6 +53,7 @@ impl MergeKnnResultsOperatorInput {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MergeKnnResultsOperatorOutput {
     pub user_ids: Vec<String>,
     pub distances: Vec<f32>,
