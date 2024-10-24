@@ -47,44 +47,35 @@ pub(crate) fn merge_update_metadata(
 ) -> Result<(Option<Metadata>, Option<DeletedMetadata>), MetadataValueConversionError> {
     let mut merged_metadata = HashMap::new();
     let mut deleted_metadata = DeletedMetadata::new();
-    match base_metadata.0 {
-        Some(base_mt) => {
-            merged_metadata = base_mt.clone();
-        }
-        None => (),
+    if let Some(base_mt) = base_metadata.0 {
+        merged_metadata = base_mt.clone();
     }
-    match base_metadata.1 {
-        Some(deleted_mt) => {
-            deleted_metadata = deleted_mt.clone();
-        }
-        None => (),
+    if let Some(deleted_mt) = base_metadata.1 {
+        deleted_metadata = deleted_mt.clone();
     }
-    match update_metadata {
-        Some(update_metadata) => {
-            match materialize_update_metadata(update_metadata) {
-                Ok((metadata, deleted_mt)) => {
-                    // Overwrite with new kv.
-                    for (key, value) in metadata {
-                        merged_metadata.insert(key.clone(), value);
-                        // Also remove from deleted list. This is important
-                        // because it can happen that the user deleted and then
-                        // reinserted the key.
-                        deleted_metadata.remove(&key);
-                    }
-                    // apply the deletes.
-                    for key in deleted_mt {
-                        deleted_metadata.insert(key.clone());
-                        // Again important to remove from this map since the user
-                        // could have previously update the key (and is now deleting it).
-                        merged_metadata.remove(&key);
-                    }
+    if let Some(update_metadata) = update_metadata {
+        match materialize_update_metadata(update_metadata) {
+            Ok((metadata, deleted_mt)) => {
+                // Overwrite with new kv.
+                for (key, value) in metadata {
+                    merged_metadata.insert(key.clone(), value);
+                    // Also remove from deleted list. This is important
+                    // because it can happen that the user deleted and then
+                    // reinserted the key.
+                    deleted_metadata.remove(&key);
                 }
-                Err(e) => {
-                    return Err(e);
+                // apply the deletes.
+                for key in deleted_mt {
+                    deleted_metadata.insert(key.clone());
+                    // Again important to remove from this map since the user
+                    // could have previously update the key (and is now deleting it).
+                    merged_metadata.remove(&key);
                 }
-            };
+            }
+            Err(e) => {
+                return Err(e);
+            }
         }
-        None => (),
     }
     let final_mt = if merged_metadata.is_empty() {
         None
@@ -259,49 +250,39 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     pub(crate) fn metadata_delta(&'referred_data self) -> MetadataDelta<'referred_data> {
         let mut metadata_delta = MetadataDelta::new();
         let mut base_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
-        match &self.data_record {
-            Some(data_record) => match &data_record.metadata {
-                Some(meta) => {
-                    for (meta_key, meta_val) in meta {
-                        base_metadata.insert(meta_key, meta_val);
-                    }
-                }
-                None => (),
-            },
-            None => (),
-        };
-        // Populate updates.
-        match &self.metadata_to_be_merged {
-            Some(meta) => {
+        if let Some(data_record) = &self.data_record {
+            if let Some(meta) = &data_record.metadata {
                 for (meta_key, meta_val) in meta {
-                    match base_metadata.get(meta_key.as_str()) {
-                        Some(old_value) => {
-                            metadata_delta
-                                .metadata_to_update
-                                .insert(meta_key.as_str(), (old_value, meta_val));
-                        }
-                        None => {
-                            metadata_delta
-                                .metadata_to_insert
-                                .insert(meta_key.as_str(), meta_val);
-                        }
+                    base_metadata.insert(meta_key, meta_val);
+                }
+            }
+        }
+        // Populate updates.
+        if let Some(meta) = &self.metadata_to_be_merged {
+            for (meta_key, meta_val) in meta {
+                match base_metadata.get(meta_key.as_str()) {
+                    Some(old_value) => {
+                        metadata_delta
+                            .metadata_to_update
+                            .insert(meta_key.as_str(), (old_value, meta_val));
+                    }
+                    None => {
+                        metadata_delta
+                            .metadata_to_insert
+                            .insert(meta_key.as_str(), meta_val);
                     }
                 }
             }
-            None => (),
         };
         // Populate deletes.
-        match &self.metadata_to_be_deleted {
-            Some(meta) => {
-                for key in meta {
-                    if let Some(old_value) = base_metadata.get(key.as_str()) {
-                        metadata_delta
-                            .metadata_to_delete
-                            .insert(key.as_str(), old_value);
-                    }
+        if let Some(meta) = &self.metadata_to_be_deleted {
+            for key in meta {
+                if let Some(old_value) = base_metadata.get(key.as_str()) {
+                    metadata_delta
+                        .metadata_to_delete
+                        .insert(key.as_str(), old_value);
                 }
             }
-            None => (),
         }
         metadata_delta
     }
@@ -312,34 +293,24 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         if self.final_operation != MaterializedLogOperation::OverwriteExisting
             && self.final_operation != MaterializedLogOperation::AddNew
         {
-            match &self.data_record {
-                Some(data_record) => match &data_record.metadata {
-                    Some(meta) => {
-                        for (meta_key, meta_val) in meta {
-                            final_metadata.insert(meta_key, meta_val);
-                        }
+            if let Some(data_record) = &self.data_record {
+                if let Some(meta) = &data_record.metadata {
+                    for (meta_key, meta_val) in meta {
+                        final_metadata.insert(meta_key, meta_val);
                     }
-                    None => (),
-                },
-                None => (),
-            };
+                }
+            }
         }
-        match &self.metadata_to_be_merged {
-            Some(meta) => {
-                for (meta_key, meta_val) in meta {
-                    final_metadata.insert(meta_key, meta_val);
-                }
+        if let Some(meta) = &self.metadata_to_be_merged {
+            for (meta_key, meta_val) in meta {
+                final_metadata.insert(meta_key, meta_val);
             }
-            None => (),
-        };
+        }
         // Remove the deleted metadatas.
-        match &self.metadata_to_be_deleted {
-            Some(meta) => {
-                for key in meta {
-                    final_metadata.remove(key.as_str());
-                }
+        if let Some(meta) = &self.metadata_to_be_deleted {
+            for key in meta {
+                final_metadata.remove(key.as_str());
             }
-            None => (),
         }
         final_metadata
     }
@@ -490,42 +461,41 @@ impl<'me> LogMaterializer<'me> {
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-        match &self.record_segment_reader {
-            Some(reader) => {
-                async {
-                    for (log_record, _) in self.logs.iter() {
-                        let exists = match reader
-                            .data_exists_for_user_id(log_record.record.id.as_str())
+        if let Some(reader) = &self.record_segment_reader {
+            async {
+                for (log_record, _) in self.logs.iter() {
+                    let exists = match reader
+                        .data_exists_for_user_id(log_record.record.id.as_str())
+                        .await
+                    {
+                        Ok(res) => res,
+                        Err(e) => {
+                            return Err(LogMaterializerError::RecordSegment(e));
+                        }
+                    };
+                    if exists {
+                        match reader
+                            .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
                             .await
                         {
-                            Ok(res) => res,
+                            Ok((data_record, offset_id)) => {
+                                existing_id_to_materialized.insert(
+                                    log_record.record.id.as_str(),
+                                    MaterializedLogRecord::from((data_record, offset_id)),
+                                );
+                            }
                             Err(e) => {
                                 return Err(LogMaterializerError::RecordSegment(e));
                             }
-                        };
-                        if exists {
-                            match reader
-                                .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
-                                .await
-                            {
-                                Ok((data_record, offset_id)) => {
-                                    existing_id_to_materialized.insert(
-                                        log_record.record.id.as_str(),
-                                        MaterializedLogRecord::from((data_record, offset_id)),
-                                    );
-                                }
-                                Err(e) => {
-                                    return Err(LogMaterializerError::RecordSegment(e));
-                                }
-                            }
                         }
                     }
-                    Ok(())
-                }.instrument(tracing::info_span!(parent: Span::current(), "Materialization read from stroage")).await?;
+                }
+                Ok(())
             }
-            // If record segment is uninitialized then there's nothing
-            // in the record segment yet.
-            None => (),
+            .instrument(
+                tracing::info_span!(parent: Span::current(), "Materialization read from stroage"),
+            )
+            .await?;
         }
         // Populate updates to these and fresh records that are being
         // inserted for the first time.

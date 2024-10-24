@@ -583,8 +583,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                 MaterializedLogOperation::AddNew => {
                     // We can ignore record.0.metadata_to_be_deleted
                     // for fresh adds. TODO on whether to propagate error.
-                    match &record.0.metadata_to_be_merged {
-                        Some(metadata) => {
+                    if let Some(metadata) = &record.0.metadata_to_be_merged {
                             for (key, value) in metadata.iter() {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
@@ -594,10 +593,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 }
                             }
                         }
-                        None => {}
-                    };
-                    match &record.0.final_document {
-                        Some(document) => match &self.full_text_index_writer {
+                    if let Some(document) = &record.0.final_document {
+                        match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
                                     .add_document(document, segment_offset_id)
@@ -606,15 +603,12 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             None => panic!(
                                 "Invariant violation. Expected full text index writer to be set"
                             ),
-                        },
-                        // It is ok for the user to not pass in any document.
-                        None => {}
-                    };
+                        }
+                    }
                 }
                 MaterializedLogOperation::DeleteExisting => match &record.0.data_record {
                     Some(data_record) => {
-                        match &data_record.metadata {
-                            Some(metadata) => {
+                        if let Some(metadata) = &data_record.metadata {
                                 for (key, value) in metadata.iter() {
                                     match self.delete_metadata(key, value, segment_offset_id).await
                                     {
@@ -627,11 +621,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     }
                                 }
                             }
-                            // Ok to not have any metadata to delete.
-                            None => {}
-                        };
-                        match &data_record.document {
-                            Some(document) => match &self.full_text_index_writer {
+                        if let Some(document) = &data_record.document {
+                            match &self.full_text_index_writer {
                                 Some(writer) => {
                                     let err =
                                         writer.delete_document(document, segment_offset_id).await;
@@ -648,11 +639,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 None => {
                                     panic!("Invariant violation. FTS index writer should be set")
                                 }
-                            },
-                            // The record that is to be deleted might not have
-                            // a document, it is fine and should not be an error.
-                            None => {}
-                        };
+                            }
+                        }
                     }
                     None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                 },
@@ -743,8 +731,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                     // Delete existing.
                     match &record.0.data_record {
                         Some(data_record) => {
-                            match &data_record.metadata {
-                                Some(metadata) => {
+                            if let Some(metadata) = &data_record.metadata {
                                     for (key, value) in metadata.iter() {
                                         match self.delete_metadata(key, value, segment_offset_id).await
                                         {
@@ -757,11 +744,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         }
                                     }
                                 }
-                                // Ok to not have any metadata to delete.
-                                None => {}
-                            };
-                            match &data_record.document {
-                                Some(document) => match &self.full_text_index_writer {
+                            if let Some(document) = data_record.document {
+                                match &self.full_text_index_writer {
                                     Some(writer) => {
                                         let err =
                                             writer.delete_document(document, segment_offset_id).await;
@@ -778,17 +762,13 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     None => {
                                         panic!("Invariant violation. FTS index writer should be set")
                                     }
-                                },
-                                // The record that is to be deleted might not have
-                                // a document, it is fine and should not be an error.
-                                None => {}
-                            };
+                                }
+                            }
                         },
                         None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                     };
                     // Add new.
-                    match &record.0.metadata_to_be_merged {
-                        Some(metadata) => {
+                    if let Some(metadata) = &record.0.metadata_to_be_merged {
                             for (key, value) in metadata.iter() {
                                 match self.set_metadata(key, value, segment_offset_id).await {
                                     Ok(()) => {}
@@ -798,10 +778,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 }
                             }
                         }
-                        None => {}
-                    };
-                    match &record.0.final_document {
-                        Some(document) => match &self.full_text_index_writer {
+                    if let Some(document) = &record.0.final_document {
+                        match &self.full_text_index_writer {
                             Some(writer) => {
                                 let _ = writer
                                     .add_document(document, segment_offset_id)
@@ -810,10 +788,8 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                             None => panic!(
                                 "Invariant violation. Expected full text index writer to be set"
                             ),
-                        },
-                        // It is ok for the user to not pass in any document.
-                        None => {}
-                    };
+                        }
+                    }
                 },
                 MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
@@ -1175,14 +1151,11 @@ impl MetadataSegmentReader<'_> {
         };
         // Where and WhereDocument are implicitly ANDed, so if we have nothing
         // for the Where query we can just return.
-        match &where_results {
-            Some(results) => {
-                if results.is_empty() {
-                    return Ok(where_results);
-                }
+        if let Some(results) = &where_results {
+            if results.is_empty() {
+                return Ok(where_results);
             }
-            None => (),
-        };
+        }
         let where_document_results = match where_document_clause {
             Some(where_document_clause) => {
                 #[allow(deprecated)]
@@ -1208,15 +1181,11 @@ impl MetadataSegmentReader<'_> {
                 None
             }
         };
-        match &where_document_results {
-            Some(results) => {
-                if results.is_empty() {
-                    return Ok(where_document_results);
-                }
+        if let Some(results) = &where_document_results {
+            if results.is_empty() {
+                return Ok(where_document_results);
             }
-            None => (),
-        };
-
+        }
         Ok(match (where_results, where_document_results) {
             (Some(where_ids), Some(where_doc_ids)) => {
                 Some(merge_sorted_vecs_conjunction(&where_ids, &where_doc_ids))
