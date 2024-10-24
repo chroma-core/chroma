@@ -246,7 +246,10 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_logservice_host = "localhost"
     chroma_logservice_port = 50052
+
     chroma_quota_provider_impl: Optional[str] = None
+    chroma_rate_limiting_provider_impl: Optional[str] = None
+
     chroma_quota_enforcer_impl: str = (
         "chromadb.quota.simple_quota_enforcer.SimpleQuotaEnforcer"
     )
@@ -270,7 +273,6 @@ class Settings(BaseSettings):  # type: ignore
     chroma_collection_assignment_policy_impl: str = (
         "chromadb.ingest.impl.simple_policy.SimpleAssignmentPolicy"
     )
-    chroma_rate_limiting_provider_impl: Optional[str] = None
 
     # =======
     # Methods
