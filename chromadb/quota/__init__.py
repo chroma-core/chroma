@@ -37,10 +37,3 @@ class QuotaEnforcer(Component):
         Enforces general quota rules.
         """
         pass
-
-    @abstractmethod
-    def rate_limit(self, func: T) -> T:
-        """
-        Enforces rate limits. Implemented as a wrapper.
-        """
-        pass

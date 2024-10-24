@@ -5,6 +5,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer
+from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.segment import SegmentManager
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.operator import Scan, Filter, Limit, KNN, Projection
@@ -99,7 +100,7 @@ def rate_limit(func: T) -> T:
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         self = args[0]
-        return self._quota_enforcer.rate_limit(func)(*args, **kwargs)
+        return self._rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
 
     return wrapper  # type: ignore
 
@@ -127,6 +128,7 @@ class SegmentAPI(ServerAPI):
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
+        self._rate_limit_enforcer = self._system.require(RateLimitEnforcer)
 
     @override
     def heartbeat(self) -> int:
