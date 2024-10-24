@@ -506,13 +506,13 @@ class SegmentAPI(ServerAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Optional[Where] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -525,12 +525,13 @@ class SegmentAPI(ServerAPI):
         )
 
         coll = self._get_collection(collection_id)
-        where = validate_where(where) if where is not None and len(where) > 0 else None
-        where_document = (
+
+        # TODO: Replace with unified validation
+        if where is not None:
+            validate_where(where)
+
+        if where_document is not None:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else None
-        )
 
         if sort is not None:
             raise NotImplementedError("Sorting is not yet supported")
@@ -585,12 +586,12 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        where = validate_where(where) if where is not None and len(where) > 0 else None
-        where_document = (
+        # TODO: Replace with unified validation
+        if where is not None:
+            validate_where(where)
+
+        if where_document is not None:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else None
-        )
 
         # You must have at least one of non-empty ids, where, or where_document.
         if (
@@ -675,8 +676,8 @@ class SegmentAPI(ServerAPI):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -704,12 +705,11 @@ class SegmentAPI(ServerAPI):
             )
         )
 
-        where = validate_where(where) if where is not None and len(where) > 0 else where
-        where_document = (
+        # TODO: Replace with unified validation
+        if where is not None:
+            validate_where(where)
+        if where_document is not None:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else where_document
-        )
 
         coll = self._get_collection(collection_id)
         for embedding in query_embeddings:
