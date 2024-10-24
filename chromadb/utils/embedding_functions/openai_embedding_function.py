@@ -50,10 +50,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
-        if api_key is not None:
-            openai.api_key = api_key
-        # If the api key is still not set, raise an error
-        elif openai.api_key is None:
+        self._api_key = api_key or openai.api_key
+        if self._api_key is None:
             raise ValueError(
                 "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
             )
@@ -118,9 +116,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             ).data
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e.index  # type: ignore
-            )
+            sorted_embeddings = sorted(embeddings, key=lambda e: e.index)
 
             # Return just the embeddings
             return cast(Embeddings, [result.embedding for result in sorted_embeddings])
@@ -135,9 +131,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 ]
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e["index"]  # type: ignore
-            )
+            sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
 
             # Return just the embeddings
             return cast(
