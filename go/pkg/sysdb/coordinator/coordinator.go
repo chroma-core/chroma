@@ -70,6 +70,14 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 	return tenant, nil
 }
 
+func (s *Coordinator) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment) (*model.Collection, bool, error) {
+	collection, created, err := s.catalog.CreateCollectionAndSegments(ctx, createCollection, createSegments, createCollection.Ts)
+	if err != nil {
+		return nil, false, err
+	}
+	return collection, created, nil
+}
+
 func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *model.CreateCollection) (*model.Collection, bool, error) {
 	log.Info("create collection", zap.Any("createCollection", createCollection))
 	collection, created, err := s.catalog.CreateCollection(ctx, createCollection, createCollection.Ts)

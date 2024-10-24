@@ -254,6 +254,72 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 	return sampleCollections
 }
 
+func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
+	ctx := context.Background()
+
+	// Create a new collection with segments
+	newCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_and_segments",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	segments := []*model.CreateSegment{
+		{
+			ID:           types.NewUniqueID(),
+			Type:         "test_type",
+			Scope:        "VECTOR",
+			CollectionID: newCollection.ID,
+		},
+		{
+			ID:           types.NewUniqueID(),
+			Type:         "test_type",
+			Scope:        "VECTOR",
+			CollectionID: newCollection.ID,
+		},
+	}
+
+	// Create collection and segments
+	createdCollection, created, err := suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
+	suite.NoError(err)
+	suite.True(created)
+	suite.Equal(newCollection.ID, createdCollection.ID)
+	suite.Equal(newCollection.Name, createdCollection.Name)
+	// suite.Equal(len(segments), len(createdSegments))
+
+	// Verify the collection was created
+	result, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(result, 1)
+	suite.Equal(newCollection.ID, result[0].ID)
+	suite.Equal(newCollection.Name, result[0].Name)
+
+	// Verify the segments were created
+	for _, segment := range segments {
+		segmentResult, err := suite.coordinator.GetSegments(ctx, segment.ID, &segment.Type, &segment.Scope, newCollection.ID)
+		suite.NoError(err)
+		suite.Len(segmentResult, 1)
+		suite.Equal(segment.ID, segmentResult[0].ID)
+	}
+
+	// Attempt to create a duplicate collection (should fail)
+	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
+	suite.Error(err)
+
+	// Create a new collection with new name and ID, so that the segment creation will fail
+	newCollection.ID = types.NewUniqueID()
+	newCollection.Name = "test_collection_and_segments_2"
+	segments[0].ID = segments[1].ID // Ensure the segment ID is the same as the existing one, so that the segment creation will fail
+	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
+	suite.Error(err)
+
+	// Check that the collection was not created
+	collections, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(collections)
+}
+
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	ctx := context.Background()
 	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)

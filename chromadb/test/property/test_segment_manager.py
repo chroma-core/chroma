@@ -97,11 +97,11 @@ class SegmentManagerStateMachine(RuleBasedStateMachine):
 
     @rule(target=collections, coll=strategies.collections())
     @precondition(lambda self: self.collection_created_counter <= 50)
-    def create_segment(
+    def prepare_segments_for_new_collection(
         self, coll: strategies.Collection
     ) -> MultipleResults[strategies.Collection]:
         # TODO: Convert collection views used in tests into actual Collections / Collection models
-        segments = self.segment_manager.create_segments(coll)  # type: ignore[arg-type]
+        segments = self.segment_manager.prepare_segments_for_new_collection(coll)  # type: ignore[arg-type]
         for segment in segments:
             self.sysdb.create_segment(segment)
             self.segment_collection[segment["id"]] = coll.id
