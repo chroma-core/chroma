@@ -42,7 +42,6 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
         "error,".to_string()
             + &vec![
-                "chroma",
                 "chroma-blockstore",
                 "chroma-config",
                 "chroma-distance",
