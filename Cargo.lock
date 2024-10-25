@@ -1223,6 +1223,7 @@ dependencies = [
  "chroma-error",
  "chroma-storage",
  "chroma-types",
+ "criterion",
  "either",
  "flatbuffers",
  "futures",

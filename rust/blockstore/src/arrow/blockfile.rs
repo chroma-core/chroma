@@ -142,7 +142,7 @@ impl ArrowUnorderedBlockfileWriter {
 
     fn split_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
-        delta: BlockDelta,
+        delta: UnorderedBlockDelta,
     ) -> Result<(), Box<dyn ChromaError>> {
         let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
         for (split_key, new_delta) in new_blocks {
