@@ -8,7 +8,7 @@ use tracing::trace;
 use uuid::Uuid;
 
 use crate::{
-    execution::operator::Operator,
+    execution::operator::{Operator, OperatorType},
     log::log::{Log, PullLogsError},
 };
 
@@ -45,6 +45,11 @@ impl ChromaError for FetchLogError {
 #[async_trait]
 impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
     type Error = FetchLogError;
+
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IO
+    }
+
     async fn run(&self, _: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
         trace!("[{}]: {:?}", self.get_name(), self);
 
@@ -70,10 +75,14 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 )
                 .await?;
 
+            let retrieve_count = log_batch.len();
+
             if let Some(last_log) = log_batch.last() {
                 offset = last_log.log_offset + 1;
                 fetched.append(&mut log_batch);
-            } else {
+            }
+
+            if retrieve_count < self.batch_size as usize {
                 // No more logs to fetch
                 break;
             }
