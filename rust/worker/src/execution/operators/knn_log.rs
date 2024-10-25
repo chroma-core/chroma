@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    fetch_log::FetchLogOutput,
+    fetch_log::{FetchLogError, FetchLogOutput},
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
     knn::KnnOperator,
 };
