@@ -29,7 +29,7 @@ impl PartialOrd for Distance {
 pub fn normalize(vector: &[f32]) -> Vec<f32> {
     let norm = vector.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 0.0 {
-        vector.iter().map(|x| x / norm).collect()
+        vector.iter().map(|x| x / norm.sqrt()).collect()
     } else {
         vector.to_vec()
     }
