@@ -136,7 +136,8 @@ impl Scheduler {
         for collection in collections {
             let result = self
                 .assignment_policy
-                .assign(collection.collection_id.to_string().as_str());
+                // NOTE(rescrv):  Need to use the untyped uuid here.
+                .assign(collection.collection_id.0.to_string().as_str());
             match result {
                 Ok(member) => {
                     if member == self.my_ip {
