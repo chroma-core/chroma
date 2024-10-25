@@ -214,7 +214,7 @@ impl Block {
             .expect_err("Never returns Ok because the comparator never evaluates to Equal.");
 
         if result == 0 {
-            // The first element is greater than the target prefix, so the target prefix does not exist in the block.
+            // The first element is greater than the target prefix, so the target prefix does not exist in the block. (Or the block is empty.)
             return None;
         }
 
@@ -236,37 +236,61 @@ impl Block {
         }
     }
 
-    /// Finds the partition point of the prefix and key.
-    /// Returns the index of the first element that matches the target prefix and key. If no element matches, returns the index at which the target prefix and key could be inserted to maintain sorted order.
+    /// Returns the smallest index where `prefixes[index] == prefix` or None if the provided prefix does not exist in the block.
     #[inline]
-    fn get_key_prefix_partition_point<'me, K: ArrowReadableKey<'me>>(
+    fn find_smallest_index_of_prefix<'me, K: ArrowReadableKey<'me>>(
         &'me self,
         prefix: &str,
-        key: Option<&K>,
-    ) -> usize {
-        // By design, will never find an exact match (comparator never evaluates to Equal). This finds the index of the first element that matches the target prefix and key. If no element matches, it returns the index at which the target prefix and key could be inserted to maintain sorted order.
-        if let Some(key) = key {
-            self.binary_search_by::<K, _>(|(p, k)| {
-                match p.cmp(prefix).then_with(|| {
-                    k.partial_cmp(key)
-                        // The key type does not have a total order because of floating point values.
-                        // But in our case NaN is not allowed, so we should always have total order.
-                        .expect("Array values should be comparable.")
-                }) {
-                    Ordering::Less => Ordering::Less,
-                    Ordering::Equal => Ordering::Greater,
-                    Ordering::Greater => Ordering::Greater,
-                }
-            })
-            .expect_err("Never returns Ok because the comparator never evaluates to Equal.")
-        } else {
-            self.binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
+    ) -> Option<usize> {
+        let result = self
+            .binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
                 Ordering::Less => Ordering::Less,
                 Ordering::Equal => Ordering::Greater,
                 Ordering::Greater => Ordering::Greater,
             })
-            .expect_err("Never returns Ok because the comparator never evaluates to Equal.")
+            .expect_err("Never returns Ok because the comparator never evaluates to Equal.");
+
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+
+        if result == self.len() {
+            // The target prefix is greater than all elements in the block.
+            return None;
         }
+
+        match prefix_array.value(result).cmp(prefix) {
+            Ordering::Greater => None,
+            Ordering::Less => None,
+            Ordering::Equal => Some(result),
+        }
+    }
+
+    /// Finds the partition point of the prefix and key.
+    /// Returns the index of the first element that matches the target prefix and key. If no element matches, returns the index at which the target prefix and key could be inserted to maintain sorted order.
+    #[inline]
+    fn binary_search_prefix_key<'me, K: ArrowReadableKey<'me>>(
+        &'me self,
+        prefix: &str,
+        key: &K,
+    ) -> usize {
+        // By design, will never find an exact match (comparator never evaluates to Equal). This finds the index of the first element that matches the target prefix and key. If no element matches, it returns the index at which the target prefix and key could be inserted to maintain sorted order.
+        self.binary_search_by::<K, _>(|(p, k)| {
+            match p.cmp(prefix).then_with(|| {
+                k.partial_cmp(key)
+                    // The key type does not have a total order because of floating point values.
+                    // But in our case NaN is not allowed, so we should always have total order.
+                    .expect("Array values should be comparable.")
+            }) {
+                Ordering::Less => Ordering::Less,
+                Ordering::Equal => Ordering::Greater,
+                Ordering::Greater => Ordering::Greater,
+            }
+        })
+        .expect_err("Never returns Ok because the comparator never evaluates to Equal.")
     }
 
     #[inline]
@@ -339,16 +363,19 @@ impl Block {
     {
         let start_index = match prefix_range.start_bound() {
             Bound::Included(prefix) => match key_range.start_bound() {
-                Bound::Included(key) => self.get_key_prefix_partition_point(prefix, Some(key)),
+                Bound::Included(key) => self.binary_search_prefix_key(prefix, key),
                 Bound::Excluded(key) => {
-                    let index = self.get_key_prefix_partition_point(prefix, Some(key));
+                    let index = self.binary_search_prefix_key(prefix, key);
                     if self.match_prefix_key_at_index(prefix, key, index) {
                         index + 1
                     } else {
                         index
                     }
                 }
-                Bound::Unbounded => self.get_key_prefix_partition_point::<K>(prefix, None),
+                Bound::Unbounded => match self.find_smallest_index_of_prefix::<K>(prefix) {
+                    Some(first_index_of_prefix) => first_index_of_prefix,
+                    None => self.len(), // prefix does not exist in the block so we shouldn't return anything
+                },
             },
             Bound::Excluded(_) => {
                 unimplemented!("Excluded prefix range is not currently supported")
@@ -359,14 +386,14 @@ impl Block {
         let end_index = match prefix_range.end_bound() {
             Bound::Included(prefix) => match key_range.end_bound() {
                 Bound::Included(key) => {
-                    let index = self.get_key_prefix_partition_point(prefix, Some(key));
+                    let index = self.binary_search_prefix_key(prefix, key);
                     if self.match_prefix_key_at_index(prefix, key, index) {
                         index + 1
                     } else {
                         index
                     }
                 }
-                Bound::Excluded(key) => self.get_key_prefix_partition_point(prefix, Some(key)),
+                Bound::Excluded(key) => self.binary_search_prefix_key::<K>(prefix, key),
                 Bound::Unbounded => match self.find_largest_index_of_prefix::<K>(prefix) {
                     Some(last_index_of_prefix) => last_index_of_prefix + 1, // (add 1 because end_index is exclusive below)
                     None => start_index, // prefix does not exist in the block so we shouldn't return anything
