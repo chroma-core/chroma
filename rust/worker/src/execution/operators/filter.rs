@@ -46,7 +46,7 @@ pub struct FilterInput {
     segments: FetchSegmentOutput,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FilterOutput {
     pub logs: FetchLogOutput,
     pub segments: FetchSegmentOutput,

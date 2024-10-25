@@ -162,7 +162,7 @@ impl<'me> SkipScanner<'me> {
                     merged_result.push(oid);
                     log_index += 1;
                 }
-                _ => {}
+                _ => break,
             };
             fetch -= 1;
         }

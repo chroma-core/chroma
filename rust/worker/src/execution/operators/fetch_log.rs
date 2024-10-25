@@ -70,10 +70,14 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 )
                 .await?;
 
+            let retrieve_count = log_batch.len();
+
             if let Some(last_log) = log_batch.last() {
                 offset = last_log.log_offset + 1;
                 fetched.append(&mut log_batch);
-            } else {
+            }
+
+            if retrieve_count < self.batch_size as usize {
                 // No more logs to fetch
                 break;
             }
