@@ -142,7 +142,7 @@ impl ArrowUnorderedBlockfileWriter {
 
     fn split_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
-        delta: BlockDelta,
+        delta: UnorderedBlockDelta,
     ) -> Result<(), Box<dyn ChromaError>> {
         let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
         for (split_key, new_delta) in new_blocks {
@@ -153,30 +153,6 @@ impl ArrowUnorderedBlockfileWriter {
 
             let mut deltas = self.block_deltas.lock();
             deltas.insert(new_delta.id, new_delta);
-        }
-
-        Ok(())
-    }
-
-    fn split_all<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
-    ) -> Result<(), Box<dyn ChromaError>> {
-        let block_ids = self.root.sparse_index.block_ids();
-        for block_id in block_ids {
-            let delta = {
-                let block_deltas = self.block_deltas.lock();
-                block_deltas.get(&block_id).unwrap().clone()
-            };
-
-            if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-                match self.split_delta::<K, V>(delta.clone()) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!("Error splitting delta: {:?}", e);
-                        return Err(e);
-                    }
-                }
-            }
         }
 
         Ok(())
