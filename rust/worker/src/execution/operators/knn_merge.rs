@@ -2,36 +2,24 @@ use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 use tonic::async_trait;
 
-use crate::execution::{operator::Operator, utils::Distance};
+use crate::execution::operator::Operator;
 
-use super::{fetch_log::FetchLogOutput, fetch_segment::FetchSegmentOutput};
+use super::knn::RecordDistance;
 
 #[derive(Clone, Debug)]
 pub struct KnnMergeOperator {
     pub fetch: u32,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct PreKnnMergeState {
-    pub logs: Option<FetchLogOutput>,
-    pub segments: Option<FetchSegmentOutput>,
-    pub log_distance: Option<Vec<Distance>>,
-    pub segment_distance: Option<Vec<Distance>>,
-}
-
 #[derive(Debug)]
 pub struct KnnMergeInput {
-    pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
-    pub log_distance: Vec<Distance>,
-    pub segment_distance: Vec<Distance>,
+    pub log_distances: Vec<RecordDistance>,
+    pub segment_distances: Vec<RecordDistance>,
 }
 
 #[derive(Debug)]
 pub struct KnnMergeOutput {
-    pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
-    pub distance: Vec<Distance>,
+    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -48,29 +36,6 @@ impl ChromaError for KnnMergeError {
     }
 }
 
-impl TryFrom<PreKnnMergeState> for KnnMergeInput {
-    type Error = KnnMergeError;
-
-    fn try_from(value: PreKnnMergeState) -> Result<Self, KnnMergeError> {
-        if let PreKnnMergeState {
-            logs: Some(logs),
-            segments: Some(segments),
-            log_distance: Some(log_distance),
-            segment_distance: Some(segment_distance),
-        } = value
-        {
-            Ok(KnnMergeInput {
-                logs,
-                segments,
-                log_distance,
-                segment_distance,
-            })
-        } else {
-            Err(KnnMergeError::IncompleteInput)
-        }
-    }
-}
-
 #[async_trait]
 impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
     type Error = KnnMergeError;
@@ -83,25 +48,25 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
         let mut merged_distance = Vec::new();
 
         while fetch > 0 {
-            let log_dist = input.log_distance.get(log_index);
-            let segment_dist = input.segment_distance.get(segment_index);
+            let log_dist = input.log_distances.get(log_index);
+            let segment_dist = input.segment_distances.get(segment_index);
 
             match (log_dist, segment_dist) {
-                (Some(ld), Some(sd)) => {
-                    if ld.measure < sd.measure {
-                        merged_distance.push(ld.clone());
+                (Some(ldist), Some(sdist)) => {
+                    if ldist.measure < sdist.measure {
+                        merged_distance.push(ldist.clone());
                         log_index += 1;
                     } else {
-                        merged_distance.push(sd.clone());
+                        merged_distance.push(sdist.clone());
                         segment_index += 1;
                     }
                 }
-                (None, Some(d)) => {
-                    merged_distance.push(d.clone());
+                (None, Some(dist)) => {
+                    merged_distance.push(dist.clone());
                     segment_index += 1;
                 }
-                (Some(d), None) => {
-                    merged_distance.push(d.clone());
+                (Some(dist), None) => {
+                    merged_distance.push(dist.clone());
                     log_index += 1;
                 }
                 _ => break,
@@ -110,9 +75,7 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
         }
 
         Ok(KnnMergeOutput {
-            logs: input.logs.clone(),
-            segments: input.segments.clone(),
-            distance: merged_distance,
+            record_distances: merged_distance,
         })
     }
 }

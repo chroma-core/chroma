@@ -3,12 +3,12 @@ use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
 
-use crate::execution::{operator::Operator, utils::Distance};
+use crate::execution::{operator::Operator, operators::projection::ProjectionInput};
 
 use super::{
     fetch_log::FetchLogOutput,
     fetch_segment::FetchSegmentOutput,
-    knn_merge::KnnMergeOutput,
+    knn::RecordDistance,
     projection::{ProjectionError, ProjectionOperator, ProjectionRecord},
 };
 
@@ -22,17 +22,7 @@ pub struct KnnProjectionOperator {
 pub struct KnnProjectionInput {
     pub logs: FetchLogOutput,
     pub segments: FetchSegmentOutput,
-    pub distance: Vec<Distance>,
-}
-
-impl From<KnnMergeOutput> for KnnProjectionInput {
-    fn from(value: KnnMergeOutput) -> Self {
-        Self {
-            logs: value.logs,
-            segments: value.segments,
-            distance: value.distance,
-        }
-    }
+    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Debug)]
@@ -70,15 +60,36 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
     ) -> Result<KnnProjectionOutput, KnnProjectionError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        let result = self.projection.run(&(input.clone().into())).await?;
+        let projection_input = ProjectionInput {
+            logs: input.logs.clone(),
+            segments: input.segments.clone(),
+            offset_ids: input
+                .record_distances
+                .iter()
+                .map(
+                    |RecordDistance {
+                         offset_id,
+                         measure: _,
+                     }| *offset_id,
+                )
+                .collect(),
+        };
+
+        let result = self.projection.run(&projection_input).await?;
 
         return Ok(KnnProjectionOutput {
             records: result
                 .records
                 .into_iter()
-                .zip(input.distance.clone())
+                .zip(input.record_distances.clone())
                 .map(
-                    |(record, Distance { oid: _, measure })| KnnProjectionRecord {
+                    |(
+                        record,
+                        RecordDistance {
+                            offset_id: _,
+                            measure,
+                        },
+                    )| KnnProjectionRecord {
                         record,
                         distance: self.distance.then_some(measure),
                     },
