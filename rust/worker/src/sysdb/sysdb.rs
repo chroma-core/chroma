@@ -7,7 +7,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError};
 use chroma_types::{
-    Collection, CollectionConversionError, FlushCompactionResponse,
+    Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::fmt::Debug;
@@ -30,7 +30,7 @@ pub(crate) enum SysDb {
 impl SysDb {
     pub(crate) async fn get_collections(
         &mut self,
-        collection_id: Option<Uuid>,
+        collection_id: Option<CollectionUuid>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
@@ -52,7 +52,7 @@ impl SysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Uuid,
+        collection: CollectionUuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_segments(id, r#type, scope, collection).await,
@@ -73,7 +73,7 @@ impl SysDb {
     pub(crate) async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -171,13 +171,13 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
 impl GrpcSysDb {
     async fn get_collections(
         &mut self,
-        collection_id: Option<Uuid>,
+        collection_id: Option<CollectionUuid>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         // TODO: move off of status into our own error type
-        let collection_id_str = collection_id.map(String::from);
+        let collection_id_str = collection_id.map(|id| String::from(id.0));
         let res = self
             .client
             .get_collections(chroma_proto::GetCollectionsRequest {
@@ -213,7 +213,7 @@ impl GrpcSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Uuid,
+        collection: CollectionUuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let res = self
             .client
@@ -270,7 +270,7 @@ impl GrpcSysDb {
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,

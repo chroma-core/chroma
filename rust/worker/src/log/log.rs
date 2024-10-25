@@ -5,7 +5,7 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
-use chroma_types::{LogRecord, RecordConversionError};
+use chroma_types::{CollectionUuid, LogRecord, RecordConversionError};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -23,14 +23,14 @@ use uuid::Uuid;
 /// - first_log_ts: the timestamp of the first log entry in the collection that needs to be compacted
 #[derive(Debug)]
 pub(crate) struct CollectionInfo {
-    pub(crate) collection_id: String,
+    pub(crate) collection_id: CollectionUuid,
     pub(crate) first_log_offset: i64,
     pub(crate) first_log_ts: i64,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct CollectionRecord {
-    pub(crate) id: Uuid,
+    pub(crate) collection_id: CollectionUuid,
     pub(crate) tenant_id: String,
     pub(crate) last_compaction_time: i64,
     #[allow(dead_code)]
@@ -49,7 +49,7 @@ pub(crate) enum Log {
 impl Log {
     pub(crate) async fn read(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
@@ -78,7 +78,7 @@ impl Log {
 
     pub(crate) async fn update_collection_log_offset(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), UpdateCollectionLogOffsetError> {
         match self {
@@ -172,7 +172,7 @@ impl Configurable<LogConfig> for GrpcLog {
 impl GrpcLog {
     async fn read(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
@@ -231,8 +231,19 @@ impl GrpcLog {
                 println!("Log got collections with new data: {:?}", collections);
                 let mut result = Vec::new();
                 for collection in collections {
+                    let collection_uuid = match Uuid::parse_str(&collection.collection_id) {
+                        Ok(uuid) => uuid,
+                        Err(_) => {
+                            tracing::error!(
+                                "Failed to parse collection id: {}",
+                                collection.collection_id
+                            );
+                            continue;
+                        }
+                    };
+                    let collection_id = CollectionUuid(collection_uuid);
                     result.push(CollectionInfo {
-                        collection_id: collection.collection_id,
+                        collection_id,
                         first_log_offset: collection.first_log_offset,
                         first_log_ts: collection.first_log_ts,
                     });
@@ -248,7 +259,7 @@ impl GrpcLog {
 
     async fn update_collection_log_offset(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), UpdateCollectionLogOffsetError> {
         let request = self.client.update_collection_log_offset(
@@ -318,7 +329,7 @@ impl ChromaError for UpdateCollectionLogOffsetError {
 // internal to a mock log implementation
 #[derive(Clone)]
 pub(crate) struct InternalLogRecord {
-    pub(crate) collection_id: Uuid,
+    pub(crate) collection_id: CollectionUuid,
     pub(crate) log_offset: i64,
     pub(crate) log_ts: i64,
     pub(crate) record: LogRecord,
@@ -338,8 +349,8 @@ impl Debug for InternalLogRecord {
 // This is used for testing only
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
-    collection_to_log: HashMap<String, Vec<InternalLogRecord>>,
-    offsets: HashMap<String, i64>,
+    collection_to_log: HashMap<CollectionUuid, Vec<InternalLogRecord>>,
+    offsets: HashMap<CollectionUuid, i64>,
 }
 
 impl InMemoryLog {
@@ -352,11 +363,8 @@ impl InMemoryLog {
     }
 
     #[cfg(test)]
-    pub fn add_log(&mut self, collection_id: Uuid, log: InternalLogRecord) {
-        let logs = self
-            .collection_to_log
-            .entry(collection_id.to_string())
-            .or_default();
+    pub fn add_log(&mut self, collection_id: CollectionUuid, log: InternalLogRecord) {
+        let logs = self.collection_to_log.entry(collection_id).or_default();
         // Ensure that the log offset is correct. Since we only use the InMemoryLog for testing,
         // we expect callers to send us logs in the correct order.
         let next_offset = logs.len() as i64;
@@ -373,7 +381,7 @@ impl InMemoryLog {
 impl InMemoryLog {
     async fn read(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
@@ -383,7 +391,7 @@ impl InMemoryLog {
             None => i64::MAX,
         };
 
-        let logs = match self.collection_to_log.get(&collection_id.to_string()) {
+        let logs = match self.collection_to_log.get(&collection_id) {
             Some(logs) => logs,
             None => return Ok(Vec::new()),
         };
@@ -424,7 +432,7 @@ impl InMemoryLog {
             let mut logs = filtered_records.to_vec();
             logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
             collections.push(CollectionInfo {
-                collection_id: collection_id.clone(),
+                collection_id: *collection_id,
                 first_log_offset: logs[0].log_offset,
                 first_log_ts: logs[0].log_ts,
             });
@@ -434,10 +442,10 @@ impl InMemoryLog {
 
     async fn update_collection_log_offset(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), UpdateCollectionLogOffsetError> {
-        self.offsets.insert(collection_id.to_string(), new_offset);
+        self.offsets.insert(collection_id, new_offset);
         Ok(())
     }
 }

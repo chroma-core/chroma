@@ -806,7 +806,8 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator, Where, WhereComparison,
+        CollectionUuid, DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator, Where,
+        WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
@@ -829,7 +830,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -838,7 +839,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -1122,7 +1123,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -1131,7 +1132,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -1407,7 +1408,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -1416,7 +1417,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -1711,7 +1712,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),

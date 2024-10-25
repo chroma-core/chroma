@@ -232,7 +232,8 @@ mod test {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, LogRecord, MetadataValue, Operation, OperationRecord, UpdateMetadataValue,
+        Chunk, CollectionUuid, LogRecord, MetadataValue, Operation, OperationRecord,
+        UpdateMetadataValue,
     };
     use roaring::RoaringBitmap;
     use std::{collections::HashMap, str::FromStr};
@@ -256,7 +257,7 @@ mod test {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -265,7 +266,7 @@ mod test {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),

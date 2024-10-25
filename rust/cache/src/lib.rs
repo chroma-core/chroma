@@ -86,7 +86,7 @@ pub trait Weighted {
 /// the persistent cache trait.  Attempts to construct a disk-based cache will return an error.
 pub async fn from_config_with_event_listener<K, V>(
     config: &CacheConfig,
-    tx: tokio::sync::mpsc::UnboundedSender<K>,
+    tx: tokio::sync::mpsc::UnboundedSender<(K, V)>,
 ) -> Result<Box<dyn Cache<K, V>>, Box<dyn ChromaError>>
 where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,

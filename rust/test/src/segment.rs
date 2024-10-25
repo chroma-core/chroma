@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::atomic::AtomicU32};
 
 use chroma_blockstore::provider::BlockfileProvider;
-use chroma_types::{Chunk, LogRecord, OperationRecord, Segment, SegmentScope, SegmentType};
+use chroma_types::{
+    Chunk, CollectionUuid, LogRecord, OperationRecord, Segment, SegmentScope, SegmentType,
+};
 use indicatif::ProgressIterator;
 use uuid::Uuid;
 use worker::segment::{
@@ -26,7 +28,7 @@ pub fn segment(scope: SegmentScope) -> Segment {
         id: Uuid::new_v4(),
         r#type,
         scope,
-        collection: Uuid::new_v4(),
+        collection: CollectionUuid(Uuid::new_v4()),
         metadata: None,
         file_path: HashMap::new(),
     }

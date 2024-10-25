@@ -19,7 +19,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Where;
 use chroma_types::{Chunk, Segment};
-use chroma_types::{Collection, LogRecord, Metadata, SegmentType};
+use chroma_types::{Collection, CollectionUuid, LogRecord, Metadata, SegmentType};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -44,7 +44,7 @@ pub(crate) struct MetadataQueryOrchestrator {
     system: System,
     // Query state
     metadata_segment_id: Uuid,
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     query_ids: Option<Vec<String>>,
     // State fetched or created for query execution
     record_segment: Option<Segment>,
@@ -74,11 +74,11 @@ enum MetadataQueryOrchestratorError {
     #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Record segment not found for collection: {0}")]
-    RecordSegmentNotFound(Uuid),
+    RecordSegmentNotFound(CollectionUuid),
     #[error("System Time Error")]
     SystemTimeError(#[from] std::time::SystemTimeError),
     #[error("Collection not found for id: {0}")]
-    CollectionNotFound(Uuid),
+    CollectionNotFound(CollectionUuid),
     #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Collection version mismatch")]
@@ -108,7 +108,7 @@ impl MetadataQueryOrchestrator {
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
         query_ids: Option<Vec<String>>,
         log: Box<Log>,
         sysdb: Box<SysDb>,
@@ -227,7 +227,7 @@ impl MetadataQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
-            collection.id,
+            collection.collection_id,
             // The collection log position is inclusive, and we want to start from the next log.
             // Note: We use the log position sent in the request for transactionality
             // TODO: Change log service to use u64 instead of i64
@@ -285,7 +285,7 @@ impl MetadataQueryOrchestrator {
         &self,
         mut sysdb: Box<SysDb>,
         metadata_segment_id: &Uuid,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
             .get_segments(Some(*metadata_segment_id), None, None, *collection_id)
@@ -321,7 +321,7 @@ impl MetadataQueryOrchestrator {
     async fn get_record_segment_from_collection_id(
         &self,
         mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
             .get_segments(
@@ -352,7 +352,7 @@ impl MetadataQueryOrchestrator {
     async fn get_collection_from_id(
         &self,
         mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
         _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb

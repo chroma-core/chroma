@@ -24,7 +24,7 @@ use crate::{
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Chunk, Collection, GetVectorsResult, LogRecord, Segment};
+use chroma_types::{Chunk, Collection, CollectionUuid, GetVectorsResult, LogRecord, Segment};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, Span};
@@ -65,7 +65,7 @@ pub struct GetVectorsOrchestrator {
     // Query state
     search_user_ids: Vec<String>,
     hnsw_segment_id: Uuid,
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     // State fetched or created for query execution
     record_segment: Option<Segment>,
     collection: Option<Collection>,
@@ -87,7 +87,7 @@ impl GetVectorsOrchestrator {
         system: System,
         get_ids: Vec<String>,
         hnsw_segment_id: Uuid,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -140,7 +140,7 @@ impl GetVectorsOrchestrator {
             .expect("State machine invariant violation. The collection is not set when pulling logs. This should never happen.");
 
         let input = PullLogsInput::new(
-            collection.id,
+            collection.collection_id,
             // The collection log position is inclusive, and we want to start from the next log
             // Note that we query using the incoming log position this is critical for correctness
             // TODO: We should make all the log service code use u64 instead of i64

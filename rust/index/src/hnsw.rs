@@ -1,4 +1,4 @@
-use super::{Index, IndexConfig, PersistentIndex};
+use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
 use std::ffi::CString;
@@ -6,7 +6,6 @@ use std::ffi::{c_char, c_int};
 use std::str::Utf8Error;
 use thiserror::Error;
 use tracing::instrument;
-use uuid::Uuid;
 
 const DEFAULT_MAX_ELEMENTS: usize = 10000;
 const DEFAULT_HNSW_M: usize = 16;
@@ -126,7 +125,7 @@ impl HnswIndexConfig {
 pub struct HnswIndex {
     ffi_ptr: *const IndexPtrFFI,
     dimensionality: i32,
-    pub id: Uuid,
+    pub id: IndexUuid,
 }
 
 // Make index sync, we should wrap index so that it is sync in the way we expect but for now this implements the trait
@@ -172,7 +171,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
     fn init(
         index_config: &IndexConfig,
         hnsw_config: Option<&HnswIndexConfig>,
-        id: Uuid,
+        id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
         match hnsw_config {
             None => Err(Box::new(HnswIndexInitError::NoConfigProvided)),
@@ -286,7 +285,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
     fn load(
         path: &str,
         index_config: &IndexConfig,
-        id: Uuid,
+        id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let distance_function_string: String = index_config.distance_function.clone().into();
         let space_name = match CString::new(distance_function_string) {
@@ -429,11 +428,13 @@ pub mod test {
     use super::*;
     use crate::utils;
     use chroma_distance::DistanceFunction;
+    use chroma_types::CollectionUuid;
     use rand::seq::IteratorRandom;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
     use std::collections::HashMap;
     use tempfile::tempdir;
+    use uuid::Uuid;
 
     const EPS: f32 = 0.00001;
 
@@ -476,7 +477,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path,
             }),
-            Uuid::new_v4(),
+            IndexUuid(Uuid::new_v4()),
         );
         match index {
             Err(e) => panic!("Error initializing index: {}", e),
@@ -508,7 +509,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path,
             }),
-            Uuid::new_v4(),
+            IndexUuid(Uuid::new_v4()),
         );
 
         let index = match index {
@@ -557,7 +558,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path,
             }),
-            Uuid::new_v4(),
+            IndexUuid(Uuid::new_v4()),
         );
 
         let index = match index {
@@ -612,7 +613,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path,
             }),
-            Uuid::new_v4(),
+            IndexUuid(Uuid::new_v4()),
         );
 
         let index = match index {
@@ -675,7 +676,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path: persist_path.clone(),
             }),
-            id,
+            IndexUuid(id),
         );
 
         let index = match index {
@@ -704,7 +705,7 @@ pub mod test {
                 dimensionality: d as i32,
                 distance_function,
             },
-            id,
+            IndexUuid(id),
         );
 
         let index = match index {
@@ -713,7 +714,7 @@ pub mod test {
         };
         // TODO: This should be set by the load
         index.set_ef(100).expect("Should not error");
-        assert_eq!(index.id, id);
+        assert_eq!(index.id, IndexUuid(id));
 
         // Query the data
         let query = &data[0..d];
@@ -749,7 +750,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path,
             }),
-            Uuid::new_v4(),
+            IndexUuid(Uuid::new_v4()),
         );
 
         let index = match index {
@@ -794,7 +795,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path,
             }),
-            Uuid::new_v4(),
+            IndexUuid(Uuid::new_v4()),
         );
 
         let mut index = match index {
@@ -831,7 +832,7 @@ pub mod test {
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(HashMap::new()),
-            collection: Uuid::new_v4(),
+            collection: CollectionUuid(Uuid::new_v4()),
             file_path: HashMap::new(),
         };
 
@@ -855,7 +856,7 @@ pub mod test {
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(metadata),
-            collection: Uuid::new_v4(),
+            collection: CollectionUuid(Uuid::new_v4()),
             file_path: HashMap::new(),
         };
 
@@ -890,7 +891,7 @@ pub mod test {
                 random_seed: 0,
                 persist_path,
             }),
-            Uuid::new_v4(),
+            IndexUuid(Uuid::new_v4()),
         );
 
         let index = match index {

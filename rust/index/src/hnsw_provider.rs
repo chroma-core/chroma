@@ -3,7 +3,7 @@ use crate::PersistentIndex;
 use super::config::HnswProviderConfig;
 use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
-    IndexConfigFromSegmentError,
+    IndexConfigFromSegmentError, IndexUuid,
 };
 
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
-use chroma_types::Segment;
+use chroma_types::{CollectionUuid, Segment};
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
@@ -47,7 +47,7 @@ const FILES: [&str; 4] = [
 // their ref count goes to 0.
 #[derive(Clone)]
 pub struct HnswIndexProvider {
-    cache: Arc<dyn Cache<Uuid, HnswIndexRef>>,
+    cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -102,14 +102,18 @@ impl HnswIndexProvider {
     pub fn new(
         storage: Storage,
         storage_path: PathBuf,
-        cache: Box<dyn Cache<Uuid, HnswIndexRef>>,
-        mut evicted: tokio::sync::mpsc::UnboundedReceiver<Uuid>,
+        cache: Box<dyn Cache<CollectionUuid, HnswIndexRef>>,
+        mut evicted: tokio::sync::mpsc::UnboundedReceiver<(CollectionUuid, HnswIndexRef)>,
     ) -> Self {
-        let cache: Arc<dyn Cache<Uuid, HnswIndexRef>> = cache.into();
+        let cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>> = cache.into();
         let temporary_storage_path = storage_path.to_path_buf();
         let purger = Some(Arc::new(tokio::task::spawn(async move {
-            while let Some(id) = evicted.recv().await {
-                let _ = Self::purge_one_id(&temporary_storage_path, id).await;
+            while let Some((_, index_ref)) = evicted.recv().await {
+                let index_id = {
+                    let index = index_ref.inner.read();
+                    index.id
+                };
+                let _ = Self::purge_one_id(&temporary_storage_path, index_id).await;
             }
         })));
         Self {
@@ -121,7 +125,11 @@ impl HnswIndexProvider {
         }
     }
 
-    pub async fn get(&self, index_id: &Uuid, collection_id: &Uuid) -> Option<HnswIndexRef> {
+    pub async fn get(
+        &self,
+        index_id: &IndexUuid,
+        collection_id: &CollectionUuid,
+    ) -> Option<HnswIndexRef> {
         match self.cache.get(collection_id).await.ok().flatten() {
             Some(index) => {
                 let index_with_lock = index.inner.read();
@@ -136,17 +144,17 @@ impl HnswIndexProvider {
         }
     }
 
-    fn format_key(&self, id: &Uuid, file: &str) -> String {
+    fn format_key(&self, id: &IndexUuid, file: &str) -> String {
         format!("hnsw/{}/{}", id, file)
     }
 
     pub async fn fork(
         &self,
-        source_id: &Uuid,
+        source_id: &IndexUuid,
         segment: &Segment,
         dimensionality: i32,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
-        let new_id = Uuid::new_v4();
+        let new_id = IndexUuid(Uuid::new_v4());
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
         // This is ok to be called from multiple threads concurrently. See
         // the documentation of tokio::fs::create_dir_all to see why.
@@ -246,7 +254,7 @@ impl HnswIndexProvider {
     #[instrument]
     async fn load_hnsw_segment_into_directory(
         &self,
-        source_id: &Uuid,
+        source_id: &IndexUuid,
         index_storage_path: &Path,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
         // Fetch the files from storage and put them in the index storage path.
@@ -280,7 +288,7 @@ impl HnswIndexProvider {
 
     pub async fn open(
         &self,
-        id: &Uuid,
+        id: &IndexUuid,
         segment: &Segment,
         dimensionality: i32,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
@@ -360,7 +368,7 @@ impl HnswIndexProvider {
         segment: &Segment,
         dimensionality: i32,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
-        let id = Uuid::new_v4();
+        let id = IndexUuid(Uuid::new_v4());
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
         match self.create_dir_all(&index_storage_path).await {
@@ -411,7 +419,7 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    pub async fn flush(&self, id: &Uuid) -> Result<(), Box<HnswIndexProviderFlushError>> {
+    pub async fn flush(&self, id: &IndexUuid) -> Result<(), Box<HnswIndexProviderFlushError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
@@ -433,25 +441,35 @@ impl HnswIndexProvider {
     }
 
     /// Purge entries from the cache by index ID and remove temporary files from disk.
-    pub async fn purge_by_id(&mut self, index_ids: &[Uuid]) {
-        for index_id in index_ids {
-            match self.remove_temporary_files(index_id).await {
+    pub async fn purge_by_id(&mut self, collection_uuids: &[CollectionUuid]) {
+        for collection_uuid in collection_uuids {
+            let Some(index_id) = self
+                .cache
+                .get(collection_uuid)
+                .await
+                .ok()
+                .flatten()
+                .map(|r| r.inner.read().id)
+            else {
+                continue;
+            };
+            match self.remove_temporary_files(&index_id).await {
                 Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
-                    tracing::error!("Failed to remove temporary files: {}", e);
+                    tracing::error!("Failed to remove temporary files for {index_id}: {e}");
                 }
             }
         }
     }
 
-    pub async fn purge_one_id(path: &Path, id: Uuid) -> tokio::io::Result<()> {
+    pub async fn purge_one_id(path: &Path, id: IndexUuid) -> tokio::io::Result<()> {
         let index_storage_path = path.join(id.to_string());
+        tracing::info!("Purging index: {}", index_storage_path.to_str().unwrap());
         tokio::fs::remove_dir_all(index_storage_path).await?;
         Ok(())
     }
 
-    async fn remove_temporary_files(&self, id: &Uuid) -> tokio::io::Result<()> {
+    async fn remove_temporary_files(&self, id: &IndexUuid) -> tokio::io::Result<()> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         tokio::fs::remove_dir_all(index_storage_path).await
     }
@@ -609,7 +627,7 @@ mod tests {
             id: Uuid::new_v4(),
             r#type: SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
-            collection: Uuid::new_v4(),
+            collection: CollectionUuid(Uuid::new_v4()),
             metadata: None,
             file_path: HashMap::new(),
         };

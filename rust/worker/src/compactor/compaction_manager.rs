@@ -17,6 +17,7 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_storage::Storage;
+use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
@@ -29,7 +30,6 @@ use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
 use tracing::Span;
-use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -149,7 +149,10 @@ impl CompactionManager {
 
     // TODO: make the return type more informative
     #[instrument(name = "CompactionManager::compact_batch")]
-    pub(crate) async fn compact_batch(&mut self, compacted: &mut Vec<Uuid>) -> (u32, u32) {
+    pub(crate) async fn compact_batch(
+        &mut self,
+        compacted: &mut Vec<CollectionUuid>,
+    ) -> (u32, u32) {
         self.scheduler.schedule().await;
         let mut jobs = FuturesUnordered::new();
         for job in self.scheduler.get_jobs() {
@@ -356,7 +359,8 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
 
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
             collection_uuid_1,
             InternalLogRecord {
@@ -377,7 +381,8 @@ mod tests {
             },
         );
 
-        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let collection_uuid_2 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         in_memory_log.add_log(
             collection_uuid_2,
             InternalLogRecord {
@@ -402,7 +407,7 @@ mod tests {
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            id: collection_uuid_1,
+            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -414,7 +419,7 @@ mod tests {
 
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            id: collection_uuid_2,
+            collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),

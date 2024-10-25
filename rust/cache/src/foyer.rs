@@ -200,7 +200,7 @@ impl FoyerCacheConfig {
 
     pub async fn build_memory_with_event_listener<K, V>(
         &self,
-        tx: tokio::sync::mpsc::UnboundedSender<K>,
+        tx: tokio::sync::mpsc::UnboundedSender<(K, V)>,
     ) -> Result<Box<dyn super::Cache<K, V>>, Box<dyn ChromaError>>
     where
         K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
@@ -369,12 +369,9 @@ where
     /// Build an in-memory cache that emits keys that get evicted to a channel.
     pub async fn memory_with_event_listener(
         config: &FoyerCacheConfig,
-        tx: tokio::sync::mpsc::UnboundedSender<K>,
+        tx: tokio::sync::mpsc::UnboundedSender<(K, V)>,
     ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
-        struct TokioEventListener<K, V>(
-            tokio::sync::mpsc::UnboundedSender<K>,
-            std::marker::PhantomData<V>,
-        )
+        struct TokioEventListener<K, V>(tokio::sync::mpsc::UnboundedSender<(K, V)>)
         where
             K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
             V: Clone + Send + Sync + Weighted + 'static;
@@ -386,16 +383,16 @@ where
             type Key = K;
             type Value = V;
 
-            fn on_memory_release(&self, key: Self::Key, _: Self::Value)
+            fn on_memory_release(&self, key: Self::Key, value: Self::Value)
             where
                 K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
             {
                 // NOTE(rescrv):  There's no mechanism by which we can error.  We could log a
                 // metric, but this should really never happen.
-                let _ = self.0.send(key.clone());
+                let _ = self.0.send((key, value));
             }
         }
-        let evl = TokioEventListener(tx, std::marker::PhantomData);
+        let evl = TokioEventListener(tx);
 
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
