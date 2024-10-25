@@ -141,7 +141,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
 }
 
 #[derive(Error, Debug)]
-pub(super) enum GetError {
+pub enum GetError {
     #[error(transparent)]
     BlockLoadError(#[from] BlockLoadError),
     #[error(transparent)]

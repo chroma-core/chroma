@@ -1,7 +1,7 @@
 use crate::fulltext::tokenizer::ChromaTokenizer;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use roaring::RoaringBitmap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -413,6 +413,7 @@ impl<'me> FullTextIndexReader<'me> {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
                     .get_range(token.text.as_str()..=token.text.as_str(), ..)
+                    .try_collect::<Vec<_>>()
                     .await?;
                 Ok::<_, FullTextIndexError>(positional_posting_list)
             })
@@ -515,6 +516,7 @@ impl<'me> FullTextIndexReader<'me> {
         let positional_posting_list = self
             .posting_lists_blockfile_reader
             .get_range(token..=token, ..)
+            .try_collect::<Vec<_>>()
             .await?;
         let mut results = vec![];
         for (doc_id, positions) in positional_posting_list.iter() {
@@ -529,6 +531,7 @@ impl<'me> FullTextIndexReader<'me> {
         let res = self
             .frequencies_blockfile_reader
             .get_range(token..=token, ..)
+            .try_collect::<Vec<_>>()
             .await?;
         if res.is_empty() {
             return Ok(0);

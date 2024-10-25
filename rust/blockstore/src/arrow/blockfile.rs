@@ -14,6 +14,7 @@ use crate::BlockfileError;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
+use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::mem::transmute;
@@ -37,12 +38,15 @@ pub struct ArrowBlockfileWriter {
 pub enum ArrowBlockfileError {
     #[error("Block not found")]
     BlockNotFound,
+    #[error("Could not fetch block")]
+    BlockFetchError(#[from] GetError),
 }
 
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
             ArrowBlockfileError::BlockNotFound => ErrorCodes::Internal,
+            ArrowBlockfileError::BlockFetchError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -478,42 +482,41 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 
     // Returns all Arrow records in the specified range.
-    pub(crate) async fn get_range<'prefix, PrefixRange, KeyRange>(
+    pub(crate) fn get_range<'prefix, PrefixRange, KeyRange>(
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + Send + 'me
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone,
-        KeyRange: RangeBounds<K> + Clone,
+        PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'me,
+        KeyRange: RangeBounds<K> + Clone + Send + 'me,
+        K: Sync,
+        V: Sync,
     {
-        let block_ids = self
-            .root
-            .sparse_index
-            .get_block_ids_range(prefix_range.clone(), key_range.clone());
-
-        let mut result: Vec<(K, V)> = vec![];
-        for block_id in block_ids {
-            let block_opt = match self.get_block(block_id).await {
-                Ok(Some(block)) => Some(block),
-                Ok(None) => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
-
-            let block = match block_opt {
-                Some(b) => b,
-                None => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            };
-            result.extend(block.get_range(prefix_range.clone(), key_range.clone()));
-        }
-
-        Ok(result)
+        futures::stream::iter(
+            self.root
+                .sparse_index
+                .get_block_ids_range(prefix_range.clone(), key_range.clone())
+                .into_iter()
+                .map(Ok),
+        )
+        .try_filter_map(move |block_id| async move {
+            // todo: does this load all blocks at once?
+            match self.get_block(block_id).await {
+                Ok(Some(block)) => Ok(Some(block)),
+                Ok(None) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
+                Err(e) => Err(Box::new(ArrowBlockfileError::BlockFetchError(e))),
+            }
+        })
+        .map(move |block| {
+            futures::stream::iter(
+                block
+                    .unwrap() // todo
+                    .get_range::<K, V, _, _>(prefix_range.clone(), key_range.clone()),
+            )
+            .map(Ok)
+        })
+        .flatten()
     }
 
     pub(crate) async fn contains(
@@ -596,6 +599,7 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
+    use futures::TryStreamExt;
     use parking_lot::Mutex;
     use proptest::prelude::*;
     use proptest::test_runner::Config;
@@ -672,9 +676,8 @@ mod tests {
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
             let prefix_query = format!("{}/{}", "prefix", prefix_for_query);
             println!("Query {}, num_keys {}", prefix_query, num_keys);
-            let res = reader
-                .get_range(prefix_query.as_str()..=prefix_query.as_str(), ..)
-                .await;
+            let range_iter = reader.get_range(prefix_query.as_str()..=prefix_query.as_str(), ..);
+            let res = range_iter.try_collect::<Vec<_>>().await;
             match res {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
@@ -742,16 +745,26 @@ mod tests {
                             prefix..=prefix,
                             (Bound::Excluded(query.as_str()), Bound::Unbounded),
                         )
+                        .try_collect::<Vec<_>>()
                         .await
                 }
                 ComparisonOperation::GreaterThanOrEquals => {
-                    reader.get_range(prefix..=prefix, query.as_str()..).await
+                    reader
+                        .get_range(prefix..=prefix, query.as_str()..)
+                        .try_collect::<Vec<_>>()
+                        .await
                 }
                 ComparisonOperation::LessThan => {
-                    reader.get_range(prefix..=prefix, ..query.as_str()).await
+                    reader
+                        .get_range(prefix..=prefix, ..query.as_str())
+                        .try_collect::<Vec<_>>()
+                        .await
                 }
                 ComparisonOperation::LessThanOrEquals => {
-                    reader.get_range(prefix..=prefix, ..=query.as_str()).await
+                    reader
+                        .get_range(prefix..=prefix, ..=query.as_str())
+                        .try_collect::<Vec<_>>()
+                        .await
                 }
             };
             match greater_than {

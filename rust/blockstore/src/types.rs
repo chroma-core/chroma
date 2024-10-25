@@ -10,6 +10,7 @@ use super::memory::reader_writer::{
 use super::memory::storage::{Readable, Writeable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DataRecord;
+use futures::{Stream, StreamExt};
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
 use std::mem::size_of;
@@ -277,21 +278,27 @@ impl<
         }
     }
 
-    pub async fn get_range<'prefix, PrefixRange, KeyRange>(
+    pub fn get_range<'prefix, PrefixRange, KeyRange>(
         &'referred_data self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + 'referred_data + Send
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone,
-        KeyRange: RangeBounds<K> + Clone,
+        PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'referred_data,
+        KeyRange: RangeBounds<K> + Clone + Send + 'referred_data,
+        K: Sync + Send,
+        V: Sync + Send,
     {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => {
-                reader.get_range(prefix_range, key_range)
+                match reader.get_range(prefix_range, key_range) {
+                    Ok(r) => futures::stream::iter(r.map(Ok)).boxed(),
+                    Err(e) => futures::stream::iter(vec![Err(e)]).boxed(),
+                }
             }
+
             BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.get_range(prefix_range, key_range).await
+                reader.get_range(prefix_range, key_range).boxed()
             }
         }
     }

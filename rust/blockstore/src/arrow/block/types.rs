@@ -356,7 +356,7 @@ impl Block {
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Vec<(K, V)>
+    ) -> impl Iterator<Item = (K, V)> + 'me
     where
         PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
@@ -405,15 +405,12 @@ impl Block {
             Bound::Unbounded => self.len(),
         };
 
-        let mut result = Vec::new();
-
-        for index in start_index..end_index {
-            result.push((
+        (start_index..end_index).map(move |index| {
+            (
                 K::get(self.data.column(1), index),
                 V::get(self.data.column(2), index),
-            ));
-        }
-        result
+            )
+        })
     }
 
     /// Get all the values for a given prefix in the block where the key is between the given keys
