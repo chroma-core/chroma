@@ -182,7 +182,8 @@ impl GrpcLog {
             None => i64::MAX,
         };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
-            collection_id: collection_id.to_string(),
+            // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+            collection_id: collection_id.0.to_string(),
             start_from_offset: offset,
             batch_size,
             end_timestamp,
@@ -264,7 +265,8 @@ impl GrpcLog {
     ) -> Result<(), UpdateCollectionLogOffsetError> {
         let request = self.client.update_collection_log_offset(
             chroma_proto::UpdateCollectionLogOffsetRequest {
-                collection_id: collection_id.to_string(),
+                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                collection_id: collection_id.0.to_string(),
                 log_offset: new_offset,
             },
         );

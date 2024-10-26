@@ -293,7 +293,7 @@ impl GrpcSysDb {
 
         let req = chroma_proto::FlushCollectionCompactionRequest {
             tenant_id,
-            collection_id: collection_id.to_string(),
+            collection_id: collection_id.0.to_string(),
             log_position,
             collection_version,
             segment_compaction_info,
