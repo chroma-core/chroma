@@ -501,20 +501,20 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 .map(Ok),
         )
         .try_filter_map(move |block_id| async move {
-            // todo: does this load all blocks at once?
             match self.get_block(block_id).await {
                 Ok(Some(block)) => Ok(Some(block)),
                 Ok(None) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
                 Err(e) => Err(Box::new(ArrowBlockfileError::BlockFetchError(e))),
             }
         })
-        .map(move |block| {
-            futures::stream::iter(
+        .map(move |block| match block {
+            Ok(block) => futures::stream::iter(
                 block
-                    .unwrap() // todo
-                    .get_range::<K, V, _, _>(prefix_range.clone(), key_range.clone()),
+                    .get_range::<K, V, _, _>(prefix_range.clone(), key_range.clone())
+                    .map(Ok),
             )
-            .map(Ok)
+            .boxed(),
+            Err(e) => futures::stream::once(async { Err(e as Box<dyn ChromaError>) }).boxed(),
         })
         .flatten()
     }
