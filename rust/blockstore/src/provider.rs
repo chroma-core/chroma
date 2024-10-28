@@ -79,14 +79,14 @@ impl BlockfileProvider {
         }
     }
 
-    pub async fn get_writer<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+    pub async fn write<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
         &self,
         options: BlockfileWriterOptions,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.get_writer(options),
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.write(options),
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider.get_writer::<K, V>(options).await
+                provider.write::<K, V>(options).await
             }
         }
     }
@@ -107,11 +107,11 @@ impl BlockfileProvider {
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => {
-                provider.get_writer(BlockfileWriterOptions::default())
+                provider.write(BlockfileWriterOptions::default())
             }
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
                 provider
-                    .get_writer::<K, V>(BlockfileWriterOptions::default())
+                    .write::<K, V>(BlockfileWriterOptions::default())
                     .await
             }
         }
@@ -124,14 +124,14 @@ impl BlockfileProvider {
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => {
-                provider.get_writer(BlockfileWriterOptions {
+                provider.write(BlockfileWriterOptions {
                     fork_from: Some(*id),
                     ..Default::default()
                 })
             }
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
                 provider
-                    .get_writer::<K, V>(BlockfileWriterOptions {
+                    .write::<K, V>(BlockfileWriterOptions {
                         fork_from: Some(*id),
                         ..Default::default()
                     })

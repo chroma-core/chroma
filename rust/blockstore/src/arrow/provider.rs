@@ -62,7 +62,7 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub async fn get_writer<
+    pub async fn write<
         'new,
         K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
         V: Value + ArrowWriteableValue + 'new,
