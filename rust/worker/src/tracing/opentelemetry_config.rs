@@ -1,7 +1,7 @@
 use opentelemetry::global;
-use opentelemetry::sdk::propagation::TraceContextPropagator;
-use opentelemetry::sdk::trace;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
@@ -10,13 +10,13 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
         "Registering jaeger subscriber for {} at endpoint {}",
         service_name, otel_endpoint
     );
-    let resource = opentelemetry::sdk::Resource::new(vec![opentelemetry::KeyValue::new(
+    let resource = opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
         "service.name",
         service_name.clone(),
     )]);
     // Prepare trace config.
-    let trace_config = trace::config()
-        .with_sampler(opentelemetry::sdk::trace::Sampler::AlwaysOn)
+    let trace_config = opentelemetry_sdk::trace::Config::default()
+        .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
         .with_resource(resource);
     // Prepare exporter.
     let exporter = opentelemetry_otlp::new_exporter()
@@ -26,12 +26,12 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
         .tracing()
         .with_exporter(exporter)
         .with_trace_config(trace_config)
-        .install_batch(opentelemetry::runtime::Tokio)
-        .expect("Error - Failed to create tracer.");
+        .install_batch(opentelemetry_sdk::runtime::Tokio)
+        .expect("could not build otlp trace provider")
+        .tracer(service_name.clone());
     // Layer for adding our configured tracer.
     // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
-    let exporter_layer = tracing_opentelemetry::layer()
-        .with_tracer(otlp_tracer)
+    let exporter_layer = tracing_opentelemetry::OpenTelemetryLayer::new(otlp_tracer)
         .with_filter(tracing_subscriber::filter::LevelFilter::TRACE);
     // Layer for printing spans to stdout. Only print INFO logs by default.
     let stdout_layer =
