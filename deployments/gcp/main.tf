@@ -87,11 +87,10 @@ resource "google_compute_instance" "chroma_instance" {
   machine_type = var.machine_type
   zone         = var.zone
 
-  # Use a public image similar to Amazon Linux
   boot_disk {
     initialize_params {
       image = "debian-cloud/debian-11"
-      size  = 24  # GB, similar to VolumeSize in BlockDeviceMappings
+      size  = 24
     }
   }
 

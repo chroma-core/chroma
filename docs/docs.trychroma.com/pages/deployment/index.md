@@ -23,7 +23,7 @@ If you are using Chroma in production, please fill out [this form](https://airta
 
 * [AWS](/deployment/aws)
 * [GCP](/deployment/gcp)
-* Azure - Coming Soon!
+* [Azure](/deployment/azure)
 
 ***
 
