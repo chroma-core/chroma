@@ -26,7 +26,7 @@ mod tests {
                     sparse_index_cache,
                 );
                 let writer = future::block_on(
-                    blockfile_provider.get_writer::<&str, u32>(BlockfileWriterOptions::default()),
+                    blockfile_provider.write::<&str, u32>(BlockfileWriterOptions::default()),
                 )
                 .unwrap();
                 let id = writer.id();
