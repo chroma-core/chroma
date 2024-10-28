@@ -204,7 +204,7 @@ mod tests {
         segment::{record_segment::RecordSegmentWriter, SegmentWriter},
     };
     use chroma_blockstore::provider::BlockfileProvider;
-    use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
+    use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord};
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
     use uuid::Uuid;
@@ -216,7 +216,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -356,7 +356,7 @@ mod tests {
             id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),

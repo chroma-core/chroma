@@ -3,7 +3,7 @@ use crate::{
     system::{Component, ComponentContext},
 };
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Collection, Segment, SegmentType};
+use chroma_types::{Collection, CollectionUuid, Segment, SegmentType};
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
@@ -28,7 +28,7 @@ impl ChromaError for GetHnswSegmentByIdError {
 pub(super) async fn get_hnsw_segment_by_id(
     mut sysdb: Box<SysDb>,
     hnsw_segment_id: &Uuid,
-    collection_id: &Uuid,
+    collection_id: &CollectionUuid,
 ) -> Result<Segment, Box<GetHnswSegmentByIdError>> {
     let segments = sysdb
         .get_segments(Some(*hnsw_segment_id), None, None, *collection_id)
@@ -58,7 +58,7 @@ pub(super) async fn get_hnsw_segment_by_id(
 #[derive(Debug, Error)]
 pub(super) enum GetCollectionByIdError {
     #[error("Collection with id: {0} not found")]
-    CollectionNotFound(Uuid),
+    CollectionNotFound(CollectionUuid),
     #[error("Get collection error")]
     GetCollectionError(#[from] GetCollectionsError),
 }
@@ -74,7 +74,7 @@ impl ChromaError for GetCollectionByIdError {
 
 pub(super) async fn get_collection_by_id(
     mut sysdb: Box<SysDb>,
-    collection_id: &Uuid,
+    collection_id: &CollectionUuid,
 ) -> Result<Collection, Box<GetCollectionByIdError>> {
     let child_span: tracing::Span =
         trace_span!(parent: Span::current(), "get collection for collection id");
@@ -98,7 +98,7 @@ pub(super) async fn get_collection_by_id(
 #[derive(Debug, Error)]
 pub(super) enum GetRecordSegmentByCollectionIdError {
     #[error("Record segment for collection with id: {0} not found")]
-    RecordSegmentNotFound(Uuid),
+    RecordSegmentNotFound(CollectionUuid),
     #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
 }
@@ -114,7 +114,7 @@ impl ChromaError for GetRecordSegmentByCollectionIdError {
 
 pub(super) async fn get_record_segment_by_collection_id(
     mut sysdb: Box<SysDb>,
-    collection_id: &Uuid,
+    collection_id: &CollectionUuid,
 ) -> Result<Segment, Box<GetRecordSegmentByCollectionIdError>> {
     let segments = sysdb
         .get_segments(

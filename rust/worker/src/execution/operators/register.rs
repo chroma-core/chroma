@@ -5,10 +5,9 @@ use crate::sysdb::sysdb::FlushCompactionError;
 use crate::sysdb::sysdb::SysDb;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{FlushCompactionResponse, SegmentFlushInfo};
+use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
-use uuid::Uuid;
 
 /// The register  operator is responsible for flushing compaction data to the sysdb
 /// as well as updating the log offset in the log service.
@@ -39,7 +38,7 @@ impl RegisterOperator {
 /// * `log` - The log client.
 pub struct RegisterInput {
     tenant: String,
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     log_position: i64,
     collection_version: i32,
     segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -51,7 +50,7 @@ impl RegisterInput {
     /// Create a new flush sysdb input.
     pub fn new(
         tenant: String,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -152,10 +151,11 @@ mod tests {
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
         let log = Box::new(Log::InMemory(InMemoryLog::new()));
         let collection_version = 0;
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            id: collection_uuid_1,
+            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -165,10 +165,11 @@ mod tests {
             version: collection_version,
         };
 
-        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let collection_uuid_2 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            id: collection_uuid_2,
+            collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),

@@ -8,6 +8,7 @@ use chroma_index::hnsw_provider::{
 };
 use chroma_index::{
     HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig, IndexConfigFromSegmentError,
+    IndexUuid,
 };
 use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
@@ -136,6 +137,7 @@ impl DistributedHNSWSegmentWriter {
                     ))
                 }
             };
+            let index_uuid = IndexUuid(index_uuid);
 
             let index = match hnsw_index_provider
                 .fork(&index_uuid, segment, dimensionality as i32)
@@ -319,6 +321,7 @@ impl DistributedHNSWSegmentReader {
                     ))
                 }
             };
+            let index_uuid = IndexUuid(index_uuid);
 
             let index =
                 match hnsw_index_provider

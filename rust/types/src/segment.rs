@@ -1,4 +1,7 @@
-use super::{Metadata, MetadataValueConversionError, SegmentScope, SegmentScopeConversionError};
+use super::{
+    CollectionUuid, Metadata, MetadataValueConversionError, SegmentScope,
+    SegmentScopeConversionError,
+};
 use crate::chroma_proto;
 use chroma_error::{ChromaError, ErrorCodes};
 use std::collections::HashMap;
@@ -45,7 +48,7 @@ pub struct Segment {
     pub id: Uuid,
     pub r#type: SegmentType,
     pub scope: SegmentScope,
-    pub collection: Uuid,
+    pub collection: CollectionUuid,
     pub metadata: Option<Metadata>,
     pub file_path: HashMap<String, Vec<String>>,
 }
@@ -87,6 +90,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             Ok(uuid) => uuid,
             Err(_) => return Err(SegmentConversionError::InvalidUuid),
         };
+        let collection_uuid = CollectionUuid(collection_uuid);
         let segment_metadata: Option<Metadata> = match proto_segment.metadata {
             Some(proto_metadata) => match proto_metadata.try_into() {
                 Ok(metadata) => Some(metadata),
@@ -156,7 +160,7 @@ mod tests {
         assert_eq!(converted_segment.id, Uuid::nil());
         assert_eq!(converted_segment.r#type, SegmentType::HnswDistributed);
         assert_eq!(converted_segment.scope, SegmentScope::VECTOR);
-        assert_eq!(converted_segment.collection, Uuid::nil());
+        assert_eq!(converted_segment.collection, CollectionUuid(Uuid::nil()));
         let metadata = converted_segment.metadata.unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata.get("foo").unwrap(), &MetadataValue::Int(42));

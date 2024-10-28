@@ -40,7 +40,7 @@ use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_index::IndexConfig;
-use chroma_types::{Chunk, Collection, LogRecord, Segment, VectorQueryResult};
+use chroma_types::{Chunk, Collection, CollectionUuid, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -111,7 +111,7 @@ pub(crate) struct HnswQueryOrchestrator {
     allowed_ids: Arc<[String]>,
     include_embeddings: bool,
     hnsw_segment_id: Uuid,
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     // State fetched or created for query execution
     hnsw_segment: Option<Segment>,
     record_segment: Option<Segment>,
@@ -155,7 +155,7 @@ impl HnswQueryOrchestrator {
         allowed_ids: Vec<String>,
         include_embeddings: bool,
         segment_id: Uuid,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         hnsw_index_provider: HnswIndexProvider,
@@ -234,7 +234,7 @@ impl HnswQueryOrchestrator {
             .expect("State machine invariant violation. The collection is not set when pulling logs. This should never happen.");
 
         let input = PullLogsInput::new(
-            collection.id,
+            collection.collection_id,
             // The collection log position is inclusive, and we want to start from the next log
             // Note that we query using the incoming log position this is critical for correctness
             // TODO: We should make all the log service code use u64 instead of i64

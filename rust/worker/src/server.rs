@@ -19,7 +19,7 @@ use chroma_types::chroma_proto::{
 use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
-use chroma_types::{MetadataValue, ScalarEncoding, Where};
+use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, Where};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -144,6 +144,7 @@ impl WorkerServer {
                 return Err(Status::invalid_argument("Invalid Collection UUID"));
             }
         };
+        let collection_uuid = CollectionUuid(collection_uuid);
 
         let (collection_version, log_position) = match request.version_context {
             Some(version_context) => (
@@ -267,6 +268,7 @@ impl WorkerServer {
                 return Err(Status::invalid_argument("Invalid Collection UUID"));
             }
         };
+        let collection_uuid = CollectionUuid(collection_uuid);
 
         let (collection_version, log_position) = match request.version_context {
             Some(version_context) => (
@@ -359,6 +361,7 @@ impl WorkerServer {
                 return Err(Status::invalid_argument("Invalid Collection UUID"));
             }
         };
+        let collection_uuid = CollectionUuid(collection_uuid);
 
         let (collection_version, log_position) = match request.version_context {
             Some(version_context) => (
@@ -543,6 +546,7 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
                 return Err(Status::invalid_argument("Invalid Collection UUID"));
             }
         };
+        let collection_uuid = CollectionUuid(collection_uuid);
 
         let (collection_version, log_position) = match request.version_context {
             Some(version_context) => (

@@ -12,8 +12,7 @@ use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Segment;
-use chroma_types::{Collection, SegmentType};
+use chroma_types::{Collection, CollectionUuid, Segment, SegmentType};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -25,7 +24,7 @@ pub(crate) struct CountQueryOrchestrator {
     system: System,
     // Query state
     metadata_segment_id: Uuid,
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     // State fetched or created for query execution
     record_segment: Option<Segment>,
     collection: Option<Collection>,
@@ -48,11 +47,11 @@ enum CountQueryOrchestratorError {
     #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Record segment not found for collection: {0}")]
-    RecordSegmentNotFound(Uuid),
+    RecordSegmentNotFound(CollectionUuid),
     #[error("System Time Error")]
     SystemTimeError(#[from] std::time::SystemTimeError),
     #[error("Collection not found for id: {0}")]
-    CollectionNotFound(Uuid),
+    CollectionNotFound(CollectionUuid),
     #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Collection version mismatch")]
@@ -80,7 +79,7 @@ impl CountQueryOrchestrator {
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -190,7 +189,7 @@ impl CountQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
-            collection.id,
+            collection.collection_id,
             // The collection log position is inclusive, and we want to start from the next log.
             // Note that we query using the incoming log position this is critical for correctness
             // TODO: We should make all the log service code use u64 instead of i64
@@ -216,7 +215,7 @@ impl CountQueryOrchestrator {
         &self,
         mut sysdb: Box<SysDb>,
         metadata_segment_id: &Uuid,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
             .get_segments(Some(*metadata_segment_id), None, None, *collection_id)
@@ -249,7 +248,7 @@ impl CountQueryOrchestrator {
     async fn get_record_segment_from_collection_id(
         &self,
         mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
             .get_segments(
@@ -279,7 +278,7 @@ impl CountQueryOrchestrator {
     async fn get_collection_from_id(
         &self,
         mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
         _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
