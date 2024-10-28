@@ -5,6 +5,50 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
+#[derive(Clone, Debug, Default)]
+struct ChromaShouldSample;
+
+const BUSY_NS: opentelemetry::Key = opentelemetry::Key::from_static_str("busy_ns");
+const IDLE_NS: opentelemetry::Key = opentelemetry::Key::from_static_str("idle_ns");
+
+fn is_slow(attributes: &[opentelemetry::KeyValue]) -> bool {
+    let mut nanos = 0i64;
+    for attr in attributes {
+        if attr.key == BUSY_NS || attr.key == IDLE_NS {
+            if let opentelemetry::Value::I64(ns) = attr.value {
+                nanos += ns;
+            }
+        }
+    }
+    nanos > 1_000_000
+}
+
+impl opentelemetry_sdk::trace::ShouldSample for ChromaShouldSample {
+    fn should_sample(
+        &self,
+        parent_context: Option<&opentelemetry::Context>,
+        trace_id: opentelemetry::trace::TraceId,
+        name: &str,
+        span_kind: &opentelemetry::trace::SpanKind,
+        attributes: &[opentelemetry::KeyValue],
+        links: &[opentelemetry::trace::Link],
+    ) -> opentelemetry::trace::SamplingResult {
+        if (name != "get" && name != "insert") || is_slow(attributes) {
+            opentelemetry::trace::SamplingResult {
+                decision: opentelemetry::trace::SamplingDecision::RecordAndSample,
+                attributes: attributes.to_vec(),
+                trace_state: opentelemetry::trace::TraceState::default(),
+            }
+        } else {
+            opentelemetry::trace::SamplingResult {
+                decision: opentelemetry::trace::SamplingDecision::Drop,
+                attributes: vec![],
+                trace_state: opentelemetry::trace::TraceState::default(),
+            }
+        }
+    }
+}
+
 pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     println!(
         "Registering jaeger subscriber for {} at endpoint {}",
@@ -16,7 +60,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     )]);
     // Prepare trace config.
     let trace_config = opentelemetry_sdk::trace::Config::default()
-        .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+        .with_sampler(ChromaShouldSample)
         .with_resource(resource);
     // Prepare exporter.
     let exporter = opentelemetry_otlp::new_exporter()
@@ -36,14 +80,23 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // Layer for printing spans to stdout. Only print INFO logs by default.
     let stdout_layer =
         BunyanFormattingLayer::new(service_name.clone().to_string(), std::io::stdout)
+            .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+                !(metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("chroma_cache")
+                    && metadata.name() != "clear")
+            }))
             .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
     // global filter layer. Don't filter anything at above trace at the global layer for chroma.
     // And enable errors for every other library.
     let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
         "error,".to_string()
             + &vec![
+                "chroma",
                 "chroma-blockstore",
                 "chroma-config",
+                "chroma-cache",
                 "chroma-distance",
                 "chroma-error",
                 "chroma-index",
