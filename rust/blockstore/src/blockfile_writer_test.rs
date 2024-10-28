@@ -122,8 +122,7 @@ mod tests {
                 sparse_index_cache,
             );
             let writer =
-                block_on(provider.get_writer::<&str, String>(BlockfileWriterOptions::new()))
-                    .unwrap();
+                block_on(provider.write::<&str, String>(BlockfileWriterOptions::new())).unwrap();
 
             BlockfileWriterWrapper {
                 provider,
@@ -158,7 +157,7 @@ mod tests {
                     state.writer = block_on(
                         state
                             .provider
-                            .get_writer::<&str, String>(BlockfileWriterOptions::new().fork(id)),
+                            .write::<&str, String>(BlockfileWriterOptions::new().fork(id)),
                     )
                     .unwrap();
                 }

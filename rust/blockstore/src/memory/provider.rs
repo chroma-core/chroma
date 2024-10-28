@@ -42,7 +42,7 @@ impl MemoryBlockfileProvider {
         Ok(BlockfileReader::<K, V>::MemoryBlockfileReader(reader))
     }
 
-    pub(crate) fn get_writer(
+    pub(crate) fn write(
         &self,
         options: BlockfileWriterOptions,
     ) -> Result<BlockfileWriter, Box<CreateError>> {

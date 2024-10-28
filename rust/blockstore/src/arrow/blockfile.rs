@@ -742,7 +742,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -782,7 +782,7 @@ mod tests {
                 sparse_index_cache,
             );
             let writer = blockfile_provider
-                .get_writer::<&str, u32>(BlockfileWriterOptions::default())
+                .write::<&str, u32>(BlockfileWriterOptions::default())
                 .await
                 .unwrap();
             let id = writer.id();
@@ -847,7 +847,7 @@ mod tests {
                 sparse_index_cache,
             );
             let writer = blockfile_provider
-                .get_writer::<&str, u32>(BlockfileWriterOptions::default())
+                .write::<&str, u32>(BlockfileWriterOptions::default())
                 .await
                 .unwrap();
             let id = writer.id();
@@ -958,7 +958,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -998,7 +998,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1035,7 +1035,7 @@ mod tests {
 
         // Add 5 new entries to the first block
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
             .await
             .unwrap();
         let id_2 = writer.id();
@@ -1070,7 +1070,7 @@ mod tests {
 
         // Add 1200 more entries, causing splits
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
             .await
             .unwrap();
         let id_3 = writer.id();
@@ -1115,7 +1115,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1161,7 +1161,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .get_writer::<&str, String>(BlockfileWriterOptions::default())
+            .write::<&str, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1201,7 +1201,7 @@ mod tests {
         );
 
         let writer = provider
-            .get_writer::<f32, String>(BlockfileWriterOptions::default())
+            .write::<f32, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1238,7 +1238,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .get_writer::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::default())
+            .write::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1288,7 +1288,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .get_writer::<u32, u32>(BlockfileWriterOptions::default())
+            .write::<u32, u32>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1325,7 +1325,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .get_writer::<&str, &DataRecord>(BlockfileWriterOptions::default())
+            .write::<&str, &DataRecord>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1380,7 +1380,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .get_writer::<&str, String>(BlockfileWriterOptions::default())
+            .write::<&str, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1420,7 +1420,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, String>(BlockfileWriterOptions::default())
+            .write::<&str, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1446,7 +1446,7 @@ mod tests {
         }
 
         let writer = blockfile_provider
-            .get_writer::<&str, String>(BlockfileWriterOptions::new().fork(id))
+            .write::<&str, String>(BlockfileWriterOptions::new().fork(id))
             .await
             .unwrap();
         let id = writer.id();
@@ -1490,7 +1490,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1532,7 +1532,7 @@ mod tests {
             sparse_index_cache,
         );
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1553,7 +1553,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Delete everything but the last 10 keys.
@@ -1586,7 +1586,7 @@ mod tests {
         }
 
         let writer = blockfile_provider
-            .get_writer::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Add everything back.
@@ -1628,7 +1628,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .get_writer::<&str, u32>(BlockfileWriterOptions::default())
+            .write::<&str, u32>(BlockfileWriterOptions::default())
             .await
             .unwrap();
         let id = writer.id();
@@ -1786,7 +1786,7 @@ mod tests {
         // successfully hydrating counts for ALL blocks it needs to set counts for
 
         let writer = blockfile_provider
-            .get_writer::<&str, String>(BlockfileWriterOptions::new().fork(first_write_id))
+            .write::<&str, String>(BlockfileWriterOptions::new().fork(first_write_id))
             .await
             .unwrap();
         let second_write_id = writer.id();
