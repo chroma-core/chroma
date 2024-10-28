@@ -1,12 +1,10 @@
+use super::{BlockfileFlusher, Key, Value};
 use crate::arrow::blockfile::ArrowBlockfileWriter;
+use crate::arrow::types::{ArrowWriteableKey, ArrowWriteableValue};
 use crate::key::KeyWrapper;
 use crate::memory::reader_writer::MemoryBlockfileWriter;
-use chroma_error::ChromaError;
-
-use crate::arrow::types::{ArrowWriteableKey, ArrowWriteableValue};
 use crate::memory::storage::Writeable;
-
-use super::{BlockfileFlusher, Key, Value};
+use chroma_error::ChromaError;
 
 #[derive(Clone)]
 pub enum BlockfileWriter {

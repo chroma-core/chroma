@@ -10,7 +10,7 @@ pub(crate) enum BlockfileWriterMutationOrdering {
 #[derive(Debug, Default)]
 pub struct BlockfileWriterOptions {
     pub(crate) mutation_ordering: BlockfileWriterMutationOrdering,
-    pub(crate) fork: Option<Uuid>,
+    pub(crate) fork_from: Option<Uuid>,
 }
 
 impl BlockfileWriterOptions {
@@ -24,7 +24,7 @@ impl BlockfileWriterOptions {
         self
     }
 
-    /// Mutations (calls to `.set()` and `.delete()`) are provided in ascending order of keys. This mode should be preferred when possible as it's more efficient than unordered mutations. Blockfile implementations may panic when in this mode if:
+    /// Mutations (calls to `.set()` and `.delete()`) are provided in ascending order of keys. This mode may be more efficient if your data is pre-sorted. Blockfile implementations may return an error when in this mode if:
     /// - mutations are not provided in sequential order
     /// - a key is provided more than once (e.g. a key is provided to both `.set()` and `.delete()`)
     pub fn ordered_mutations(mut self) -> Self {
@@ -34,7 +34,7 @@ impl BlockfileWriterOptions {
 
     /// Fork from an existing blockfile.
     pub fn fork(mut self, fork: Uuid) -> Self {
-        self.fork = Some(fork);
+        self.fork_from = Some(fork);
         self
     }
 }
