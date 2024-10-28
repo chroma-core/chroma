@@ -33,6 +33,9 @@ impl opentelemetry_sdk::trace::ShouldSample for ChromaShouldSample {
         attributes: &[opentelemetry::KeyValue],
         _: &[opentelemetry::trace::Link],
     ) -> opentelemetry::trace::SamplingResult {
+        // If the name is not get and not insert, or the request is slow, sample it.
+        // Otherwise, drop.
+        // This filters filters foyer calls in-process so they won't be overwhelming the tracing.
         if (name != "get" && name != "insert") || is_slow(attributes) {
             opentelemetry::trace::SamplingResult {
                 decision: opentelemetry::trace::SamplingDecision::RecordAndSample,
@@ -81,6 +84,8 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let stdout_layer =
         BunyanFormattingLayer::new(service_name.clone().to_string(), std::io::stdout)
             .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+                // This filter ensures that we don't cache calls for get/insert on stdout, but will
+                // still see the clear call.
                 !(metadata
                     .module_path()
                     .unwrap_or("")
