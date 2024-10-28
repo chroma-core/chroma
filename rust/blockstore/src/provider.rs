@@ -124,14 +124,14 @@ impl BlockfileProvider {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => {
                 provider.get_writer(BlockfileWriterOptions {
-                    fork: Some(*id),
+                    fork_from: Some(*id),
                     ..Default::default()
                 })
             }
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
                 provider
                     .get_writer::<K, V>(BlockfileWriterOptions {
-                        fork: Some(*id),
+                        fork_from: Some(*id),
                         ..Default::default()
                     })
                     .await
