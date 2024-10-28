@@ -6,14 +6,6 @@ use thiserror::Error;
 pub enum BlockfileError {
     #[error("Key not found")]
     NotFoundError,
-    #[error("Invalid Key Type")]
-    InvalidKeyType,
-    #[error("Invalid Value Type")]
-    InvalidValueType,
-    #[error("Transaction already in progress")]
-    TransactionInProgress,
-    #[error("Transaction not in progress")]
-    TransactionNotInProgress,
     #[error("Block not found")]
     BlockNotFound,
 }
@@ -21,12 +13,7 @@ pub enum BlockfileError {
 impl ChromaError for BlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
-            BlockfileError::NotFoundError
-            | BlockfileError::InvalidKeyType
-            | BlockfileError::InvalidValueType => ErrorCodes::InvalidArgument,
-            BlockfileError::TransactionInProgress | BlockfileError::TransactionNotInProgress => {
-                ErrorCodes::FailedPrecondition
-            }
+            BlockfileError::NotFoundError => ErrorCodes::InvalidArgument,
             BlockfileError::BlockNotFound => ErrorCodes::Internal,
         }
     }

@@ -74,7 +74,7 @@ impl ArrowBlockfileProvider {
             unimplemented!();
         }
 
-        if let Some(fork_from) = options.fork {
+        if let Some(fork_from) = options.fork_from {
             tracing::info!("Forking blockfile from {:?}", fork_from);
             let new_id = Uuid::new_v4();
             let new_root = self

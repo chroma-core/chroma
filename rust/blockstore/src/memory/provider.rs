@@ -50,7 +50,7 @@ impl MemoryBlockfileProvider {
             unimplemented!();
         }
 
-        if options.fork.is_some() {
+        if options.fork_from.is_some() {
             unimplemented!();
         }
 
