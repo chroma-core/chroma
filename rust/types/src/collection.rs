@@ -27,7 +27,7 @@ impl std::str::FromStr for CollectionUuid {
 
 impl std::fmt::Display for CollectionUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "collection-{}", self.0)
+        write!(f, "{}", self.0)
     }
 }
 

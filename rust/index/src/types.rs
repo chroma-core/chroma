@@ -103,6 +103,6 @@ pub struct IndexUuid(pub Uuid);
 
 impl std::fmt::Display for IndexUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "index-{}", self.0)
+        write!(f, "{}", self.0)
     }
 }
