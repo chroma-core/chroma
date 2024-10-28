@@ -42,7 +42,7 @@ impl opentelemetry_sdk::trace::ShouldSample for ChromaShouldSample {
         if (name != "get" && name != "insert") || is_slow(attributes) {
             opentelemetry::trace::SamplingResult {
                 decision: opentelemetry::trace::SamplingDecision::RecordAndSample,
-                attributes: attributes.to_vec(),
+                attributes: vec![],
                 trace_state: opentelemetry::trace::TraceState::default(),
             }
         } else {
