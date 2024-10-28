@@ -26,12 +26,12 @@ fn is_slow(attributes: &[opentelemetry::KeyValue]) -> bool {
 impl opentelemetry_sdk::trace::ShouldSample for ChromaShouldSample {
     fn should_sample(
         &self,
-        parent_context: Option<&opentelemetry::Context>,
-        trace_id: opentelemetry::trace::TraceId,
+        _: Option<&opentelemetry::Context>,
+        _: opentelemetry::trace::TraceId,
         name: &str,
-        span_kind: &opentelemetry::trace::SpanKind,
+        _: &opentelemetry::trace::SpanKind,
         attributes: &[opentelemetry::KeyValue],
-        links: &[opentelemetry::trace::Link],
+        _: &[opentelemetry::trace::Link],
     ) -> opentelemetry::trace::SamplingResult {
         if (name != "get" && name != "insert") || is_slow(attributes) {
             opentelemetry::trace::SamplingResult {
