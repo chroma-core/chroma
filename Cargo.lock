@@ -1226,6 +1226,7 @@ dependencies = [
  "chroma-types",
  "clap",
  "foyer",
+ "opentelemetry",
  "parking_lot",
  "serde",
  "serde_yaml",
