@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::delta::BlockDelta;
+use super::delta::UnorderedBlockDelta;
 
 const ARROW_ALIGNMENT: usize = 64;
 
@@ -100,8 +100,8 @@ impl Block {
     /// Converts the block to a block delta for writing to a new block
     pub fn to_block_delta<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
-        mut delta: BlockDelta,
-    ) -> BlockDelta {
+        mut delta: UnorderedBlockDelta,
+    ) -> UnorderedBlockDelta {
         let prefix_arr = self
             .data
             .column(0)

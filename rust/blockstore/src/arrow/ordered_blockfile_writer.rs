@@ -1,4 +1,4 @@
-use super::block::delta::types::DeltaCommon;
+use super::block::delta::types::Delta;
 use super::block::delta::OrderedBlockDelta;
 use super::provider::BlockManager;
 use super::provider::RootManager;
@@ -335,7 +335,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::Arc;
 
-    use crate::arrow::block::delta::types::DeltaCommon;
+    use crate::arrow::block::delta::types::Delta;
     use crate::arrow::block::delta::OrderedBlockDelta;
     use crate::arrow::block::Block;
     use crate::arrow::ordered_blockfile_writer::{ArrowOrderedBlockfileWriter, Inner};

@@ -1,4 +1,4 @@
-use super::block::delta::{BlockDelta, BlockKeyArrowBuilder, BlockStorage};
+use super::block::delta::{BlockKeyArrowBuilder, BlockStorage, UnorderedBlockDelta};
 use crate::{key::KeyWrapper, Key, Value};
 use arrow::{array::Array, datatypes::Field};
 use std::sync::Arc;
@@ -29,7 +29,7 @@ pub trait ArrowWriteableValue: Value {
     fn offset_size(item_count: usize) -> usize;
     fn validity_size(item_count: usize) -> usize;
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage);
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta);
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta);
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder;
     fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage;
     fn prepare(value: Self) -> Self::PreparedValue;

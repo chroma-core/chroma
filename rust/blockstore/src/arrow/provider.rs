@@ -1,5 +1,5 @@
 use super::{
-    block::{delta::types::DeltaCommon, Block, BlockLoadError},
+    block::{delta::types::Delta, Block, BlockLoadError},
     blockfile::{ArrowBlockfileReader, ArrowUnorderedBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
     ordered_blockfile_writer::ArrowOrderedBlockfileWriter,
@@ -235,21 +235,15 @@ impl BlockManager {
         }
     }
 
-    pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue, Delta: DeltaCommon>(
-        &self,
-    ) -> Delta {
+    pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(&self) -> D {
         let new_block_id = Uuid::new_v4();
-        Delta::new::<K, V>(new_block_id)
+        D::new::<K, V>(new_block_id)
     }
 
-    pub(super) async fn fork<
-        KeyWrite: ArrowWriteableKey,
-        ValueWrite: ArrowWriteableValue,
-        Delta: DeltaCommon,
-    >(
+    pub(super) async fn fork<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(
         &self,
         block_id: &Uuid,
-    ) -> Result<Delta, ForkError> {
+    ) -> Result<D, ForkError> {
         let block = self.get(block_id).await;
         let block = match block {
             Ok(Some(block)) => block,
@@ -261,15 +255,12 @@ impl BlockManager {
             }
         };
         let new_block_id = Uuid::new_v4();
-        Ok(Delta::fork_block::<KeyWrite, ValueWrite>(
-            new_block_id,
-            &block,
-        ))
+        Ok(Delta::fork_block::<K, V>(new_block_id, &block))
     }
 
     pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
-        builder: impl DeltaCommon,
+        builder: impl Delta,
     ) -> Block {
         let builder_id = builder.id();
         let record_batch = builder.finish::<K, V>(None);
