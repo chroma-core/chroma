@@ -1,12 +1,12 @@
-use std::collections::BTreeMap;
-
 use crate::{arrow::types::ArrowWriteableValue, key::CompositeKey};
+use either::Either;
+use std::collections::BTreeMap;
 
 pub struct BTreeBuilderStorage<V: ArrowWriteableValue> {
     storage: BTreeMap<CompositeKey, V>,
 }
 
-impl<V: ArrowWriteableValue + 'static> BTreeBuilderStorage<V> {
+impl<V: ArrowWriteableValue> BTreeBuilderStorage<V> {
     fn add(&mut self, key: CompositeKey, value: V) {
         self.storage.insert(key, value);
     }
@@ -35,8 +35,8 @@ impl<V: ArrowWriteableValue + 'static> BTreeBuilderStorage<V> {
         Box::new(self.storage.iter())
     }
 
-    fn into_iter(self) -> Box<dyn Iterator<Item = (CompositeKey, V)>> {
-        Box::new(self.storage.into_iter())
+    fn into_iter(self) -> impl Iterator<Item = (CompositeKey, V)> {
+        self.storage.into_iter()
     }
 }
 
@@ -53,7 +53,7 @@ pub struct VecBuilderStorage<V: ArrowWriteableValue> {
     storage: Vec<(CompositeKey, V)>,
 }
 
-impl<V: ArrowWriteableValue + 'static> VecBuilderStorage<V> {
+impl<V: ArrowWriteableValue> VecBuilderStorage<V> {
     fn add(&mut self, key: CompositeKey, value: V) {
         self.storage.push((key, value));
     }
@@ -84,8 +84,8 @@ impl<V: ArrowWriteableValue + 'static> VecBuilderStorage<V> {
         Box::new(self.storage.iter().map(|(k, v)| (k, v)))
     }
 
-    fn into_iter(self) -> Box<dyn Iterator<Item = (CompositeKey, V)>> {
-        Box::new(self.storage.into_iter())
+    fn into_iter(self) -> impl Iterator<Item = (CompositeKey, V)> {
+        self.storage.into_iter()
     }
 }
 
@@ -102,7 +102,7 @@ pub enum BuilderStorage<V: ArrowWriteableValue> {
     VecBuilderStorage(VecBuilderStorage<V>),
 }
 
-impl<V: ArrowWriteableValue + 'static> BuilderStorage<V> {
+impl<V: ArrowWriteableValue> BuilderStorage<V> {
     pub fn add(&mut self, key: CompositeKey, value: V) {
         match self {
             BuilderStorage::BTreeBuilderStorage(storage) => storage.add(key, value),
@@ -152,13 +152,10 @@ impl<V: ArrowWriteableValue + 'static> BuilderStorage<V> {
         }
     }
 
-    pub fn into_iter(self) -> Box<dyn Iterator<Item = (CompositeKey, V)>>
-    where
-        <V as ArrowWriteableValue>::PreparedValue: 'static,
-    {
+    pub fn into_iter(self) -> impl Iterator<Item = (CompositeKey, V)> {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.into_iter(),
-            BuilderStorage::VecBuilderStorage(storage) => storage.into_iter(),
+            BuilderStorage::BTreeBuilderStorage(storage) => Either::Left(storage.into_iter()),
+            BuilderStorage::VecBuilderStorage(storage) => Either::Right(storage.into_iter()),
         }
     }
 }

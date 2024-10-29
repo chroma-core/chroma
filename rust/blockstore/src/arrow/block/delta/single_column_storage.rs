@@ -31,9 +31,7 @@ impl<V: ArrowWriteableValue> std::fmt::Debug for Inner<V> {
     }
 }
 
-impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker> + 'static>
-    SingleColumnStorage<V>
-{
+impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumnStorage<V> {
     pub(in crate::arrow) fn new(mutation_ordering_hint: MutationOrderHint) -> Self {
         let storage = match mutation_ordering_hint {
             MutationOrderHint::Unordered => {
