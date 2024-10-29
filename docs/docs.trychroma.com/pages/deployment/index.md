@@ -33,7 +33,7 @@ You can run Chroma single-node in [client/server mode](/deployment/client-server
 
 * [AWS](/deployment/aws)
 * [GCP](/deployment/gcp)
-* Azure - Coming Soon!
+* [Azure](/deployment/azure)
 
 ***
 
