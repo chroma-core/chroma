@@ -466,7 +466,7 @@ impl WorkerServer {
             },
         );
 
-        let result = orchestrator.register_and_run(system.clone()).await;
+        let result = orchestrator.run(system.clone()).await;
         let result = match result {
             Ok(result) => result,
             Err(e) => {

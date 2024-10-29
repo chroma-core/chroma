@@ -116,7 +116,7 @@ impl GetOrchestrator {
         }
     }
 
-    pub async fn register_and_run(mut self, system: System) -> GetResult {
+    pub async fn run(mut self, system: System) -> GetResult {
         let (tx, rx) = oneshot::channel();
         self.result_channel = Some(tx);
         let mut handle = system.start_component(self);
