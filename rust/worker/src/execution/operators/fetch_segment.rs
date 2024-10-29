@@ -1,11 +1,12 @@
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{hnsw_provider::HnswIndexProvider, IndexConfig, IndexConfigFromSegmentError};
-use chroma_types::{Collection, Segment, SegmentScope, SegmentType};
+use chroma_index::{
+    hnsw_provider::HnswIndexProvider, IndexConfig, IndexConfigFromSegmentError, IndexUuid,
+};
+use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType};
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
-use uuid::Uuid;
 
 use crate::{
     execution::operator::{Operator, OperatorType},
@@ -26,10 +27,10 @@ pub struct FetchSegmentOperator {
     pub hnsw: HnswIndexProvider,
     pub blockfile: BlockfileProvider,
     // TODO: Enforce uuid
-    pub knn: Option<Uuid>,
-    pub metadata: Option<Uuid>,
-    pub record: Option<Uuid>,
-    pub collection: Uuid,
+    pub knn: Option<IndexUuid>,
+    pub metadata: Option<IndexUuid>,
+    pub record: Option<IndexUuid>,
+    pub collection: CollectionUuid,
     // Version
     pub version: u32,
 }
@@ -171,7 +172,7 @@ impl FetchSegmentOperator {
         self.sysdb
             .clone()
             .get_segments(
-                segment_id,
+                segment_id.map(|id| id.0),
                 Some(segment_type.into()),
                 Some(scope),
                 self.collection,

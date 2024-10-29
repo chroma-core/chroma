@@ -1,11 +1,10 @@
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Chunk, LogRecord};
+use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
-use uuid::Uuid;
 
 use crate::{
     execution::operator::{Operator, OperatorType},
@@ -18,7 +17,7 @@ pub struct FetchLogOperator {
     pub batch_size: u32,
     pub skip: u32,
     pub fetch: Option<u32>,
-    pub collection: Uuid,
+    pub collection: CollectionUuid,
 }
 
 pub type FetchLogInput = ();
