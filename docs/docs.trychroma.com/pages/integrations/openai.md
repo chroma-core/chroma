@@ -57,7 +57,7 @@ You can pass in an optional `model` argument, which lets you choose which OpenAI
 const {OpenAIEmbeddingFunction} = require('chromadb');
 const embeddingFunction = new OpenAIEmbeddingFunction({
     openai_api_key: "apiKey",
-    model: "text-embedding-3-small"
+    openai_model: "text-embedding-3-small"
 })
 
 // use directly
