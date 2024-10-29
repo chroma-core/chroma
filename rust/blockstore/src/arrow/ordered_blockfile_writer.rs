@@ -1,5 +1,5 @@
 use super::block::delta::types::DeltaCommon;
-use super::block::delta::OrderedMergeBlockDelta;
+use super::block::delta::OrderedBlockDelta;
 use super::provider::BlockManager;
 use super::provider::RootManager;
 use super::root::RootWriter;
@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 // The end key is exclusive, if the end key is None, then the block/delta is open-ended
 type BlockIdAndEndKey = (Uuid, Option<CompositeKey>);
-type CurrentDeltaAndEndKey = (OrderedMergeBlockDelta, Option<CompositeKey>);
+type CurrentDeltaAndEndKey = (OrderedBlockDelta, Option<CompositeKey>);
 
 struct Inner {
     /// On construction, this contains all existing block IDs and the end of their key range ordered by end key (asc).
@@ -34,7 +34,7 @@ struct Inner {
     /// Holds the current block delta and its end key. When we receive a write past the end key, this delta is moved into `completed_block_deltas`.
     current_block_delta: Option<CurrentDeltaAndEndKey>,
     /// Deltas in this vec can no longer receive writes and are ready to be committed.
-    completed_block_deltas: Vec<OrderedMergeBlockDelta>,
+    completed_block_deltas: Vec<OrderedBlockDelta>,
 }
 
 #[derive(Clone)]
@@ -66,7 +66,7 @@ impl ArrowOrderedBlockfileWriter {
         block_manager: BlockManager,
         root_manager: RootManager,
     ) -> Self {
-        let initial_block = block_manager.create::<K, V, OrderedMergeBlockDelta>();
+        let initial_block = block_manager.create::<K, V, OrderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let root_writer = RootWriter::new(CURRENT_VERSION, id, sparse_index);
 
@@ -236,7 +236,7 @@ impl ArrowOrderedBlockfileWriter {
 
         let new_delta = self
             .block_manager
-            .fork::<K, V, OrderedMergeBlockDelta>(new_delta_block_id)
+            .fork::<K, V, OrderedBlockDelta>(new_delta_block_id)
             .await
             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
@@ -336,7 +336,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::arrow::block::delta::types::DeltaCommon;
-    use crate::arrow::block::delta::OrderedMergeBlockDelta;
+    use crate::arrow::block::delta::OrderedBlockDelta;
     use crate::arrow::block::Block;
     use crate::arrow::ordered_blockfile_writer::{ArrowOrderedBlockfileWriter, Inner};
     use crate::arrow::provider::{BlockManager, RootManager};
@@ -761,7 +761,7 @@ mod tests {
         let block_manager = BlockManager::new(storage.clone(), 8 * 1024 * 1024, block_cache);
 
         // Manually create a v1 blockfile with no counts
-        let initial_block = block_manager.create::<&str, String, OrderedMergeBlockDelta>();
+        let initial_block = block_manager.create::<&str, String, OrderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let file_id = Uuid::new_v4();
         let root_writer = RootWriter::new(Version::V1, file_id, sparse_index);
@@ -827,9 +827,9 @@ mod tests {
         ////////////////////////// STEP 1 //////////////////////////
 
         // Create two blocks with some data, we will make this conceptually a v1 block
-        let mut old_block_delta_1 = block_manager.create::<&str, String, OrderedMergeBlockDelta>();
+        let mut old_block_delta_1 = block_manager.create::<&str, String, OrderedBlockDelta>();
         old_block_delta_1.add("prefix", "a", "value_a".to_string());
-        let mut old_block_delta_2 = block_manager.create::<&str, String, OrderedMergeBlockDelta>();
+        let mut old_block_delta_2 = block_manager.create::<&str, String, OrderedBlockDelta>();
         old_block_delta_2.add("prefix", "f", "value_b".to_string());
         let old_block_id_1 = old_block_delta_1.id;
         let old_block_id_2 = old_block_delta_2.id;

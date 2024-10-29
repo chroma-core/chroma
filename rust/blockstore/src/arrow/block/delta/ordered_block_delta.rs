@@ -24,21 +24,21 @@ use uuid::Uuid;
 /// - delete: deletes a key from the block delta.
 /// - get_size: gets the size of the block delta.
 /// - split: splits the block delta into new block deltas based on a max block size.
-pub struct OrderedMergeBlockDelta {
+pub struct OrderedBlockDelta {
     pub(in crate::arrow) builder: BlockStorage,
     pub(in crate::arrow) id: Uuid,
     copied_up_to_row_of_old_block: usize,
     old_block: Option<Block>,
 }
 
-impl DeltaCommon for OrderedMergeBlockDelta {
+impl DeltaCommon for OrderedBlockDelta {
     // NOTE(rescrv):  K is unused, but it is very conceptually easy to think of everything as
     // key-value pairs.  I started to refactor this to remove ArrowWriteableKey, but it was not
     // readable to tell whether I was operating on the key or value type.  Keeping both but
     // suppressing the clippy error is a reasonable alternative.
     #[allow(clippy::extra_unused_type_parameters)]
     fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
-        OrderedMergeBlockDelta {
+        OrderedBlockDelta {
             builder: V::get_delta_builder(BuilderMutationOrderHint::Ordered),
             id,
             copied_up_to_row_of_old_block: 0,
@@ -47,7 +47,7 @@ impl DeltaCommon for OrderedMergeBlockDelta {
     }
 
     fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid, block: &Block) -> Self {
-        let mut delta = OrderedMergeBlockDelta::new::<K, V>(id);
+        let mut delta = OrderedBlockDelta::new::<K, V>(id);
         delta.old_block = Some(block.clone());
         delta
     }
@@ -64,7 +64,7 @@ impl DeltaCommon for OrderedMergeBlockDelta {
     }
 }
 
-impl OrderedMergeBlockDelta {
+impl OrderedBlockDelta {
     pub fn add<K, V>(&mut self, prefix: &str, key: K, value: V)
     where
         K: ArrowWriteableKey,
@@ -178,14 +178,14 @@ impl OrderedMergeBlockDelta {
     pub(crate) fn split<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         max_block_size_bytes: usize,
-    ) -> Vec<(CompositeKey, OrderedMergeBlockDelta)> {
+    ) -> Vec<(CompositeKey, OrderedBlockDelta)> {
         let half_size = max_block_size_bytes / 2;
 
-        let mut blocks_to_split: Vec<OrderedMergeBlockDelta> = Vec::new();
+        let mut blocks_to_split: Vec<OrderedBlockDelta> = Vec::new();
 
         // Special case for the first split (self) because it's an immutable borrow
         let (new_start_key, new_delta) = self.builder.split::<K>(half_size);
-        let new_block = OrderedMergeBlockDelta {
+        let new_block = OrderedBlockDelta {
             builder: new_delta,
             id: Uuid::new_v4(),
             copied_up_to_row_of_old_block: 0,
@@ -201,7 +201,7 @@ impl OrderedMergeBlockDelta {
         // iterate over all blocks to split until its empty
         while let Some(curr_block) = blocks_to_split.pop() {
             let (new_start_key, new_delta) = curr_block.builder.split::<K>(half_size);
-            let new_block = OrderedMergeBlockDelta {
+            let new_block = OrderedBlockDelta {
                 builder: new_delta,
                 id: Uuid::new_v4(),
                 copied_up_to_row_of_old_block: 0,
