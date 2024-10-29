@@ -40,6 +40,7 @@ num_cpus = "1.16.0"
 flatbuffers = "24.3.25"
 tantivy = "0.21.1"
 criterion = { version = "0.5", features = ["async_tokio"] }
+either = "1.13.0"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
