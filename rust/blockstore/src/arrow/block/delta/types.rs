@@ -8,6 +8,11 @@ use crate::arrow::{
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 
+/// A block delta tracks a source block and represents the new state of a block. Blocks are
+/// immutable, so when a write is made to a block, a new block is created with the new state.
+/// A block delta is a temporary representation of the new state of a block. A block
+/// can be converted to a block data, which is then used to create a new block. A block data
+/// can be converted into a block delta for new writes.
 pub(crate) trait Delta {
     /// Creates a new block delta from a block.
     /// # Arguments
