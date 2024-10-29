@@ -375,20 +375,20 @@ impl SparseIndexReader {
         let forward = &self.data.forward;
 
         // We do not materialize the last key of each block, so we must check the next block's start key to determine if the current block's end key is within the query range.
+        let start_keys_offset_by_1_iter = forward
+            .iter()
+            .skip(1)
+            .map(|(k, _)| match k {
+                SparseIndexDelimiter::Start => {
+                    panic!("Invariant violation. Sparse index is not valid.");
+                }
+                SparseIndexDelimiter::Key(k) => Some(k),
+            })
+            .chain(std::iter::once(None));
+
         forward
             .iter()
-            .zip(
-                forward
-                    .iter()
-                    .skip(1)
-                    .map(|(k, _)| match k {
-                        SparseIndexDelimiter::Start => {
-                            panic!("Invariant violation. Sparse index is not valid.");
-                        }
-                        SparseIndexDelimiter::Key(k) => Some(k),
-                    })
-                    .chain(std::iter::once(None)),
-            )
+            .zip(start_keys_offset_by_1_iter)
             .map(|((start_key, block_uuid), end_key)| (block_uuid, start_key, end_key))
             .filter(|(_, block_start_key, block_end_key)| {
                 let prefix_start_valid = match block_start_key {
