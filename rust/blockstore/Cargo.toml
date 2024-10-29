@@ -23,13 +23,14 @@ prost-types = { workspace = true }
 tokio = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
+itertools = { workspace = true }
+either = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-types = { workspace = true }
-itertools = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
