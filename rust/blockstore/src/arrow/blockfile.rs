@@ -1,3 +1,4 @@
+use super::migrations::{apply_migrations_to_blockfile, MigrationError};
 use super::provider::{GetError, RootManager};
 use super::root::{RootReader, RootWriter, Version};
 use super::{block::delta::UnorderedBlockDelta, provider::BlockManager};
@@ -36,12 +37,15 @@ pub struct ArrowUnorderedBlockfileWriter {
 pub enum ArrowBlockfileError {
     #[error("Block not found")]
     BlockNotFound,
+    #[error("Could not migrate blockfile to new version")]
+    MigrationError(#[from] MigrationError),
 }
 
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
             ArrowBlockfileError::BlockNotFound => ErrorCodes::Internal,
+            ArrowBlockfileError::MigrationError(e) => e.code(),
         }
     }
 }
@@ -95,9 +99,9 @@ impl ArrowUnorderedBlockfileWriter {
         mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut blocks = Vec::new();
-        let mut handled_blocks = HashSet::new();
+        let mut new_block_ids = HashSet::new();
         for (_, delta) in self.block_deltas.lock().drain() {
-            handled_blocks.insert(delta.id);
+            new_block_ids.insert(delta.id);
             let mut removed = false;
             // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
@@ -114,45 +118,11 @@ impl ArrowUnorderedBlockfileWriter {
             }
         }
 
-        // MIGRATION(10/15/2024 @hammadb) Get all the blocks and manually update the sparse index
-        if self.root.version == Version::V1 {
-            self.root.version = Version::V1_1;
-            let block_ids;
-            // Guard the sparse index data access with a lock
-            // otherwise we have to hold the lock across an await
-            {
-                let sparse_index_data = self.root.sparse_index.data.lock();
-                block_ids = sparse_index_data
-                    .forward
-                    .values()
-                    .filter(|block_id| !handled_blocks.contains(block_id))
-                    .copied()
-                    .collect::<Vec<Uuid>>();
-            }
-            for block_id in block_ids.iter() {
-                let block = self.block_manager.get(block_id).await;
-                match block {
-                    Ok(Some(block)) => {
-                        match self
-                            .root
-                            .sparse_index
-                            .set_count(*block_id, block.len() as u32)
-                        {
-                            Ok(_) => {}
-                            Err(e) => {
-                                return Err(Box::new(e));
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                    }
-                    Err(e) => {
-                        return Err(Box::new(e));
-                    }
-                }
-            }
-        }
+        apply_migrations_to_blockfile(&mut self.root, &self.block_manager, &new_block_ids)
+            .await
+            .map_err(|e| {
+                Box::new(ArrowBlockfileError::MigrationError(e)) as Box<dyn ChromaError>
+            })?;
 
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
