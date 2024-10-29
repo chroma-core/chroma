@@ -322,13 +322,13 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Optional[Where] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         return self._server._get(
@@ -350,8 +350,8 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
     ) -> None:
         self._server._delete(
             collection_id=collection_id,
@@ -368,8 +368,8 @@ class Client(SharedSystemClient, ClientAPI):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         return self._server._query(

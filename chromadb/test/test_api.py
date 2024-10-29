@@ -315,7 +315,6 @@ def test_get_nearest_neighbors(client):
     nn = collection.query(
         query_embeddings=[1.1, 2.3, 3.2],
         n_results=1,
-        where={},
         include=includes,
     )
     for key in nn.keys():
@@ -329,7 +328,6 @@ def test_get_nearest_neighbors(client):
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=1,
-        where={},
         include=includes,
     )
     for key in nn.keys():
@@ -343,7 +341,6 @@ def test_get_nearest_neighbors(client):
     nn = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2], [0.1, 2.3, 4.5]],
         n_results=1,
-        where={},
         include=includes,
     )
     for key in nn.keys():
@@ -1417,7 +1414,6 @@ def test_get_nearest_neighbors_where_n_results_more_than_element(client):
     results = collection.query(
         query_embeddings=[[1.1, 2.3, 3.2]],
         n_results=5,
-        where={},
         include=includes,
     )
     for key in results.keys():
@@ -1437,7 +1433,6 @@ def test_invalid_n_results_param(client):
         collection.query(
             query_embeddings=[[1.1, 2.3, 3.2]],
             n_results=-1,
-            where={},
             include=["embeddings", "documents", "metadatas", "distances"],
         )
     assert "Number of requested results -1, cannot be negative, or zero." in str(
@@ -1449,7 +1444,6 @@ def test_invalid_n_results_param(client):
         collection.query(
             query_embeddings=[[1.1, 2.3, 3.2]],
             n_results="one",
-            where={},
             include=["embeddings", "documents", "metadatas", "distances"],
         )
     assert "int" in str(exc.value)
