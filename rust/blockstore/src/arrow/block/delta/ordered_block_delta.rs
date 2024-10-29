@@ -14,16 +14,8 @@ use crate::{
 use arrow::array::{RecordBatch, StringArray};
 use uuid::Uuid;
 
-/// A block delta tracks a source block and represents the new state of a block. Blocks are
-/// immutable, so when a write is made to a block, a new block is created with the new state.
-/// A block delta is a temporary representation of the new state of a block. A block delta
-/// can be converted to a block data, which is then used to create a new block. A block data
-/// can be converted into a block delta for new writes.
-/// # Methods
-/// - add: adds a key value pair to the block delta.
-/// - delete: deletes a key from the block delta.
-/// - get_size: gets the size of the block delta.
-/// - split: splits the block delta into new block deltas based on a max block size.
+/// This delta type performs mutations more efficiently than the `UnorderedBlockDelta` type if the mutations are already in sorted order.
+/// See rust/blockstore/src/arrow/block/delta/types.rs for more info about deltas.
 pub struct OrderedBlockDelta {
     pub(in crate::arrow) builder: BlockStorage,
     pub(in crate::arrow) id: Uuid,
