@@ -26,7 +26,7 @@ use chroma_types::chroma_proto::{
 use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
-use chroma_types::{MetadataValue, ScalarEncoding, Where};
+use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, Where};
 use futures::future::try_join_all;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
@@ -207,7 +207,7 @@ impl WorkerServer {
                 sysdb: self.sysdb.clone(),
                 hnsw: self.hnsw_index_provider.clone(),
                 blockfile: self.blockfile_provider.clone(),
-                knn: Some(segment_uuid),
+                knn: Some(IndexUuid(segment_uuid)),
                 metadata: None,
                 record: None,
                 collection: collection_uuid,
@@ -219,10 +219,7 @@ impl WorkerServer {
             },
         );
 
-        let knn_filter_output = match knn_filter_orchestrator
-            .register_and_run(system.clone())
-            .await
-        {
+        let knn_filter_output = match knn_filter_orchestrator.run(system.clone()).await {
             Ok(output) => output,
             Err(e) => {
                 tracing::error!("Error running orchestrator: {}", e);
@@ -262,7 +259,7 @@ impl WorkerServer {
         let result = try_join_all(
             knn_orchestrators
                 .into_iter()
-                .map(|knn| knn.register_and_run(system.clone())),
+                .map(|knn| knn.run(system.clone())),
         )
         .await;
 

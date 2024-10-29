@@ -121,7 +121,7 @@ impl KnnFilterOrchestrator {
         }
     }
 
-    pub async fn register_and_run(mut self, system: System) -> KnnFilterResult {
+    pub async fn run(mut self, system: System) -> KnnFilterResult {
         let (tx, rx) = oneshot::channel();
         self.result_channel = Some(tx);
         let mut handle = system.start_component(self);
@@ -299,7 +299,7 @@ impl KnnOrchestrator {
         terminate_with_error(self.result_channel.take(), knn_err, ctx);
     }
 
-    pub async fn register_and_run(mut self, system: System) -> KnnResult {
+    pub async fn run(mut self, system: System) -> KnnResult {
         let (tx, rx) = oneshot::channel();
         self.result_channel = Some(tx);
         let mut handle = system.start_component(self);
