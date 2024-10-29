@@ -4,7 +4,7 @@ use crate::{
             single_column_size_tracker::SingleColumnSizeTracker,
             single_column_storage::SingleColumnStorage, UnorderedBlockDelta, BlockStorage,
         },
-        types::BuilderMutationOrderHint,
+        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -48,7 +48,7 @@ impl ArrowWriteableValue for Vec<u32> {
         }
     }
 
-    fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage {
         BlockStorage::VecUInt32(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
