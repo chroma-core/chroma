@@ -131,7 +131,7 @@ impl ArrowOrderedBlockfileWriter {
             .expect("There should be no other strong references to the completed block deltas")
             .into_inner();
 
-        Self::flush_current_delta::<K, V>(&mut inner);
+        Self::complete_current_delta::<K, V>(&mut inner);
 
         let mut split_block_deltas = Vec::new();
         for delta in inner.completed_block_deltas.drain(..) {
@@ -219,7 +219,7 @@ impl ArrowOrderedBlockfileWriter {
         Ok(flusher)
     }
 
-    fn flush_current_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(inner: &mut Inner) {
+    fn complete_current_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(inner: &mut Inner) {
         if let Some((mut delta, _)) = inner.current_block_delta.take() {
             delta.copy_to_end::<K, V>();
             inner.completed_block_deltas.push(delta);
@@ -232,7 +232,7 @@ impl ArrowOrderedBlockfileWriter {
         new_delta_block_id: &Uuid,
         new_delta_end_key: Option<CompositeKey>,
     ) -> Result<(), Box<dyn ChromaError>> {
-        Self::flush_current_delta::<K, V>(inner);
+        Self::complete_current_delta::<K, V>(inner);
 
         let new_delta = self
             .block_manager

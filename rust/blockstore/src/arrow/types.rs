@@ -15,7 +15,7 @@ pub trait ArrowWriteableKey: Key + Default {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuilderMutationOrderHint {
+pub enum MutationOrderHint {
     Unordered,
     Ordered,
 }
@@ -39,7 +39,7 @@ pub trait ArrowWriteableValue: Value {
     /// Delete a K/V pair from a delta. This is called when a K/V pair is deleted from a blockfile.
     fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta);
     /// Returns an appropriate `BlockStorage` instance for the value type. This is called when creating a new delta.
-    fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage;
+    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage;
     /// Constructs a new Arrow builder for `Self::ArrowBuilder` given the final size of the delta. This is called when a delta is done receiving updates and is ready to be committed.
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder;
     /// Prepare a value for storage in delta or Arrow array.

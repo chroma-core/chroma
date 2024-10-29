@@ -2,9 +2,9 @@ use crate::{
     arrow::{
         block::delta::{
             single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, UnorderedBlockDelta, BlockStorage,
+            single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
-        types::BuilderMutationOrderHint,
+        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -44,7 +44,7 @@ impl ArrowWriteableValue for String {
         }
     }
 
-    fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage {
         BlockStorage::String(SingleColumnStorage::new(mutation_ordering_hint))
     }
 

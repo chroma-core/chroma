@@ -4,7 +4,7 @@ use super::{storage::BlockStorage, types::Delta};
 use crate::{
     arrow::{
         block::Block,
-        types::{ArrowWriteableKey, ArrowWriteableValue, BuilderMutationOrderHint},
+        types::{ArrowWriteableKey, ArrowWriteableValue, MutationOrderHint},
     },
     key::CompositeKey,
 };
@@ -35,14 +35,17 @@ impl Delta for UnorderedBlockDelta {
     #[allow(clippy::extra_unused_type_parameters)]
     fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
         UnorderedBlockDelta {
-            builder: V::get_delta_builder(BuilderMutationOrderHint::Unordered),
+            builder: V::get_delta_builder(MutationOrderHint::Unordered),
             id,
         }
     }
 
-    fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid, block: &Block) -> Self {
-        let delta = UnorderedBlockDelta::new::<K, V>(id);
-        block.to_block_delta::<K::ReadableKey<'_>, V::ReadableValue<'_>>(delta)
+    fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        new_id: Uuid,
+        old_block: &Block,
+    ) -> Self {
+        let delta = UnorderedBlockDelta::new::<K, V>(new_id);
+        old_block.to_block_delta::<K::ReadableKey<'_>, V::ReadableValue<'_>>(delta)
     }
 
     fn id(&self) -> Uuid {

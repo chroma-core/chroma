@@ -17,7 +17,10 @@ pub(crate) trait Delta {
     /// # Arguments
     /// - id: the id of the block delta.
     /// - block: the block to fork.
-    fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid, block: &Block) -> Self;
+    fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        new_id: Uuid,
+        old_block: &Block,
+    ) -> Self;
     fn id(&self) -> Uuid;
     /// Finishes the block delta and converts it into a record batch.
     /// # Arguments
