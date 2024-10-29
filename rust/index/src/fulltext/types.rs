@@ -1,7 +1,7 @@
 use crate::fulltext::tokenizer::ChromaTokenizer;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use roaring::RoaringBitmap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -412,8 +412,7 @@ impl<'me> FullTextIndexReader<'me> {
             .then(|token| async {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
-                    .get_range_stream(token.text.as_str()..=token.text.as_str(), ..)
-                    .try_collect::<Vec<_>>()
+                    .get_range(token.text.as_str()..=token.text.as_str(), ..)
                     .await?;
                 Ok::<_, FullTextIndexError>(positional_posting_list)
             })
@@ -515,8 +514,7 @@ impl<'me> FullTextIndexReader<'me> {
     ) -> Result<Vec<(u32, Vec<u32>)>, FullTextIndexError> {
         let positional_posting_list = self
             .posting_lists_blockfile_reader
-            .get_range_stream(token..=token, ..)
-            .try_collect::<Vec<_>>()
+            .get_range(token..=token, ..)
             .await?;
         let mut results = vec![];
         for (doc_id, positions) in positional_posting_list.iter() {
@@ -530,8 +528,7 @@ impl<'me> FullTextIndexReader<'me> {
     async fn get_frequencies_for_token(&self, token: &str) -> Result<u32, FullTextIndexError> {
         let res = self
             .frequencies_blockfile_reader
-            .get_range_stream(token..=token, ..)
-            .try_collect::<Vec<_>>()
+            .get_range(token..=token, ..)
             .await?;
         if res.is_empty() {
             return Ok(0);
