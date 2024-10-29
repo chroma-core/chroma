@@ -1,6 +1,6 @@
 use super::provider::{GetError, RootManager};
 use super::root::{RootReader, RootWriter, Version};
-use super::{block::delta::BlockDelta, provider::BlockManager};
+use super::{block::delta::UnorderedBlockDelta, provider::BlockManager};
 use super::{
     block::Block,
     flusher::ArrowBlockfileFlusher,
@@ -27,7 +27,7 @@ use uuid::Uuid;
 pub struct ArrowUnorderedBlockfileWriter {
     block_manager: BlockManager,
     root_manager: RootManager,
-    block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
+    block_deltas: Arc<Mutex<HashMap<Uuid, UnorderedBlockDelta>>>,
     root: RootWriter,
     id: Uuid,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -57,7 +57,7 @@ impl ArrowUnorderedBlockfileWriter {
         block_manager: BlockManager,
         root_manager: RootManager,
     ) -> Self {
-        let initial_block = block_manager.create::<K, V, BlockDelta>();
+        let initial_block = block_manager.create::<K, V, UnorderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let root_writer = RootWriter::new(CURRENT_VERSION, id, sparse_index);
 
@@ -205,7 +205,11 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_delta = match self.block_manager.fork::<K, V, BlockDelta>(&block.id).await {
+                let new_delta = match self
+                    .block_manager
+                    .fork::<K, V, UnorderedBlockDelta>(&block.id)
+                    .await
+                {
                     Ok(delta) => delta,
                     Err(e) => {
                         return Err(Box::new(e));
@@ -272,7 +276,11 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_delta = match self.block_manager.fork::<K, V, BlockDelta>(&block.id).await {
+                let new_delta = match self
+                    .block_manager
+                    .fork::<K, V, UnorderedBlockDelta>(&block.id)
+                    .await
+                {
                     Ok(delta) => delta,
                     Err(e) => {
                         return Err(Box::new(e));
@@ -625,8 +633,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
 #[cfg(test)]
 mod tests {
-    use crate::arrow::block::delta::types::DeltaCommon;
-    use crate::arrow::block::delta::BlockDelta;
+    use crate::arrow::block::delta::types::Delta;
+    use crate::arrow::block::delta::UnorderedBlockDelta;
     use crate::arrow::block::Block;
     use crate::arrow::blockfile::ArrowUnorderedBlockfileWriter;
     use crate::arrow::provider::{BlockManager, RootManager};
@@ -1628,7 +1636,7 @@ mod tests {
         let block_manager = BlockManager::new(storage.clone(), 8 * 1024 * 1024, block_cache);
 
         // Manually create a v1 blockfile with no counts
-        let initial_block = block_manager.create::<&str, String, BlockDelta>();
+        let initial_block = block_manager.create::<&str, String, UnorderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let file_id = Uuid::new_v4();
         let root_writer = RootWriter::new(Version::V1, file_id, sparse_index);
@@ -1697,9 +1705,9 @@ mod tests {
         ////////////////////////// STEP 1 //////////////////////////
 
         // Create two blocks with some data, we will make this conceptually a v1 block
-        let old_block_delta_1 = block_manager.create::<&str, String, BlockDelta>();
+        let old_block_delta_1 = block_manager.create::<&str, String, UnorderedBlockDelta>();
         old_block_delta_1.add("prefix", "a", "value_a".to_string());
-        let old_block_delta_2 = block_manager.create::<&str, String, BlockDelta>();
+        let old_block_delta_2 = block_manager.create::<&str, String, UnorderedBlockDelta>();
         old_block_delta_2.add("prefix", "f", "value_b".to_string());
         let old_block_id_1 = old_block_delta_1.id;
         let old_block_id_2 = old_block_delta_2.id;

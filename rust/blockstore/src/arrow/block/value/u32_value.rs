@@ -2,7 +2,7 @@ use crate::{
     arrow::{
         block::delta::{
             single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
+            single_column_storage::SingleColumnStorage, UnorderedBlockDelta, BlockStorage,
         },
         types::BuilderMutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
@@ -36,7 +36,7 @@ impl ArrowWriteableValue for u32 {
         }
     }
 
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
         match &delta.builder {
             BlockStorage::UInt32(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type: {:?}", &delta.builder),
