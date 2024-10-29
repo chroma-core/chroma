@@ -211,13 +211,13 @@ class AsyncBaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Optional[Where] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
@@ -244,8 +244,8 @@ class AsyncBaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
     ) -> None:
         """[Internal] Deletes entries from a collection specified by UUID.
 
@@ -266,8 +266,8 @@ class AsyncBaseAPI(ABC):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
@@ -634,13 +634,13 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Optional[Where] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -699,8 +699,8 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -713,8 +713,8 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
