@@ -5,10 +5,7 @@ use super::{
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 use chroma_error::ChromaError;
-use futures::{
-    stream::{FuturesOrdered, FuturesUnordered},
-    StreamExt, TryStreamExt,
-};
+use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 
 pub struct ArrowBlockfileFlusher {
