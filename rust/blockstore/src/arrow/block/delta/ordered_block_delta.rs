@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{storage::BlockStorage, types::DeltaCommon};
+use super::{storage::BlockStorage, types::Delta};
 use crate::{
     arrow::{
         block::Block,
@@ -31,7 +31,7 @@ pub struct OrderedBlockDelta {
     old_block: Option<Block>,
 }
 
-impl DeltaCommon for OrderedBlockDelta {
+impl Delta for OrderedBlockDelta {
     // NOTE(rescrv):  K is unused, but it is very conceptually easy to think of everything as
     // key-value pairs.  I started to refactor this to remove ArrowWriteableKey, but it was not
     // readable to tell whether I was operating on the key or value type.  Keeping both but

@@ -8,7 +8,7 @@ use crate::arrow::{
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 
-pub(crate) trait DeltaCommon {
+pub(crate) trait Delta {
     /// Creates a new block delta from a block.
     /// # Arguments
     /// - id: the id of the block delta.
