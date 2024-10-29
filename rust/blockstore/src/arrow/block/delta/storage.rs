@@ -19,7 +19,7 @@ use std::{
 };
 
 #[derive(Clone)]
-pub(crate) enum BlockStorage {
+pub enum BlockStorage {
     String(SingleColumnStorage<String>),
     VecUInt32(SingleColumnStorage<Vec<u32>>),
     UInt32(SingleColumnStorage<u32>),
