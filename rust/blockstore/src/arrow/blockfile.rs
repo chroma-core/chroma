@@ -140,24 +140,6 @@ impl ArrowUnorderedBlockfileWriter {
         Ok(flusher)
     }
 
-    fn split_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
-        delta: UnorderedBlockDelta,
-    ) -> Result<(), Box<dyn ChromaError>> {
-        let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
-        for (split_key, new_delta) in new_blocks {
-            self.root
-                .sparse_index
-                .add_block(split_key, new_delta.id)
-                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-
-            let mut deltas = self.block_deltas.lock();
-            deltas.insert(new_delta.id, new_delta);
-        }
-
-        Ok(())
-    }
-
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
@@ -222,7 +204,16 @@ impl ArrowUnorderedBlockfileWriter {
         delta.add(prefix, key, value);
 
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-            self.split_delta::<K, V>(delta)?;
+            let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+            for (split_key, new_delta) in new_blocks {
+                self.root
+                    .sparse_index
+                    .add_block(split_key, new_delta.id)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
+                let mut deltas = self.block_deltas.lock();
+                deltas.insert(new_delta.id, new_delta);
+            }
         }
 
         Ok(())
@@ -277,9 +268,7 @@ impl ArrowUnorderedBlockfileWriter {
             }
             Some(delta) => delta,
         };
-
         delta.delete::<K, V>(prefix, key);
-
         Ok(())
     }
 
