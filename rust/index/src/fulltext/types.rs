@@ -412,7 +412,7 @@ impl<'me> FullTextIndexReader<'me> {
             .then(|token| async {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
-                    .get_range(token.text.as_str()..=token.text.as_str(), ..)
+                    .get_range_stream(token.text.as_str()..=token.text.as_str(), ..)
                     .try_collect::<Vec<_>>()
                     .await?;
                 Ok::<_, FullTextIndexError>(positional_posting_list)
@@ -515,7 +515,7 @@ impl<'me> FullTextIndexReader<'me> {
     ) -> Result<Vec<(u32, Vec<u32>)>, FullTextIndexError> {
         let positional_posting_list = self
             .posting_lists_blockfile_reader
-            .get_range(token..=token, ..)
+            .get_range_stream(token..=token, ..)
             .try_collect::<Vec<_>>()
             .await?;
         let mut results = vec![];
@@ -530,7 +530,7 @@ impl<'me> FullTextIndexReader<'me> {
     async fn get_frequencies_for_token(&self, token: &str) -> Result<u32, FullTextIndexError> {
         let res = self
             .frequencies_blockfile_reader
-            .get_range(token..=token, ..)
+            .get_range_stream(token..=token, ..)
             .try_collect::<Vec<_>>()
             .await?;
         if res.is_empty() {

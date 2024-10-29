@@ -178,7 +178,7 @@ mod tests {
             assert_eq!(block_on(reader.count()).unwrap(), ref_last_commit.len());
 
             // Check that entries are ordered and match expected
-            let all_entries = block_on(reader.get_range(.., ..).try_collect::<Vec<_>>()).unwrap();
+            let all_entries = block_on(reader.get_range_stream(.., ..).try_collect::<Vec<_>>()).unwrap();
             assert_eq!(all_entries.len(), ref_last_commit.len());
 
             for (blockfile_entry, expected_entry) in all_entries.iter().zip(ref_last_commit.iter())

@@ -565,7 +565,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => blockfile_reader
-                    .get_range(metadata_key..=metadata_key, ..*k)
+                    .get_range_stream(metadata_key..=metadata_key, ..*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
                         Ok(result.bitor(&record.1))
                     })
@@ -575,7 +575,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => blockfile_reader
-                    .get_range(metadata_key..=metadata_key, ..*k)
+                    .get_range_stream(metadata_key..=metadata_key, ..*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
                         Ok(result.bitor(&record.1))
                     })
@@ -595,7 +595,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => blockfile_reader
-                    .get_range(metadata_key..=metadata_key, ..=*k)
+                    .get_range_stream(metadata_key..=metadata_key, ..=*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
                         Ok(result.bitor(&record.1))
                     })
@@ -605,7 +605,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => blockfile_reader
-                    .get_range(metadata_key..=metadata_key, ..=*k)
+                    .get_range_stream(metadata_key..=metadata_key, ..=*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
                         Ok(result.bitor(&record.1))
                     })
@@ -625,7 +625,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => blockfile_reader
-                    .get_range(
+                    .get_range_stream(
                         metadata_key..=metadata_key,
                         (Bound::Excluded(*k), Bound::Unbounded),
                     )
@@ -638,7 +638,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => blockfile_reader
-                    .get_range(
+                    .get_range_stream(
                         metadata_key..=metadata_key,
                         (Bound::Excluded(*k), Bound::Unbounded),
                     )
@@ -661,7 +661,7 @@ impl<'me> MetadataIndexReader<'me> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Uint32(k) => blockfile_reader
-                    .get_range(metadata_key..=metadata_key, *k..)
+                    .get_range_stream(metadata_key..=metadata_key, *k..)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
                         Ok(result.bitor(&record.1))
                     })
@@ -671,7 +671,7 @@ impl<'me> MetadataIndexReader<'me> {
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
                 KeyWrapper::Float32(k) => blockfile_reader
-                    .get_range(metadata_key..=metadata_key, *k..)
+                    .get_range_stream(metadata_key..=metadata_key, *k..)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
                         Ok(result.bitor(&record.1))
                     })
