@@ -28,7 +28,7 @@ fn generate_kv_pairs() -> Vec<((String, u32), u32)> {
 
 async fn create_populated_blockfile(provider: &ArrowBlockfileProvider) -> Uuid {
     let writer = provider
-        .get_writer::<u32, u32>(BlockfileWriterOptions::new().unordered_mutations())
+        .write::<u32, u32>(BlockfileWriterOptions::new().unordered_mutations())
         .await
         .unwrap();
     let id = writer.id();
@@ -63,7 +63,7 @@ pub fn benchmark(c: &mut Criterion) {
         new_writer.bench_function("UnorderedBlockfileWriter", |b| {
             b.to_async(&runner).iter_with_large_drop(|| async {
                 let writer = arrow_blockfile_provider
-                    .get_writer::<u32, u32>(BlockfileWriterOptions::new().unordered_mutations())
+                    .write::<u32, u32>(BlockfileWriterOptions::new().unordered_mutations())
                     .await
                     .unwrap();
                 for (key, value) in data.iter() {
@@ -76,7 +76,7 @@ pub fn benchmark(c: &mut Criterion) {
         new_writer.bench_function("OrderedBlockfileWriter", |b| {
             b.to_async(&runner).iter_with_large_drop(|| async {
                 let writer = arrow_blockfile_provider
-                    .get_writer::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
+                    .write::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
                     .await
                     .unwrap();
                 for (key, value) in sorted_data.iter() {
@@ -94,7 +94,7 @@ pub fn benchmark(c: &mut Criterion) {
         forked_writer.bench_function("UnorderedBlockfileWriter", |b| {
             b.to_async(&runner).iter_with_large_drop(|| async {
                 let writer = arrow_blockfile_provider
-                    .get_writer::<u32, u32>(
+                    .write::<u32, u32>(
                         BlockfileWriterOptions::new()
                             .unordered_mutations()
                             .fork(populated_blockfile_id),
@@ -111,7 +111,7 @@ pub fn benchmark(c: &mut Criterion) {
         forked_writer.bench_function("OrderedBlockfileWriter", |b| {
             b.to_async(&runner).iter_with_large_drop(|| async {
                 let writer = arrow_blockfile_provider
-                    .get_writer::<u32, u32>(
+                    .write::<u32, u32>(
                         BlockfileWriterOptions::new()
                             .ordered_mutations()
                             .fork(populated_blockfile_id),
