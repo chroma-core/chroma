@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 90458c723bdc5861c0caf78c7d3419a91a2999798a3d740a80787275e95e0e73 # shrinks to (initial_state, transitions) = (RefState { generated_max_block_size_bytes: 500, generated_mutation_ordering: Ordered, dirty_keys: {}, store: {}, last_commit: None }, [Set("0", "5Z5c7Cp9xDzXyPHY", "LXqGXc7SzSX8p2eWvD1HALf"), Delete("OFUGv3RW", "uNun"), Set("233cT", "tPI0NZH2L3WFy47JLKnDh73PE9m3M", "13bR8gS3A98nWHfdci")])
