@@ -1,10 +1,8 @@
 use crate::{
     arrow::{
         block::delta::{
-            single_column_storage::{
-                SingleColumnStorage, SingleColumnStorageArrowValueCapacityHint,
-            },
-            BlockDelta, BlockStorage,
+            single_column_size_tracker::SingleColumnSizeTracker,
+            single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
         },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
@@ -20,7 +18,7 @@ use std::{mem::size_of, sync::Arc};
 impl ArrowWriteableValue for Vec<u32> {
     type ReadableValue<'referred_data> = &'referred_data [u32];
     type ArrowBuilder = ListBuilder<UInt32Builder>;
-    type ArrowCapacityHint = SingleColumnStorageArrowValueCapacityHint;
+    type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = Vec<u32>;
 
     fn offset_size(item_count: usize) -> usize {
@@ -53,11 +51,11 @@ impl ArrowWriteableValue for Vec<u32> {
         BlockStorage::VecUInt32(SingleColumnStorage::new())
     }
 
-    fn get_arrow_builder(capacity_hint: Self::ArrowCapacityHint) -> Self::ArrowBuilder {
-        let total_value_count = capacity_hint.byte_size / size_of::<u32>();
+    fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
+        let total_value_count = size_tracker.get_value_size() / size_of::<u32>();
         ListBuilder::with_capacity(
             UInt32Builder::with_capacity(total_value_count),
-            capacity_hint.item_count,
+            size_tracker.get_num_items(),
         )
     }
 

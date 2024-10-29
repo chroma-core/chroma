@@ -1,7 +1,7 @@
 use crate::{
     arrow::{
         block::delta::{
-            data_record::{DataRecordArrowCapacityHint, DataRecordStorage},
+            data_record::DataRecordStorage, data_record_size_tracker::DataRecordSizeTracker,
             BlockDelta, BlockStorage,
         },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
@@ -33,7 +33,7 @@ pub struct ValueBuilderWrapper {
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
     type ArrowBuilder = ValueBuilderWrapper;
-    type ArrowCapacityHint = DataRecordArrowCapacityHint;
+    type SizeTracker = DataRecordSizeTracker;
     type PreparedValue = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
 
     fn offset_size(item_count: usize) -> usize {
@@ -68,26 +68,27 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         BlockStorage::DataRecord(DataRecordStorage::new())
     }
 
-    fn get_arrow_builder(capacity_hint: Self::ArrowCapacityHint) -> Self::ArrowBuilder {
+    fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
         ValueBuilderWrapper {
             id_builder: StringBuilder::with_capacity(
-                capacity_hint.item_count,
-                capacity_hint.id_byte_size,
+                size_tracker.get_num_items(),
+                size_tracker.get_id_size(),
             ),
             embedding_builder: FixedSizeListBuilder::with_capacity(
                 Float32Builder::with_capacity(
-                    capacity_hint.item_count * capacity_hint.embedding_dimension,
+                    size_tracker.get_num_items()
+                        * size_tracker.get_embedding_dimension().unwrap_or(0),
                 ),
-                capacity_hint.embedding_dimension as i32,
-                capacity_hint.item_count,
+                size_tracker.get_embedding_dimension().unwrap_or(0) as i32,
+                size_tracker.get_num_items(),
             ),
             metadata_builder: BinaryBuilder::with_capacity(
-                capacity_hint.item_count,
-                capacity_hint.metadata_byte_size,
+                size_tracker.get_num_items(),
+                size_tracker.get_metadata_size(),
             ),
             document_builder: StringBuilder::with_capacity(
-                capacity_hint.item_count,
-                capacity_hint.document_byte_size,
+                size_tracker.get_num_items(),
+                size_tracker.get_document_size(),
             ),
         }
     }

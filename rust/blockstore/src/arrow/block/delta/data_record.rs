@@ -1,3 +1,4 @@
+use super::data_record_size_tracker::DataRecordSizeTracker;
 use super::BlockKeyArrowBuilder;
 use crate::arrow::types::ArrowWriteableValue;
 use crate::{
@@ -15,20 +16,7 @@ struct Inner {
         CompositeKey,
         <&'static chroma_types::DataRecord<'static> as ArrowWriteableValue>::PreparedValue,
     >,
-    prefix_size: usize,
-    key_size: usize,
-    id_size: usize,
-    embedding_size: usize,
-    metadata_size: usize,
-    document_size: usize,
-}
-
-pub struct DataRecordArrowCapacityHint {
-    pub item_count: usize,
-    pub embedding_dimension: usize,
-    pub id_byte_size: usize,
-    pub metadata_byte_size: usize,
-    pub document_byte_size: usize,
+    size_tracker: DataRecordSizeTracker,
 }
 
 #[derive(Clone, Debug)]
@@ -38,12 +26,7 @@ pub struct DataRecordStorage {
 
 struct SplitInformation {
     split_key: CompositeKey,
-    remaining_prefix_size: usize,
-    remaining_key_size: usize,
-    remaining_id_size: usize,
-    remaining_embedding_size: usize,
-    remaining_metadata_size: usize,
-    remaining_document_size: usize,
+    remaining_size: DataRecordSizeTracker,
 }
 
 impl DataRecordStorage {
@@ -51,44 +34,19 @@ impl DataRecordStorage {
         Self {
             inner: Arc::new(RwLock::new(Inner {
                 storage: BTreeMap::new(),
-                prefix_size: 0,
-                key_size: 0,
-                id_size: 0,
-                embedding_size: 0,
-                metadata_size: 0,
-                document_size: 0,
+                size_tracker: DataRecordSizeTracker::new(),
             })),
         }
     }
 
     pub(super) fn get_prefix_size(&self) -> usize {
         let inner = self.inner.read();
-        inner.prefix_size
+        inner.size_tracker.get_prefix_size()
     }
 
     pub(super) fn get_key_size(&self) -> usize {
         let inner = self.inner.read();
-        inner.key_size
-    }
-
-    pub fn get_id_size(&self) -> usize {
-        let inner = self.inner.read();
-        inner.id_size
-    }
-
-    fn get_embedding_size(&self) -> usize {
-        let inner = self.inner.read();
-        inner.embedding_size
-    }
-
-    fn get_metadata_size(&self) -> usize {
-        let inner = self.inner.read();
-        inner.metadata_size
-    }
-
-    fn get_document_size(&self) -> usize {
-        let inner = self.inner.read();
-        inner.document_size
+        inner.size_tracker.get_key_size()
     }
 
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: &DataRecord<'_>) {
@@ -98,34 +56,16 @@ impl DataRecordStorage {
             key,
         };
 
-        if inner.storage.contains_key(&composite_key) {
+        if let Some(previous_entry) = inner.storage.remove(&composite_key) {
             // key already exists, subtract the old size
-            // unwraps are safe because we just checked if the key exists
-            let old_id_size = inner.storage.get(&composite_key).unwrap().0.len();
-            inner.id_size -= old_id_size;
-
-            let old_embedding_size = inner.storage.get(&composite_key).unwrap().1.len() * 4;
-            inner.embedding_size -= old_embedding_size;
-
-            let old_metadata_size = inner
-                .storage
-                .get(&composite_key)
-                .unwrap()
-                .2
-                .as_ref()
-                .map_or(0, |v| v.len());
-            inner.metadata_size -= old_metadata_size;
-
-            let old_document_size = inner
-                .storage
-                .get(&composite_key)
-                .unwrap()
-                .3
-                .as_ref()
-                .map_or(0, |v| v.len());
-            inner.document_size -= old_document_size;
-            inner.prefix_size -= composite_key.prefix.len();
-            inner.key_size -= composite_key.key.get_size();
+            inner.size_tracker.subtract_value_size(&previous_entry);
+            inner
+                .size_tracker
+                .subtract_prefix_size(composite_key.prefix.len());
+            inner
+                .size_tracker
+                .subtract_key_size(composite_key.key.get_size());
+            inner.size_tracker.decrement_item_count();
         }
 
         let prefix_size = composite_key.prefix.len();
@@ -133,12 +73,10 @@ impl DataRecordStorage {
 
         let prepared = <&chroma_types::DataRecord>::prepare(value);
 
-        inner.id_size += prepared.0.len();
-        inner.embedding_size += prepared.1.len() * 4;
-        inner.metadata_size += prepared.2.as_ref().map_or(0, |v| v.len());
-        inner.document_size += prepared.3.as_ref().map_or(0, |v| v.len());
-        inner.prefix_size += prefix_size;
-        inner.key_size += key_size;
+        inner.size_tracker.add_value_size(&prepared);
+        inner.size_tracker.add_prefix_size(prefix_size);
+        inner.size_tracker.add_key_size(key_size);
+        inner.size_tracker.increment_item_count();
 
         inner.storage.insert(composite_key.clone(), prepared);
     }
@@ -152,15 +90,15 @@ impl DataRecordStorage {
 
         let maybe_removed_entry = inner.storage.remove(&composite_key);
 
-        if let Some((remove_id, remove_embedding, remove_metadata, remove_document)) =
-            maybe_removed_entry
-        {
-            inner.prefix_size -= composite_key.prefix.len();
-            inner.key_size -= composite_key.key.get_size();
-            inner.id_size -= remove_id.len();
-            inner.embedding_size -= remove_embedding.len() * 4;
-            inner.metadata_size -= remove_metadata.as_ref().map_or(0, |v| v.len());
-            inner.document_size -= remove_document.as_ref().map_or(0, |v| v.len());
+        if let Some(removed_entry) = maybe_removed_entry {
+            inner
+                .size_tracker
+                .subtract_prefix_size(composite_key.prefix.len());
+            inner
+                .size_tracker
+                .subtract_key_size(composite_key.key.get_size());
+            inner.size_tracker.subtract_value_size(&removed_entry);
+            inner.size_tracker.decrement_item_count();
         }
     }
 
@@ -170,13 +108,17 @@ impl DataRecordStorage {
     }
 
     pub(super) fn get_size<K: ArrowWriteableKey>(&self) -> usize {
-        let prefix_size = bit_util::round_upto_multiple_of_64(self.get_prefix_size());
-        let key_size = bit_util::round_upto_multiple_of_64(self.get_key_size());
+        let inner = self.inner.read();
+        let prefix_size = bit_util::round_upto_multiple_of_64(inner.size_tracker.get_prefix_size());
+        let key_size = bit_util::round_upto_multiple_of_64(inner.size_tracker.get_key_size());
 
-        let id_size = bit_util::round_upto_multiple_of_64(self.get_id_size());
-        let embedding_size = bit_util::round_upto_multiple_of_64(self.get_embedding_size());
-        let metadata_size = bit_util::round_upto_multiple_of_64(self.get_metadata_size());
-        let document_size = bit_util::round_upto_multiple_of_64(self.get_document_size());
+        let id_size = bit_util::round_upto_multiple_of_64(inner.size_tracker.get_id_size());
+        let embedding_size =
+            bit_util::round_upto_multiple_of_64(inner.size_tracker.get_embedding_size());
+        let metadata_size =
+            bit_util::round_upto_multiple_of_64(inner.size_tracker.get_metadata_size());
+        let document_size =
+            bit_util::round_upto_multiple_of_64(inner.size_tracker.get_document_size());
 
         // offset sizing
         // https://docs.rs/arrow-buffer/52.2.0/arrow_buffer/buffer/struct.OffsetBuffer.html
@@ -206,30 +148,22 @@ impl DataRecordStorage {
     }
 
     fn split_internal<K: ArrowWriteableKey>(&self, split_size: usize) -> SplitInformation {
-        let mut prefix_size = 0;
-        let mut key_size = 0;
-        let mut id_size = 0;
-        let mut embedding_size = 0;
-        let mut metadata_size = 0;
-        let mut document_size = 0;
-        let mut item_count = 0;
+        let mut size_up_to_split_key = DataRecordSizeTracker::new();
         let mut split_key = None;
 
         let inner = self.inner.read();
         let mut iter = inner.storage.iter();
 
-        while let Some((key, (id, embedding, metadata, document))) = iter.next() {
-            prefix_size += key.prefix.len();
-            key_size += key.key.get_size();
-            id_size += id.len();
-            embedding_size += embedding.len() * 4;
-            metadata_size += metadata.as_ref().map_or(0, |v| v.len());
-            document_size += document.as_ref().map_or(0, |v| v.len());
-            item_count += 1;
+        while let Some((key, entry)) = iter.next() {
+            size_up_to_split_key.add_prefix_size(key.prefix.len());
+            size_up_to_split_key.add_key_size(key.key.get_size());
+            size_up_to_split_key.add_value_size(entry);
+            size_up_to_split_key.increment_item_count();
 
             // offset sizing
             // https://docs.rs/arrow-buffer/52.2.0/arrow_buffer/buffer/struct.OffsetBuffer.html
             // 4 bytes per offset entry, n+1 entries
+            let item_count = size_up_to_split_key.get_num_items();
             let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
             let key_offset_bytes: usize = K::offset_size(item_count);
             let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
@@ -241,30 +175,31 @@ impl DataRecordStorage {
                 bit_util::round_upto_multiple_of_64(bit_util::ceil(item_count, 8)) * 2;
 
             // round all running sizes to 64 and add them together
-            let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
-                + bit_util::round_upto_multiple_of_64(key_size)
-                + bit_util::round_upto_multiple_of_64(id_size)
-                + bit_util::round_upto_multiple_of_64(embedding_size)
-                + bit_util::round_upto_multiple_of_64(metadata_size)
-                + bit_util::round_upto_multiple_of_64(document_size)
-                + prefix_offset_bytes
-                + key_offset_bytes
-                + id_offset
-                + metdata_offset
-                + document_offset
-                + validity_bytes;
+            let total_size =
+                bit_util::round_upto_multiple_of_64(size_up_to_split_key.get_prefix_size())
+                    + bit_util::round_upto_multiple_of_64(size_up_to_split_key.get_key_size())
+                    + bit_util::round_upto_multiple_of_64(size_up_to_split_key.get_id_size())
+                    + bit_util::round_upto_multiple_of_64(
+                        size_up_to_split_key.get_embedding_size(),
+                    )
+                    + bit_util::round_upto_multiple_of_64(size_up_to_split_key.get_metadata_size())
+                    + bit_util::round_upto_multiple_of_64(size_up_to_split_key.get_document_size())
+                    + prefix_offset_bytes
+                    + key_offset_bytes
+                    + id_offset
+                    + metdata_offset
+                    + document_offset
+                    + validity_bytes;
 
             if total_size > split_size {
                 split_key = match iter.next() {
                     Some((key, _)) => Some(key.clone()),
                     None => {
                         // Remove the last item since we are splitting at the end
-                        prefix_size -= key.prefix.len();
-                        key_size -= key.key.get_size();
-                        id_size -= id.len();
-                        embedding_size -= embedding.len() * 4;
-                        metadata_size -= metadata.as_ref().map_or(0, |v| v.len());
-                        document_size -= document.as_ref().map_or(0, |v| v.len());
+                        size_up_to_split_key.subtract_prefix_size(key.prefix.len());
+                        size_up_to_split_key.subtract_key_size(key.key.get_size());
+                        size_up_to_split_key.subtract_value_size(entry);
+                        size_up_to_split_key.decrement_item_count();
                         Some(key.clone())
                     }
                 };
@@ -274,12 +209,7 @@ impl DataRecordStorage {
 
         SplitInformation {
             split_key: split_key.expect("split key should be set"),
-            remaining_prefix_size: inner.prefix_size - prefix_size,
-            remaining_key_size: inner.key_size - key_size,
-            remaining_id_size: inner.id_size - id_size,
-            remaining_embedding_size: inner.embedding_size - embedding_size,
-            remaining_metadata_size: inner.metadata_size - metadata_size,
-            remaining_document_size: inner.document_size - document_size,
+            remaining_size: inner.size_tracker - size_up_to_split_key,
         }
     }
 
@@ -290,22 +220,12 @@ impl DataRecordStorage {
         let split_info = self.split_internal::<K>(split_size);
         let mut inner = self.inner.write();
         let split_storage = inner.storage.split_off(&split_info.split_key);
-        inner.prefix_size -= split_info.remaining_prefix_size;
-        inner.key_size -= split_info.remaining_key_size;
-        inner.id_size -= split_info.remaining_id_size;
-        inner.embedding_size -= split_info.remaining_embedding_size;
-        inner.metadata_size -= split_info.remaining_metadata_size;
-        inner.document_size -= split_info.remaining_document_size;
+        inner.size_tracker = inner.size_tracker - split_info.remaining_size;
 
         let drs = DataRecordStorage {
             inner: Arc::new(RwLock::new(Inner {
                 storage: split_storage,
-                prefix_size: split_info.remaining_prefix_size,
-                key_size: split_info.remaining_key_size,
-                id_size: split_info.remaining_id_size,
-                embedding_size: split_info.remaining_embedding_size,
-                metadata_size: split_info.remaining_metadata_size,
-                document_size: split_info.remaining_document_size,
+                size_tracker: split_info.remaining_size,
             })),
         };
 
@@ -329,16 +249,7 @@ impl DataRecordStorage {
         let storage = inner.storage;
 
         let mut value_builder =
-            <&DataRecord as ArrowWriteableValue>::get_arrow_builder(DataRecordArrowCapacityHint {
-                item_count: storage.len(),
-                embedding_dimension: match storage.values().next() {
-                    Some((_, embedding, _, _)) => embedding.len(),
-                    None => 0,
-                },
-                id_byte_size: inner.id_size,
-                metadata_byte_size: inner.metadata_size,
-                document_byte_size: inner.document_size,
-            });
+            <&DataRecord as ArrowWriteableValue>::get_arrow_builder(inner.size_tracker);
 
         for (key, value) in storage.into_iter() {
             key_builder.add_key(key);

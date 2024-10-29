@@ -1,10 +1,8 @@
 use crate::{
     arrow::{
         block::delta::{
-            single_column_storage::{
-                SingleColumnStorage, SingleColumnStorageArrowValueCapacityHint,
-            },
-            BlockDelta, BlockStorage,
+            single_column_size_tracker::SingleColumnSizeTracker,
+            single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
         },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
@@ -20,7 +18,7 @@ use std::sync::Arc;
 impl ArrowWriteableValue for String {
     type ReadableValue<'referred_data> = &'referred_data str;
     type ArrowBuilder = StringBuilder;
-    type ArrowCapacityHint = SingleColumnStorageArrowValueCapacityHint;
+    type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = String;
 
     fn offset_size(item_count: usize) -> usize {
@@ -49,8 +47,8 @@ impl ArrowWriteableValue for String {
         BlockStorage::String(SingleColumnStorage::new())
     }
 
-    fn get_arrow_builder(capacity_hint: Self::ArrowCapacityHint) -> Self::ArrowBuilder {
-        StringBuilder::with_capacity(capacity_hint.item_count, capacity_hint.byte_size)
+    fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
+        StringBuilder::with_capacity(size_tracker.get_num_items(), size_tracker.get_value_size())
     }
 
     fn prepare(value: Self) -> Self::PreparedValue {
