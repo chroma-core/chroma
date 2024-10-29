@@ -182,6 +182,7 @@ class QuotaError(ChromaError):
 
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
+    "InvalidArgumentError": InvalidArgumentError,
     "InvalidCollection": InvalidCollectionException,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
