@@ -97,47 +97,47 @@ impl<V: ArrowWriteableValue> Default for VecBuilderStorage<V> {
     }
 }
 
-pub enum BuilderStorageKind<V: ArrowWriteableValue> {
+pub enum BuilderStorage<V: ArrowWriteableValue> {
     BTreeBuilderStorage(BTreeBuilderStorage<V>),
     VecBuilderStorage(VecBuilderStorage<V>),
 }
 
-impl<V: ArrowWriteableValue + 'static> BuilderStorageKind<V> {
+impl<V: ArrowWriteableValue + 'static> BuilderStorage<V> {
     pub fn add(&mut self, key: CompositeKey, value: V) {
         match self {
-            BuilderStorageKind::BTreeBuilderStorage(storage) => storage.add(key, value),
-            BuilderStorageKind::VecBuilderStorage(storage) => storage.add(key, value),
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.add(key, value),
+            BuilderStorage::VecBuilderStorage(storage) => storage.add(key, value),
         }
     }
 
     pub fn delete(&mut self, key: &CompositeKey) -> Option<V> {
         match self {
-            BuilderStorageKind::BTreeBuilderStorage(storage) => storage.delete(key),
-            BuilderStorageKind::VecBuilderStorage(storage) => storage.delete(key),
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.delete(key),
+            BuilderStorage::VecBuilderStorage(storage) => storage.delete(key),
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            BuilderStorageKind::BTreeBuilderStorage(storage) => storage.len(),
-            BuilderStorageKind::VecBuilderStorage(storage) => storage.len(),
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.len(),
+            BuilderStorage::VecBuilderStorage(storage) => storage.len(),
         }
     }
 
     pub fn min_key(&self) -> Option<&CompositeKey> {
         match self {
-            BuilderStorageKind::BTreeBuilderStorage(storage) => storage.min_key(),
-            BuilderStorageKind::VecBuilderStorage(storage) => storage.min_key(),
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.min_key(),
+            BuilderStorage::VecBuilderStorage(storage) => storage.min_key(),
         }
     }
 
     pub fn split_off(&mut self, key: &CompositeKey) -> Self {
         match self {
-            BuilderStorageKind::BTreeBuilderStorage(storage) => {
-                BuilderStorageKind::BTreeBuilderStorage(storage.split_off(key))
+            BuilderStorage::BTreeBuilderStorage(storage) => {
+                BuilderStorage::BTreeBuilderStorage(storage.split_off(key))
             }
-            BuilderStorageKind::VecBuilderStorage(storage) => {
-                BuilderStorageKind::VecBuilderStorage(storage.split_off(key))
+            BuilderStorage::VecBuilderStorage(storage) => {
+                BuilderStorage::VecBuilderStorage(storage.split_off(key))
             }
         }
     }
@@ -147,8 +147,8 @@ impl<V: ArrowWriteableValue + 'static> BuilderStorageKind<V> {
     ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
     {
         match self {
-            BuilderStorageKind::BTreeBuilderStorage(storage) => storage.iter(),
-            BuilderStorageKind::VecBuilderStorage(storage) => storage.iter(),
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.iter(),
+            BuilderStorage::VecBuilderStorage(storage) => storage.iter(),
         }
     }
 
@@ -157,8 +157,8 @@ impl<V: ArrowWriteableValue + 'static> BuilderStorageKind<V> {
         <V as ArrowWriteableValue>::PreparedValue: 'static,
     {
         match self {
-            BuilderStorageKind::BTreeBuilderStorage(storage) => storage.into_iter(),
-            BuilderStorageKind::VecBuilderStorage(storage) => storage.into_iter(),
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.into_iter(),
+            BuilderStorage::VecBuilderStorage(storage) => storage.into_iter(),
         }
     }
 }

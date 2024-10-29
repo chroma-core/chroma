@@ -1,10 +1,10 @@
 use super::{
-    builder_storage::{BTreeBuilderStorage, BuilderStorageKind, VecBuilderStorage},
+    builder_storage::{BTreeBuilderStorage, BuilderStorage, VecBuilderStorage},
     single_column_size_tracker::SingleColumnSizeTracker,
     BlockKeyArrowBuilder,
 };
 use crate::{
-    arrow::types::{ArrowWriteableKey, ArrowWriteableValue, BuilderMutationOrderHint},
+    arrow::types::{ArrowWriteableKey, ArrowWriteableValue, MutationOrderHint},
     key::{CompositeKey, KeyWrapper},
 };
 use arrow::util::bit_util;
@@ -19,7 +19,7 @@ pub struct SingleColumnStorage<T: ArrowWriteableValue> {
 }
 
 struct Inner<V: ArrowWriteableValue> {
-    storage: BuilderStorageKind<V>,
+    storage: BuilderStorage<V>,
     size_tracker: SingleColumnSizeTracker,
 }
 
@@ -34,13 +34,13 @@ impl<V: ArrowWriteableValue> std::fmt::Debug for Inner<V> {
 impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker> + 'static>
     SingleColumnStorage<V>
 {
-    pub(in crate::arrow) fn new(mutation_ordering_hint: BuilderMutationOrderHint) -> Self {
+    pub(in crate::arrow) fn new(mutation_ordering_hint: MutationOrderHint) -> Self {
         let storage = match mutation_ordering_hint {
-            BuilderMutationOrderHint::Unordered => {
-                BuilderStorageKind::BTreeBuilderStorage(BTreeBuilderStorage::default())
+            MutationOrderHint::Unordered => {
+                BuilderStorage::BTreeBuilderStorage(BTreeBuilderStorage::default())
             }
-            BuilderMutationOrderHint::Ordered => {
-                BuilderStorageKind::VecBuilderStorage(VecBuilderStorage::default())
+            MutationOrderHint::Ordered => {
+                BuilderStorage::VecBuilderStorage(VecBuilderStorage::default())
             }
         };
 
