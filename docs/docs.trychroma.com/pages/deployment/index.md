@@ -24,6 +24,7 @@ We would love to help you think through the design of your system, or if you wou
 
 You can run Chroma single-node in [client/server mode](/deployment/client-server-mode), and easily deploy it. In this section, we also show you how to make sure your Chroma server is secure and reliable, and how to understand its performance at scale.
 
+
 ### Containers
 * 🐳  [Docker](/deployment/docker)
 * Kubernetes - Coming Soon!
