@@ -15,7 +15,7 @@ pub trait ArrowWriteableKey: Key + Default {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuilderMutationOrderHint {
+pub enum MutationOrderHint {
     Unordered,
     Ordered,
 }
@@ -31,7 +31,7 @@ pub trait ArrowWriteableValue: Value {
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage);
     fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta);
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder;
-    fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage;
+    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage;
     fn prepare(value: Self) -> Self::PreparedValue;
     fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder);
     fn finish(builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>);

@@ -4,7 +4,7 @@ use crate::{
             data_record::DataRecordStorage, data_record_size_tracker::DataRecordSizeTracker,
             UnorderedBlockDelta, BlockStorage,
         },
-        types::BuilderMutationOrderHint,
+        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -65,7 +65,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         }
     }
 
-    fn get_delta_builder(_: BuilderMutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(_: MutationOrderHint) -> BlockStorage {
         BlockStorage::DataRecord(DataRecordStorage::new())
     }
 

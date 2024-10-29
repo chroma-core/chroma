@@ -6,7 +6,7 @@ use crate::{
         block::Block,
         types::{
             ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue,
-            BuilderMutationOrderHint,
+            MutationOrderHint,
         },
     },
     key::{CompositeKey, KeyWrapper},
@@ -39,16 +39,19 @@ impl Delta for OrderedBlockDelta {
     #[allow(clippy::extra_unused_type_parameters)]
     fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
         OrderedBlockDelta {
-            builder: V::get_delta_builder(BuilderMutationOrderHint::Ordered),
+            builder: V::get_delta_builder(MutationOrderHint::Ordered),
             id,
             copied_up_to_row_of_old_block: 0,
             old_block: None,
         }
     }
 
-    fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid, block: &Block) -> Self {
-        let mut delta = OrderedBlockDelta::new::<K, V>(id);
-        delta.old_block = Some(block.clone());
+    fn fork_block<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        new_id: Uuid,
+        old_block: &Block,
+    ) -> Self {
+        let mut delta = OrderedBlockDelta::new::<K, V>(new_id);
+        delta.old_block = Some(old_block.clone());
         delta
     }
 
@@ -72,7 +75,7 @@ impl OrderedBlockDelta {
     {
         if let Some(old_block) = self.old_block.clone().as_ref() {
             // todo: is clone expensive here?
-            self.copy_past::<K::ReadableKey<'_>, V::ReadableValue<'_>>(
+            self.copy_up_to::<K::ReadableKey<'_>, V::ReadableValue<'_>>(
                 prefix,
                 key.clone().into(),
                 old_block,
@@ -90,7 +93,7 @@ impl OrderedBlockDelta {
     {
         if let Some(old_block) = self.old_block.clone().as_ref() {
             // todo: is clone expensive here?
-            self.copy_past::<K::ReadableKey<'_>, V::ReadableValue<'_>>(
+            self.copy_up_to::<K::ReadableKey<'_>, V::ReadableValue<'_>>(
                 prefix,
                 key.clone().into(),
                 old_block,
@@ -120,7 +123,7 @@ impl OrderedBlockDelta {
         self.builder.len()
     }
 
-    fn copy_past<'a, K: ArrowReadableKey<'a>, V: ArrowReadableValue<'a>>(
+    fn copy_up_to<'a, K: ArrowReadableKey<'a>, V: ArrowReadableValue<'a>>(
         &mut self,
         excluded_prefix: &str,
         excluded_key: KeyWrapper,
@@ -142,6 +145,7 @@ impl OrderedBlockDelta {
             if old_prefix > excluded_prefix
                 || (old_prefix == excluded_prefix && old_key_wrapped >= excluded_key)
             {
+                // If the provided prefix/key pair existed in the old block, we need to skip it (move the pointer past that entry)
                 if old_prefix == excluded_prefix && old_key_wrapped == excluded_key {
                     self.copied_up_to_row_of_old_block += 1;
                 }
