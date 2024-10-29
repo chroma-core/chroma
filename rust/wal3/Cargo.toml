@@ -1,0 +1,25 @@
+[package]
+name = "wal3"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrrg = "0.5"
+arrrg_derive = "0.5"
+async-trait = "0.1"
+biometrics = "0.9"
+biometrics_prometheus = "0.4"
+bytes = "1.7"
+futures = "0.3.31"
+futures-core = "0.3"
+getopts = "0.2"
+guacamole = "0.9"
+object_store = { version = "0.11", features = ["aws"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+setsum = "0.7"
+sig_fig_histogram = "0.4"
+sst = "0.13"
+tokio = { version = "1.40", features = ["full"] }
+utf8path = "0.6"
+uuid = "1.10"
