@@ -18,6 +18,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::IndexUuid;
 use chroma_types::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
@@ -445,7 +446,7 @@ impl WorkerServer {
                 hnsw: self.hnsw_index_provider.clone(),
                 blockfile: self.blockfile_provider.clone(),
                 knn: None,
-                metadata: Some(segment_uuid),
+                metadata: Some(IndexUuid(segment_uuid)),
                 record: None,
                 collection: collection_uuid,
                 version: collection_version,
