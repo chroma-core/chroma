@@ -5,7 +5,10 @@ use super::{
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 use chroma_error::ChromaError;
-use futures::{stream::FuturesUnordered, TryStreamExt};
+use futures::{
+    stream::{FuturesOrdered, FuturesUnordered},
+    StreamExt, TryStreamExt,
+};
 use uuid::Uuid;
 
 pub struct ArrowBlockfileFlusher {
@@ -46,11 +49,17 @@ impl ArrowBlockfileFlusher {
         // in parallel and try_join_all / join_all switches to using futures_ordered if the
         // number of futures is high. However, our NAC controls the number of futures that can be
         // created at once, so that behavior is redudant and suboptimal for us.
+        // As of 10/28 the NAC does not impact the write path, only the read path.
+        // As a workaround we used buffered futures to reduce concurrency
+        // once the NAC supports write path admission control we can switch back
+        // to unbuffered futures.
+
         let mut futures = Vec::new();
         for block in &self.blocks {
             futures.push(self.block_manager.flush(block));
         }
-        FuturesUnordered::from_iter(futures)
+        futures::stream::iter(futures)
+            .buffer_unordered(30)
             .try_collect::<Vec<_>>()
             .await?;
 
