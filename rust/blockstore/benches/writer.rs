@@ -5,10 +5,14 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{thread_rng, Rng};
 use uuid::Uuid;
 
+// Ends up creating ~1.1MB:
+// prefix: 3char * 100_000
+// key:    (size_of(u32) * 100_000)
+// value:  (size_of(u32) * 100_000)
 const NUM_KV_PAIRS: usize = 100_000;
-const BLOCK_SIZE: usize = 1024 * 256; // 256KB
+const BLOCK_SIZE: usize = 1024 * 256; // 256KB, so there should be 5 blocks
 
-fn generate_kv_pairs() -> Vec<((String, u32), u32)> {
+fn generate_trigram_kv_pairs() -> Vec<((String, u32), u32)> {
     let mut pairs = Vec::with_capacity(NUM_KV_PAIRS);
     let mut rng = thread_rng();
 
@@ -33,7 +37,7 @@ async fn create_populated_blockfile(provider: &ArrowBlockfileProvider) -> Uuid {
         .unwrap();
     let id = writer.id();
 
-    for (key, value) in generate_kv_pairs() {
+    for (key, value) in generate_trigram_kv_pairs() {
         writer.set(&key.0, key.1, value).await.unwrap();
     }
 
@@ -42,17 +46,19 @@ async fn create_populated_blockfile(provider: &ArrowBlockfileProvider) -> Uuid {
     id
 }
 
+/// This benchmark compares the performance of UnorderedBlockfileWriter and OrderedBlockfileWriter.
 pub fn benchmark(c: &mut Criterion) {
     let runner = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("Failed to create runtime");
 
-    let data = generate_kv_pairs();
+    let data = generate_trigram_kv_pairs();
     let mut sorted_data = data.clone();
     sorted_data.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    let storage = Storage::Local(LocalStorage::new("temp_storage"));
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
     let block_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
     let sparse_index_cache = Box::new(UnboundedCacheConfig {}.build()) as _;
     let arrow_blockfile_provider =
