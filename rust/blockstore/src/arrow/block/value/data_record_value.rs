@@ -2,7 +2,7 @@ use crate::{
     arrow::{
         block::delta::{
             data_record::DataRecordStorage, data_record_size_tracker::DataRecordSizeTracker,
-            BlockDelta, BlockStorage,
+            UnorderedBlockDelta, BlockStorage,
         },
         types::BuilderMutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
@@ -58,7 +58,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         }
     }
 
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
         match &delta.builder {
             BlockStorage::DataRecord(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type"),

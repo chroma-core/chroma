@@ -1,4 +1,4 @@
-use super::block::delta::{BlockDelta, BlockKeyArrowBuilder, BlockStorage};
+use super::block::delta::{BlockKeyArrowBuilder, BlockStorage, UnorderedBlockDelta};
 use crate::{key::KeyWrapper, Key, Value};
 use arrow::{array::Array, datatypes::Field};
 use std::sync::Arc;
@@ -37,7 +37,7 @@ pub trait ArrowWriteableValue: Value {
     /// Add a K/V pair to a delta. This is called when a new K/V pair is added to a blockfile.
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage);
     /// Delete a K/V pair from a delta. This is called when a K/V pair is deleted from a blockfile.
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta);
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta);
     /// Returns an appropriate `BlockStorage` instance for the value type. This is called when creating a new delta.
     fn get_delta_builder(mutation_ordering_hint: BuilderMutationOrderHint) -> BlockStorage;
     /// Constructs a new Arrow builder for `Self::ArrowBuilder` given the final size of the delta. This is called when a delta is done receiving updates and is ready to be committed.
