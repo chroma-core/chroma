@@ -14,11 +14,6 @@ pub struct SingleColumnStorage<T: ArrowWriteableValue> {
     inner: Arc<RwLock<Inner<T>>>,
 }
 
-pub struct SingleColumnStorageArrowValueCapacityHint {
-    pub item_count: usize,
-    pub byte_size: usize,
-}
-
 struct Inner<T: ArrowWriteableValue> {
     storage: BTreeMap<CompositeKey, T>,
     size_tracker: SingleColumnSizeTracker,
@@ -32,9 +27,7 @@ impl<T: ArrowWriteableValue> std::fmt::Debug for Inner<T> {
     }
 }
 
-impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCapacityHint>>
-    SingleColumnStorage<T>
-{
+impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumnStorage<T> {
     pub(in crate::arrow) fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(Inner {
@@ -105,6 +98,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
             inner.size_tracker.subtract_value_size(old_value_size);
             inner.size_tracker.subtract_key_size(key_len);
             inner.size_tracker.subtract_prefix_size(prefix.len());
+            inner.size_tracker.decrement_item_count();
         }
         let value_size = value.get_size();
 
@@ -112,6 +106,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(value_size);
+        inner.size_tracker.increment_item_count();
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
@@ -129,6 +124,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
                 .subtract_prefix_size(maybe_removed_prefix_len);
             inner.size_tracker.subtract_key_size(maybe_removed_key_len);
             inner.size_tracker.subtract_value_size(value.get_size());
+            inner.size_tracker.decrement_item_count();
         }
     }
 
@@ -136,6 +132,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
         &self,
         split_size: usize,
     ) -> (CompositeKey, SingleColumnStorage<T>) {
+        let mut num_items = 0;
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut value_size = 0;
@@ -148,6 +145,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
             let mut item_count = 0;
             let mut iter = storage.iter();
             while let Some((key, value)) = iter.next() {
+                num_items += 1;
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();
                 value_size += value.get_size();
@@ -187,6 +185,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
 
         let mut inner = self.inner.write();
 
+        let total_num_items = inner.size_tracker.get_num_items();
         let total_prefix_size = inner.size_tracker.get_prefix_size();
         let total_key_size = inner.size_tracker.get_key_size();
         let total_value_size = inner.size_tracker.get_value_size();
@@ -199,6 +198,9 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
         inner
             .size_tracker
             .subtract_value_size(total_value_size - value_size);
+        inner
+            .size_tracker
+            .subtract_item_count(total_num_items - num_items);
 
         match split_key {
             None => panic!("A storage should have at least one element to be split."),
@@ -210,6 +212,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
                         inner: Arc::new(RwLock::new(Inner {
                             storage: new_delta,
                             size_tracker: SingleColumnSizeTracker::with_values(
+                                total_num_items - num_items,
                                 total_prefix_size - prefix_size,
                                 total_key_size - key_size,
                                 total_value_size - value_size,
@@ -232,10 +235,7 @@ impl<T: ArrowWriteableValue<ArrowCapacityHint = SingleColumnStorageArrowValueCap
             )
             .into_inner();
 
-        let mut value_builder = T::get_arrow_builder(SingleColumnStorageArrowValueCapacityHint {
-            item_count: inner.storage.len(),
-            byte_size: inner.size_tracker.get_value_size(),
-        });
+        let mut value_builder = T::get_arrow_builder(inner.size_tracker);
 
         let storage = inner.storage;
         for (key, value) in storage.into_iter() {
