@@ -72,7 +72,10 @@ impl ArrowWriteableValue for RoaringBitmap {
         builder.append_value(value);
     }
 
-    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(
+        mut builder: Self::ArrowBuilder,
+        size_tracker: &Self::SizeTracker,
+    ) -> (Field, Arc<dyn Array>) {
         let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());

@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use chroma_types::DataRecord;
+use chroma_types::{DataRecord, SpannPostingList};
 use roaring::RoaringBitmap;
 
 pub trait Value: Clone {
@@ -58,5 +58,11 @@ impl<'a> Value for DataRecord<'a> {
 impl<'a> Value for &DataRecord<'a> {
     fn get_size(&self) -> usize {
         DataRecord::get_size(self)
+    }
+}
+
+impl<'a> Value for &SpannPostingList<'a> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
     }
 }
