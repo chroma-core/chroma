@@ -7,7 +7,7 @@ use object_store::{ObjectStore, Result};
 
 use crate::manifest::{Manifest, ShardFragment};
 use crate::{
-    Error, LogPosition, ThrottleOptions, APPLY_DELTA, GENERATE_NEXT_POINTER, LOG_FULL,
+    Error, LogPosition, ThrottleOptions, APPLY_DELTA, GENERATE_POINTERS, LOG_FULL,
     NO_APPROPRIATE_DELTA, NO_DELTAS, PULL_WORK, PUSH_DELTA,
 };
 
@@ -70,8 +70,8 @@ impl Staging {
             NO_APPROPRIATE_DELTA.click();
             return None;
         }
-        if new_manifest.generate_next_pointer().is_err() {
-            GENERATE_NEXT_POINTER.click();
+        if new_manifest.generate_pointers(&self.manifest).is_err() {
+            GENERATE_POINTERS.click();
             return None;
         }
         PULL_WORK.click();
@@ -303,14 +303,15 @@ impl Drop for ManifestManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::manifest::{manifest_path, NextPointer, ShardFragment};
+    use crate::manifest::{manifest_path, NextPointer, PrevPointer, ShardFragment};
     use crate::{ShardID, ShardSeqNo};
 
     use super::*;
 
     #[tokio::test]
     async fn manager_staging() {
-        let mut manifest = Manifest {
+        let manifest = Manifest {
+            path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
             fragments: vec![],
@@ -319,7 +320,6 @@ mod tests {
                 path_to_manifest: manifest_path(42),
             },
         };
-        manifest.generate_next_pointer().unwrap();
         let object_store = Arc::new(object_store::memory::InMemory::new());
         let mut manager =
             ManifestManager::new(ThrottleOptions::default(), manifest, object_store).await;
@@ -375,6 +375,7 @@ mod tests {
         assert!(staging.deltas.is_empty());
         assert_eq!(
             Manifest {
+                path: String::from("manifest/MANIFEST.42"),
                 writer: "manifest writer 1".to_string(),
                 setsum: sst::Setsum::default(),
                 fragments: vec![
@@ -395,7 +396,10 @@ mod tests {
                         setsum: sst::Setsum::default(),
                     }
                 ],
-                prev: None,
+                prev: Some(PrevPointer {
+                    path_to_manifest: manifest_path(0),
+                    setsum: sst::Setsum::default(),
+                }),
                 next: staging.manifest.next.clone(),
             },
             staging.manifest

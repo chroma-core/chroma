@@ -123,6 +123,7 @@ impl NextPointer {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Manifest {
+    pub path: String,
     #[serde(
         deserialize_with = "super::deserialize_setsum",
         serialize_with = "super::serialize_setsum"
@@ -160,9 +161,14 @@ impl Manifest {
         self.fragments.push(fragment);
     }
 
-    pub fn generate_next_pointer(&mut self) -> Result<(), Error> {
+    pub fn generate_pointers(&mut self, prev: &Manifest) -> Result<(), Error> {
         let timestamp = manifest_timestamp(&self.next.path_to_manifest)?;
+        self.prev = Some(PrevPointer {
+            setsum: prev.setsum,
+            path_to_manifest: prev.path.to_string(),
+        });
         self.next = NextPointer::generate(timestamp);
+        self.path = prev.next.path_to_manifest.clone();
         Ok(())
     }
 
@@ -171,28 +177,18 @@ impl Manifest {
     }
 
     pub fn scrub(&self) -> Result<sst::Setsum, ScrubError> {
-        let mut acc = self.prev.as_ref().map(|p| p.setsum).unwrap_or_default();
-        for fragment in self.fragments.iter() {
-            let fragment_acc = fragment.scrub()?;
-            acc += fragment_acc;
-        }
-        if self.setsum != acc {
-            return Err(ScrubError::CorruptManifest(format!(
-                "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
-                self.setsum.hexdigest(),
-                acc.hexdigest()
-            )));
-        }
-        let mut acc = self.prev.as_ref().map(|p| p.setsum).unwrap_or_default();
+        let mut acc = sst::Setsum::default();
         for frag in self.fragments.iter() {
             acc += frag.setsum;
         }
         if self.setsum != acc {
-            return Err(ScrubError::CorruptManifest(format!(
+            return Err(ScrubError::CorruptManifest{
+                manifest: self.path.to_string(),
+                what: format!(
                 "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
                 self.setsum.hexdigest(),
                 acc.hexdigest()
-            )));
+            )});
         }
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
         Ok(acc)
@@ -221,6 +217,7 @@ impl Manifest {
         let this = Path::from(manifest_path(0));
         let next = NextPointer::generate(0);
         let manifest = Manifest {
+            path: String::from("manifest/MANIFEST.0"),
             setsum: sst::Setsum::default(),
             fragments: vec![],
             prev: None,
@@ -304,7 +301,7 @@ impl Manifest {
         // consistent chain of manifests going back to the blessed timestamp.
         if let Some(writer) = blessed_writer {
             for (timestamp, path) in candidate_paths.iter() {
-                if let Some(manifest) = fetched.remove(path) {
+                if let Some(mut manifest) = fetched.remove(path) {
                     fn forms_a_chain(
                         blessed_timestamp: u128,
                         timestamp: u128,
@@ -339,6 +336,7 @@ impl Manifest {
                     if manifest.writer == writer && (*timestamp == blessed_timestamp)
                         || forms_a_chain(blessed_timestamp, *timestamp, &manifest, &fetched, alpha)
                     {
+                        manifest.path = path.to_string();
                         return Ok(Some(manifest));
                     }
                 } else {
@@ -454,6 +452,7 @@ mod tests {
             setsum: sst::Setsum::default(),
         };
         let manifest = Manifest {
+            path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
             fragments: vec![shard_fragment1, shard_fragment2],
@@ -495,6 +494,7 @@ mod tests {
             .unwrap(),
         };
         let manifest = Manifest {
+            path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -508,6 +508,7 @@ mod tests {
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
+            path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
@@ -547,6 +548,7 @@ mod tests {
             .unwrap(),
         };
         let mut manifest = Manifest {
+            path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
             fragments: vec![],
@@ -562,6 +564,7 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
+                path: String::from("manifest/MANIFEST.0"),
                 writer: "manifest writer 1".to_string(),
                 setsum: sst::Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -611,6 +614,7 @@ mod tests {
         };
         assert_eq!(
             Manifest {
+                path: String::from("manifest/MANIFEST.0"),
                 writer: "log initializer".to_string(),
                 setsum: sst::Setsum::default(),
                 fragments: vec![],
@@ -629,12 +633,11 @@ mod tests {
         let options = LogWriterOptions::default();
         // First manifest.
         Manifest::initialize(&options, &object_store).await.unwrap();
-        let mut manifest0 = Manifest::load(&object_store, 1).await.unwrap().unwrap();
-        manifest0.generate_next_pointer().unwrap();
+        let manifest0 = Manifest::load(&object_store, 1).await.unwrap().unwrap();
         // Second manifest.
         let mut manifest1 = manifest0.clone();
         let ptr1 = manifest1.next.clone();
-        manifest1.generate_next_pointer().unwrap();
+        manifest1.generate_pointers(&manifest0).unwrap();
         let ptr2 = manifest1.next.clone();
         let options = ThrottleOptions::default();
         Manifest::install(&manifest0, &options, &object_store, &manifest1)
@@ -654,7 +657,7 @@ mod tests {
             .unwrap(),
         };
         manifest2.apply_fragment(fragment1);
-        manifest2.generate_next_pointer().unwrap();
+        manifest2.generate_pointers(&manifest1).unwrap();
         if Manifest::install(&manifest1, &options, &object_store, &manifest2)
             .await
             .is_err()
@@ -675,7 +678,7 @@ mod tests {
             .unwrap(),
         };
         manifest3.apply_fragment(fragment2);
-        manifest3.generate_next_pointer().unwrap();
+        manifest3.generate_pointers(&manifest2).unwrap();
         Manifest::install(&manifest2, &options, &object_store, &manifest3)
             .await
             .unwrap();

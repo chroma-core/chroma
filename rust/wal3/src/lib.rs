@@ -46,8 +46,7 @@ static PUSH_DELTA: Counter = Counter::new("wal3__manifest_manager__push_delta");
 static PULL_WORK: Counter = Counter::new("wal3__manifest_manager__pull_work");
 static NO_DELTAS: Counter = Counter::new("wal3__manifest_manager__no_deltas");
 static NO_APPROPRIATE_DELTA: Counter = Counter::new("wal3__manifest_manager__no_appropriate_delta");
-static GENERATE_NEXT_POINTER: Counter =
-    Counter::new("wal3__manifest_manager__generate_next_pointer");
+static GENERATE_POINTERS: Counter = Counter::new("wal3__manifest_manager__generate_pointers");
 
 static DROPPED_MESSAGES: Counter = Counter::new("wal3.dropped_messages");
 static LOG_FULL: Counter = Counter::new("wal3.log_full");
@@ -69,7 +68,7 @@ pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&PULL_WORK);
     collector.register_counter(&NO_DELTAS);
     collector.register_counter(&NO_APPROPRIATE_DELTA);
-    collector.register_counter(&GENERATE_NEXT_POINTER);
+    collector.register_counter(&GENERATE_POINTERS);
 
     collector.register_counter(&DROPPED_MESSAGES);
     collector.register_counter(&LOG_FULL);
@@ -122,8 +121,12 @@ impl From<ScrubError> for Error {
 
 #[derive(Clone, Debug)]
 pub enum ScrubError {
-    CorruptManifest(String),
+    CorruptManifest {
+        manifest: String,
+        what: String,
+    },
     CorruptFragment {
+        manifest: String,
         shard_id: ShardID,
         seq_no: ShardSeqNo,
         what: String,
