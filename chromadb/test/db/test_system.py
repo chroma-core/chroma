@@ -22,22 +22,8 @@ from pytest import FixtureRequest
 import uuid
 from chromadb.api.configuration import CollectionConfigurationInternal
 import logging
-import time
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-# Decorator to log the start and end of each test function
-def log_test(func):
-    @functools.wraps(func)
-    def wrapper(sysdb, *args, **kwargs):
-        logger.debug(f"Starting test: {func.__name__}")
-        start_time = time.time()
-        result = func(sysdb, *args, **kwargs)
-        end_time = time.time()
-        logger.debug(f"Finished test: {func.__name__} in {end_time - start_time:.2f} seconds")
-        return result
-    return wrapper
 
 TENANT = "default"
 NAMESPACE = "default"
@@ -190,7 +176,6 @@ def sample_segment(collection_id: uuid.UUID = uuid.uuid4(),
     )
 
 # region Collection tests
-@log_test
 def test_create_get_delete_collections(sysdb: SysDB) -> None:
     logger.debug("Resetting state")
     sysdb.reset_state()

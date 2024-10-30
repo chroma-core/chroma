@@ -479,7 +479,7 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 			return nil
 		}
 
-		// Create the associated segments using the refactored helper
+		// Create the associated segments.
 		for _, createSegment := range createSegments {
 			createSegment.CollectionID = resultCollection.ID // Ensure the segment is linked to the newly created collection
 

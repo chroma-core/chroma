@@ -1007,10 +1007,10 @@ type DeleteCollectionRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id           string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Tenant       string `protobuf:"bytes,2,opt,name=tenant,proto3" json:"tenant,omitempty"`
-	Database     string `protobuf:"bytes,3,opt,name=database,proto3" json:"database,omitempty"`
-	WithSegments *bool  `protobuf:"varint,4,opt,name=with_segments,json=withSegments,proto3,oneof" json:"with_segments,omitempty"`
+	Id         string   `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Tenant     string   `protobuf:"bytes,2,opt,name=tenant,proto3" json:"tenant,omitempty"`
+	Database   string   `protobuf:"bytes,3,opt,name=database,proto3" json:"database,omitempty"`
+	SegmentIds []string `protobuf:"bytes,4,rep,name=segment_ids,json=segmentIds,proto3" json:"segment_ids,omitempty"`
 }
 
 func (x *DeleteCollectionRequest) Reset() {
@@ -1066,11 +1066,11 @@ func (x *DeleteCollectionRequest) GetDatabase() string {
 	return ""
 }
 
-func (x *DeleteCollectionRequest) GetWithSegments() bool {
-	if x != nil && x.WithSegments != nil {
-		return *x.WithSegments
+func (x *DeleteCollectionRequest) GetSegmentIds() []string {
+	if x != nil {
+		return x.SegmentIds
 	}
-	return false
+	return nil
 }
 
 type DeleteCollectionResponse struct {

@@ -37,6 +37,9 @@ from chromadb.api.async_client import (
     AsyncClient as AsyncClientCreator,
 )
 from chromadb.utils.async_to_sync import async_class_to_sync
+import logging
+
+logger = logging.getLogger(__name__)
 
 VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
@@ -904,3 +907,15 @@ def pytest_configure(config):  # type: ignore
 def is_client_in_process(client: ClientAPI) -> bool:
     """Returns True if the client is in-process (a SQLite client), False if it's out-of-process (a HTTP client)."""
     return client.get_settings().chroma_server_http_port is None
+
+
+@pytest.fixture(autouse=True)
+def log_tests(request):
+    """Automatically logs the start and end of each test."""
+    test_name = request.node.name
+    logger.debug(f"Starting test: {test_name}")
+
+    # Yield control back to the test, allowing it to execute
+    yield
+
+    logger.debug(f"Finished test: {test_name}")

@@ -50,7 +50,11 @@ func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.Res
 // bit weird, but it is the easiest way to excercise all cases
 
 // NOTE: In current implementation, we do not support updating the metadata of an existing collection via this RPC.
-//		 The call will fail if the collection already exists. Leaving the comments about cases 0,1,2,3 above for future reference.
+//
+// The call will fail if the collection already exists. Leaving the comments about cases 0,1,2,3 above for future reference.
+// Refer to these issues for more context:
+// https://github.com/chroma-core/chroma/issues/2390
+// https://github.com/chroma-core/chroma/pull/2810
 func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
 	res := &coordinatorpb.CreateCollectionResponse{}
 

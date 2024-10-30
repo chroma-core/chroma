@@ -222,15 +222,12 @@ class SegmentAPI(ServerAPI):
             dimension=None,
         )
 
-        # Get the segment related information for the collection.
-        segments = self._manager.prepare_segments_for_new_collection(model)
-
         # TODO: Let sysdb create the collection directly from the model
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
-            segments=segments,
+            segments=[], # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -238,7 +235,11 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
-        if not created:
+        if created:
+            segments = self._manager.prepare_segments_for_new_collection(coll)
+            for segment in segments:
+                self._sysdb.create_segment(segment)
+        else:
             logger.debug(
                 f"Collection {name} already exists, returning existing collection."
             )
