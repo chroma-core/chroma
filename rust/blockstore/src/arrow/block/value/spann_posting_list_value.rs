@@ -183,6 +183,8 @@ impl ArrowWriteableValue for &SpannPostingList<'_> {
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for SpannPostingList<'referred_data> {
+    type OwnedReadableValue = SpannPostingListDeltaEntry;
+
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self {
         let as_struct_array = array.as_any().downcast_ref::<StructArray>().unwrap();
 
@@ -252,5 +254,13 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for SpannPostingList<'re
         storage: &mut BlockStorage,
     ) {
         <&SpannPostingList>::add(prefix, key.into(), &value, storage);
+    }
+
+    fn to_owned(self) -> Self::OwnedReadableValue {
+        (
+            self.doc_offset_ids.to_vec(),
+            self.doc_versions.to_vec(),
+            self.doc_embeddings.to_vec(),
+        )
     }
 }

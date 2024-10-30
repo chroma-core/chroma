@@ -71,6 +71,8 @@ impl ArrowWriteableValue for u32 {
 }
 
 impl<'a> ArrowReadableValue<'a> for u32 {
+    type OwnedReadableValue = u32;
+
     fn get(array: &Arc<dyn Array>, index: usize) -> u32 {
         let array = array.as_any().downcast_ref::<UInt32Array>().unwrap();
         array.value(index)
@@ -82,5 +84,9 @@ impl<'a> ArrowReadableValue<'a> for u32 {
         storage: &mut BlockStorage,
     ) {
         u32::add(prefix, key.into(), value, storage);
+    }
+
+    fn to_owned(self) -> Self::OwnedReadableValue {
+        self
     }
 }

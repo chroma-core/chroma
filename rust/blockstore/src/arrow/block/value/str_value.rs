@@ -72,6 +72,8 @@ impl ArrowWriteableValue for String {
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str {
+    type OwnedReadableValue = String;
+
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> &'referred_data str {
         let array = array.as_any().downcast_ref::<StringArray>().unwrap();
         array.value(index)
@@ -83,5 +85,9 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str 
         storage: &mut BlockStorage,
     ) {
         String::add(prefix, key.into(), value.to_string(), storage);
+    }
+
+    fn to_owned(self) -> Self::OwnedReadableValue {
+        self.to_string()
     }
 }

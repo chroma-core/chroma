@@ -58,6 +58,8 @@ pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
 }
 
 pub trait ArrowReadableValue<'referred_data>: Sized {
+    type OwnedReadableValue;
+
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
@@ -65,4 +67,5 @@ pub trait ArrowReadableValue<'referred_data>: Sized {
         value: Self,
         storage: &mut BlockStorage,
     );
+    fn to_owned(self) -> Self::OwnedReadableValue;
 }

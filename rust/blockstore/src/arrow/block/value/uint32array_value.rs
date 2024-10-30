@@ -89,6 +89,8 @@ impl ArrowWriteableValue for Vec<u32> {
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32] {
+    type OwnedReadableValue = Vec<u32>;
+
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self {
         let list_array = array.as_any().downcast_ref::<ListArray>().unwrap();
         let start = list_array.value_offsets()[index] as usize;
@@ -132,5 +134,9 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
         storage: &mut BlockStorage,
     ) {
         <Vec<u32>>::add(prefix, key.into(), value.to_vec(), storage);
+    }
+
+    fn to_owned(self) -> Self::OwnedReadableValue {
+        self.to_vec()
     }
 }

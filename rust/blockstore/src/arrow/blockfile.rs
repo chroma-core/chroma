@@ -224,6 +224,70 @@ impl ArrowUnorderedBlockfileWriter {
         Ok(())
     }
 
+    fn block_lifetime_scope<'new, K: ArrowReadableKey<'new>, V: ArrowReadableValue<'new>>(
+        &self,
+        block: &'new Block,
+        prefix: &str,
+        key: K,
+    ) -> V::OwnedReadableValue {
+        let value = block.get::<K, V>(prefix, key).unwrap();
+        value.to_owned()
+    }
+
+    pub(crate) async fn get_clone<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<V::OwnedReadableValue, Box<dyn ChromaError>> {
+        // TODO: for now the BF writer locks the entire write operation
+        let _guard = self.write_mutex.lock().await;
+
+        // TODO: value must be smaller than the block size except for position lists, which are a special case
+        //  where we split the value across multiple blocks
+
+        // Get the target block id for the key
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+
+        // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
+        // Creating a delta loads the block entirely into memory
+
+        let delta = {
+            let deltas = self.block_deltas.lock();
+            deltas.get(&target_block_id).cloned()
+        };
+
+        let res: Result<V::OwnedReadableValue, Box<dyn ChromaError>> = match delta {
+            None => {
+                let block = match self.block_manager.get(&target_block_id).await {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                // // Lie to the compiler that the block is static even though it is not and will be
+                // // dropped after this method call. The only way this block is being used is
+                // // to read a value from it and deep copy it so even if the block is dropped,
+                // // the value will still be valid.
+                // let block: &'static Block = unsafe { transmute::<&Block, &'static Block>(&block) };
+                // let value = match block.get::<K, V>(prefix, key) {
+                //     Some(value) => value.to_owned(),
+                //     None => {
+                //         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                //     }
+                // };
+                // Ok(value)
+                let val = self.block_lifetime_scope::<K, V>(&block, prefix, key);
+                Ok(val)
+            }
+            Some(_) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
+        };
+        res
+    }
+
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,

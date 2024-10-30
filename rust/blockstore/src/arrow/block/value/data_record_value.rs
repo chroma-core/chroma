@@ -24,6 +24,10 @@ use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use prost::Message;
 use std::sync::Arc;
 
+// Convenience type for the storage entry
+// (id, embedding, metadata, document)
+pub type DataRecordStorageEntry = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+
 pub struct ValueBuilderWrapper {
     id_builder: StringBuilder,
     embedding_builder: FixedSizeListBuilder<Float32Builder>,
@@ -181,6 +185,8 @@ impl ArrowWriteableValue for &DataRecord<'_> {
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred_data> {
+    type OwnedReadableValue = DataRecordStorageEntry;
+
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self {
         let as_struct_array = array.as_any().downcast_ref::<StructArray>().unwrap();
 
@@ -250,5 +256,22 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred
         storage: &mut BlockStorage,
     ) {
         <&DataRecord>::add(prefix, key.into(), &value, storage);
+    }
+
+    fn to_owned(self) -> Self::OwnedReadableValue {
+        let metadata = match &self.metadata {
+            Some(metadata) => {
+                let metadata_proto = Into::<UpdateMetadata>::into(metadata.clone());
+                let metadata_as_bytes = metadata_proto.encode_to_vec();
+                Some(metadata_as_bytes)
+            }
+            None => None,
+        };
+        (
+            self.id.to_string(),
+            self.embedding.to_vec(),
+            metadata,
+            self.document.map(|s| s.to_string()),
+        )
     }
 }

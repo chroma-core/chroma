@@ -81,6 +81,8 @@ impl ArrowWriteableValue for RoaringBitmap {
 }
 
 impl ArrowReadableValue<'_> for RoaringBitmap {
+    type OwnedReadableValue = RoaringBitmap;
+
     fn get(array: &std::sync::Arc<dyn Array>, index: usize) -> Self {
         let arr = array.as_any().downcast_ref::<BinaryArray>().unwrap();
         let bytes = arr.value(index);
@@ -95,5 +97,9 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         storage: &mut BlockStorage,
     ) {
         RoaringBitmap::add(prefix, key.into(), value, storage);
+    }
+
+    fn to_owned(self) -> Self::OwnedReadableValue {
+        self.clone()
     }
 }
