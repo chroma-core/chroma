@@ -112,19 +112,25 @@ class DistributedExecutor(Executor):
 
     @overrides
     def knn(self, plan: KNNPlan) -> QueryResult:
-        records = self._metadata_segment(plan.scan.collection).get_metadata(
-            request_version_context=plan.scan.version,
-            where=plan.filter.where,
-            where_document=plan.filter.where_document,
-            ids=plan.filter.user_ids,
-            limit=None,
-            offset=0,
-            include_metadata=False,
-        )
+        prefiltered_ids = None
+        if plan.filter.user_ids or plan.filter.where or plan.filter.where_document:
+            records = self._metadata_segment(plan.scan.collection).get_metadata(
+                request_version_context=plan.scan.version,
+                where=plan.filter.where,
+                where_document=plan.filter.where_document,
+                ids=plan.filter.user_ids,
+                limit=None,
+                offset=0,
+                include_metadata=False,
+            )
+            prefiltered_ids = [r["id"] for r in records]
 
-        prefiltered_ids = [r["id"] for r in records]
         knns: Sequence[Sequence[VectorQueryResult]] = [[]] * len(plan.knn.embeddings)
-        if len(prefiltered_ids) > 0:
+
+        # Query vectors only when the user did not specify a filter or when the filter
+        # yields non-empty ids. Otherwise, the user specified a filter but it yields
+        # no matching ids, in which case we can return an empty result.
+        if prefiltered_ids is None or len(prefiltered_ids) > 0:
             query = VectorQuery(
                 vectors=plan.knn.embeddings,
                 k=plan.knn.fetch,
