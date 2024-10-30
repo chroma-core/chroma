@@ -451,6 +451,6 @@ mod tests {
         // At > 8 MB.
         test_multipart_get_for_size(1024 * 1024 * 19).await;
         // Greater than NAC limit i.e. > 5*8 MB = 40 MB.
-        test_multipart_get_for_size(1024 * 1024 * 100).await;
+        test_multipart_get_for_size(1024 * 1024 * 50).await;
     }
 }
