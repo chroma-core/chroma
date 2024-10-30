@@ -20,6 +20,7 @@ impl ArrowWriteableValue for u32 {
     type ArrowBuilder = UInt32Builder;
     type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = u32;
+    type OwnedReadableValue = u32;
 
     fn offset_size(_item_count: usize) -> usize {
         0
@@ -68,6 +69,17 @@ impl ArrowWriteableValue for u32 {
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
         (value_field, value_arr)
     }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &BlockDelta,
+    ) -> Option<Self::OwnedReadableValue> {
+        match &delta.builder {
+            BlockStorage::UInt32(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type: {:?}", &delta.builder),
+        }
+    }
 }
 
 impl<'a> ArrowReadableValue<'a> for u32 {
@@ -84,9 +96,5 @@ impl<'a> ArrowReadableValue<'a> for u32 {
         storage: &mut BlockStorage,
     ) {
         u32::add(prefix, key.into(), value, storage);
-    }
-
-    fn to_owned(self) -> Self::OwnedReadableValue {
-        self
     }
 }

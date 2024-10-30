@@ -224,21 +224,11 @@ impl ArrowUnorderedBlockfileWriter {
         Ok(())
     }
 
-    fn block_lifetime_scope<'new, K: ArrowReadableKey<'new>, V: ArrowReadableValue<'new>>(
-        &self,
-        block: &'new Block,
-        prefix: &str,
-        key: K,
-    ) -> V::OwnedReadableValue {
-        let value = block.get::<K, V>(prefix, key).unwrap();
-        value.to_owned()
-    }
-
-    pub(crate) async fn get_clone<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+    pub(crate) async fn get_clone<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
-    ) -> Result<V::OwnedReadableValue, Box<dyn ChromaError>> {
+    ) -> Result<Option<V::OwnedReadableValue>, Box<dyn ChromaError>> {
         // TODO: for now the BF writer locks the entire write operation
         let _guard = self.write_mutex.lock().await;
 
@@ -257,7 +247,7 @@ impl ArrowUnorderedBlockfileWriter {
             deltas.get(&target_block_id).cloned()
         };
 
-        let res: Result<V::OwnedReadableValue, Box<dyn ChromaError>> = match delta {
+        let delta = match delta {
             None => {
                 let block = match self.block_manager.get(&target_block_id).await {
                     Ok(Some(block)) => block,
@@ -268,24 +258,27 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                // // Lie to the compiler that the block is static even though it is not and will be
-                // // dropped after this method call. The only way this block is being used is
-                // // to read a value from it and deep copy it so even if the block is dropped,
-                // // the value will still be valid.
-                // let block: &'static Block = unsafe { transmute::<&Block, &'static Block>(&block) };
-                // let value = match block.get::<K, V>(prefix, key) {
-                //     Some(value) => value.to_owned(),
-                //     None => {
-                //         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                //     }
-                // };
-                // Ok(value)
-                let val = self.block_lifetime_scope::<K, V>(&block, prefix, key);
-                Ok(val)
+                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
+                    Ok(delta) => delta,
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                let new_id = new_delta.id;
+                // Blocks can be empty.
+                self.root
+                    .sparse_index
+                    .replace_block(target_block_id, new_delta.id);
+                {
+                    let mut deltas = self.block_deltas.lock();
+                    deltas.insert(new_id, new_delta.clone());
+                }
+                new_delta
             }
-            Some(_) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
+            Some(delta) => delta,
         };
-        res
+
+        Ok(V::get_owned_value_from_delta(prefix, key.into(), &delta))
     }
 
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(

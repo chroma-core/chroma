@@ -21,6 +21,7 @@ impl ArrowWriteableValue for String {
     type ArrowBuilder = StringBuilder;
     type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = String;
+    type OwnedReadableValue = String;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
@@ -69,11 +70,20 @@ impl ArrowWriteableValue for String {
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
         (value_field, value_arr)
     }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &BlockDelta,
+    ) -> Option<Self::OwnedReadableValue> {
+        match &delta.builder {
+            BlockStorage::String(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type"),
+        }
+    }
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str {
-    type OwnedReadableValue = String;
-
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> &'referred_data str {
         let array = array.as_any().downcast_ref::<StringArray>().unwrap();
         array.value(index)
@@ -85,9 +95,5 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str 
         storage: &mut BlockStorage,
     ) {
         String::add(prefix, key.into(), value.to_string(), storage);
-    }
-
-    fn to_owned(self) -> Self::OwnedReadableValue {
-        self.to_string()
     }
 }

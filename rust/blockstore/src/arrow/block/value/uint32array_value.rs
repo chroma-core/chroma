@@ -21,6 +21,7 @@ impl ArrowWriteableValue for Vec<u32> {
     type ArrowBuilder = ListBuilder<UInt32Builder>;
     type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = Vec<u32>;
+    type OwnedReadableValue = Vec<u32>;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * size_of::<u32>())
@@ -86,11 +87,20 @@ impl ArrowWriteableValue for Vec<u32> {
 
         (value_field, Arc::new(value_arr))
     }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &BlockDelta,
+    ) -> Option<Self::OwnedReadableValue> {
+        match &delta.builder {
+            BlockStorage::VecUInt32(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type"),
+        }
+    }
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32] {
-    type OwnedReadableValue = Vec<u32>;
-
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self {
         let list_array = array.as_any().downcast_ref::<ListArray>().unwrap();
         let start = list_array.value_offsets()[index] as usize;
@@ -134,9 +144,5 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
         storage: &mut BlockStorage,
     ) {
         <Vec<u32>>::add(prefix, key.into(), value.to_vec(), storage);
-    }
-
-    fn to_owned(self) -> Self::OwnedReadableValue {
-        self.to_vec()
     }
 }

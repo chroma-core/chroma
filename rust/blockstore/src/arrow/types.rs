@@ -23,6 +23,7 @@ pub trait ArrowWriteableValue: Value {
     type ReadableValue<'referred_data>: ArrowReadableValue<'referred_data>;
     /// Some values are a reference type and need to be converted to an owned type or need to be prepared (e.g. serializing a RoaringBitmap) before they can be stored in a delta or Arrow array.
     type PreparedValue;
+    type OwnedReadableValue;
 
     /// Some values use an offsets array. This returns the size of the offsets array given the number of items in the array.
     fn offset_size(item_count: usize) -> usize;
@@ -45,6 +46,11 @@ pub trait ArrowWriteableValue: Value {
         builder: Self::ArrowBuilder,
         size_tracker: &Self::SizeTracker,
     ) -> (Field, Arc<dyn Array>);
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &BlockDelta,
+    ) -> Option<Self::OwnedReadableValue>;
 }
 
 pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
@@ -58,8 +64,6 @@ pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {
 }
 
 pub trait ArrowReadableValue<'referred_data>: Sized {
-    type OwnedReadableValue;
-
     fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> Self;
     fn add_to_delta<K: ArrowWriteableKey>(
         prefix: &str,
@@ -67,5 +71,4 @@ pub trait ArrowReadableValue<'referred_data>: Sized {
         value: Self,
         storage: &mut BlockStorage,
     );
-    fn to_owned(self) -> Self::OwnedReadableValue;
 }

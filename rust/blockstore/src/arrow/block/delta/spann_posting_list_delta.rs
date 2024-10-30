@@ -48,6 +48,19 @@ impl SpannPostingListDelta {
         self.inner.read().size_tracker.get_key_size()
     }
 
+    pub fn get_owned_value(
+        &self,
+        prefix: &str,
+        key: KeyWrapper,
+    ) -> Option<SpannPostingListDeltaEntry> {
+        let read_guard = self.inner.read();
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        read_guard.storage.get(&composite_key).cloned()
+    }
+
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: &SpannPostingList<'_>) {
         let mut lock_guard = self.inner.write();
         let composite_key = CompositeKey {

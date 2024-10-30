@@ -49,6 +49,15 @@ impl DataRecordStorage {
         inner.size_tracker.get_key_size()
     }
 
+    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<DataRecordStorageEntry> {
+        let inner = self.inner.read();
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        inner.storage.get(&composite_key).cloned()
+    }
+
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: &DataRecord<'_>) {
         let mut inner = self.inner.write();
         let composite_key = CompositeKey {
