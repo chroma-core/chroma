@@ -2,7 +2,7 @@ use crate::{
     arrow::{
         block::delta::{
             single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, UnorderedBlockDelta, BlockStorage,
+            single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
         types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},

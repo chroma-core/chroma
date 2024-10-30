@@ -6,6 +6,7 @@ use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
 use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
+use chroma_blockstore::BlockfileWriterOptions;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::tokenizer::TantivyChromaTokenizer;
 use chroma_index::fulltext::types::{
@@ -36,7 +37,7 @@ const U32_METADATA: &str = "u32_metadata";
 
 #[derive(Clone)]
 pub struct MetadataSegmentWriter<'me> {
-    pub(crate) full_text_index_writer: Option<FullTextIndexWriter<'me>>,
+    pub(crate) full_text_index_writer: Option<FullTextIndexWriter>,
     pub(crate) string_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
@@ -132,7 +133,13 @@ impl<'me> MetadataSegmentWriter<'me> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_writer = match blockfile_provider.fork::<u32, Vec<u32>>(&pls_uuid).await
+                    let pls_writer = match blockfile_provider
+                        .write::<u32, Vec<u32>>(
+                            BlockfileWriterOptions::new()
+                                .fork(pls_uuid)
+                                .ordered_mutations(),
+                        )
+                        .await
                     {
                         Ok(writer) => writer,
                         Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
@@ -145,7 +152,10 @@ impl<'me> MetadataSegmentWriter<'me> {
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider.create::<u32, Vec<u32>>().await {
+            None => match blockfile_provider
+                .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
+                .await
+            {
                 Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
@@ -161,7 +171,13 @@ impl<'me> MetadataSegmentWriter<'me> {
                             ))
                         }
                     };
-                    let freqs_writer = match blockfile_provider.fork::<u32, u32>(&freqs_uuid).await
+                    let freqs_writer = match blockfile_provider
+                        .write::<u32, u32>(
+                            BlockfileWriterOptions::new()
+                                .fork(freqs_uuid)
+                                .ordered_mutations(),
+                        )
+                        .await
                     {
                         Ok(writer) => writer,
                         Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
@@ -175,7 +191,10 @@ impl<'me> MetadataSegmentWriter<'me> {
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider.create::<u32, u32>().await {
+            None => match blockfile_provider
+                .write::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
+                .await
+            {
                 Ok(writer) => (writer, None),
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },

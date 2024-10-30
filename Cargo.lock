@@ -1298,6 +1298,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
+ "async-channel",
  "async-trait",
  "cc",
  "chroma-benchmark",
@@ -1311,6 +1312,7 @@ dependencies = [
  "criterion",
  "futures",
  "indicatif",
+ "itertools 0.13.0",
  "parking_lot",
  "rand",
  "rayon",
@@ -1319,6 +1321,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "thiserror",
+ "tikv-jemallocator",
  "tokio",
  "tracing",
  "uuid",
