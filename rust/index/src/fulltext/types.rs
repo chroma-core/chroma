@@ -1,15 +1,158 @@
+use super::tokenizer::ChromaTokenStream;
 use crate::fulltext::tokenizer::ChromaTokenizer;
+use async_channel::{Receiver, Sender};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use itertools::Itertools;
 use roaring::RoaringBitmap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tantivy::tokenizer::Token;
+use std::u128;
+use tantivy::tokenizer::TokenStream;
+use tantivy::tokenizer::Tokenizer;
+use tantivy::tokenizer::{self, NgramTokenizer, Token};
 use thiserror::Error;
+use tokio::task::{JoinError, JoinHandle};
 use uuid::Uuid;
 
-use super::tokenizer::ChromaTokenStream;
+pub type TokenInstance = u128;
+
+// Unicode characters only use 21 bit, so we can encode a trigram in 21 * 3 = 63 bits (a u64).
+#[inline(always)]
+pub(super) fn pack_trigram(s: &str) -> u64 {
+    let mut u = 0u64;
+    for (i, c) in s.chars().take(3).enumerate() {
+        let shift = (2 - i) * 21;
+        u |= (c as u64) << shift;
+    }
+    u
+}
+
+unsafe fn encode_utf8_unchecked(c: u32, buf: &mut [u8]) -> usize {
+    if c < 0x80 {
+        buf[0] = c as u8;
+        1
+    } else if c < 0x800 {
+        buf[0] = (0xC0 | (c >> 6)) as u8;
+        buf[1] = (0x80 | (c & 0x3F)) as u8;
+        2
+    } else if c < 0x10000 {
+        buf[0] = (0xE0 | (c >> 12)) as u8;
+        buf[1] = (0x80 | ((c >> 6) & 0x3F)) as u8;
+        buf[2] = (0x80 | (c & 0x3F)) as u8;
+        3
+    } else {
+        buf[0] = (0xF0 | (c >> 18)) as u8;
+        buf[1] = (0x80 | ((c >> 12) & 0x3F)) as u8;
+        buf[2] = (0x80 | ((c >> 6) & 0x3F)) as u8;
+        buf[3] = (0x80 | (c & 0x3F)) as u8;
+        4
+    }
+}
+
+#[inline(always)]
+pub(super) fn unpack_trigram(u: u64) -> String {
+    let c0 = ((u >> 42) & 0x1F_FFFF) as u32;
+    let c1 = ((u >> 21) & 0x1F_FFFF) as u32;
+    let c2 = (u & 0x1F_FFFF) as u32;
+
+    // Preallocate the maximum possible size (3 chars * 4 bytes each)
+    let mut s = String::with_capacity(12);
+
+    unsafe {
+        // Directly get a mutable reference to the internal buffer
+        let v = s.as_mut_vec();
+        let len0 = v.len();
+
+        // Ensure the buffer has enough capacity
+        v.set_len(len0 + 12);
+
+        // Encode the codepoints directly into the buffer
+        let bytes_written_c0 = encode_utf8_unchecked(c0, &mut v[len0..]);
+        let bytes_written_c1 = encode_utf8_unchecked(c1, &mut v[len0 + bytes_written_c0..]);
+        let bytes_written_c2 =
+            encode_utf8_unchecked(c2, &mut v[len0 + bytes_written_c0 + bytes_written_c1..]);
+
+        // Set the correct length after writing
+        let total_bytes = bytes_written_c0 + bytes_written_c1 + bytes_written_c2;
+        v.set_len(len0 + total_bytes);
+    }
+
+    s
+}
+
+pub trait TokenContainer {
+    fn encode(token: &str, document_id: u32, offset: u32) -> Self;
+    fn get_token(&self) -> String;
+    fn get_encoded_token(&self) -> u64;
+    fn get_document_id(&self) -> u32;
+    fn get_encoded_token_and_document_id(&self) -> u128;
+    fn get_offset(&self) -> u32;
+}
+
+impl TokenContainer for TokenInstance {
+    #[inline(always)]
+    fn encode(token: &str, document_id: u32, offset: u32) -> Self {
+        (pack_trigram(token) as u128) << 64 | (document_id as u128) << 32 | offset as u128
+    }
+
+    #[inline(always)]
+    fn get_encoded_token_and_document_id(&self) -> u128 {
+        (*self >> 32)
+    }
+
+    #[inline(always)]
+    fn get_encoded_token(&self) -> u64 {
+        (*self >> 64) as u64
+    }
+
+    #[inline(always)]
+    fn get_token(&self) -> String {
+        unpack_trigram((*self >> 64) as u64)
+    }
+
+    #[inline(always)]
+    fn get_document_id(&self) -> u32 {
+        (*self >> 32) as u32
+    }
+
+    #[inline(always)]
+    fn get_offset(&self) -> u32 {
+        *self as u32
+    }
+}
+
+type WorkerResult = Vec<TokenInstance>;
+
+struct Worker {}
+impl Worker {
+    fn new() -> Self {
+        Worker {}
+    }
+
+    fn run(rx: Receiver<(u32, String)>) -> WorkerResult {
+        let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+        let mut results: WorkerResult = Vec::new();
+
+        while let Ok((offset_id, document)) = rx.recv_blocking() {
+            tokenizer
+                .clone()
+                .token_stream(document.as_str())
+                .process(&mut |token| {
+                    results.push(TokenInstance::encode(
+                        token.text.as_str(),
+                        offset_id,
+                        token.offset_from as u32,
+                    ));
+                });
+        }
+
+        results.sort_unstable();
+        results
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
@@ -51,17 +194,18 @@ impl UncommittedPostings {
 }
 
 #[derive(Clone)]
-pub struct FullTextIndexWriter<'me> {
-    full_text_index_reader: Option<FullTextIndexReader<'me>>,
+pub struct FullTextIndexWriter {
+    tx: Sender<(u32, String)>,
+    worker_handles: Arc<FuturesUnordered<JoinHandle<WorkerResult>>>,
+    // full_text_index_reader: Option<FullTextIndexReader<'me>>,
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
-    tokenizer: Arc<Box<dyn ChromaTokenizer>>,
-
+    // tokenizer: Arc<Box<dyn ChromaTokenizer>>,
     // TODO(Sanket): Move off this tokio::sync::mutex and use
     // a lightweight lock instead. This is needed currently to
     // keep holding the lock across an await point.
     // term -> positional posting list builder for that term
-    uncommitted_postings: Arc<tokio::sync::Mutex<UncommittedPostings>>,
+    // uncommitted_postings: Arc<tokio::sync::Mutex<UncommittedPostings>>,
     // TODO(Sanket): Move off this tokio::sync::mutex and use
     // a lightweight lock instead. This is needed currently to
     // keep holding the lock across an await point.
@@ -69,126 +213,145 @@ pub struct FullTextIndexWriter<'me> {
     // because we also need to keep the old frequency
     // around. The reason is (token, freq) is the key in the blockfile hence
     // when freq changes, we need to delete the old (token, freq) key.
-    uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
+    // uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
 }
 
-impl<'me> FullTextIndexWriter<'me> {
+impl FullTextIndexWriter {
     pub fn new(
-        full_text_index_reader: Option<FullTextIndexReader<'me>>,
+        full_text_index_reader: Option<FullTextIndexReader>,
         posting_lists_blockfile_writer: BlockfileWriter,
         frequencies_blockfile_writer: BlockfileWriter,
         tokenizer: Box<dyn ChromaTokenizer>,
     ) -> Self {
+        let (tx, rx) = async_channel::unbounded();
+
+        let tokenizer = Arc::new(tokenizer);
+
+        let worker_handles = (0..4)
+            .map(|_| {
+                let rx = unsafe { std::mem::transmute(rx.clone()) };
+                tokio::task::spawn_blocking(|| Worker::run(rx))
+            })
+            .collect::<FuturesUnordered<_>>();
+
         FullTextIndexWriter {
-            full_text_index_reader,
+            tx,
+            worker_handles: Arc::new(worker_handles),
+            // full_text_index_reader,
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
-            tokenizer: Arc::new(tokenizer),
-            uncommitted_postings: Arc::new(tokio::sync::Mutex::new(UncommittedPostings::new())),
-            uncommitted_frequencies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            // tokenizer: Arc::new(tokenizer),
+            // uncommitted_postings: Arc::new(tokio::sync::Mutex::new(UncommittedPostings::new())),
+            // uncommitted_frequencies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
-    async fn populate_frequencies_and_posting_lists_from_previous_version(
-        &self,
-        tokens: &[Token],
-    ) -> Result<(), FullTextIndexError> {
-        // (Scoped to limit the lifetime of the lock)
-        {
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-            for token in tokens {
-                if uncommitted_frequencies.contains_key(&token.text) {
-                    continue;
-                }
+    // async fn populate_frequencies_and_posting_lists_from_previous_version(
+    //     &self,
+    //     tokens: &[Token],
+    // ) -> Result<(), FullTextIndexError> {
+    //     // (Scoped to limit the lifetime of the lock)
+    //     {
+    //         let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+    //         for token in tokens {
+    //             if uncommitted_frequencies.contains_key(&token.text) {
+    //                 continue;
+    //             }
 
-                let frequency = match &self.full_text_index_reader {
-                    // Readers are uninitialized until the first compaction finishes
-                    // so there is a case when this is none hence not an error.
-                    None => 0,
-                    Some(reader) => {
-                        (reader.get_frequencies_for_token(token.text.as_str()).await).unwrap_or(0)
-                    }
-                };
-                uncommitted_frequencies
-                    .insert(token.text.clone(), (frequency as i32, frequency as i32));
-            }
-        }
+    //             let frequency = match &self.full_text_index_reader {
+    //                 // Readers are uninitialized until the first compaction finishes
+    //                 // so there is a case when this is none hence not an error.
+    //                 None => 0,
+    //                 Some(reader) => {
+    //                     (reader.get_frequencies_for_token(token.text.as_str()).await).unwrap_or(0)
+    //                 }
+    //             };
+    //             uncommitted_frequencies
+    //                 .insert(token.text.clone(), (frequency as i32, frequency as i32));
+    //         }
+    //     }
 
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-        for token in tokens {
-            if uncommitted_postings
-                .positional_postings
-                .contains_key(&token.text)
-            {
-                continue;
-            }
+    //     let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+    //     for token in tokens {
+    //         if uncommitted_postings
+    //             .positional_postings
+    //             .contains_key(&token.text)
+    //         {
+    //             continue;
+    //         }
 
-            let results = match &self.full_text_index_reader {
-                // Readers are uninitialized until the first compaction finishes
-                // so there is a case when this is none hence not an error.
-                None => vec![],
-                Some(reader) => reader
-                    .get_all_results_for_token(&token.text)
-                    .await
-                    .unwrap_or_default(),
-            };
-            let mut doc_and_positions = HashMap::new();
-            for result in results {
-                doc_and_positions.insert(result.0, result.1);
-            }
-            uncommitted_postings
-                .positional_postings
-                .insert(token.text.clone(), doc_and_positions);
-        }
-        Ok(())
-    }
+    //         let results = match &self.full_text_index_reader {
+    //             // Readers are uninitialized until the first compaction finishes
+    //             // so there is a case when this is none hence not an error.
+    //             None => vec![],
+    //             Some(reader) => reader
+    //                 .get_all_results_for_token(&token.text)
+    //                 .await
+    //                 .unwrap_or_default(),
+    //         };
+    //         let mut doc_and_positions = HashMap::new();
+    //         for result in results {
+    //             doc_and_positions.insert(result.0, result.1);
+    //         }
+    //         uncommitted_postings
+    //             .positional_postings
+    //             .insert(token.text.clone(), doc_and_positions);
+    //     }
+    //     Ok(())
+    // }
 
-    pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
-        self.tokenizer.encode(document)
-    }
+    // pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
+    //     self.tokenizer.encode(document)
+    // }
 
     pub async fn add_document(
         &self,
         document: &str,
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
-        let tokens = self.encode_tokens(document);
-        let tokens = tokens.get_tokens();
-        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
-            .await?;
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+        // let tokens = self.encode_tokens(document);
+        // let tokens = tokens.get_tokens();
+        // self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
+        //     .await?;
+        // let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        // let mut uncommitted_postings = self.uncommitted_postings.lock().await;
 
-        for token in tokens {
-            // The entry should always exist because self.populate_frequencies_and_posting_lists_from_previous_version
-            // will have created it if this token is new to the system.
-            uncommitted_frequencies
-                .entry(token.text.clone())
-                .and_modify(|e| e.0 += 1);
+        // for token in tokens {
+        //     // The entry should always exist because self.populate_frequencies_and_posting_lists_from_previous_version
+        //     // will have created it if this token is new to the system.
+        //     uncommitted_frequencies
+        //         .entry(token.text.clone())
+        //         .and_modify(|e| e.0 += 1);
 
-            // For a new token, the uncommitted list will not contain any entry so insert
-            // an empty builder in that case.
-            let builder = uncommitted_postings
-                .positional_postings
-                .entry(token.text.to_string())
-                .or_insert(HashMap::new());
+        //     // For a new token, the uncommitted list will not contain any entry so insert
+        //     // an empty builder in that case.
+        //     let builder = uncommitted_postings
+        //         .positional_postings
+        //         .entry(token.text.to_string())
+        //         .or_insert(HashMap::new());
 
-            // Store starting positions of tokens. These are NOT affected by token filters.
-            // For search, we can use the start and end positions to compute offsets to
-            // check full string match.
-            //
-            // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
-            if let std::collections::hash_map::Entry::Vacant(e) = builder.entry(offset_id) {
-                // Casting to i32 is safe since we limit the size of the document.
-                e.insert(vec![token.offset_from as u32]);
-            } else {
-                // unwrap() is safe since we already verified that the key exists.
-                builder
-                    .get_mut(&offset_id)
-                    .unwrap()
-                    .push(token.offset_from as u32);
-            }
-        }
+        //     // Store starting positions of tokens. These are NOT affected by token filters.
+        //     // For search, we can use the start and end positions to compute offsets to
+        //     // check full string match.
+        //     //
+        //     // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
+        //     if let std::collections::hash_map::Entry::Vacant(e) = builder.entry(offset_id) {
+        //         // Casting to i32 is safe since we limit the size of the document.
+        //         e.insert(vec![token.offset_from as u32]);
+        //     } else {
+        //         // unwrap() is safe since we already verified that the key exists.
+        //         builder
+        //             .get_mut(&offset_id)
+        //             .unwrap()
+        //             .push(token.offset_from as u32);
+        //     }
+        // }
+        // Ok(())
+
+        self.tx
+            .send((offset_id, document.to_string()))
+            .await
+            .unwrap(); // todo
         Ok(())
     }
 
@@ -197,42 +360,42 @@ impl<'me> FullTextIndexWriter<'me> {
         document: &str,
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
-        let tokens = self.encode_tokens(document);
-        let tokens = tokens.get_tokens();
+        // let tokens = self.encode_tokens(document);
+        // let tokens = tokens.get_tokens();
 
-        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
-            .await?;
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+        // self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
+        //     .await?;
+        // let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        // let mut uncommitted_postings = self.uncommitted_postings.lock().await;
 
-        for token in tokens {
-            match uncommitted_frequencies.get_mut(token.text.as_str()) {
-                Some(frequency) => {
-                    frequency.0 -= 1;
-                }
-                None => {
-                    // Invariant violation -- we just populated this.
-                    tracing::error!("Error decrementing frequency for token: {:?}", token.text);
-                    return Err(FullTextIndexError::InvariantViolation);
-                }
-            }
-            if let Some(builder) = uncommitted_postings
-                .positional_postings
-                .get_mut(token.text.as_str())
-            {
-                builder.remove(&offset_id);
-                if builder.is_empty() {
-                    uncommitted_postings
-                        .positional_postings
-                        .remove(token.text.as_str());
-                }
-                // Track all the deleted (token, doc) pairs. This is needed
-                // to remove the old postings list for this pair from storage.
-                uncommitted_postings
-                    .deleted_token_doc_pairs
-                    .insert((token.text.clone(), offset_id as i32));
-            }
-        }
+        // for token in tokens {
+        //     match uncommitted_frequencies.get_mut(token.text.as_str()) {
+        //         Some(frequency) => {
+        //             frequency.0 -= 1;
+        //         }
+        //         None => {
+        //             // Invariant violation -- we just populated this.
+        //             tracing::error!("Error decrementing frequency for token: {:?}", token.text);
+        //             return Err(FullTextIndexError::InvariantViolation);
+        //         }
+        //     }
+        //     if let Some(builder) = uncommitted_postings
+        //         .positional_postings
+        //         .get_mut(token.text.as_str())
+        //     {
+        //         builder.remove(&offset_id);
+        //         if builder.is_empty() {
+        //             uncommitted_postings
+        //                 .positional_postings
+        //                 .remove(token.text.as_str());
+        //         }
+        //         // Track all the deleted (token, doc) pairs. This is needed
+        //         // to remove the old postings list for this pair from storage.
+        //         uncommitted_postings
+        //             .deleted_token_doc_pairs
+        //             .insert((token.text.clone(), offset_id as i32));
+        //     }
+        // }
         Ok(())
     }
 
@@ -242,84 +405,117 @@ impl<'me> FullTextIndexWriter<'me> {
         new_document: &str,
         offset_id: u32,
     ) -> Result<(), FullTextIndexError> {
-        self.delete_document(old_document, offset_id).await?;
-        self.add_document(new_document, offset_id).await?;
+        // self.delete_document(old_document, offset_id).await?;
+        // self.add_document(new_document, offset_id).await?;
         Ok(())
     }
 
     pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-        // Delete (token, doc) pairs from blockfile first. Note that the ordering is
-        // important here i.e. we need to delete before inserting the new postings
-        // list otherwise we could incorrectly delete posting lists that shouldn't be deleted.
-        for (token, offset_id) in uncommitted_postings.deleted_token_doc_pairs.drain() {
-            match self
-                .posting_lists_blockfile_writer
-                .delete::<u32, Vec<u32>>(token.as_str(), offset_id as u32)
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(FullTextIndexError::BlockfileWriteError(e));
-                }
-            }
-        }
+        // let mut uncommitted_postings = self.uncommitted_postings.lock().await;
+        // // Delete (token, doc) pairs from blockfile first. Note that the ordering is
+        // // important here i.e. we need to delete before inserting the new postings
+        // // list otherwise we could incorrectly delete posting lists that shouldn't be deleted.
+        // for (token, offset_id) in uncommitted_postings.deleted_token_doc_pairs.drain() {
+        //     match self
+        //         .posting_lists_blockfile_writer
+        //         .delete::<u32, Vec<u32>>(token.as_str(), offset_id as u32)
+        //         .await
+        //     {
+        //         Ok(_) => {}
+        //         Err(e) => {
+        //             return Err(FullTextIndexError::BlockfileWriteError(e));
+        //         }
+        //     }
+        // }
 
-        for (key, mut value) in uncommitted_postings.positional_postings.drain() {
-            for (doc_id, positions) in value.drain() {
-                // Don't add if postings list is empty for this (token, doc) combo.
-                // This can happen with deletes.
-                if !positions.is_empty() {
-                    match self
-                        .posting_lists_blockfile_writer
-                        .set(key.as_str(), doc_id, positions)
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return Err(FullTextIndexError::BlockfileWriteError(e));
-                        }
-                    }
-                }
-            }
-        }
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        for (key, value) in uncommitted_frequencies.drain() {
-            // Delete only if the token existed previously.
-            if value.1 > 0 {
-                // Delete the old frequency.
-                match self
-                    .frequencies_blockfile_writer
-                    .delete::<u32, u32>(key.as_str(), value.1 as u32)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(FullTextIndexError::BlockfileWriteError(e));
-                    }
-                }
-            }
-            // Insert the new frequency.
-            // Add only if the frequency is not zero. This can happen in case of document
-            // deletes.
-            // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
-            if value.0 > 0 {
-                match self
-                    .frequencies_blockfile_writer
-                    .set(key.as_str(), value.0 as u32, 0)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(FullTextIndexError::BlockfileWriteError(e));
-                    }
-                }
-            }
-        }
+        // for (key, mut value) in uncommitted_postings.positional_postings.drain() {
+        //     for (doc_id, positions) in value.drain() {
+        //         // Don't add if postings list is empty for this (token, doc) combo.
+        //         // This can happen with deletes.
+        //         if !positions.is_empty() {
+        //             match self
+        //                 .posting_lists_blockfile_writer
+        //                 .set(key.as_str(), doc_id, positions)
+        //                 .await
+        //             {
+        //                 Ok(_) => {}
+        //                 Err(e) => {
+        //                     return Err(FullTextIndexError::BlockfileWriteError(e));
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        // let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
+        // for (key, value) in uncommitted_frequencies.drain() {
+        //     // Delete only if the token existed previously.
+        //     if value.1 > 0 {
+        //         // Delete the old frequency.
+        //         match self
+        //             .frequencies_blockfile_writer
+        //             .delete::<u32, u32>(key.as_str(), value.1 as u32)
+        //             .await
+        //         {
+        //             Ok(_) => {}
+        //             Err(e) => {
+        //                 return Err(FullTextIndexError::BlockfileWriteError(e));
+        //             }
+        //         }
+        //     }
+        //     // Insert the new frequency.
+        //     // Add only if the frequency is not zero. This can happen in case of document
+        //     // deletes.
+        //     // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
+        //     if value.0 > 0 {
+        //         match self
+        //             .frequencies_blockfile_writer
+        //             .set(key.as_str(), value.0 as u32, 0)
+        //             .await
+        //         {
+        //             Ok(_) => {}
+        //             Err(e) => {
+        //                 return Err(FullTextIndexError::BlockfileWriteError(e));
+        //             }
+        //         }
+        //     }
+        // }
         Ok(())
     }
 
     pub async fn commit(self) -> Result<FullTextIndexFlusher, FullTextIndexError> {
+        let mut worker_handles = Arc::try_unwrap(self.worker_handles).unwrap(); // todo
+        drop(self.tx);
+        let mut worker_results = vec![];
+        while let Some(result) = worker_handles.next().await {
+            let result = result.unwrap();
+            worker_results.push(result);
+        }
+
+        let mut last_key = u128::MAX;
+        let mut posting_list: Vec<u32> = vec![];
+        for encoded_instance in worker_results
+            .into_iter()
+            .kmerge_by(|a_instance, b_instance| {
+                a_instance.get_encoded_token_and_document_id()
+                    < b_instance.get_encoded_token_and_document_id()
+            })
+        {
+            let this_key = encoded_instance.get_encoded_token_and_document_id();
+            if last_key != this_key {
+                if last_key != u128::MAX {
+                    let token = (last_key << 32).get_token();
+                    let document_id = (last_key << 32).get_document_id();
+                    self.posting_lists_blockfile_writer
+                        .set(&token, document_id, posting_list.clone())
+                        .await
+                        .unwrap();
+                    posting_list.clear();
+                }
+                last_key = this_key;
+            }
+            posting_list.push(encoded_instance.get_offset());
+        }
+
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
