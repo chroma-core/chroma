@@ -1,3 +1,17 @@
+# Add a PVC to the minio deployment
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: chroma
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 60Gi
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,7 +30,8 @@ spec:
     spec:
       volumes:
         - name: minio
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: minio-pvc
       containers:
         - name: minio
           image: minio/minio:latest
