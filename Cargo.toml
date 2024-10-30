@@ -66,3 +66,6 @@ itertools = "0.13.0"
 
 [profile.release]
 debug = 2
+
+[profile.bench]
+lto = "thin"

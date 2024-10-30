@@ -1,9 +1,9 @@
-use std::sync::Arc;
-
 use anyhow::Result;
+use chroma_benchmark::datasets::types::Record;
 use chroma_benchmark::datasets::{
     ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
 };
+use chroma_blockstore::BlockfileWriterOptions;
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::UnboundedCacheConfig;
 use chroma_index::fulltext::{
@@ -13,20 +13,30 @@ use chroma_index::fulltext::{
 use chroma_storage::{local::LocalStorage, Storage};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use futures::{StreamExt, TryStreamExt};
-use tantivy::tokenizer::NgramTokenizer;
-
+use std::sync::Arc;
 mod dataset_utilities;
 use dataset_utilities::{get_record_dataset, get_record_query_dataset_pair};
+use tantivy::tokenizer::NgramTokenizer;
 
-async fn compact_log_and_get_reader<'a, T>(
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+async fn compact_log_and_get_reader<'a>(
     blockfile_provider: &BlockfileProvider,
-    corpus: &T,
-) -> Result<FullTextIndexReader<'a>>
-where
-    T: RecordDataset,
-{
-    let postings_blockfile_writer = blockfile_provider.create::<u32, Vec<u32>>().await.unwrap();
-    let frequencies_blockfile_writer = blockfile_provider.create::<u32, u32>().await.unwrap();
+    corpus: &Vec<(usize, Record)>,
+) -> Result<FullTextIndexReader<'a>> {
+    let postings_blockfile_writer = blockfile_provider
+        .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
+        .await
+        .unwrap();
+    let frequencies_blockfile_writer = blockfile_provider
+        .write::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
+        .await
+        .unwrap();
     let postings_blockfile_id = postings_blockfile_writer.id();
     let frequencies_blockfile_id = frequencies_blockfile_writer.id();
 
@@ -41,15 +51,9 @@ where
         tokenizer,
     );
 
-    let mut corpus_stream = corpus
-        .create_records_stream()
-        .await?
-        .enumerate()
-        .boxed_local();
-    while let Some((i, record)) = corpus_stream.next().await {
-        let record = record?;
+    for (i, record) in corpus.iter() {
         full_text_index_writer
-            .add_document(&record.document, i as u32)
+            .add_document(&record.document, *i as u32)
             .await
             .unwrap();
     }
@@ -117,15 +121,30 @@ pub fn bench_compaction(c: &mut Criterion) {
     let tmp_dir = tempfile::tempdir().unwrap();
     let blockfile_provider = create_blockfile_provider(tmp_dir.path().to_str().unwrap());
 
-    let record_corpus = Arc::new(record_corpus);
+    let collected_corpus_records = runner
+        .block_on(async {
+            let stream = record_corpus.create_records_stream().await?;
+
+            stream
+                .enumerate()
+                .map(|(i, record)| record.map(|r| (i, r)))
+                .boxed_local()
+                .try_collect::<Vec<(usize, Record)>>()
+                .await
+        })
+        .unwrap();
+    let collected_corpus_records = Arc::new(collected_corpus_records);
 
     compaction_group.bench_function("scidocs", |b| {
         b.to_async(&runner).iter_batched(
-            || (record_corpus.clone(), blockfile_provider.clone()),
-            |(record_corpus, blockfile_provider)| async move {
-                compact_log_and_get_reader(&blockfile_provider, black_box(&record_corpus))
-                    .await
-                    .unwrap();
+            || (collected_corpus_records.clone(), blockfile_provider.clone()),
+            |(collected_corpus_records, blockfile_provider)| async move {
+                compact_log_and_get_reader(
+                    &blockfile_provider,
+                    black_box(&collected_corpus_records),
+                )
+                .await
+                .unwrap();
             },
             criterion::BatchSize::LargeInput,
         )
@@ -151,8 +170,21 @@ fn bench_querying(c: &mut Criterion) {
 
     let mut query_iter = query_subset.queries.iter().cycle();
 
+    let collected_corpus_records = runner
+        .block_on(async {
+            let stream = record_corpus.create_records_stream().await?;
+
+            stream
+                .enumerate()
+                .map(|(i, record)| record.map(|r| (i, r)))
+                .boxed_local()
+                .try_collect::<Vec<(usize, Record)>>()
+                .await
+        })
+        .unwrap();
+
     let index_reader = runner.block_on(async {
-        compact_log_and_get_reader(&blockfile_provider, &record_corpus)
+        compact_log_and_get_reader(&blockfile_provider, &collected_corpus_records)
             .await
             .unwrap()
     });

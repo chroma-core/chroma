@@ -28,6 +28,10 @@ chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-distance = { workspace = true }
+async-channel = "2.3.1"
+itertools.workspace = true
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"
 
 [dev-dependencies]
 rayon = { workspace = true }
