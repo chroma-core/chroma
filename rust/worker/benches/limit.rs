@@ -1,33 +1,18 @@
-use std::iter::once;
-
-use chroma_test::benchmark::{bench, tokio_multi_thread};
-use chroma_test::log::{offset_as_id, random_document, random_embedding, LogGenerator};
-use chroma_test::segment::CompactSegment;
-use chroma_types::{Chunk, Operation, OperationRecord, SignedRoaringBitmap, UpdateMetadataValue};
+use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
+use chroma_types::{Chunk, SignedRoaringBitmap};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
 use worker::execution::operators::limit::{LimitInput, LimitOperator};
+use worker::log::test::{add_generator_0, LogGenerator};
+use worker::segment::test::TestSegment;
 
-const DOCUMENT_LENGTH: usize = 64;
-const EMBEDDING_DIMENSION: usize = 6;
 const LIMIT: usize = 100;
-
-fn log_generator(id: usize) -> OperationRecord {
-    OperationRecord {
-        id: offset_as_id(id),
-        embedding: Some(random_embedding(EMBEDDING_DIMENSION)),
-        encoding: None,
-        metadata: Some(once(("val".to_string(), UpdateMetadataValue::Int(id as i64))).collect()),
-        document: Some(random_document(DOCUMENT_LENGTH)),
-        operation: Operation::Add,
-    }
-}
 
 fn bench_limit(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
     let logen = LogGenerator {
-        generator: log_generator,
+        generator: add_generator_0,
     };
 
     let routine = |limit_input| async move {
@@ -38,7 +23,7 @@ fn bench_limit(criterion: &mut Criterion) {
     };
 
     for record_count in [1000, 10000, 100000] {
-        let mut compact = CompactSegment::default();
+        let mut compact = TestSegment::default();
         runtime.block_on(async { compact.populate_with_generator(record_count, &logen).await });
 
         for offset in [0, record_count / 2, record_count - LIMIT] {
@@ -53,7 +38,7 @@ fn bench_limit(criterion: &mut Criterion) {
                     Some(LIMIT as u32),
                 )
             };
-            bench(
+            bench_run(
                 format!("limit-{}-{}", record_count, offset).as_str(),
                 criterion,
                 &runtime,
