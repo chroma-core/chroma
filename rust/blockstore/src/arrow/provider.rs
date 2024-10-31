@@ -316,10 +316,15 @@ impl BlockManager {
             }
         };
         let key = format!("block/{}", block.id);
+        let block_bytes_len = bytes.len();
         let res = self.storage.put_bytes(&key, bytes).await;
         match res {
             Ok(_) => {
-                tracing::info!("Block: {} written to storage", block.id);
+                tracing::info!(
+                    "Block: {} written to storage ({}B)",
+                    block.id,
+                    block_bytes_len
+                );
             }
             Err(e) => {
                 tracing::info!("Error writing block to storage {}", e);
