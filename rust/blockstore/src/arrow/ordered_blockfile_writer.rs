@@ -274,8 +274,26 @@ impl ArrowOrderedBlockfileWriter {
         let inner = &mut self
             .advance_current_delta_and_get_inner::<K, V>(prefix, &key)
             .await?;
-        let delta = &mut inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
-        delta.add(prefix, key, value);
+        let current_materialized_delta_size = {
+            let delta = &mut inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
+            delta.add(prefix, key, value);
+            delta.get_size::<K, V>()
+        };
+
+        let max_block_size_bytes = self.block_manager.max_block_size_bytes();
+        if current_materialized_delta_size > max_block_size_bytes {
+            let (mut current_delta, current_end_key) = inner.current_block_delta.take().unwrap(); // todo
+            let new_delta = current_delta.split_off_half::<K, V>();
+
+            self.root
+                .sparse_index
+                .add_block(new_delta.min_key().unwrap(), new_delta.id) // todo
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
+            inner.completed_block_deltas.push(current_delta);
+            inner.current_block_delta = Some((new_delta, current_end_key));
+        }
+
         Ok(())
     }
 
