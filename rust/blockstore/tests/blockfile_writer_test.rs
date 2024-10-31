@@ -351,7 +351,7 @@ mod tests {
             let writer = block_on(
                 provider.write::<&str, String>(
                     BlockfileWriterOptions::new()
-                        .set_mutation_ordering(ref_state.generated_mutation_ordering.clone()),
+                        .set_mutation_ordering(ref_state.generated_mutation_ordering),
                 ),
             )
             .unwrap();
@@ -390,9 +390,7 @@ mod tests {
                     state.writer = block_on(
                         state.provider.write::<&str, String>(
                             BlockfileWriterOptions::new()
-                                .set_mutation_ordering(
-                                    ref_state.generated_mutation_ordering.clone(),
-                                )
+                                .set_mutation_ordering(ref_state.generated_mutation_ordering)
                                 .fork(id),
                         ),
                     )
