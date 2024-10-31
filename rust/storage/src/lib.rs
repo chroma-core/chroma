@@ -13,6 +13,8 @@ pub mod local;
 pub mod s3;
 pub mod stream;
 use futures::Stream;
+use local::LocalStorage;
+use tempfile::TempDir;
 use thiserror::Error;
 
 #[derive(Clone)]
@@ -205,4 +207,14 @@ pub async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn Chro
             admissioncontrolleds3::AdmissionControlledS3Storage::try_from_config(config).await?,
         )),
     }
+}
+
+pub fn test_storage() -> Storage {
+    Storage::Local(LocalStorage::new(
+        TempDir::new()
+            .expect("Should be able to create a temporary directory.")
+            .into_path()
+            .to_str()
+            .expect("Should be able to convert temporary directory path to string"),
+    ))
 }

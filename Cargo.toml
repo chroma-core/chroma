@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+   "rust/benchmark",
    "rust/blockstore",
    "rust/cache",
    "rust/chroma",
@@ -12,7 +13,6 @@ members = [
    "rust/storage",
    "rust/types",
    "rust/worker",
-   "rust/test",
 ]
 
 [workspace.dependencies]
@@ -42,6 +42,7 @@ tantivy = "0.21.1"
 criterion = { version = "0.5", features = ["async_tokio"] }
 either = "1.13.0"
 
+chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-error = { path = "rust/error" }
 chroma-config = { path = "rust/config" }
@@ -50,7 +51,6 @@ chroma-cache = { path = "rust/cache" }
 chroma-types = { path = "rust/types" }
 chroma-index = { path = "rust/index" }
 chroma-distance = { path = "rust/distance" }
-chroma-test = { path = "rust/test" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies
