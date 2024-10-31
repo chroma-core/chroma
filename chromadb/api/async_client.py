@@ -201,14 +201,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_collection(
         self,
         name: str,
-        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         model = await self._server.get_collection(
-            id=id,
             name=name,
             tenant=self.tenant,
             database=self.database,
