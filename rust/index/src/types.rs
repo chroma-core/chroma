@@ -25,25 +25,10 @@ impl ChromaError for IndexConfigFromSegmentError {
 }
 
 impl IndexConfig {
-    pub fn from_segment(
-        segment: &Segment,
-        dimensionality: i32,
-    ) -> Result<Self, Box<IndexConfigFromSegmentError>> {
-        let space = match segment.metadata {
-            Some(ref metadata) => match metadata.get("hnsw:space") {
-                Some(MetadataValue::Str(space)) => space,
-                _ => "l2",
-            },
-            None => "l2",
-        };
-        match DistanceFunction::try_from(space) {
-            Ok(distance_function) => Ok(IndexConfig {
-                dimensionality,
-                distance_function,
-            }),
-            Err(e) => Err(Box::new(
-                IndexConfigFromSegmentError::InvalidDistanceFunction(e),
-            )),
+    pub fn new(dimensionality: i32, distance_function: DistanceFunction) -> Self {
+        IndexConfig {
+            dimensionality,
+            distance_function,
         }
     }
 }

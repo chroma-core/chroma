@@ -278,6 +278,23 @@ Metadata
 pub type Metadata = HashMap<String, MetadataValue>;
 pub type DeletedMetadata = HashSet<String>;
 
+pub fn get_metadata_value_as<'a, T>(
+    metadata: &'a Metadata,
+    key: &str,
+) -> Result<T, Box<MetadataValueConversionError>>
+where
+    T: TryFrom<&'a MetadataValue, Error = MetadataValueConversionError>,
+{
+    let res = match metadata.get(key) {
+        Some(value) => T::try_from(value),
+        None => return Err(Box::new(MetadataValueConversionError::InvalidValue)),
+    };
+    match res {
+        Ok(value) => Ok(value),
+        Err(e) => Err(Box::new(MetadataValueConversionError::InvalidValue)),
+    }
+}
+
 impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
     type Error = MetadataValueConversionError;
 
