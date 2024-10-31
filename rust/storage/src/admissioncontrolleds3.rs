@@ -64,7 +64,7 @@ impl AdmissionControlledS3Storage {
         Self {
             storage,
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
-            rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(5))),
+            rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(2))),
         }
     }
 
@@ -449,8 +449,8 @@ mod tests {
         // At < 8 MB.
         test_multipart_get_for_size(1024 * 1024 * 7).await;
         // At > 8 MB.
-        test_multipart_get_for_size(1024 * 1024 * 19).await;
-        // Greater than NAC limit i.e. > 5*8 MB = 40 MB.
-        test_multipart_get_for_size(1024 * 1024 * 100).await;
+        test_multipart_get_for_size(1024 * 1024 * 10).await;
+        // Greater than NAC limit i.e. > 2*8 MB = 16 MB.
+        test_multipart_get_for_size(1024 * 1024 * 18).await;
     }
 }
