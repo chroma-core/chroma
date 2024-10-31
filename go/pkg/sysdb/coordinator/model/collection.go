@@ -15,6 +15,7 @@ type Collection struct {
 	Ts                   types.Timestamp
 	LogPosition          int64
 	Version              int32
+	UpdatedAt            types.Timestamp
 }
 
 type CreateCollection struct {
