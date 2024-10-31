@@ -32,7 +32,7 @@ const fn default_file_size() -> usize {
 }
 
 const fn default_flushers() -> usize {
-    64
+    4
 }
 
 const fn default_flush() -> bool {
@@ -40,7 +40,7 @@ const fn default_flush() -> bool {
 }
 
 const fn default_reclaimers() -> usize {
-    4
+    2
 }
 
 const fn default_recover_concurrency() -> usize {
@@ -48,7 +48,7 @@ const fn default_recover_concurrency() -> usize {
 }
 
 const fn default_admission_rate_limit() -> usize {
-    50
+    100
 }
 
 const fn default_shards() -> usize {
@@ -56,7 +56,7 @@ const fn default_shards() -> usize {
 }
 
 fn default_eviction() -> String {
-    "lfu".to_string()
+    "lru".to_string()
 }
 
 const fn default_invalid_ratio() -> f64 {
@@ -120,7 +120,7 @@ pub struct FoyerCacheConfig {
     pub flush: bool,
 
     /// Reclaimer count.
-    #[arg(long, default_value_t = 4)]
+    #[arg(long, default_value_t = 2)]
     #[serde(default = "default_reclaimers")]
     pub reclaimers: usize,
 
@@ -130,7 +130,7 @@ pub struct FoyerCacheConfig {
     pub recover_concurrency: usize,
 
     /// Enable rated ticket admission picker if `admission_rate_limit > 0`. (MiB/s)
-    #[arg(long, default_value_t = 50)]
+    #[arg(long, default_value_t = 100)]
     #[serde(default = "default_admission_rate_limit")]
     pub admission_rate_limit: usize,
 
@@ -140,7 +140,7 @@ pub struct FoyerCacheConfig {
     pub shards: usize,
 
     /// Eviction algorithm to use
-    #[arg(long, default_value = "lfu")]
+    #[arg(long, default_value = "lru")]
     #[serde(default = "default_eviction")]
     pub eviction: String,
 
