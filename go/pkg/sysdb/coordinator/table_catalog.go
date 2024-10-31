@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -216,6 +217,7 @@ func (tc *Catalog) GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*mo
 	return result, nil
 }
 
+// If collection is soft-deleted, then hard delete it, before creating a collection with the same name.
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
 	var result *model.Collection
 
@@ -250,6 +252,17 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 			}
 		} else {
 			created = true
+			// If collection is soft-deleted, then hard delete it.
+			isSoftDeleted, err := tc.metaDomain.CollectionDb(txCtx).CheckCollectionIsSoftDeleted(createCollection.ID.String(), tenantID, databaseName)
+			if err != nil {
+				return err
+			}
+			if isSoftDeleted {
+				err = tc.hardDeleteCollection(txCtx, &model.DeleteCollection{ID: createCollection.ID, TenantID: tenantID, DatabaseName: databaseName})
+				if err != nil {
+					return err
+				}
+			}
 		}
 
 		dbCollection := &dbmodel.Collection{
@@ -308,8 +321,15 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return collections, nil
 }
 
-func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
-	log.Info("deleting collection", zap.Any("deleteCollection", deleteCollection))
+func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection, softDelete bool) error {
+	if softDelete {
+		return tc.softDeleteCollection(ctx, deleteCollection)
+	}
+	return tc.hardDeleteCollection(ctx, deleteCollection)
+}
+
+func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	log.Info("hard deleting collection", zap.Any("deleteCollection", deleteCollection))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
 		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
@@ -328,10 +348,58 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 		if err != nil {
 			return err
 		}
-		log.Info("collection deleted", zap.Any("collection", collectionAndMetadata), zap.Int("collectionDeletedCount", collectionDeletedCount), zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
+		log.Info("collection hard deleted", zap.Any("collection", collectionAndMetadata), zap.Int("collectionDeletedCount", collectionDeletedCount), zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
 
 		return nil
 	})
+}
+
+func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	log.Info("Soft deleting collection", zap.Any("softDeleteCollection", deleteCollection))
+	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Check if collection exists
+		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(deleteCollection.ID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
+		if err != nil {
+			return err
+		}
+		if len(collections) == 0 {
+			return common.ErrCollectionDeleteNonExistingCollection
+		}
+
+		dbCollection := &dbmodel.Collection{
+			ID:        deleteCollection.ID.String(),
+			IsDeleted: true,
+			Ts:        deleteCollection.Ts,
+			UpdatedAt: time.Now(),
+		}
+		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
+		if err != nil {
+			log.Error("soft delete collection failed", zap.Error(err))
+			return fmt.Errorf("collection delete failed due to update error: %w", err)
+		}
+		return nil
+	})
+}
+
+func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
+	collections, err := tc.metaDomain.CollectionDb(ctx).GetSoftDeletedCollections(tenantID, databaseName, limit)
+	if err != nil {
+		return nil, err
+	}
+	// Convert to model.Collection
+	collectionList := make([]*model.Collection, 0, len(collections))
+	for _, dbCollection := range collections {
+		collection := &model.Collection{
+			ID:           types.MustParse(dbCollection.Collection.ID),
+			Name:         *dbCollection.Collection.Name,
+			DatabaseName: dbCollection.DatabaseName,
+			TenantID:     dbCollection.TenantID,
+			Ts:           types.Timestamp(dbCollection.Collection.Ts),
+			UpdatedAt:    types.Timestamp(dbCollection.Collection.UpdatedAt.Unix()),
+		}
+		collectionList = append(collectionList, collection)
+	}
+	return collectionList, nil
 }
 
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {

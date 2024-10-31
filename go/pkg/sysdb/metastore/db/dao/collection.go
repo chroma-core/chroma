@@ -25,10 +25,14 @@ func (s *collectionDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Collection{}).Error
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
+	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
+}
+
+func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, databases.name, databases.tenant_id").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, databases.name, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -44,6 +48,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
 	}
+	query = query.Where("collections.is_deleted = ?", is_deleted)
 
 	if limit != nil {
 		query = query.Limit(int(*limit))
@@ -66,12 +71,13 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 			collectionConfigurationJsonStr string
 			collectionDimension            sql.NullInt32
 			collectionDatabaseID           string
+			collectionIsDeleted            bool
 			collectionCreatedAt            sql.NullTime
 			databaseName                   string
 			databaseTenantID               string
 		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &databaseName, &databaseTenantID)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &databaseName, &databaseTenantID)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
@@ -84,6 +90,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 			DatabaseID:           collectionDatabaseID,
 			LogPosition:          logPosition,
 			Version:              version,
+			IsDeleted:            collectionIsDeleted,
 		}
 		if collectionDimension.Valid {
 			collection.Dimension = &collectionDimension.Int32
@@ -110,6 +117,10 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	}
 
 	return
+}
+
+func (s *collectionDb) GetSoftDeletedCollections(tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
+	return s.getCollections(nil, nil, tenantID, databaseName, &limit, nil, true)
 }
 
 func (s *collectionDb) DeleteCollectionByID(collectionID string) (int, error) {
@@ -147,6 +158,9 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	if in.Dimension != nil {
 		ret["dimension"] = *in.Dimension
 	}
+	if in.IsDeleted {
+		ret["is_deleted"] = true
+	}
 	return ret
 }
 
@@ -155,7 +169,7 @@ func (s *collectionDb) Update(in *dbmodel.Collection) error {
 	updates := generateCollectionUpdatesWithoutID(in)
 	err := s.db.Model(&dbmodel.Collection{}).Where("id = ?", in.ID).Updates(updates).Error
 	if err != nil {
-		log.Error("create collection failed", zap.Error(err))
+		log.Error("update collection failed", zap.Error(err))
 		var pgErr *pgconn.PgError
 		ok := errors.As(err, &pgErr)
 		if ok {
@@ -199,4 +213,21 @@ func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosit
 		return 0, err
 	}
 	return version, nil
+}
+
+func (s *collectionDb) CheckCollectionIsSoftDeleted(collectionID string, tenantID string, databaseName string) (bool, error) {
+	var collection dbmodel.Collection
+	query := s.db.Select("collections.is_deleted").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
+		Where("collections.id = ? AND databases.tenant_id = ? AND databases.name = ?",
+			collectionID, tenantID, databaseName)
+
+	err := query.First(&collection).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, common.ErrCollectionNotFound
+		}
+		return false, err
+	}
+	return collection.IsDeleted, nil
 }

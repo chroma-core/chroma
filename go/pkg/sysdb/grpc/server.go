@@ -57,9 +57,10 @@ type Config struct {
 // convenient for end-to-end property based testing.
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer
-	coordinator  coordinator.Coordinator
-	grpcServer   grpcutils.GrpcServer
-	healthServer *health.Server
+	coordinator       coordinator.Coordinator
+	grpcServer        grpcutils.GrpcServer
+	healthServer      *health.Server
+	softDeleteCleaner *SoftDeleteCleaner
 }
 
 func New(config Config) (*Server, error) {
@@ -88,6 +89,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		return nil, err
 	}
 	s.coordinator = *coordinator
+	s.softDeleteCleaner = NewSoftDeleteCleaner(*coordinator, 60, 3600)
 	if !config.Testing {
 		namespace := config.KubernetesNamespace
 		// Create memberlist manager for query service
@@ -119,6 +121,8 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		if err != nil {
 			return nil, err
 		}
+
+		s.softDeleteCleaner.Start()
 	}
 	return s, nil
 }
