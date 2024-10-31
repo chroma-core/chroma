@@ -61,7 +61,7 @@ embeddings.
 By default, this template saves all data on a single
 volume. When you delete or replace it, the data will disappear. For
 serious production use (with high availability, backups, etc.) please
-read and understand the CloudFormation template and use it as a basis
+read and understand the Terraform template and use it as a basis
 for what you need, or reach out to the Chroma team for assistance.
 {% /note %}
 
@@ -119,6 +119,11 @@ If  you want to use a machine type different from the default `e2-small`, in you
 
 ```text
 machine_type = "e2-medium"
+```
+
+After a few minutes, you can get the IP address of your instance with
+```shell
+terraform output -raw chroma_instance_ip
 ```
 
 ### Step 5: Chroma Client Set-Up

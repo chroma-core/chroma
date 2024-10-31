@@ -106,6 +106,16 @@ async def catch_exceptions_middleware(
         return await call_next(request)
     except ChromaError as e:
         return fastapi_json_response(e)
+    except ValueError as e:
+        return JSONResponse(
+            content={"error": "InvalidArgumentError", "message": str(e)},
+            status_code=400,
+        )
+    except TypeError as e:
+        return JSONResponse(
+            content={"error": "InvalidArgumentError", "message": str(e)},
+            status_code=400,
+        )
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)

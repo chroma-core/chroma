@@ -161,4 +161,13 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
 
         prev_hook(panic_info);
     }));
+    let exporter = opentelemetry_otlp::new_exporter()
+        .tonic()
+        .with_endpoint(otel_endpoint);
+    let provider = opentelemetry_otlp::new_pipeline()
+        .metrics(opentelemetry_sdk::runtime::Tokio)
+        .with_exporter(exporter)
+        .build()
+        .expect("Failed to build metrics provider");
+    global::set_meter_provider(provider);
 }

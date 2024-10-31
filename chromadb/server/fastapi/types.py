@@ -31,8 +31,8 @@ class QueryEmbedding(BaseModel):
     # TODO: Pydantic doesn't bode well with recursive types so we use generic Dicts
     # for Where and WhereDocument. This is not ideal, but it works for now since
     # there is a lot of downstream validation.
-    where: Optional[Dict[Any, Any]] = {}
-    where_document: Optional[Dict[Any, Any]] = {}
+    where: Optional[Dict[Any, Any]] = None
+    where_document: Optional[Dict[Any, Any]] = None
     query_embeddings: List[Any]
     n_results: int = 10
     include: Include = IncludeMetadataDocumentsDistances

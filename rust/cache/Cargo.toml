@@ -10,6 +10,11 @@ path = "src/lib.rs"
 clap = { version = "4", features = ["derive"] }
 foyer = "0.12"
 anyhow = "1.0"
+opentelemetry = { version = "0.26.0", default-features = false, features = [
+  "trace",
+  "metrics",
+] }
+
 # TODO(rescrv):  Deprecated.  Find a suitable replacement for such things.
 serde_yaml = "0.9"
 
