@@ -50,6 +50,7 @@ prost-types = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
 tantivy = { workspace = true }
+indicatif = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-error = { workspace = true }
@@ -72,7 +73,7 @@ proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 criterion = { workspace = true }
 
-chroma-test = { workspace = true }
+chroma-benchmark = { workspace = true }
 
 [[bench]]
 name = "metadata_filtering"

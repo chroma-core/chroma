@@ -131,6 +131,23 @@ impl TryFrom<chroma_proto::Segment> for Segment {
     }
 }
 
+pub fn test_segment(scope: SegmentScope) -> Segment {
+    let r#type = match scope {
+        SegmentScope::METADATA => SegmentType::BlockfileMetadata,
+        SegmentScope::RECORD => SegmentType::BlockfileRecord,
+        SegmentScope::VECTOR => SegmentType::HnswDistributed,
+        SegmentScope::SQLITE => unimplemented!("Sqlite segment is not implemented"),
+    };
+    Segment {
+        id: Uuid::new_v4(),
+        r#type,
+        scope,
+        collection: CollectionUuid(Uuid::new_v4()),
+        metadata: None,
+        file_path: HashMap::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
