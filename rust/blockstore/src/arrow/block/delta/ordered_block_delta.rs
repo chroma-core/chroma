@@ -221,4 +221,28 @@ impl OrderedBlockDelta {
 
         output
     }
+
+    pub(crate) fn split_off_half<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &mut self,
+    ) -> OrderedBlockDelta {
+        let half_size = self.get_size::<K, V>() / 2;
+        let (_, new_delta) = self.builder.split::<K>(half_size);
+
+        let old_block = self.old_block.take();
+
+        let new_delta = OrderedBlockDelta {
+            builder: new_delta,
+            id: Uuid::new_v4(),
+            copied_up_to_row_of_old_block: self.copied_up_to_row_of_old_block,
+            old_block,
+        };
+
+        self.copied_up_to_row_of_old_block = 0;
+
+        new_delta
+    }
+
+    pub(crate) fn min_key(&self) -> Option<CompositeKey> {
+        self.builder.get_min_key()
+    }
 }
