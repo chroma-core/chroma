@@ -437,9 +437,9 @@ impl WorkerServer {
             FetchLogOperator {
                 log_client: self.log.clone(),
                 batch_size: 100,
-                skip: log_position as u32 + 1,
-                fetch: None,
-                collection: collection_uuid,
+                start_log_offset_id: log_position as u32 + 1,
+                maximum_fetch_count: None,
+                collection_uuid,
             },
             FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),

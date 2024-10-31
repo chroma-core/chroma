@@ -15,9 +15,9 @@ use crate::{
 pub struct FetchLogOperator {
     pub(crate) log_client: Box<Log>,
     pub batch_size: u32,
-    pub skip: u32,
-    pub fetch: Option<u32>,
-    pub collection: CollectionUuid,
+    pub start_log_offset_id: u32,
+    pub maximum_fetch_count: Option<u32>,
+    pub collection_uuid: CollectionUuid,
 }
 
 pub type FetchLogInput = ();
@@ -54,20 +54,12 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
 
         let mut fetched = Vec::new();
         let mut log_client = self.log_client.clone();
-        let mut offset = self.skip as i64;
+        let mut offset = self.start_log_offset_id as i64;
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
         loop {
-            if let Some(limit) = self.fetch {
-                if fetched.len() >= limit as usize {
-                    // Enough logs have been fetched
-                    fetched.truncate(limit as usize);
-                    break;
-                }
-            }
-
             let mut log_batch = log_client
                 .read(
-                    self.collection,
+                    self.collection_uuid,
                     offset,
                     self.batch_size as i32,
                     Some(timestamp),
@@ -79,6 +71,13 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
             if let Some(last_log) = log_batch.last() {
                 offset = last_log.log_offset + 1;
                 fetched.append(&mut log_batch);
+                if let Some(limit) = self.maximum_fetch_count {
+                    if fetched.len() >= limit as usize {
+                        // Enough logs have been fetched
+                        fetched.truncate(limit as usize);
+                        break;
+                    }
+                }
             }
 
             if retrieve_count < self.batch_size as usize {
@@ -86,7 +85,90 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 break;
             }
         }
-        tracing::info!(name: "Pulled log records", num_records = fetched.len());
+        tracing::info!(name: "Fetched log records", num_records = fetched.len());
         Ok(Chunk::new(fetched.into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chroma_types::CollectionUuid;
+
+    use crate::{
+        execution::{operator::Operator, operators::fetch_log::FetchLogOperator},
+        log::{
+            log::{InMemoryLog, InternalLogRecord},
+            test::{add_generator_0, LogGenerator},
+        },
+    };
+
+    use super::Log;
+
+    fn in_memory_log_setup() -> (CollectionUuid, Box<Log>) {
+        let collection_id = CollectionUuid::new();
+        let mut in_memory_log = InMemoryLog::new();
+        let generator = LogGenerator {
+            generator: add_generator_0,
+        };
+        generator.generate_vec(0..10).into_iter().for_each(|log| {
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: log.log_offset,
+                    log_ts: log.log_offset,
+                    record: log,
+                },
+            )
+        });
+        (collection_id, Box::new(Log::InMemory(in_memory_log)))
+    }
+
+    #[tokio::test]
+    async fn test_pull_all() {
+        let (collection_uuid, log_client) = in_memory_log_setup();
+
+        let fetch_log_operator = FetchLogOperator {
+            log_client,
+            batch_size: 100,
+            start_log_offset_id: 0,
+            maximum_fetch_count: None,
+            collection_uuid,
+        };
+
+        let logs = fetch_log_operator
+            .run(&())
+            .await
+            .expect("Fetch log operator should not fail");
+
+        assert_eq!(logs.len(), 10);
+        logs.iter()
+            .map(|(log, _)| log)
+            .zip(0..10)
+            .for_each(|(log, offset)| assert_eq!(log.log_offset, offset));
+    }
+
+    #[tokio::test]
+    async fn test_pull_range() {
+        let (collection_uuid, log_client) = in_memory_log_setup();
+
+        let fetch_log_operator = FetchLogOperator {
+            log_client,
+            batch_size: 100,
+            start_log_offset_id: 3,
+            maximum_fetch_count: Some(3),
+            collection_uuid,
+        };
+
+        let logs = fetch_log_operator
+            .run(&())
+            .await
+            .expect("Fetch log operator should not fail");
+
+        assert_eq!(logs.len(), 3);
+        logs.iter()
+            .map(|(log, _)| log)
+            .zip(3..6)
+            .for_each(|(log, offset)| assert_eq!(log.log_offset, offset));
     }
 }
