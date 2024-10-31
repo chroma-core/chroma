@@ -88,6 +88,7 @@ impl Staging {
             if self.snapshots_staged.contains(&s.setsum) {
                 self.snapshots_staged.retain(|ss| ss != &s.setsum);
                 if let Err(err) = new_manifest.apply_snapshot(s) {
+                    println!("apply snapshot failed: {:?}", err);
                     APPLY_SNAPSHOT_FAILED.click();
                 } else {
                     snapshot = None;
