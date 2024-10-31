@@ -125,7 +125,7 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
     size: D::DataSize,
     provider: &ArrowBlockfileProvider,
 ) where
-    <D as DataGenerator>::Value: chroma_blockstore::memory::storage::Writeable,
+    <D as DataGenerator>::Value: chroma_blockstore::memory::Writeable,
 {
     let generator = D::generate(size.clone());
     let data_byte_size = generator.num_bytes();
@@ -222,9 +222,9 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
 }
 
 // todo: this should be a parameter
-const BLOCK_SIZE: usize = 1024 * 256; // 256KB, so there should be 5 blocks
+const BLOCK_SIZE: usize = 1024 * 256; // 256KB
 
-/// This benchmark compares the performance of UnorderedBlockfileWriter and OrderedBlockfileWriter.
+/// This benchmark compares the performance of UnorderedBlockfileWriter and OrderedBlockfileWriter across various use-cases.
 pub fn benchmark(c: &mut Criterion) {
     let runner = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
