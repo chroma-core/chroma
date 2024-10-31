@@ -2,8 +2,8 @@ use std::iter::once;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_types::{
-    BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
-    MetadataValue, PrimitiveOperator, Where, WhereChildren, WhereComparison,
+    BooleanOperator, Chunk, DirectWhereComparison, MetadataValue, PrimitiveOperator, Where,
+    WhereChildren, WhereComparison,
 };
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
@@ -11,12 +11,11 @@ use worker::execution::operator::Operator;
 use worker::execution::operators::metadata_filtering::{
     MetadataFilteringInput, MetadataFilteringOperator,
 };
-use worker::log::test::{add_generator_0, random_document, LogGenerator};
+use worker::log::test::{add_generator_0, LogGenerator};
 use worker::segment::test::TestSegment;
 
 fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
     use BooleanOperator::*;
-    use DocumentOperator::*;
     use MetadataValue::*;
     use PrimitiveOperator::*;
     use WhereComparison::*;
