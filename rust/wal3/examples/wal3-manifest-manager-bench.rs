@@ -112,6 +112,7 @@ async fn main() {
     let manifest_manager = Arc::new(
         ManifestManager::new(
             options.log.throttle_manifest,
+            options.log.snapshot_manifest,
             manifest,
             Arc::clone(&object_store),
         )

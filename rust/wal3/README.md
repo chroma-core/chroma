@@ -490,10 +490,10 @@ this another way and the number of bytes written to object storage for the manif
 the number of writes to the manifest.  This is a problem because each manifest write is
 incrementally more expensive than the previous write.
 
-To compensate, the manifest writer needs to periodically write a snapshot of the manifest that
-contains a prefix of the manifest that it won't rewrite.  This is a form of fragmentation.
+To compensate, the manifest writer periodically writes a snapshot of the manifest that contains a
+prefix of the manifest that it won't rewrite.  This is a form of fragmentation.
 
-One way to handle this would be to write a snapshot every N writes and embed the snapshots.
+The direct way to handle this would be to write a snapshot every N writes and embed the snapshots.
 
 ```text
    ┌──────────────────┐   ┌──────────────────┐
@@ -509,52 +509,74 @@ One way to handle this would be to write a snapshot every N writes and embed the
 
 This requires writing a new snapshot everytime a new manifest that exceeds the size is written.
 This would be the straight-forward way to handle this, except that it requires writing SNAPSHOT.x
-before writing MANIFEST.i and that's a problem.  The manifest writer is a hot path and we don't want
-to introduce an extra round trip.
+before writing MANIFEST.i and a naive implementation would introduce latency.  The manifest writer
+is a hot path and we don't want to introduce an extra round trip.
 
-Instead, we can leverage the fact that a manifest is just a list of shard fragments, a prev and next
-pointer, and a setsum.  The setsum of the manifest minus the setsum of its previous manifest (both
-of which are embedded within a manifest) tells the setsum of everything that is new to the manifest.
-Similarly, the set of files contained within the manifest must be the same as what will roll up into
-the snapshot.  This means that we can simply treat the prior manifest as a snapshot and disregard
-the prev/next/snapshot pointers within the snapshot when parsing.  A manifest and a snapshot are
-both valid lists of shard fragments with accompanying setsums; the fact that one contains pointers
-is immaterial to this fact.
+Instead, we are able to leverage the fact that a manifest's prefix is immutable and under control of
+the writer.  The writer can write a snapshot of the manifest at any time, and then use it in the
+first manifest that it starts writing after the snapshot completes.  The question then becomes what
+the structure of the manifest/snapshot/fragment pointer-rich data structure looks like.
 
-To leverage this fact, we will not write explicit snapshots, but instead store pointers to manifests
-as snapshots.  When rolling a snapshot follow the following algorithm:
+Back-of-the-envelope calculations show that a single manifest is not sufficiently large to hold a
+whole log efficiently.  The same calculations show that a tree of manifests composing a single root
+node with a single level of interior nodes and a single level of leaves is sufficient to capture any
+log that we currently design for from a stationary perspective.
 
-- Construct a new empty manifest that points to the current manifest.  We will install this as a new
-  manifest.
-- Copy all snapshots from the latest manifest into the new manifest.
-- Refer to the latest manifest as the newest snapshot.
-- Install the new manifest.  What you get looks something like this:
+Keeping a perfectly balanced tree is hard, however.  And since the root of the multi-rooted tree is
+a manifest, we rewrite the indirect pointers to the tree each time that we write a new manifest.
+The bulk of this manifest is the indirect pointers to the interior nodes of the tree.
+
+We can do better, however, by recognizing that the tree is skewed in its access pattern.  Readers
+that read the whole tree will not be bothered by having to walk a tree of manifests, but readers
+that are looking to do a query of the tail of the log should be able to do so without having to walk
+multiple manifests.
+
+To this end, we introduce a second level of indirection in the manifest so that we will have a root,
+two levels of interior nodes, and a level of leaves.  The root will point to the interior nodes, the
+first level of interior nodes point to the second level, and that level points to the leaves.
+
+This is, strictly speaking, an optimization, but one that will allow us to scale the log to beyond
+all forseeable current requirements.  20-25 pointers in the root, or 2kB are all that's needed to
+capture a log that's more than a petabyte in size.  Compare that to 5k pointers or 329kB for a
+single manifest.  We're dealing with kilobytes per manifest for a log that's petabytes, but when
+each manifest targets < 1MB in size, the difference at write time is apparent in the latency.
+
+Consequently, the manifest and its transitive references will be a four-level tree.
+
+### Interplay Between Garbage Collection and Snapshots
+
+The manifest compaction strategy is designed to reduce the cost of writing the manifest, but it
+incurs a cost for garbage collection.  To garbage collect an arbitary prefix of the log
+fragment-by-fragment would require rewriting the snapshots that partially cover the prefix and
+contain data that is not to be garbage collected.  This is complex.
+
+To side-step this problem we will introduce intentional fragmentation of the manifest and snapshots
+to align to the garbage collection interval.  This will guarantee that at most one interval worth of
+garbage that could be compacted is left uncompacted.
+
+### Interplay Between Snapshots and Setsum
+
+The setsum mechanism protects the snapshot mechanism.  Each pointer to a snapshot embeds within the
+pointer itself a reference to the setsum of the pointed-to snapshot.  The following example shows
+how to balance setsums.
 
 ```text
-┐   ┌──────────────────┐   ┌──────────────────┐
-│   │ MANIFEST.i       │   │ MANIFEST.j       │
-│──▶│            next ─│──▶│            next ─│──▶
-│◀──│─ prev    snap    │◀──│─ prev  snap[x, i]│
-┘   └────────────│─────┘   └─────────────│──│─┘
-                 │   ↑                   │  │
-                 │   └───────────────────│──┘
-                 ↓                       │
-       ┌──────────────────┐              │
-       │ SNAPSHOT.x       │◀─────────────┘
-       └──────────────────┘
+┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐
+│ A ││ B ││ C ││ D ││ E ││ F ││ G ││ H ││ I ││ J │
+└───┘└───┘└───┘└───┘└───┘└───┘└───┘└───┘└───┘└───┘
+└───────────────── setsum(A - J) ────────────────┘
+
+└── setsum(A - D) ─┘
+                    └─────── setsum(E - J) ──────┘
+
+setsum(A - J) = setsum(A - D) + setsum(E - J)
 ```
 
-A rats nest of pointers, but it enables writing new manifests that are constant in size without
-having to write rollup snapshots of the manifest.
-
-Effectively the manifests form a tree with one internal node and many leaves.  Each manifest is a
-file of the form "manifest/MANIFEST.1730146801207827" with references of the form
-"shard03/000000000000025a_1730146851138_1730146851140_544c43c0ba56f62b024644e1567ce7ce0fa5fc752929ac94001f4b81ba2f0418.log"
-contained within.  Each shard fragment is currently 256 bytes, so a 1MB manifest will include at
-most 4096 references to shard fragments.  The snapshot references are another 66 bytes each, so a
-fully-loaded manifest will have up to ~15k snapshot references, each of which has 4096 references.
-This imposes a limit of ~65M shard fragments referenced by a manifest.  A 2MB manifest will hold
-~260M shard fragments, and a 4MB manifest will hold ~1B shard fragments.  8MB gets us ~4B fragments.
+To compact the manifest's pointers A-D, wal3 would write a new snapshot under `setsum(A-D)`.  Once
+that snapshot is written, the manifest next manifest to write replaces the fragments A, B, C, D with
+a single snapshot.A-D.  The setsum of the new manifest is setsum(A-D) + setsum(E-J), which conserves
+the setsum(A-J), providing some measure of proof that integrity is assured and no data is lost from
+the log when compacting.
 
 ## Snapshotting of the Log
 

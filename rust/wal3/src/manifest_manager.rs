@@ -5,10 +5,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use object_store::{ObjectStore, Result};
 
-use crate::manifest::{Manifest, ShardFragment};
+use crate::manifest::{Manifest, ShardFragment, Snapshot, SnapshotOptions};
 use crate::{
-    Error, LogPosition, ThrottleOptions, APPLY_DELTA, GENERATE_POINTERS, LOG_FULL,
-    NO_APPROPRIATE_DELTA, NO_DELTAS, PULL_WORK, PUSH_DELTA,
+    Error, LogPosition, ThrottleOptions, APPLY_DELTA, APPLY_SNAPSHOT_FAILED, GENERATE_POINTERS,
+    LOG_FULL, NO_APPROPRIATE_DELTA, NO_DELTAS, PULL_WORK, PUSH_DELTA,
 };
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
@@ -17,6 +17,8 @@ use crate::{
 struct Staging {
     /// Options for rate limiting.
     throttle: ThrottleOptions,
+    // Options related to snapshots.
+    snapshot: SnapshotOptions,
     /// The manifest that is most recently created.  This will be the most recent manifest
     /// in-flight.
     manifest: Manifest,
@@ -26,6 +28,10 @@ struct Staging {
         DeltaSeqNo,
         tokio::sync::oneshot::Sender<Option<Error>>,
     )>,
+    /// In-flight snapshots.
+    snapshots_in_flight: Vec<Snapshot>,
+    /// Snapshots that have been uploaded and are free for a manifest to claim.
+    snapshots_staged: Vec<sst::Setsum>,
     /// The next timestamp to assign.
     timestamp: LogPosition,
     /// The sequence number of the next shard assigned.
@@ -43,6 +49,7 @@ impl Staging {
     ) -> Option<(
         Manifest,
         Manifest,
+        Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
         if self.deltas.is_empty() {
@@ -76,9 +83,28 @@ impl Staging {
         }
         PULL_WORK.click();
         self.last_batch = Instant::now();
+        let mut snapshot = new_manifest.generate_snapshot(self.snapshot);
+        if let Some(s) = snapshot.as_ref() {
+            if self.snapshots_staged.contains(&s.setsum) {
+                self.snapshots_staged.retain(|ss| ss != &s.setsum);
+                if let Err(err) = new_manifest.apply_snapshot(s) {
+                    APPLY_SNAPSHOT_FAILED.click();
+                } else {
+                    snapshot = None;
+                }
+            } else if self
+                .snapshots_in_flight
+                .iter()
+                .any(|ss| ss.setsum == s.setsum)
+            {
+                snapshot = None;
+            } else {
+                self.snapshots_in_flight.push(s.clone());
+            }
+        }
         let mut old_manifest = new_manifest.clone();
         std::mem::swap(&mut old_manifest, &mut self.manifest);
-        Some((old_manifest, new_manifest, notifiers))
+        Some((old_manifest, new_manifest, snapshot, notifiers))
     }
 }
 
@@ -100,6 +126,7 @@ pub struct ManifestManager {
 impl ManifestManager {
     pub async fn new(
         throttle: ThrottleOptions,
+        snapshot: SnapshotOptions,
         manifest: Manifest,
         object_store: Arc<impl ObjectStore>,
     ) -> Self {
@@ -111,8 +138,11 @@ impl ManifestManager {
             .unwrap_or(LogPosition(1));
         let staging = Arc::new(Mutex::new(Staging {
             throttle,
+            snapshot,
             manifest,
             deltas: vec![],
+            snapshots_in_flight: vec![],
+            snapshots_staged: vec![],
             timestamp,
             next_seq_no_to_assign: 1,
             next_seq_no_to_apply: 1,
@@ -233,7 +263,7 @@ impl ManifestManager {
                     (None, staging.throttle)
                 }
             };
-            if let Some((old_manifest, new_manifest, notifiers)) = work {
+            if let Some((old_manifest, new_manifest, snapshot, notifiers)) = work {
                 let done = Arc::new(AtomicBool::new(false));
                 let install_one = Self::install_one(
                     throttle,
@@ -245,6 +275,19 @@ impl ManifestManager {
                 );
                 let handle = tokio::task::spawn(install_one);
                 in_flight.push_back((done, handle, notifiers));
+                if let Some(snapshot) = snapshot {
+                    let done = Arc::new(AtomicBool::new(false));
+                    let install = Self::install_snapshot(
+                        throttle,
+                        Arc::clone(&staging),
+                        Arc::clone(&object_store),
+                        snapshot,
+                        Arc::clone(&notifier),
+                        Arc::clone(&done),
+                    );
+                    let handle = tokio::task::spawn(install);
+                    in_flight.push_back((done, handle, vec![]));
+                }
             }
             while in_flight
                 .front()
@@ -286,6 +329,35 @@ impl ManifestManager {
             }
         }
     }
+
+    async fn install_snapshot(
+        throttle: ThrottleOptions,
+        staging: Arc<Mutex<Staging>>,
+        object_store: Arc<impl ObjectStore>,
+        snapshot: Snapshot,
+        notifier: Arc<tokio::sync::Notify>,
+        done: Arc<AtomicBool>,
+    ) -> Option<Error> {
+        let res = match snapshot.install(&throttle, &*object_store).await {
+            Ok(_) => {
+                done.store(true, Ordering::Relaxed);
+                notifier.notify_one();
+                None
+            }
+            Err(e) => {
+                done.store(true, Ordering::Relaxed);
+                notifier.notify_one();
+                Some(e)
+            }
+        };
+        // SAFETY(rescrv):  Mutex poisoning.
+        let mut staging = staging.lock().unwrap();
+        staging.snapshots_staged.push(snapshot.setsum);
+        staging
+            .snapshots_in_flight
+            .retain(|s| s.setsum != snapshot.setsum);
+        res
+    }
 }
 
 impl Drop for ManifestManager {
@@ -314,6 +386,7 @@ mod tests {
             path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
+            snapshots: vec![],
             fragments: vec![],
             prev: None,
             next: NextPointer {
@@ -321,8 +394,13 @@ mod tests {
             },
         };
         let object_store = Arc::new(object_store::memory::InMemory::new());
-        let mut manager =
-            ManifestManager::new(ThrottleOptions::default(), manifest, object_store).await;
+        let mut manager = ManifestManager::new(
+            ThrottleOptions::default(),
+            SnapshotOptions::default(),
+            manifest,
+            object_store,
+        )
+        .await;
         if let Some(background) = manager.background.take() {
             background.abort();
         }
@@ -366,7 +444,7 @@ mod tests {
         };
         // pretend to install the manifest....
         // now finish work
-        for n in work.2 {
+        for n in work.3 {
             n.send(None).unwrap();
         }
         assert!(d1_rx.try_recv().is_ok());
@@ -378,6 +456,7 @@ mod tests {
                 path: String::from("manifest/MANIFEST.42"),
                 writer: "manifest writer 1".to_string(),
                 setsum: sst::Setsum::default(),
+                snapshots: vec![],
                 fragments: vec![
                     ShardFragment {
                         path: "path1".to_string(),
