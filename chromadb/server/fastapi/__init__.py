@@ -674,7 +674,6 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api.get_collection,
                 collection_name,
-                None,  # id
                 tenant,
                 database_name,
                 limiter=self._capacity_limiter,
@@ -1042,8 +1041,8 @@ class FastAPI(Server):
                     else None,
                 ),
                 n_results=query.n_results,
-                where=query.where,  # type: ignore
-                where_document=query.where_document,  # type: ignore
+                where=query.where,
+                where_document=query.where_document,
                 include=query.include,
                 tenant=tenant,
                 database=database_name,
@@ -1542,7 +1541,6 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api.get_collection,
                 collection_name,
-                None,  # id
                 tenant,
                 database,
                 limiter=self._capacity_limiter,
@@ -1862,8 +1860,8 @@ class FastAPI(Server):
                     else None,
                 ),
                 n_results=query.n_results,
-                where=query.where,  # type: ignore
-                where_document=query.where_document,  # type: ignore
+                where=query.where,
+                where_document=query.where_document,
                 include=query.include,
             )
 

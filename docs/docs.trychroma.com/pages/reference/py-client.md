@@ -330,7 +330,6 @@ Create a new collection with the given name and metadata.
 ```python
 def get_collection(
         name: str,
-        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]] = ef.DefaultEmbeddingFunction(),
         data_loader: Optional[DataLoader[Loadable]] = None) -> Collection

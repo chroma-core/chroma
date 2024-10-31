@@ -173,7 +173,7 @@ class CollectionCommon(Generic[ClientT]):
         )
 
     def __repr__(self) -> str:
-        return f"Collection(id={self.id}, name={self.name})"
+        return f"Collection(name={self.name})"
 
     def get_model(self) -> CollectionModel:
         return self._model

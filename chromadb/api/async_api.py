@@ -398,7 +398,6 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     async def get_collection(
         self,
         name: str,
-        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -406,7 +405,6 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     ) -> AsyncCollection:
         """Get a collection with the given name.
         Args:
-            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
             name: The name of the collection to get
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
@@ -568,7 +566,6 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def get_collection(
         self,
         name: str,
-        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
