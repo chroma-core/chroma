@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/pingcap/log"
@@ -406,6 +407,65 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	// Duplicate delete throws an exception
 	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
 	suite.Error(err)
+
+	// Re-create the deleted collection
+	createCollection := &model.CreateCollection{
+		ID:           suite.sampleCollections[0].ID,
+		Name:         suite.sampleCollections[0].Name,
+		Dimension:    suite.sampleCollections[0].Dimension,
+		Metadata:     suite.sampleCollections[0].Metadata,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		Ts:           types.Timestamp(time.Now().Unix()),
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, createCollection)
+	suite.NoError(err)
+
+	// Verify collection was re-created
+	results, err = suite.coordinator.GetCollections(ctx, createCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(results, 1)
+	suite.Equal(createCollection.ID, results[0].ID)
+	suite.Equal(createCollection.Name, results[0].Name)
+	suite.Equal(createCollection.Dimension, results[0].Dimension)
+	suite.Equal(createCollection.Metadata, results[0].Metadata)
+
+	// Create segments associated with collection
+	segment := &model.CreateSegment{
+		ID:           types.MustParse("00000000-0000-0000-0000-000000000001"),
+		CollectionID: suite.sampleCollections[0].ID,
+		Type:         "test_segment",
+		Scope:        "test_scope",
+		Ts:           types.Timestamp(time.Now().Unix()),
+	}
+	err = suite.coordinator.CreateSegment(ctx, segment)
+	suite.NoError(err)
+
+	// Verify segment was created
+	segments, err := suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, suite.sampleCollections[0].ID)
+	suite.NoError(err)
+	suite.Len(segments, 1)
+	suite.Equal(segment.ID, segments[0].ID)
+	suite.Equal(segment.CollectionID, segments[0].CollectionID)
+	suite.Equal(segment.Type, segments[0].Type)
+	suite.Equal(segment.Scope, segments[0].Scope)
+
+	// Delete the re-created collection with segments
+	deleteCollection = &model.DeleteCollection{
+		ID:           createCollection.ID,
+		DatabaseName: suite.databaseName,
+		TenantID:     suite.tenantName,
+	}
+	err = suite.coordinator.DeleteCollectionAndSegments(ctx, deleteCollection, []types.UniqueID{segment.ID})
+	suite.NoError(err)
+
+	// Verify collection and segment were deleted
+	results, err = suite.coordinator.GetCollections(ctx, createCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(results)
+	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
+	suite.NoError(err)
+	suite.Empty(segments)
 }
 
 func (suite *APIsTestSuite) TestUpdateCollections() {

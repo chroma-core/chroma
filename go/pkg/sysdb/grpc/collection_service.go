@@ -161,7 +161,19 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 		TenantID:     req.GetTenant(),
 		DatabaseName: req.GetDatabase(),
 	}
-	err = s.coordinator.DeleteCollection(ctx, deleteCollection)
+	segmentIds := []types.UniqueID{}
+	for _, segment := range req.SegmentIds {
+		parsedSegmentID, err := types.Parse(segment)
+		if err != nil {
+			log.Error("Delete collection failed. Parsing error for segmendId",
+				zap.Error(err), zap.String("collection_id", collectionID),
+				zap.String("segmentID", segment))
+			return res, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+		segmentIds = append(segmentIds, parsedSegmentID)
+	}
+
+	err = s.coordinator.DeleteCollectionAndSegments(ctx, deleteCollection, segmentIds)
 	if err != nil {
 		log.Error("DeleteCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
 		if err == common.ErrCollectionDeleteNonExistingCollection {
