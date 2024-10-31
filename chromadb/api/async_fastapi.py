@@ -257,21 +257,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_collection(
         self,
         name: str,
-        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        if (name is None and id is None) or (name is not None and id is not None):
-            raise ValueError("Name or id must be specified, but not both")
-
-        params: Dict[str, str] = {}
-        if id is not None:
-            params["type"] = str(id)
-
         resp_json = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{name}",
-            params=params,
         )
 
         model = CollectionModel.from_json(resp_json)
