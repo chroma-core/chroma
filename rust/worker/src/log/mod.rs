@@ -1,6 +1,9 @@
 pub(crate) mod config;
 #[allow(clippy::module_inception)]
 pub(crate) mod log;
+#[allow(dead_code)]
+pub mod test;
+
 use self::config::LogConfig;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;

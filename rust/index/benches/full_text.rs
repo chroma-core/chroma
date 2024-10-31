@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use chroma_benchmark::datasets::{
+    ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
+};
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::UnboundedCacheConfig;
 use chroma_index::fulltext::{
@@ -8,9 +11,6 @@ use chroma_index::fulltext::{
     types::{FullTextIndexReader, FullTextIndexWriter},
 };
 use chroma_storage::{local::LocalStorage, Storage};
-use chroma_test::datasets::{
-    ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
-};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use futures::{StreamExt, TryStreamExt};
 use tantivy::tokenizer::NgramTokenizer;
