@@ -126,7 +126,7 @@ jobs:
       - name: Build Client
         run: python -m build
       - name: Test Client Package
-        run: bin/test-package.sh dist/*.tar.gz
+        run: bin/test-package/test-package.sh dist/*.tar.gz
       - name: Upload as artifact
         uses: actions/upload-artifact@v4
         with:
@@ -163,6 +163,8 @@ jobs:
           python-version: '3.12'
       - name: Build Client
         run: ./clients/python/build_python_thin_client.sh
+      - name: Test Client Package
+        run: bin/test-package/test-thin-client-package.sh dist/*.tar.gz
       - name: Install setuptools_scm
         run: python -m pip install setuptools_scm
       - name: Publish to Test PyPI
@@ -170,30 +172,13 @@ jobs:
         with:
           password: ${{ secrets.TEST_PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
           repository-url: https://test.pypi.org/legacy/
+          verbose: 'true'
       - name: Publish to PyPI
         if:  ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
-
-  release-cloudformation:
-    name: Publish CloudFormation template to S3
-    runs-on: ubuntu-latest
-    needs:
-      - check-tag
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Login to AWS
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          role-to-assume: arn:aws:iam::369178033109:role/github-action-generate-cf-template
-          aws-region: us-east-1
-      - name: Generate CloudFormation template
-        id: generate-cf
-        if: ${{needs.check-tag.outputs.tag_matches == 'true'}}
-        run: "pip install boto3 && python bin/generate_cloudformation.py"
+          verbose: 'true'
 
   release-github:
     name: Make GitHub release
@@ -218,7 +203,7 @@ jobs:
         id: builddate
         run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
       - name: Release Tagged Version
-        uses: ncipollo/release-action@v1.11.1
+        uses: ncipollo/release-action@v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         with:
           body: |
@@ -229,7 +214,8 @@ jobs:
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
           artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
-          prerelease: true
+          prerelease: false
+          makeLatest: true
           generateReleaseNotes: true
       - name: Update Tag
         uses: richardsimko/update-tag@v1.0.5

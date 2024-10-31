@@ -78,11 +78,12 @@ def verify_records(
 
 
 @skip_if_not_cluster()
-def test_add(api):  # type: ignore
+def test_add(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    api.reset()
+    client.reset()
+
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
@@ -91,16 +92,16 @@ def test_add(api):  # type: ignore
         "contains_records": contains_records,
     }
 
-    collection = api.create_collection("testadd")
+    collection = client.create_collection("testadd")
     verify_records(logservice, collection, test_records_map, collection.add, 0)
 
 
 @skip_if_not_cluster()
-def test_update(api):  # type: ignore
+def test_update(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    api.reset()
+    client.reset()
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
@@ -111,19 +112,19 @@ def test_update(api):  # type: ignore
         },
     }
 
-    collection = api.create_collection("testupdate")
+    collection = client.create_collection("testupdate")
     verify_records(logservice, collection, test_records_map, collection.update, 1)
 
 
 @skip_if_not_cluster()
-def test_delete(api):  # type: ignore
+def test_delete(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    api.reset()
+    client.reset()
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
-    collection = api.create_collection("testdelete")
+    collection = client.create_collection("testdelete")
 
     # push 2 records
     collection.add(**contains_records)
@@ -134,13 +135,14 @@ def test_delete(api):  # type: ignore
 # TODO: These tests should be enabled when the distributed system has metadata segments
 @pytest.mark.xfail
 @skip_if_not_cluster()
-def test_delete_filter(api):  # type: ignore
+def test_delete_filter(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    api.reset()
+    client.reset()
+    time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
-    collection = api.create_collection("testdelete_filter")
+    collection = client.create_collection("testdelete_filter")
 
     # delete by where
     collection.delete(where_document={"$contains": "doc1"})
@@ -159,11 +161,11 @@ def test_delete_filter(api):  # type: ignore
 
 
 @skip_if_not_cluster()
-def test_upsert(api):  # type: ignore
+def test_upsert(client):  # type: ignore
     system = System(Settings(allow_reset=True))
     logservice = system.instance(LogService)
     system.start()
-    api.reset()
+    client.reset()
     time.sleep(MEMBERLIST_DELAY_SLEEP_TIME)
 
     test_records_map = {
@@ -172,5 +174,5 @@ def test_upsert(api):  # type: ignore
         "contains_records": contains_records,
     }
 
-    collection = api.create_collection("testupsert")
+    collection = client.create_collection("testupsert")
     verify_records(logservice, collection, test_records_map, collection.upsert, 2)

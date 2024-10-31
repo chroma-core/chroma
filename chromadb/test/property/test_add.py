@@ -1,12 +1,12 @@
-import random
 import uuid
 from random import randint
 from typing import cast, List, Any, Dict
 import hypothesis
+import numpy as np
 import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
-from chromadb.api import ServerAPI
+from chromadb.api import ClientAPI
 from chromadb.api.types import Embeddings, Metadatas
 from chromadb.test.conftest import (
     reset,
@@ -38,12 +38,12 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
     ),
 )
 def test_add_small(
-    api: ServerAPI,
+    client: ClientAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
 ) -> None:
-    _test_add(api, collection, record_set, should_compact)
+    _test_add(client, collection, record_set, should_compact)
 
 
 @given(
@@ -72,7 +72,7 @@ def test_add_small(
     ],
 )
 def test_add_medium(
-    api: ServerAPI,
+    client: ClientAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
@@ -81,39 +81,47 @@ def test_add_medium(
     # This breaks the ann_accuracy invariant by default, since
     # the vector reader returns a payload of dataset size. So we need to batch
     # the queries in the ann_accuracy invariant
-    _test_add(api, collection, record_set, should_compact, batch_ann_accuracy=True)
+    _test_add(client, collection, record_set, should_compact, batch_ann_accuracy=True)
 
 
 def _test_add(
-    api: ServerAPI,
+    client: ClientAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
     should_compact: bool,
     batch_ann_accuracy: bool = False,
 ) -> None:
-    reset(api)
+    reset(client)
 
     # TODO: Generative embedding functions
-    coll = api.create_collection(
+    coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
+    initial_version = cast(int, coll.get_model()["version"])
+
     normalized_record_set = invariants.wrap_all(record_set)
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
-    coll.add(**record_set)  # type: ignore
+    for batch in create_batches(
+        api=client,
+        ids=cast(List[str], record_set["ids"]),
+        embeddings=cast(Embeddings, record_set["embeddings"]),
+        metadatas=cast(Metadatas, record_set["metadatas"]),
+        documents=cast(List[str], record_set["documents"]),
+    ):
+        coll.add(*batch)
+    # Only wait for compaction if the size of the collection is
+    # some minimal size
     if (
         not NOT_CLUSTER_ONLY
         and should_compact
         and len(normalized_record_set["ids"]) > 10
     ):
-        # Only wait for compaction if the size of the collection is
-        # some minimal size
-        initial_version = coll.get_model()["version"]
         # Wait for the model to be updated
-        wait_for_version_increase(api, collection.name, initial_version)
+        wait_for_version_increase(client, collection.name, initial_version)
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
@@ -163,24 +171,24 @@ def create_large_recordset(
 @given(collection=collection_st, should_compact=st.booleans())
 @settings(deadline=None, max_examples=5)
 def test_add_large(
-    api: ServerAPI, collection: strategies.Collection, should_compact: bool
+    client: ClientAPI, collection: strategies.Collection, should_compact: bool
 ) -> None:
-    reset(api)
+    reset(client)
 
     record_set = create_large_recordset(
-        min_size=api.get_max_batch_size(),
-        max_size=api.get_max_batch_size()
-        + int(api.get_max_batch_size() * random.random()),
+        min_size=10000,
+        max_size=50000,
     )
-    coll = api.create_collection(
+    coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
     normalized_record_set = invariants.wrap_all(record_set)
+    initial_version = cast(int, coll.get_model()["version"])
 
     for batch in create_batches(
-        api=api,
+        api=client,
         ids=cast(List[str], record_set["ids"]),
         embeddings=cast(Embeddings, record_set["embeddings"]),
         metadatas=cast(Metadatas, record_set["metadatas"]),
@@ -193,10 +201,9 @@ def test_add_large(
         and should_compact
         and len(normalized_record_set["ids"]) > 10
     ):
-        initial_version = coll.get_model()["version"]
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
-            api, collection.name, initial_version, additional_time=240
+            client, collection.name, initial_version, additional_time=240
         )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
@@ -204,22 +211,24 @@ def test_add_large(
 
 @given(collection=collection_st)
 @settings(deadline=None, max_examples=1)
-def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) -> None:
-    reset(api)
+def test_add_large_exceeding(
+    client: ClientAPI, collection: strategies.Collection
+) -> None:
+    reset(client)
 
     record_set = create_large_recordset(
-        min_size=api.get_max_batch_size(),
-        max_size=api.get_max_batch_size()
-        + int(api.get_max_batch_size() * random.random()),
+        min_size=client.get_max_batch_size(),
+        max_size=client.get_max_batch_size()
+        + 100,  # Exceed the max batch size by 100 records
     )
-    coll = api.create_collection(
+    coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
 
     with pytest.raises(Exception) as e:
-        coll.add(**record_set)
+        coll.add(**record_set)  # type: ignore[arg-type]
     assert "exceeds maximum batch size" in str(e.value)
 
 
@@ -228,8 +237,8 @@ def test_add_large_exceeding(api: ServerAPI, collection: strategies.Collection) 
     reason="This is expected to fail right now. We should change the API to sort the \
     ids by input order."
 )
-def test_out_of_order_ids(api: ServerAPI) -> None:
-    reset(api)
+def test_out_of_order_ids(client: ClientAPI) -> None:
+    reset(client)
     ooo_ids = [
         "40",
         "05",
@@ -258,25 +267,28 @@ def test_out_of_order_ids(api: ServerAPI) -> None:
         "1",
     ]
 
-    coll = api.create_collection(
+    coll = client.create_collection(
         "test", embedding_function=lambda input: [[1, 2, 3] for _ in input]  # type: ignore
     )
-    embeddings: Embeddings = [[1, 2, 3] for _ in ooo_ids]
+    embeddings: Embeddings = [np.array([1, 2, 3]) for _ in ooo_ids]
     coll.add(ids=ooo_ids, embeddings=embeddings)
     get_ids = coll.get(ids=ooo_ids)["ids"]
     assert get_ids == ooo_ids
 
 
-def test_add_partial(api: ServerAPI) -> None:
+def test_add_partial(client: ClientAPI) -> None:
     """Tests adding a record set with some of the fields set to None."""
-    reset(api)
+    reset(client)
 
-    coll = api.create_collection("test")
+    coll = client.create_collection("test")
     # TODO: We need to clean up the api types to support this typing
     coll.add(
         ids=["1", "2", "3"],
+        # All embeddings must be provided, or else None - no partial lists allowed
         embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
+        # Metadatas can always be partial
         metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
+        # Documents are optional if embeddings are provided
         documents=["a", "b", None],  # type: ignore
     )
 

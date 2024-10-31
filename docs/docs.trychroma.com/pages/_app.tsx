@@ -50,8 +50,8 @@ const ibmPlexMono = IBM_Plex_Mono({
   variable: '--font-ibm-plex-mono',
 })
 
-const TITLE = 'Markdoc';
-const DESCRIPTION = 'A powerful, flexible, Markdown-based authoring framework';
+const TITLE = 'Chroma Docs';
+const DESCRIPTION = 'Chroma is the open-source AI application database. Batteries included.';
 
 function collectHeadings(node, sections = []) {
   if (node) {
@@ -138,7 +138,6 @@ export default function ChromaDocs({ Component, pageProps }: AppProps<ChromaDocs
   }
 
   const pageTitle = `${title}${title !== "Chroma" ? " | Chroma Docs": " Docs" }`
-
 
   // generate the github edit link
   let filePath = router.asPath.split('/').slice(1).join('/')

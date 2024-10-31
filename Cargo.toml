@@ -1,5 +1,62 @@
 [workspace]
+resolver = "2"
 
 members = [
-   "rust/worker/"
+   "rust/blockstore",
+   "rust/cache",
+   "rust/chroma",
+   "rust/config",
+   "rust/distance",
+   "rust/error",
+   "rust/index",
+   "rust/storage",
+   "rust/types",
+   "rust/worker",
+   "rust/test",
 ]
+
+[workspace.dependencies]
+serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"
+arrow = "52.0.0"
+thiserror = "1.0.50"
+uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+async-trait = "0.1.74"
+roaring = "0.10.3"
+futures = "0.3"
+parking_lot = { version = "0.12.1", features = ["serde"] }
+tracing = "0.1"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+tokio-util = "0.7.10"
+tonic = "0.10"
+prost = "0.12"
+prost-types = "0.12"
+num_cpus = "1.16.0"
+flatbuffers = "24.3.25"
+tantivy = "0.21.1"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+chroma-blockstore = { path = "rust/blockstore" }
+chroma-error = { path = "rust/error" }
+chroma-config = { path = "rust/config" }
+chroma-storage = { path = "rust/storage" }
+chroma-cache = { path = "rust/cache" }
+chroma-types = { path = "rust/types" }
+chroma-index = { path = "rust/index" }
+chroma-distance = { path = "rust/distance" }
+chroma-test = { path = "rust/test" }
+worker = { path = "rust/worker" }
+
+# Dev dependencies
+bincode = "1.3.3"
+indicatif = "0.17.8"
+proptest = "1.4.0"
+proptest-state-machine = "0.1.0"
+rand = "0.8.5"
+rand_xorshift = "0.3.0"
+rayon = "1.8.0"
+shuttle = "0.7.1"
+tempfile = "3.8.1"
+
+[profile.release]
+debug = 2

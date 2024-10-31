@@ -1,10 +1,7 @@
 from multiprocessing.connection import Connection
-import sys
 import os
 import shutil
-import subprocess
 import tempfile
-from types import ModuleType
 from typing import Generator, List, Tuple, Dict, Any, Callable, Type
 from hypothesis import given, settings
 import hypothesis.strategies as st
@@ -12,20 +9,36 @@ import pytest
 import json
 from urllib import request
 from chromadb import config
-from chromadb.api import ServerAPI
+from chromadb.api.configuration import (
+    ConfigurationParameter,
+    EmbeddingsQueueConfigurationInternal,
+)
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from chromadb.db.impl.sqlite import SqliteDB
+from chromadb.ingest.impl.utils import trigger_vector_segments_max_seq_id_migration
+from chromadb.segment import SegmentManager
+from chromadb.segment.impl.manager.local import LocalSegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
 import re
 import multiprocessing
 from chromadb.config import Settings
+from chromadb.api.client import Client as ClientCreator
+from chromadb.test.utils.cross_version import (
+    switch_to_version,
+    install_version,
+    get_path_to_version_install,
+)
 
-MINIMUM_VERSION = "0.4.1"
+# Minimum persisted version we support, and other substantial change versions
+# 0.4.1 is the first version with persistence
+# 0.5.3 is the first version with the new API where the serverapi and client api return types and arguments differ
+BASELINE_VERSIONS = ["0.4.1", "0.5.3"]
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
-VERSIONED_MODULES = ["pydantic"]
+VERSIONED_MODULES = ["pydantic", "numpy"]
 
 
 def versions() -> List[str]:
@@ -36,7 +49,7 @@ def versions() -> List[str]:
     # Older versions on pypi contain "devXYZ" suffixes
     versions = [v for v in versions if version_re.match(v)]
     versions.sort(key=packaging_version.Version)
-    return [MINIMUM_VERSION, versions[-1]]
+    return BASELINE_VERSIONS + [versions[-1]]
 
 
 def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -146,64 +159,6 @@ def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
         shutil.rmtree(data_path, ignore_errors=True)
 
 
-def get_path_to_version_install(version: str) -> str:
-    return base_install_dir + "/" + version
-
-
-def get_path_to_version_library(version: str) -> str:
-    return get_path_to_version_install(version) + "/chromadb/__init__.py"
-
-
-def install_version(version: str) -> None:
-    # Check if already installed
-    version_library = get_path_to_version_library(version)
-    if os.path.exists(version_library):
-        return
-    path = get_path_to_version_install(version)
-    install(f"chromadb=={version}", path)
-
-
-def install(pkg: str, path: str) -> int:
-    # -q -q to suppress pip output to ERROR level
-    # https://pip.pypa.io/en/stable/cli/pip/#quiet
-    print(f"Installing chromadb version {pkg} to {path}")
-    return subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "-q",
-            "-q",
-            "install",
-            pkg,
-            "--target={}".format(path),
-        ]
-    )
-
-
-def switch_to_version(version: str) -> ModuleType:
-    module_name = "chromadb"
-    # Remove old version from sys.modules, except test modules
-    old_modules = {
-        n: m
-        for n, m in sys.modules.items()
-        if n == module_name
-        or (n.startswith(module_name + "."))
-        or n in VERSIONED_MODULES
-        or (any(n.startswith(m + ".") for m in VERSIONED_MODULES))
-    }
-    for n in old_modules:
-        del sys.modules[n]
-
-    # Load the target version and override the path to the installed version
-    # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    sys.path.insert(0, get_path_to_version_install(version))
-    import chromadb
-
-    assert chromadb.__version__ == version
-    return chromadb
-
-
 class not_implemented_ef(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         assert False, "Embedding function should not be called"
@@ -217,12 +172,18 @@ def persist_generated_data_with_old_version(
     conn: Connection,
 ) -> None:
     try:
-        old_module = switch_to_version(version)
+        old_module = switch_to_version(version, VERSIONED_MODULES)
         system = old_module.config.System(settings)
         api = system.instance(api_import_for_version(old_module, version))
         system.start()
 
         api.reset()
+        # In 0.5.4 we changed the API of the server api level to
+        # deal with collection models instead of collections
+        # in order to work with this we need to wrap the api in a client
+        # for versions greater than or equal to 0.5.4
+        if packaging_version.Version(version) >= packaging_version.Version("0.5.4"):
+            api = old_module.api.client.Client.from_system(system)
         coll = api.create_collection(
             name=collection_strategy.name,
             metadata=collection_strategy.metadata,
@@ -243,6 +204,13 @@ def persist_generated_data_with_old_version(
         embedding_id_to_index = {id: i for i, id in enumerate(check_embeddings["ids"])}
         actual_ids = sorted(actual_ids, key=lambda id: embedding_id_to_index[id])
         assert actual_ids == check_embeddings["ids"]
+
+        # Leave writes on the queue to be processed by the next version's
+        # segment manager so we can test cross version serialization
+        # compatibility.
+        system.instance(LocalSegmentManager).stop()
+        coll.upsert(**embeddings_strategy)
+
         # Shutdown system
         system.stop()
     except Exception as e:
@@ -252,7 +220,15 @@ def persist_generated_data_with_old_version(
 
 # Since we can't pickle the embedding function, we always generate record sets with embeddings
 collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
-    strategies.collections(with_hnsw_params=True, has_embeddings=True), key="coll"
+    strategies.collections(
+        with_hnsw_params=True,
+        has_embeddings=True,
+        # By default, these are set to 2000, which makes it unlikely that index mutations will ever be fully flushed
+        max_hnsw_sync_threshold=10,
+        max_hnsw_batch_size=10,
+        with_persistent_hnsw_params=st.booleans(),
+    ),
+    key="coll",
 )
 
 
@@ -279,7 +255,7 @@ def test_cycle_versions(
         embeddings_strategy["metadatas"], list
     ):
         embeddings_strategy["metadatas"] = [
-            m if m is None or len(m) > 0 else None  # type: ignore
+            m if m is None or len(m) > 0 else None
             for m in embeddings_strategy["metadatas"]
         ]
 
@@ -310,17 +286,51 @@ def test_cycle_versions(
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
-    api = system.instance(ServerAPI)
     system.start()
-    coll = api.get_collection(
+    client = ClientCreator.from_system(system)
+    coll = client.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
     )
+
+    embeddings_queue = system.instance(SqliteDB)
+
+    # Automatic pruning should be disabled since embeddings_queue is non-empty
+    if packaging_version.Version(version) < packaging_version.Version(
+        "0.5.7"
+    ):  # (automatic pruning is enabled by default in 0.5.7 and later)
+        assert (
+            embeddings_queue.config.get_parameter("automatically_purge").value is False
+        )
+
+    # Update to True so log_size_below_max() invariant will pass
+    embeddings_queue.set_config(
+        EmbeddingsQueueConfigurationInternal(
+            [ConfigurationParameter("automatically_purge", True)]
+        )
+    )
+
+    # Should be able to clean log immediately after updating
+
+    # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
+    # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
+    # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
+    trigger_vector_segments_max_seq_id_migration(
+        embeddings_queue, system.instance(SegmentManager)
+    )
+
+    embeddings_queue.purge_log(coll.id)
+    invariants.log_size_below_max(system, [coll], True)
+
+    # Should be able to add embeddings
+    coll.add(**embeddings_strategy)  # type: ignore
+
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)
     invariants.documents_match(coll, embeddings_strategy)
     invariants.ids_match(coll, embeddings_strategy)
     invariants.ann_accuracy(coll, embeddings_strategy)
+    invariants.log_size_below_max(system, [coll], True)
 
     # Shutdown system
     system.stop()

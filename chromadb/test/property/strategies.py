@@ -219,12 +219,15 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
         ]
 
         # Convert the hex strings to dtype
-        embeddings: types.Embeddings = np.array(
-            [[int(char, 16) / 15.0 for char in text] for text in padded_texts],
-            dtype=self.dtype,
-        ).tolist()
+        embeddings: types.Embeddings = [
+            np.array([int(char, 16) / 15.0 for char in text], dtype=self.dtype)
+            for text in padded_texts
+        ]
 
         return embeddings
+
+    def __repr__(self) -> str:
+        return f"hashing_embedding_function(dim={self.dim}, dtype={self.dtype})"
 
 
 class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
@@ -284,7 +287,9 @@ def collections(
     has_embeddings: Optional[bool] = None,
     has_documents: Optional[bool] = None,
     uses_metadata_like: Optional[bool] = False,
-    with_persistent_hnsw_params: bool = False,
+    with_persistent_hnsw_params: st.SearchStrategy[bool] = st.just(False),
+    max_hnsw_batch_size: int = 2000,
+    max_hnsw_sync_threshold: int = 2000,
 ) -> Collection:
     """Strategy to generate a Collection object.
     If add_filterable_data is True, then known_metadata_keys and known_document_keywords will be populated with consistent data.
@@ -299,19 +304,28 @@ def collections(
     dimension = draw(st.integers(min_value=2, max_value=2048))
     dtype = draw(st.sampled_from(float_types))
 
-    if with_persistent_hnsw_params and not with_hnsw_params:
+    use_persistent_hnsw_params = draw(with_persistent_hnsw_params)
+
+    if use_persistent_hnsw_params and not with_hnsw_params:
         raise ValueError(
-            "with_hnsw_params requires with_persistent_hnsw_params to be true"
+            "with_persistent_hnsw_params requires with_hnsw_params to be true"
         )
 
     if with_hnsw_params:
         if metadata is None:
             metadata = {}
         metadata.update(test_hnsw_config)
-        if with_persistent_hnsw_params:
-            metadata["hnsw:batch_size"] = draw(st.integers(min_value=3, max_value=2000))
+        if use_persistent_hnsw_params:
             metadata["hnsw:sync_threshold"] = draw(
-                st.integers(min_value=3, max_value=2000)
+                st.integers(min_value=3, max_value=max_hnsw_sync_threshold)
+            )
+            metadata["hnsw:batch_size"] = draw(
+                st.integers(
+                    min_value=3,
+                    max_value=min(
+                        [metadata["hnsw:sync_threshold"], max_hnsw_batch_size]
+                    ),
+                )
             )
         # Sometimes, select a space at random
         if draw(st.booleans()):
@@ -392,7 +406,10 @@ def collections(
 
 @st.composite
 def metadata(
-    draw: st.DrawFn, collection: Collection, min_size=0, max_size=None
+    draw: st.DrawFn,
+    collection: Collection,
+    min_size: int = 0,
+    max_size: Optional[int] = None,
 ) -> Optional[types.Metadata]:
     """Strategy for generating metadata that could be a part of the given collection"""
     # First draw a random dictionary.
@@ -461,7 +478,7 @@ def document(draw: st.DrawFn, collection: Collection) -> types.Document:
 
     # Blacklist certain unicode characters that affect sqlite processing.
     # For example, the null (/x00) character makes sqlite stop processing a string.
-    blacklist_categories = ("Cc", "Cs")
+    blacklist_categories = ("Cc", "Cs")  # type: ignore
     if collection.known_document_keywords:
         known_words_st = st.sampled_from(collection.known_document_keywords)
     else:
@@ -584,16 +601,15 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     # This is hacky, but the distributed system does not support $in or $in so we
     # need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $in and $nin
-    if not NOT_CLUSTER_ONLY:
-        legal_ops: List[Optional[str]] = [None, "$eq"]
-    else:
-        legal_ops: List[Optional[str]] = [None, "$eq", "$ne", "$in", "$nin"]
+    legal_ops: List[Optional[str]]
+    legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
+    if collection.has_like_metadata:
+      if key in collection.known_metadata_strkeys and isinstance(value, str):
         # For $like/nlike operands only
         # working under the assumption that like/nlike isn't supported
         # by the distributed system.
-        if collection.has_like_metadata:
-            if key in collection.known_metadata_strkeys and isinstance(value, str):
-                legal_ops: List[Optional[str]] =[None, "$eq", "$ne", "$like", "$nlike"]
+        legal_ops: List[Optional[str]] =[None, "$eq", "$ne", "$like", "$nlike"]
+
 
     if not isinstance(value, str) and not isinstance(value, bool):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
@@ -655,11 +671,7 @@ def where_doc_clause(draw: st.DrawFn, collection: Collection) -> types.WhereDocu
     # This is hacky, but the distributed system does not support $not_contains
     # so we need to avoid generating these operators for now in that case.
     # TODO: Remove this once the distributed system supports $not_contains
-    op: WhereOperator
-    if not NOT_CLUSTER_ONLY:
-        op = draw(st.sampled_from(["$contains"]))
-    else:
-        op = draw(st.sampled_from(["$contains", "$not_contains"]))
+    op = draw(st.sampled_from(["$contains", "$not_contains"]))
 
     if op == "$contains":
         return {"$contains": word}
@@ -738,7 +750,7 @@ def filters(
         ids = recordset["ids"]
 
     if not include_all_ids:
-        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids))))
+        ids = draw(st.one_of(st.none(), st.lists(st.sampled_from(ids), min_size=1)))
         if ids is not None:
             # Remove duplicates since hypothesis samples with replacement
             ids = list(set(ids))

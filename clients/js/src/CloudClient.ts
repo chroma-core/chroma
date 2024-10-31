@@ -7,12 +7,19 @@ import { AuthOptions } from "./auth";
 interface CloudClientParams {
   apiKey?: string;
   database?: string;
+  tenant?: string;
   cloudHost?: string;
   cloudPort?: string;
 }
 
 class CloudClient extends ChromaClient {
-  constructor({ apiKey, database, cloudHost, cloudPort }: CloudClientParams) {
+  constructor({
+    apiKey,
+    database,
+    tenant,
+    cloudHost,
+    cloudPort,
+  }: CloudClientParams) {
     // If no API key is provided, try to load it from the environment variable
     if (!apiKey) {
       apiKey = process.env.CHROMA_API_KEY;
@@ -35,7 +42,8 @@ class CloudClient extends ChromaClient {
     return new ChromaClient({
       path: path,
       auth: auth,
-      database: database,
+      database,
+      tenant,
     });
 
     super();

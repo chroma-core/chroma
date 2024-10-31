@@ -1,3 +1,3 @@
-mod vec;
+mod panic;
 
-pub(crate) use vec::*;
+pub(crate) use panic::*;

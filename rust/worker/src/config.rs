@@ -1,11 +1,7 @@
-use async_trait::async_trait;
-use figment::providers::{Env, Format, Serialized, Yaml};
+use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
 
-use crate::errors::ChromaError;
-
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
-const ENV_PREFIX: &str = "CHROMA_";
 
 #[derive(Deserialize)]
 /// # Description
@@ -39,7 +35,7 @@ impl RootConfig {
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
     pub(crate) fn load() -> Self {
-        return Self::load_from_path(DEFAULT_CONFIG_PATH);
+        Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
 
     /// # Description
@@ -75,7 +71,7 @@ impl RootConfig {
         // ));
         let res = f.extract();
         match res {
-            Ok(config) => return config,
+            Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
     }
@@ -95,14 +91,19 @@ impl RootConfig {
 pub(crate) struct QueryServiceConfig {
     pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
+    #[allow(dead_code)]
     pub(crate) my_member_id: String,
     pub(crate) my_port: u16,
+    #[allow(dead_code)]
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    #[allow(dead_code)]
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
-    pub(crate) storage: crate::storage::config::StorageConfig,
+    pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+    pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+    pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
 
 #[derive(Deserialize)]
@@ -120,34 +121,27 @@ pub(crate) struct CompactionServiceConfig {
     pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
     pub(crate) my_member_id: String,
+    #[allow(dead_code)]
     pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
-    pub(crate) storage: crate::storage::config::StorageConfig,
+    pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
     pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
-}
-
-/// # Description
-/// A trait for configuring a struct from a config object.
-/// # Notes
-/// This trait is used to configure structs from the config object.
-/// Components that need to be configured from the config object should implement this trait.
-#[async_trait]
-pub(crate) trait Configurable<T> {
-    async fn try_from_config(worker_config: &T) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
+    pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+    pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use figment::Jail;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_config_from_default_path() {
         Jail::expect_with(|jail| {
             let _ = jail.create_file(
@@ -173,11 +167,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -188,6 +188,23 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            disk:
+                                capacity: 8589934592 # 8GB
+                                eviction: lru
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -209,11 +226,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -229,6 +252,25 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            disk:
+                                capacity: 8589934592 # 8GB
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load();
@@ -245,6 +287,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_config_from_specific_path() {
         Jail::expect_with(|jail| {
             let _ = jail.create_file(
@@ -270,11 +313,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -285,6 +334,23 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            disk:
+                                capacity: 1073741824
+                                eviction: lru
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -306,11 +372,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -326,6 +398,25 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            disk:
+                                capacity: 1073741824
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load_from_path("random_path.yaml");
@@ -343,6 +434,7 @@ mod tests {
 
     #[test]
     #[should_panic]
+    #[serial]
     fn test_config_missing_required_field() {
         Jail::expect_with(|jail| {
             let _ = jail.create_file(
@@ -385,11 +477,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -400,6 +498,23 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            disk:
+                                capacity: 1073741824
+                                eviction: lru
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -421,11 +536,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -441,6 +562,25 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            disk:
+                                capacity: 1073741824
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load();
@@ -454,22 +594,31 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_config_with_env_override() {
         Jail::expect_with(|jail| {
-            let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
-            let _ = jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
-            let _ = jail.set_env(
+            jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
+            jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID",
                 "compaction-service-0",
             );
-            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
-            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
-            let _ = jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
-            let _ = jail.set_env(
+            jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
+            jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
+            jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
+            jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__upload_part_size_bytes",
+                format!("{}", 1024 * 1024 * 8),
+            );
+            jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__download_part_size_bytes",
+                format!("{}", 1024 * 1024 * 8),
+            );
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__CONNECT_TIMEOUT_MS",
                 5000,
             );
-            let _ = jail.set_env(
+            jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__REQUEST_TIMEOUT_MS",
                 1000,
             );
@@ -494,11 +643,17 @@ mod tests {
                             connect_timeout_ms: 5000
                             request_timeout_ms: 1000
                     storage:
-                        S3:
-                            bucket: "chroma"
-                            credentials: Minio
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
                     log:
                         Grpc:
                             host: "localhost"
@@ -509,6 +664,22 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            memory:
+                                capacity: 1073741824
 
                 compaction_service:
                     service_name: "compaction-service"
@@ -542,6 +713,25 @@ mod tests {
                         max_concurrent_jobs: 100
                         compaction_interval_sec: 60
                         min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    memory:
+                                        capacity: 1000
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    memory:
+                                        capacity: 1000
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            disk:
+                                capacity: 1073741824
+                                eviction: lru
                 "#,
             );
             let config = RootConfig::load();
@@ -553,14 +743,16 @@ mod tests {
             );
             assert_eq!(config.compaction_service.my_port, 50051);
             match &config.compaction_service.storage {
-                crate::storage::config::StorageConfig::S3(s) => {
+                chroma_storage::config::StorageConfig::S3(s) => {
                     assert_eq!(s.bucket, "buckets!");
                     assert_eq!(
                         s.credentials,
-                        crate::storage::config::S3CredentialsConfig::AWS
+                        chroma_storage::config::S3CredentialsConfig::AWS
                     );
                     assert_eq!(s.connect_timeout_ms, 5000);
                     assert_eq!(s.request_timeout_ms, 1000);
+                    assert_eq!(s.upload_part_size_bytes, 1024 * 1024 * 8);
+                    assert_eq!(s.download_part_size_bytes, 1024 * 1024 * 8);
                 }
                 _ => panic!("Invalid storage config"),
             }
@@ -569,8 +761,147 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_default_config_path() {
         // Sanity check that root config loads from default path correctly
         let _ = RootConfig::load();
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_without_cache_directive() {
+        Jail::expect_with(|jail| {
+            let _ = jail.create_file(
+                "random_path.yaml",
+                r#"
+                query_service:
+                    service_name: "query-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "query-service-0"
+                    my_port: 50051
+                    assignment_policy:
+                        RendezvousHashing:
+                            hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "query-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
+                    storage:
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    nop
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    nop
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            nop
+
+                compaction_service:
+                    service_name: "compaction-service"
+                    otel_endpoint: "http://jaeger:4317"
+                    my_member_id: "compaction-service-0"
+                    my_port: 50051
+                    assignment_policy:
+                        RendezvousHashing:
+                            hasher: Murmur3
+                    memberlist_provider:
+                        CustomResource:
+                            kube_namespace: "chroma"
+                            memberlist_name: "compaction-service-memberlist"
+                            queue_size: 100
+                    sysdb:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
+                    storage:
+                        AdmissionControlledS3:
+                            s3_config:
+                                bucket: "chroma"
+                                credentials: Minio
+                                connect_timeout_ms: 5000
+                                request_timeout_ms: 1000
+                                upload_part_size_bytes: 8388608
+                                download_part_size_bytes: 8388608
+                            rate_limiting_policy:
+                                CountBasedPolicy:
+                                    max_concurrent_requests: 15
+                    log:
+                        Grpc:
+                            host: "localhost"
+                            port: 50051
+                            connect_timeout_ms: 5000
+                            request_timeout_ms: 1000
+                    dispatcher:
+                        num_worker_threads: 4
+                        dispatcher_queue_size: 100
+                        worker_queue_size: 100
+                    compactor:
+                        compaction_manager_queue_size: 1000
+                        max_concurrent_jobs: 100
+                        compaction_interval_sec: 60
+                        min_compaction_size: 10
+                        max_compaction_size: 10000
+                        max_partition_size: 5000
+                    blockfile_provider:
+                        Arrow:
+                            block_manager_config:
+                                max_block_size_bytes: 16384
+                                block_cache_config:
+                                    nop
+                            sparse_index_manager_config:
+                                sparse_index_cache_config:
+                                    nop
+                    hnsw_provider:
+                        hnsw_temporary_path: "~/tmp"
+                        hnsw_cache_config:
+                            nop
+                "#,
+            );
+            let config = RootConfig::load_from_path("random_path.yaml");
+            assert_eq!(config.query_service.my_member_id, "query-service-0");
+            assert_eq!(config.query_service.my_port, 50051);
+
+            assert_eq!(
+                config.compaction_service.my_member_id,
+                "compaction-service-0"
+            );
+            assert_eq!(config.compaction_service.my_port, 50051);
+            Ok(())
+        });
     }
 }

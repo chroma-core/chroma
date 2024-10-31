@@ -1,8 +1,7 @@
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::Chunk;
 use crate::execution::operator::Operator;
-use crate::types::LogRecord;
 use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Chunk, LogRecord};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -28,8 +27,8 @@ impl PartitionInput {
     /// # Parameters
     /// * `records` - The records to partition.
     /// * `max_partition_size` - The maximum size of a partition. Since we are trying to
-    /// partition the records by id, which can casue the partition size to be larger than this
-    /// value.
+    ///   partition the records by id, which can casue the partition size to be larger than this
+    ///   value.
     pub fn new(records: Chunk<LogRecord>, max_partition_size: usize) -> Self {
         PartitionInput {
             records,
@@ -47,16 +46,12 @@ pub struct PartitionOutput {
 }
 
 #[derive(Debug, Error)]
-pub enum PartitionError {
-    #[error("Failed to partition records.")]
-    PartitionError,
-}
+#[error("Failed to partition records.")]
+pub struct PartitionError;
 
 impl ChromaError for PartitionError {
     fn code(&self) -> ErrorCodes {
-        match self {
-            PartitionError::PartitionError => ErrorCodes::Internal,
-        }
+        ErrorCodes::Internal
     }
 }
 
@@ -113,9 +108,9 @@ impl PartitionOperator {
 
     fn determine_partition_size(&self, num_records: usize, threshold: usize) -> usize {
         if num_records < threshold {
-            return num_records;
+            num_records
         } else {
-            return threshold;
+            threshold
         }
     }
 }
@@ -123,6 +118,10 @@ impl PartitionOperator {
 #[async_trait]
 impl Operator<PartitionInput, PartitionOutput> for PartitionOperator {
     type Error = PartitionError;
+
+    fn get_name(&self) -> &'static str {
+        "PartitionOperator"
+    }
 
     async fn run(&self, input: &PartitionInput) -> Result<PartitionOutput, PartitionError> {
         let records = &input.records;
@@ -137,7 +136,7 @@ impl Operator<PartitionInput, PartitionOutput> for PartitionOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{LogRecord, Operation, OperationRecord};
+    use chroma_types::{LogRecord, Operation, OperationRecord};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -204,7 +203,7 @@ mod tests {
         // The result can be 1 or 2 groups depending on the order of the records.
         assert!(result.records.len() == 2 || result.records.len() == 1);
         if result.records.len() == 2 {
-            result.records.sort_by(|a, b| a.len().cmp(&b.len()));
+            result.records.sort_by_key(|x| x.len());
             assert_eq!(result.records[0].len(), 1);
             assert_eq!(result.records[1].len(), 2);
         } else {
@@ -217,7 +216,7 @@ mod tests {
         let input = PartitionInput::new(chunk, 1);
         let mut result = operator.run(&input).await.unwrap();
         assert_eq!(result.records.len(), 2);
-        result.records.sort_by(|a, b| a.len().cmp(&b.len()));
+        result.records.sort_by_key(|x| x.len());
         assert_eq!(result.records[0].len(), 1);
         assert_eq!(result.records[1].len(), 2);
     }

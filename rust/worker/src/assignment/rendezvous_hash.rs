@@ -3,7 +3,7 @@
 // The go implementation is located go/internal/utils/rendezvous_hash.go
 // The python implementation is located chromadb/utils/rendezvous_hash.py
 
-use crate::errors::{ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes};
 use std::io::Cursor;
 use thiserror::Error;
 
@@ -69,7 +69,7 @@ pub(crate) fn assign<H: Hasher>(
         let score = hasher.hash(member.as_ref(), key);
         let score = match score {
             Ok(score) => score,
-            Err(err) => return Err(AssignmentError::HashError),
+            Err(_err) => return Err(AssignmentError::HashError),
         };
         if score > max_score {
             max_score = score;
@@ -83,7 +83,7 @@ pub(crate) fn assign<H: Hasher>(
 
     match max_member {
         Some(max_member) => return Ok(max_member.as_ref().to_string()),
-        None => return Err(AssignmentError::NoMembers),
+        None => Err(AssignmentError::NoMembers),
     }
 }
 
@@ -109,10 +109,10 @@ impl Hasher for Murmur3Hasher {
                 let member_hash_64 = member_hash as u64;
                 let key_hash_64 = key_hash as u64;
                 let merged = merge_hashes(member_hash_64, key_hash_64);
-                return Ok(merged);
+                Ok(merged)
             }
-            _ => return Err(AssignmentError::HashError),
-        };
+            _ => Err(AssignmentError::HashError),
+        }
     }
 }
 
@@ -164,8 +164,7 @@ mod tests {
         }
 
         let expected = num_keys / member_count;
-        for i in 0..member_count {
-            let count = counts[i];
+        for count in counts.iter().take(member_count).copied() {
             let diff = count - expected as i32;
             assert!(diff.abs() < tolerance);
         }

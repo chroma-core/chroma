@@ -2,7 +2,6 @@ import hypothesis.strategies as st
 
 from hypothesis import given, settings
 from overrides import override
-from starlette.datastructures import Headers
 from typing import Dict, List, Tuple
 
 from chromadb.api import ServerAPI
@@ -17,7 +16,7 @@ class DummyServerAuthenticationProvider(ServerAuthenticationProvider):
     """
 
     @override
-    def authenticate_or_raise(self, headers: Headers) -> UserIdentity:
+    def authenticate_or_raise(self, headers: Dict[str, str]) -> UserIdentity:
         return UserIdentity(user_id="test_user")
 
 
@@ -27,14 +26,14 @@ def paths_config(draw: st.DrawFn) -> Tuple[Dict[str, List[str]], Dict[str, List[
     ignore_path = draw(
         st.sampled_from(
             [
-                "/api/v1/heartbeat",
-                "/api/v1/reset",
-                "/api/v1/version",
-                "/api/v1/databases",
-                "/api/v1/tenants",
-                "/api/v1/collections",
-                "/api/v1/count_collections",
-                "/api/v1/collections",
+                "/api/v2/heartbeat",
+                "/api/v2/reset",
+                "/api/v2/version",
+                "/api/v2/databases",
+                "/api/v2/tenants",
+                "/api/v2/collections",
+                "/api/v2/count_collections",
+                "/api/v2/collections",
             ]
         )
     )

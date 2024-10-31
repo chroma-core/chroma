@@ -1,13 +1,11 @@
-use crate::chroma_proto;
-use crate::chroma_proto::log_service_client::LogServiceClient;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
 use crate::log::config::LogConfig;
 use crate::tracing::util::client_interceptor;
-use crate::types::LogRecord;
-use crate::types::RecordConversionError;
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::chroma_proto;
+use chroma_types::chroma_proto::log_service_client::LogServiceClient;
+use chroma_types::{CollectionUuid, LogRecord, RecordConversionError};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -25,16 +23,17 @@ use uuid::Uuid;
 /// - first_log_ts: the timestamp of the first log entry in the collection that needs to be compacted
 #[derive(Debug)]
 pub(crate) struct CollectionInfo {
-    pub(crate) collection_id: String,
+    pub(crate) collection_id: CollectionUuid,
     pub(crate) first_log_offset: i64,
     pub(crate) first_log_ts: i64,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct CollectionRecord {
-    pub(crate) id: Uuid,
+    pub(crate) collection_id: CollectionUuid,
     pub(crate) tenant_id: String,
     pub(crate) last_compaction_time: i64,
+    #[allow(dead_code)]
     pub(crate) first_record_time: i64,
     pub(crate) offset: i64,
     pub(crate) collection_version: i32,
@@ -43,13 +42,14 @@ pub(crate) struct CollectionRecord {
 #[derive(Clone, Debug)]
 pub(crate) enum Log {
     Grpc(GrpcLog),
+    #[allow(dead_code)]
     InMemory(InMemoryLog),
 }
 
 impl Log {
     pub(crate) async fn read(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
@@ -78,7 +78,7 @@ impl Log {
 
     pub(crate) async fn update_collection_log_offset(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), UpdateCollectionLogOffsetError> {
         match self {
@@ -96,6 +96,7 @@ impl Log {
 
 #[derive(Clone, Debug)]
 pub(crate) struct GrpcLog {
+    #[allow(clippy::type_complexity)]
     client: LogServiceClient<
         interceptor::InterceptedService<
             tonic::transport::Channel,
@@ -105,6 +106,7 @@ pub(crate) struct GrpcLog {
 }
 
 impl GrpcLog {
+    #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         client: LogServiceClient<
             interceptor::InterceptedService<
@@ -138,16 +140,11 @@ impl Configurable<LogConfig> for GrpcLog {
             LogConfig::Grpc(my_config) => {
                 let host = &my_config.host;
                 let port = &my_config.port;
-                // TODO: switch to logging when logging is implemented
-                println!("Connecting to log service at {}:{}", host, port);
+                tracing::info!("Connecting to log service at {}:{}", host, port);
                 let connection_string = format!("http://{}:{}", host, port);
                 let endpoint_res = match Endpoint::from_shared(connection_string) {
                     Ok(endpoint) => endpoint,
-                    Err(e) => {
-                        return Err(Box::new(GrpcLogError::FailedToConnect(
-                            tonic::transport::Error::from(e),
-                        )))
-                    }
+                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
                 };
                 let endpoint_res = endpoint_res
                     .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
@@ -175,7 +172,7 @@ impl Configurable<LogConfig> for GrpcLog {
 impl GrpcLog {
     async fn read(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
@@ -185,7 +182,8 @@ impl GrpcLog {
             None => i64::MAX,
         };
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
-            collection_id: collection_id.to_string(),
+            // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+            collection_id: collection_id.0.to_string(),
             start_from_offset: offset,
             batch_size,
             end_timestamp,
@@ -209,8 +207,7 @@ impl GrpcLog {
                 Ok(result)
             }
             Err(e) => {
-                // TODO: switch to logging when logging is implemented
-                println!("Failed to pull logs: {}", e);
+                tracing::error!("Failed to pull logs: {}", e);
                 Err(PullLogsError::FailedToPullLogs(e))
             }
         }
@@ -224,7 +221,7 @@ impl GrpcLog {
             .client
             .get_all_collection_info_to_compact(
                 chroma_proto::GetAllCollectionInfoToCompactRequest {
-                    min_compaction_size: min_compaction_size,
+                    min_compaction_size,
                 },
             )
             .await;
@@ -235,8 +232,19 @@ impl GrpcLog {
                 println!("Log got collections with new data: {:?}", collections);
                 let mut result = Vec::new();
                 for collection in collections {
+                    let collection_uuid = match Uuid::parse_str(&collection.collection_id) {
+                        Ok(uuid) => uuid,
+                        Err(_) => {
+                            tracing::error!(
+                                "Failed to parse collection id: {}",
+                                collection.collection_id
+                            );
+                            continue;
+                        }
+                    };
+                    let collection_id = CollectionUuid(collection_uuid);
                     result.push(CollectionInfo {
-                        collection_id: collection.collection_id,
+                        collection_id,
                         first_log_offset: collection.first_log_offset,
                         first_log_ts: collection.first_log_ts,
                     });
@@ -244,8 +252,7 @@ impl GrpcLog {
                 Ok(result)
             }
             Err(e) => {
-                // TODO: switch to logging when logging is implemented
-                println!("Failed to get collections: {}", e);
+                tracing::error!("Failed to get collections: {}", e);
                 Err(GetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(e))
             }
         }
@@ -253,12 +260,13 @@ impl GrpcLog {
 
     async fn update_collection_log_offset(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), UpdateCollectionLogOffsetError> {
         let request = self.client.update_collection_log_offset(
             chroma_proto::UpdateCollectionLogOffsetRequest {
-                collection_id: collection_id.to_string(),
+                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                collection_id: collection_id.0.to_string(),
                 log_offset: new_offset,
             },
         );
@@ -271,7 +279,7 @@ impl GrpcLog {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum PullLogsError {
+pub enum PullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to convert proto embedding record into EmbeddingRecord")]
@@ -323,7 +331,7 @@ impl ChromaError for UpdateCollectionLogOffsetError {
 // internal to a mock log implementation
 #[derive(Clone)]
 pub(crate) struct InternalLogRecord {
-    pub(crate) collection_id: Uuid,
+    pub(crate) collection_id: CollectionUuid,
     pub(crate) log_offset: i64,
     pub(crate) log_ts: i64,
     pub(crate) record: LogRecord,
@@ -343,11 +351,12 @@ impl Debug for InternalLogRecord {
 // This is used for testing only
 #[derive(Clone, Debug)]
 pub(crate) struct InMemoryLog {
-    collection_to_log: HashMap<String, Vec<Box<InternalLogRecord>>>,
-    offsets: HashMap<String, i64>,
+    collection_to_log: HashMap<CollectionUuid, Vec<InternalLogRecord>>,
+    offsets: HashMap<CollectionUuid, i64>,
 }
 
 impl InMemoryLog {
+    #[cfg(test)]
     pub fn new() -> InMemoryLog {
         InMemoryLog {
             collection_to_log: HashMap::new(),
@@ -355,11 +364,9 @@ impl InMemoryLog {
         }
     }
 
-    pub fn add_log(&mut self, collection_id: Uuid, log: Box<InternalLogRecord>) {
-        let logs = self
-            .collection_to_log
-            .entry(collection_id.to_string())
-            .or_insert(Vec::new());
+    #[cfg(test)]
+    pub fn add_log(&mut self, collection_id: CollectionUuid, log: InternalLogRecord) {
+        let logs = self.collection_to_log.entry(collection_id).or_default();
         // Ensure that the log offset is correct. Since we only use the InMemoryLog for testing,
         // we expect callers to send us logs in the correct order.
         let next_offset = logs.len() as i64;
@@ -376,7 +383,7 @@ impl InMemoryLog {
 impl InMemoryLog {
     async fn read(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
@@ -386,7 +393,7 @@ impl InMemoryLog {
             None => i64::MAX,
         };
 
-        let logs = match self.collection_to_log.get(&collection_id.to_string()) {
+        let logs = match self.collection_to_log.get(&collection_id) {
             Some(logs) => logs,
             None => return Ok(Vec::new()),
         };
@@ -427,7 +434,7 @@ impl InMemoryLog {
             let mut logs = filtered_records.to_vec();
             logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
             collections.push(CollectionInfo {
-                collection_id: collection_id.clone(),
+                collection_id: *collection_id,
                 first_log_offset: logs[0].log_offset,
                 first_log_ts: logs[0].log_ts,
             });
@@ -437,10 +444,10 @@ impl InMemoryLog {
 
     async fn update_collection_log_offset(
         &mut self,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), UpdateCollectionLogOffsetError> {
-        self.offsets.insert(collection_id.to_string(), new_offset);
+        self.offsets.insert(collection_id, new_offset);
         Ok(())
     }
 }

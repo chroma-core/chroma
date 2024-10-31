@@ -1,8 +1,3 @@
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
-
-use crate::blockstore::provider::BlockfileProvider;
-use crate::errors::ChromaError;
 use crate::segment::metadata_segment::MetadataSegmentError;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::ApplyMaterializedLogError;
@@ -11,16 +6,24 @@ use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
 use crate::segment::SegmentWriter;
-use crate::types::Segment;
 use crate::{
-    execution::{data::data_chunk::Chunk, operator::Operator},
+    execution::operator::Operator,
     segment::{
         distributed_hnsw_segment::DistributedHNSWSegmentWriter, record_segment::RecordSegmentWriter,
     },
-    types::LogRecord,
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::ChromaError;
+use chroma_error::ErrorCodes;
+use chroma_types::Chunk;
+use chroma_types::LogRecord;
+use chroma_types::Segment;
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
 use thiserror::Error;
+use tracing::Instrument;
+use tracing::Span;
 
 #[derive(Error, Debug)]
 pub enum WriteSegmentsOperatorError {
@@ -35,7 +38,7 @@ pub enum WriteSegmentsOperatorError {
 }
 
 impl ChromaError for WriteSegmentsOperatorError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             WriteSegmentsOperatorError::LogMaterializationPreparationError(e) => e.code(),
             WriteSegmentsOperatorError::LogMaterializationError(e) => e.code(),
@@ -98,6 +101,10 @@ pub struct WriteSegmentsOutput {
 impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator {
     type Error = WriteSegmentsOperatorError;
 
+    fn get_name(&self) -> &'static str {
+        "WriteSegmentsOperator"
+    }
+
     async fn run(&self, input: &WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
         tracing::debug!("Materializing N Records: {:?}", input.chunk.len());
         // Prepare for log materialization.
@@ -138,7 +145,11 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
             Some(input.offset_id.clone()),
         );
         // Materialize the logs.
-        let res = match materializer.materialize().await {
+        let res = match materializer
+            .materialize()
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await
+        {
             Ok(records) => records,
             Err(e) => {
                 tracing::error!("Error materializing records {}", e);
@@ -149,6 +160,9 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         match input
             .record_segment_writer
             .apply_materialized_log_chunk(res.clone())
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to record segment"
+            ))
             .await
         {
             Ok(()) => (),
@@ -160,6 +174,9 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         match input
             .metadata_segment_writer
             .apply_materialized_log_chunk(res.clone())
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to metadata segment"
+            ))
             .await
         {
             Ok(()) => (),
@@ -171,6 +188,9 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         match input
             .hnsw_segment_writer
             .apply_materialized_log_chunk(res)
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to HNSW segment"
+            ))
             .await
         {
             Ok(()) => (),

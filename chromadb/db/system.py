@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from typing import Optional, Sequence, Tuple
 from uuid import UUID
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.types import (
     Collection,
     Database,
@@ -50,17 +51,17 @@ class SysDB(Component):
         pass
 
     @abstractmethod
-    def delete_segment(self, id: UUID) -> None:
-        """Create a new segment in the System database."""
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
+        """Delete a segment from the System database."""
         pass
 
     @abstractmethod
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, type, scope or collection."""
         pass
@@ -68,8 +69,8 @@ class SysDB(Component):
     @abstractmethod
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         """Update a segment. Unspecified fields will be left unchanged. For the
@@ -82,6 +83,7 @@ class SysDB(Component):
         self,
         id: UUID,
         name: str,
+        configuration: CollectionConfigurationInternal,
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,

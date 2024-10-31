@@ -4,6 +4,7 @@ from chromadb.config import System, Settings
 from chromadb.test.conftest import ProducerFn
 from chromadb.types import (
     OperationRecord,
+    RequestVersionContext,
     VectorQuery,
     Operation,
     ScalarEncoding,
@@ -31,6 +32,7 @@ from itertools import count
 import tempfile
 import os
 import shutil
+import numpy as np
 
 
 def sqlite() -> Generator[System, None, None]:
@@ -84,7 +86,7 @@ def sample_embeddings() -> Iterator[OperationRecord]:
     sequence, and it's second nearest neighbor is the subsequent"""
 
     def create_record(i: int) -> OperationRecord:
-        vector = [i**1.1, i**1.1]
+        vector = np.array([i**1.1, i**1.1])
         record = OperationRecord(
             id=f"embedding_{i}",
             embedding=vector,
@@ -133,12 +135,12 @@ def test_insert_and_count(
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
-
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     max_id = produce_fns(
         producer=producer,
@@ -152,7 +154,7 @@ def test_insert_and_count(
 
     sync(segment, max_id)
 
-    assert segment.count() == 3
+    assert segment.count(request_version_context=request_version_context) == 3
 
     max_id = produce_fns(
         producer=producer,
@@ -162,7 +164,7 @@ def test_insert_and_count(
     )[1][-1]
 
     sync(segment, max_id)
-    assert segment.count() == 6
+    assert segment.count(request_version_context=request_version_context) == 6
 
 
 def approx_equal(a: float, b: float, epsilon: float = 0.0001) -> bool:
@@ -180,11 +182,12 @@ def test_get_vectors(
     produce_fns: ProducerFn,
 ) -> None:
     producer = system.instance(Producer)
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -199,7 +202,7 @@ def test_get_vectors(
     sync(segment, seq_ids[-1])
 
     # Get all items
-    vectors = segment.get_vectors()
+    vectors = segment.get_vectors(request_version_context=request_version_context)
     assert len(vectors) == len(embeddings)
     vectors = sorted(vectors, key=lambda v: v["id"])
     for actual, expected, seq_id in zip(vectors, embeddings, seq_ids):
@@ -210,7 +213,9 @@ def test_get_vectors(
 
     # Get selected IDs
     ids = [e["id"] for e in embeddings[5:]]
-    vectors = segment.get_vectors(ids=ids)
+    vectors = segment.get_vectors(
+        ids=ids, request_version_context=request_version_context
+    )
     assert len(vectors) == 5
     vectors = sorted(vectors, key=lambda v: v["id"])
     for actual, expected, seq_id in zip(vectors, embeddings[5:], seq_ids[5:]):
@@ -228,10 +233,11 @@ def test_ann_query(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -254,6 +260,7 @@ def test_ann_query(
             allowed_ids=None,
             options=None,
             include_embeddings=True,
+            request_version_context=request_version_context,
         )
         results = segment.query_vectors(query)
         assert len(results) == 1
@@ -265,7 +272,12 @@ def test_ann_query(
     # Each item is its own nearest neighbor (all at once)
     vectors = [cast(Vector, e["embedding"]) for e in embeddings]
     query = VectorQuery(
-        vectors=vectors, k=1, allowed_ids=None, options=None, include_embeddings=False
+        vectors=vectors,
+        k=1,
+        allowed_ids=None,
+        options=None,
+        include_embeddings=False,
+        request_version_context=request_version_context,
     )
     results = segment.query_vectors(query)
     assert len(results) == len(embeddings)
@@ -277,7 +289,12 @@ def test_ann_query(
     test_embeddings = embeddings[1:-1]
     vectors = [cast(Vector, e["embedding"]) for e in test_embeddings]
     query = VectorQuery(
-        vectors=vectors, k=3, allowed_ids=None, options=None, include_embeddings=False
+        vectors=vectors,
+        k=3,
+        allowed_ids=None,
+        options=None,
+        include_embeddings=False,
+        request_version_context=request_version_context,
     )
     results = segment.query_vectors(query)
     assert len(results) == len(test_embeddings)
@@ -297,10 +314,11 @@ def test_delete(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -313,7 +331,7 @@ def test_delete(
     )
 
     sync(segment, seq_ids[-1])
-    assert segment.count() == 5
+    assert segment.count(request_version_context=request_version_context) == 5
 
     delete_record = OperationRecord(
         id=embeddings[0]["id"],
@@ -335,11 +353,16 @@ def test_delete(
     sync(segment, seq_ids[-1])
 
     # Assert that the record is gone using `count`
-    assert segment.count() == 4
+    assert segment.count(request_version_context=request_version_context) == 4
 
     # Assert that the record is gone using `get`
-    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
-    results = segment.get_vectors()
+    assert (
+        segment.get_vectors(
+            ids=[embeddings[0]["id"]], request_version_context=request_version_context
+        )
+        == []
+    )
+    results = segment.get_vectors(request_version_context=request_version_context)
     assert len(results) == 4
     # get_vectors returns results in arbitrary order
     results = sorted(results, key=lambda v: v["id"])
@@ -352,7 +375,12 @@ def test_delete(
     # Assert that the record is gone from KNN search
     vector = cast(Vector, embeddings[0]["embedding"])
     query = VectorQuery(
-        vectors=[vector], k=10, allowed_ids=None, options=None, include_embeddings=False
+        vectors=[vector],
+        k=10,
+        allowed_ids=None,
+        options=None,
+        include_embeddings=False,
+        request_version_context=request_version_context,
     )
     knn_results = segment.query_vectors(query)
     assert len(results) == 4
@@ -370,7 +398,7 @@ def test_delete(
 
     sync(segment, seq_ids[-1])
 
-    assert segment.count() == 4
+    assert segment.count(request_version_context=request_version_context) == 4
 
 
 def _test_update(
@@ -388,15 +416,18 @@ def _test_update(
     for e in embeddings:
         seq_ids.append(producer.submit_embedding(collection_id, e))
 
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     sync(segment, seq_ids[-1])
-    assert segment.count() == 3
+    assert segment.count(request_version_context=request_version_context) == 3
 
     seq_ids.append(
         producer.submit_embedding(
             collection_id,
             OperationRecord(
                 id=embeddings[0]["id"],
-                embedding=[10.0, 10.0],
+                embedding=np.array([10.0, 10.0]),
                 encoding=ScalarEncoding.FLOAT32,
                 metadata=None,
                 operation=operation,
@@ -407,16 +438,23 @@ def _test_update(
     sync(segment, seq_ids[-1])
 
     # Test new data from get_vectors
-    assert segment.count() == 3
-    results = segment.get_vectors()
+    assert segment.count(request_version_context=request_version_context) == 3
+    results = segment.get_vectors(request_version_context=request_version_context)
     assert len(results) == 3
-    results = segment.get_vectors(ids=[embeddings[0]["id"]])
-    assert results[0]["embedding"] == [10.0, 10.0]
+    results = segment.get_vectors(
+        ids=[embeddings[0]["id"]], request_version_context=request_version_context
+    )
+    assert np.array_equal(results[0]["embedding"], np.array([10.0, 10.0]))
 
     # Test querying at the old location
     vector = cast(Vector, embeddings[0]["embedding"])
     query = VectorQuery(
-        vectors=[vector], k=3, allowed_ids=None, options=None, include_embeddings=False
+        vectors=[vector],
+        k=3,
+        allowed_ids=None,
+        options=None,
+        include_embeddings=False,
+        request_version_context=request_version_context,
     )
     knn_results = segment.query_vectors(query)[0]
     assert knn_results[0]["id"] == embeddings[1]["id"]
@@ -424,9 +462,14 @@ def _test_update(
     assert knn_results[2]["id"] == embeddings[0]["id"]
 
     # Test querying at the new location
-    vector = [10.0, 10.0]
+    vector = np.array([10.0, 10.0])
     query = VectorQuery(
-        vectors=[vector], k=3, allowed_ids=None, options=None, include_embeddings=False
+        vectors=[vector],
+        k=3,
+        allowed_ids=None,
+        options=None,
+        include_embeddings=False,
+        request_version_context=request_version_context,
     )
     knn_results = segment.query_vectors(query)[0]
     assert knn_results[0]["id"] == embeddings[0]["id"]
@@ -444,9 +487,9 @@ def test_update(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
-
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     segment = vector_reader(system, segment_definition)
     segment.start()
 
@@ -455,7 +498,7 @@ def test_update(
     # test updating a nonexistent record
     update_record = OperationRecord(
         id="no_such_record",
-        embedding=[10.0, 10.0],
+        embedding=np.array([10.0, 10.0]),
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPDATE,
@@ -469,8 +512,13 @@ def test_update(
 
     sync(segment, seq_id)
 
-    assert segment.count() == 3
-    assert segment.get_vectors(ids=["no_such_record"]) == []
+    assert segment.count(request_version_context=request_version_context) == 3
+    assert (
+        segment.get_vectors(
+            ids=["no_such_record"], request_version_context=request_version_context
+        )
+        == []
+    )
 
 
 def test_upsert(
@@ -483,9 +531,9 @@ def test_upsert(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
-
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     segment = vector_reader(system, segment_definition)
     segment.start()
 
@@ -494,7 +542,7 @@ def test_upsert(
     # test updating a nonexistent record
     upsert_record = OperationRecord(
         id="no_such_record",
-        embedding=[42, 42],
+        embedding=np.array([42, 42]),
         encoding=ScalarEncoding.FLOAT32,
         metadata=None,
         operation=Operation.UPSERT,
@@ -508,10 +556,12 @@ def test_upsert(
 
     sync(segment, seq_id)
 
-    assert segment.count() == 4
-    result = segment.get_vectors(ids=["no_such_record"])
+    assert segment.count(request_version_context=request_version_context) == 4
+    result = segment.get_vectors(
+        ids=["no_such_record"], request_version_context=request_version_context
+    )
     assert len(result) == 1
-    assert approx_equal_vector(result[0]["embedding"], [42, 42])
+    assert approx_equal_vector(result[0]["embedding"], np.array([42, 42]))
 
 
 def test_delete_without_add(
@@ -522,13 +572,13 @@ def test_delete_without_add(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
-
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     segment = vector_reader(system, segment_definition)
     segment.start()
 
-    assert segment.count() == 0
+    assert segment.count(request_version_context=request_version_context) == 0
 
     delete_record = OperationRecord(
         id="not_in_db",
@@ -552,10 +602,11 @@ def test_delete_with_local_segment_storage(
 ) -> None:
     producer = system.instance(Producer)
     system.reset_state()
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
 
     segment = vector_reader(system, segment_definition)
     segment.start()
@@ -568,7 +619,7 @@ def test_delete_with_local_segment_storage(
     )
 
     sync(segment, seq_ids[-1])
-    assert segment.count() == 5
+    assert segment.count(request_version_context=request_version_context) == 5
 
     delete_record = OperationRecord(
         id=embeddings[0]["id"],
@@ -590,11 +641,16 @@ def test_delete_with_local_segment_storage(
     sync(segment, seq_ids[-1])
 
     # Assert that the record is gone using `count`
-    assert segment.count() == 4
+    assert segment.count(request_version_context=request_version_context) == 4
 
     # Assert that the record is gone using `get`
-    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
-    results = segment.get_vectors()
+    assert (
+        segment.get_vectors(
+            ids=[embeddings[0]["id"]], request_version_context=request_version_context
+        )
+        == []
+    )
+    results = segment.get_vectors(request_version_context=request_version_context)
     assert len(results) == 4
     # get_vectors returns results in arbitrary order
     results = sorted(results, key=lambda v: v["id"])
@@ -607,7 +663,12 @@ def test_delete_with_local_segment_storage(
     # Assert that the record is gone from KNN search
     vector = cast(Vector, embeddings[0]["embedding"])
     query = VectorQuery(
-        vectors=[vector], k=10, allowed_ids=None, options=None, include_embeddings=False
+        vectors=[vector],
+        k=10,
+        allowed_ids=None,
+        options=None,
+        include_embeddings=False,
+        request_version_context=request_version_context,
     )
     knn_results = segment.query_vectors(query)
     assert len(results) == 4
@@ -634,9 +695,9 @@ def test_reset_state_ignored_for_allow_reset_false(
     system.reset_state()
     segment_definition = create_random_segment_definition()
     collection_id = segment_definition["collection"]
-    # We know that the segment definition has a collection_id
-    collection_id = cast(uuid.UUID, collection_id)
-
+    request_version_context = RequestVersionContext(
+        collection_version=0, log_position=0
+    )
     segment = vector_reader(system, segment_definition)
     segment.start()
 
@@ -648,7 +709,7 @@ def test_reset_state_ignored_for_allow_reset_false(
     )
 
     sync(segment, seq_ids[-1])
-    assert segment.count() == 5
+    assert segment.count(request_version_context=request_version_context) == 5
 
     delete_record = OperationRecord(
         id=embeddings[0]["id"],
@@ -670,11 +731,16 @@ def test_reset_state_ignored_for_allow_reset_false(
     sync(segment, seq_ids[-1])
 
     # Assert that the record is gone using `count`
-    assert segment.count() == 4
+    assert segment.count(request_version_context=request_version_context) == 4
 
     # Assert that the record is gone using `get`
-    assert segment.get_vectors(ids=[embeddings[0]["id"]]) == []
-    results = segment.get_vectors()
+    assert (
+        segment.get_vectors(
+            ids=[embeddings[0]["id"]], request_version_context=request_version_context
+        )
+        == []
+    )
+    results = segment.get_vectors(request_version_context=request_version_context)
     assert len(results) == 4
     # get_vectors returns results in arbitrary order
     results = sorted(results, key=lambda v: v["id"])
@@ -687,7 +753,12 @@ def test_reset_state_ignored_for_allow_reset_false(
     # Assert that the record is gone from KNN search
     vector = cast(Vector, embeddings[0]["embedding"])
     query = VectorQuery(
-        vectors=[vector], k=10, allowed_ids=None, options=None, include_embeddings=False
+        vectors=[vector],
+        k=10,
+        allowed_ids=None,
+        options=None,
+        include_embeddings=False,
+        request_version_context=request_version_context,
     )
     knn_results = segment.query_vectors(query)
     assert len(results) == 4

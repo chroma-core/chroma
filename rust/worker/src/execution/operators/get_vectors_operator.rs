@@ -1,11 +1,14 @@
 use crate::{
-    blockstore::provider::BlockfileProvider,
-    errors::{ChromaError, ErrorCodes},
-    execution::{data::data_chunk::Chunk, operator::Operator},
-    segment::record_segment::{self, RecordSegmentReader},
-    types::{LogRecord, Segment},
+    execution::operator::Operator,
+    segment::{
+        record_segment::{self, RecordSegmentReader},
+        LogMaterializer, LogMaterializerError,
+    },
 };
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
@@ -14,7 +17,7 @@ pub struct GetVectorsOperator {}
 
 impl GetVectorsOperator {
     pub fn new() -> Box<Self> {
-        return Box::new(GetVectorsOperator {});
+        Box::new(GetVectorsOperator {})
     }
 }
 
@@ -39,12 +42,12 @@ impl GetVectorsOperatorInput {
         log_records: Chunk<LogRecord>,
         search_user_ids: Vec<String>,
     ) -> Self {
-        return GetVectorsOperatorInput {
+        GetVectorsOperatorInput {
             record_segment_definition,
             blockfile_provider,
             log_records,
             search_user_ids,
-        };
+        }
     }
 }
 
@@ -63,11 +66,13 @@ pub struct GetVectorsOperatorOutput {
 #[derive(Debug, Error)]
 pub enum GetVectorsOperatorError {
     #[error("Error creating record segment reader {0}")]
-    RecordSegmentReaderCreationError(
+    RecordSegmentReaderCreation(
         #[from] crate::segment::record_segment::RecordSegmentReaderCreationError,
     ),
     #[error(transparent)]
-    RecordSegmentReaderError(#[from] Box<dyn ChromaError>),
+    RecordSegmentReader(#[from] Box<dyn ChromaError>),
+    #[error("Error materializing logs {0}")]
+    LogMaterialization(#[from] LogMaterializerError),
 }
 
 impl ChromaError for GetVectorsOperatorError {
@@ -80,12 +85,17 @@ impl ChromaError for GetVectorsOperatorError {
 impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsOperator {
     type Error = GetVectorsOperatorError;
 
+    fn get_name(&self) -> &'static str {
+        "GetVectorsOperator"
+    }
+
     async fn run(
         &self,
         input: &GetVectorsOperatorInput,
     ) -> Result<GetVectorsOperatorOutput, Self::Error> {
         let mut output_vectors = HashMap::new();
 
+        // Materialize logs.
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,
@@ -96,160 +106,42 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
             Err(e) => match *e {
                 record_segment::RecordSegmentReaderCreationError::UninitializedSegment => None,
                 record_segment::RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreationError(
-                        *e,
-                    ))
+                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
                 }
                 record_segment::RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreationError(
-                        *e,
-                    ))
+                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
                 }
             },
         };
+        // Step 1: Materialize the logs.
+        let materializer = LogMaterializer::new(
+            record_segment_reader.clone(),
+            input.log_records.clone(),
+            None,
+        );
+        let mat_records = match materializer.materialize().await {
+            Ok(records) => records,
+            Err(e) => {
+                return Err(GetVectorsOperatorError::LogMaterialization(e));
+            }
+        };
 
         // Search the log records for the user ids
-        let logs = input.log_records.clone();
         let mut remaining_search_user_ids: HashSet<String> =
             HashSet::from_iter(input.search_user_ids.iter().cloned());
-        let mut original_search_user_ids: HashSet<String> =
-            HashSet::from_iter(input.search_user_ids.iter().cloned());
-        for (log_record, _) in logs.iter() {
-            if original_search_user_ids.contains(&log_record.record.id) {
-                match log_record.record.operation {
-                    crate::types::Operation::Add => {
-                        // If there is a record segment, validate the add
-                        if let Some(ref reader) = record_segment_reader {
-                            match reader.data_exists_for_user_id(&log_record.record.id).await {
-                                Ok(true) => {
-                                    // The record exists in the record segment, so this add is faulty
-                                    // and we should skip it
-                                    continue;
-                                }
-                                Ok(false) => {
-                                    // The record does not exist in the record segment,
-                                    // the add is valid
-
-                                    // If the user id is already present in the log set, skip it
-                                    // We use the first add log entry for a user id if a
-                                    // user has multiple log entries
-                                    if output_vectors.contains_key(&log_record.record.id) {
-                                        continue;
-                                    }
-                                    let vector = log_record.record.embedding.as_ref().expect("Invariant violation. The log record for an add does not have an embedding.");
-                                    output_vectors
-                                        .insert(log_record.record.id.clone(), vector.clone());
-                                    remaining_search_user_ids.remove(&log_record.record.id);
-                                }
-                                Err(e) => {
-                                    // If there is an error, we skip the add
-                                    return Err(GetVectorsOperatorError::RecordSegmentReaderError(
-                                        e.into(),
-                                    ));
-                                }
-                            }
-                        } else {
-                            // Record segment is uninitialized.
-                            // If the user id is already present in the log set, skip it
-                            // We use the first add log entry for a user id if a
-                            // user has multiple log entries
-                            if output_vectors.contains_key(&log_record.record.id) {
-                                continue;
-                            }
-                            let vector = log_record.record.embedding.as_ref().expect("Invariant violation. The log record for an add does not have an embedding.");
-                            output_vectors.insert(log_record.record.id.clone(), vector.clone());
-                            remaining_search_user_ids.remove(&log_record.record.id);
-                        }
-                    }
-                    crate::types::Operation::Update => {
-                        // If there is a record segment, validate the update
-                        if let Some(ref reader) = record_segment_reader {
-                            match reader.data_exists_for_user_id(&log_record.record.id).await {
-                                Ok(true) => {
-                                    // The record exists in the record segment, so this update is valid
-                                    // and we should include it in the output
-
-                                    // If the update mutates the vector, we need to update the output
-                                    match &log_record.record.embedding {
-                                        Some(vector) => {
-                                            // This will overwrite the vector if it already exists
-                                            // (e.g if it was added previously in the log)
-                                            output_vectors.insert(
-                                                log_record.record.id.clone(),
-                                                vector.clone(),
-                                            );
-                                            remaining_search_user_ids.remove(&log_record.record.id);
-                                        }
-                                        None => {
-                                            // Nothing to do with this as the vector was not updated
-                                        }
-                                    }
-                                }
-                                Ok(false) => {
-                                    // The record does not exist in the record segment,
-                                    // If the user id is present in the output set then it means
-                                    // that it was inserted previously. Update the embedding
-                                    // if it exists.
-                                    if !output_vectors.contains_key(&log_record.record.id) {
-                                        continue;
-                                    }
-                                    match &log_record.record.embedding {
-                                        Some(vector) => {
-                                            // This will overwrite the vector if it already exists
-                                            // (e.g if it was added previously in the log)
-                                            output_vectors.insert(
-                                                log_record.record.id.clone(),
-                                                vector.clone(),
-                                            );
-                                            remaining_search_user_ids.remove(&log_record.record.id);
-                                        }
-                                        None => {
-                                            // Nothing to do with this as the vector was not updated
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    // If there is an error, we skip the update
-                                    return Err(GetVectorsOperatorError::RecordSegmentReaderError(
-                                        e.into(),
-                                    ));
-                                }
-                            }
-                        } else {
-                            // Record segment is uninitialized.
-                            // If the user id is present in the output set then it means
-                            // that it was inserted previously. Update the embedding
-                            // if it exists.
-                            if !output_vectors.contains_key(&log_record.record.id) {
-                                continue;
-                            }
-                            match &log_record.record.embedding {
-                                Some(vector) => {
-                                    // This will overwrite the vector if it already exists
-                                    // (e.g if it was added previously in the log)
-                                    output_vectors
-                                        .insert(log_record.record.id.clone(), vector.clone());
-                                    remaining_search_user_ids.remove(&log_record.record.id);
-                                }
-                                None => {
-                                    // Nothing to do with this as the vector was not updated
-                                }
-                            }
-                        }
-                    }
-                    crate::types::Operation::Upsert => {
-                        // The upsert operation does not allow embeddings to be None
-                        // So the final value is always present in the log
-                        let vector = log_record.record.embedding.as_ref().expect("Invariant violation. The log record for an upsert does not have an embedding.");
-                        output_vectors.insert(log_record.record.id.clone(), vector.clone());
-                        remaining_search_user_ids.remove(&log_record.record.id);
-                    }
-                    crate::types::Operation::Delete => {
-                        // If the user id is present in the output, remove it
-                        output_vectors.remove(&log_record.record.id);
-                        remaining_search_user_ids.remove(&log_record.record.id);
-                    }
-                }
+        for (log_record, _) in mat_records.iter() {
+            // Log is the source of truth for these so don't consider these for
+            // reading from the segment.
+            let mut removed = false;
+            if remaining_search_user_ids.contains(log_record.merged_user_id_ref()) {
+                removed = true;
+                remaining_search_user_ids.remove(log_record.merged_user_id_ref());
+            }
+            if removed && log_record.final_operation != MaterializedLogOperation::DeleteExisting {
+                output_vectors.insert(
+                    log_record.merged_user_id(),
+                    log_record.merged_embeddings().to_vec(),
+                );
             }
         }
 

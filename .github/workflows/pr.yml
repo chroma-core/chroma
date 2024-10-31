@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       outside-docs: ${{ steps.changes.outputs.outside-docs }}
+      docs: ${{ steps.changes.outputs.docs }}
     steps:
       - name: Get changed paths
         id: changes
@@ -29,7 +30,7 @@ jobs:
     name: Deploy preview of docs
     needs: paths-filter
     if: needs.paths-filter.outputs.docs == 'true'
-    runs-on: depot-ubuntu-22.04
+    runs-on: depot-ubuntu-22.04-small
     environment:
       name: Preview
       url: ${{ steps.deploy.outputs.url }}
@@ -111,11 +112,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-      - name: Install pre-commit
-        shell: bash
-        run: python -m pip install -r requirements_dev.txt
+      - uses: ./.github/actions/python
+        with:
+          python-version: "3.12"
+      - name: Setup Rust
+        uses: ./.github/actions/rust
       - name: Run pre-commit
         shell: bash
         run: |
@@ -131,9 +132,13 @@ jobs:
           pre-commit run --all-files flake8
           pre-commit run --all-files prettier
           pre-commit run --all-files check-yaml
+        continue-on-error: true
       - name: Cargo fmt check
         shell: bash
         run: cargo fmt -- --check
+        continue-on-error: true
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
 
   # This job exists for our branch protection rule.
   # We want to require status checks to pass before merging, but the set of

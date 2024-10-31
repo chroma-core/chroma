@@ -4,11 +4,6 @@ package chroma;
 
 option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
-message Status {
-  string reason = 1;
-  int32 code = 2; // TODO: What is the enum of this code?
-}
-
 // Types here should mirror chromadb/types.py
 enum Operation {
     ADD = 0;
@@ -43,7 +38,7 @@ message Segment {
     string id = 1;
     string type = 2;
     SegmentScope scope = 3;
-    optional string collection = 5;
+    string collection = 5;
     optional UpdateMetadata metadata = 6;
     map<string,FilePaths> file_paths = 7;
 }
@@ -51,6 +46,7 @@ message Segment {
 message Collection {
   string id = 1;
   string name = 2;
+  string configuration_json_str = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
   string tenant = 6;
@@ -92,6 +88,11 @@ message OperationRecord {
     Operation operation = 4;
 }
 
+message RequestVersionContext {
+    uint32 collection_version = 1;
+    uint64 log_position = 2;
+}
+
 /* Metadata Reader Interface */
 
 service MetadataReader {
@@ -101,6 +102,8 @@ service MetadataReader {
 
 message CountRecordsRequest {
     string segment_id = 1;
+    string collection_id = 2;
+    RequestVersionContext version_context = 3;
 }
 
 // TODO: Add error propagation in the response.
@@ -112,9 +115,12 @@ message QueryMetadataRequest {
     string segment_id = 1;
     Where where = 2;
     WhereDocument where_document = 3;
-    repeated string ids = 4;
-    optional int32 limit = 5;
-    optional int32 offset = 6;
+    optional UserIds ids = 4;
+    optional uint32 limit = 5;
+    optional uint32 offset = 6;
+    string collection_id = 7;
+    bool include_metadata = 8;
+    RequestVersionContext version_context = 9;
 }
 
 message QueryMetadataResponse {
@@ -124,6 +130,11 @@ message QueryMetadataResponse {
 message MetadataEmbeddingRecord {
     string id = 1;
     UpdateMetadata metadata = 2;
+}
+
+// A `UserIds` should contain the set of user provided ids allowed in the result.
+message UserIds {
+    repeated string ids = 1;
 }
 
 // A `WhereDocument` clause for filtering metadata. A `WhereDocument` clause is a tree of
@@ -285,6 +296,8 @@ service VectorReader {
 message GetVectorsRequest {
     repeated string ids = 1;
     string segment_id = 2;
+    string collection_id = 3;
+    RequestVersionContext version_context = 4;
 }
 
 message GetVectorsResponse {
@@ -302,6 +315,8 @@ message QueryVectorsRequest {
     repeated string allowed_ids = 3;
     bool include_embeddings = 4;
     string segment_id = 5;
+    string collection_id = 6;
+    RequestVersionContext version_context = 7;
     // TODO: options as in types.py, its currently unused so can add later
 }
 

@@ -1,13 +1,9 @@
-use std::{fmt::Debug, sync::RwLock};
-
 use super::config::MemberlistProviderConfig;
-use crate::system::Receiver;
-use crate::{
-    config::Configurable,
-    errors::{ChromaError, ErrorCodes},
-    system::{Component, ComponentContext, Handler, StreamHandler},
-};
+use crate::system::ReceiverForMessage;
+use crate::system::{Component, ComponentContext, Handler, StreamHandler};
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
 use kube::runtime::watcher::Config;
 use kube::{
@@ -15,8 +11,10 @@ use kube::{
     runtime::{watcher, WatchStreamExt},
     Client, CustomResource,
 };
+use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use thiserror::Error;
 
 /* =========== Basic Types ============== */
@@ -26,7 +24,7 @@ pub(crate) type Memberlist = Vec<String>;
 pub(crate) trait MemberlistProvider:
     Component + Configurable<MemberlistProviderConfig>
 {
-    fn subscribe(&mut self, receiver: Box<dyn Receiver<Memberlist> + Send>) -> ();
+    fn subscribe(&mut self, receiver: Box<dyn ReceiverForMessage<Memberlist> + Send>);
 }
 
 /* =========== CRD ============== */
@@ -53,10 +51,11 @@ pub(crate) struct CustomResourceMemberlistProvider {
     memberlist_name: String,
     kube_client: Client,
     kube_ns: String,
+    #[allow(dead_code)]
     memberlist_cr_client: Api<MemberListKubeResource>,
     queue_size: usize,
     current_memberlist: RwLock<Memberlist>,
-    subscribers: Vec<Box<dyn Receiver<Memberlist> + Send>>,
+    subscribers: Vec<Box<dyn ReceiverForMessage<Memberlist> + Send>>,
 }
 
 impl Debug for CustomResourceMemberlistProvider {
@@ -76,7 +75,7 @@ pub(crate) enum CustomResourceMemberlistProviderConfigurationError {
 }
 
 impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
-    fn code(&self) -> crate::errors::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
             CustomResourceMemberlistProviderConfigurationError::FailedToLoadKubeClient(_e) => {
                 ErrorCodes::Internal
@@ -90,9 +89,7 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
     async fn try_from_config(
         config: &MemberlistProviderConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let my_config = match &config {
-            MemberlistProviderConfig::CustomResource(config) => config,
-        };
+        let MemberlistProviderConfig::CustomResource(my_config) = &config;
         let kube_client = match Client::try_default().await {
             Ok(client) => client,
             Err(err) => {
@@ -120,6 +117,9 @@ impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider
 }
 
 impl CustomResourceMemberlistProvider {
+    // This is not reserved for testing.  If you need to use it outside test contexts, remove this
+    // line.  It exists solely to satisfy the linter.
+    #[cfg(test)]
     fn new(
         memberlist_name: String,
         kube_client: Client,
@@ -152,7 +152,6 @@ impl CustomResourceMemberlistProvider {
         let stream = stream.then(|event| async move {
             match event {
                 Ok(event) => {
-                    let event = event;
                     println!("Kube stream event: {:?}", event);
                     Some(event)
                 }
@@ -165,14 +164,8 @@ impl CustomResourceMemberlistProvider {
         self.register_stream(stream, ctx);
     }
 
-    async fn notify_subscribers(&self) -> () {
-        let curr_memberlist = match self.current_memberlist.read() {
-            Ok(curr_memberlist) => curr_memberlist.clone(),
-            Err(_err) => {
-                // TODO: Log error and attempt recovery
-                return;
-            }
-        };
+    async fn notify_subscribers(&self) {
+        let curr_memberlist = self.current_memberlist.read().clone();
 
         for subscriber in self.subscribers.iter() {
             let _ = subscriber.send(curr_memberlist.clone(), None).await;
@@ -197,6 +190,8 @@ impl Component for CustomResourceMemberlistProvider {
 
 #[async_trait]
 impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvider {
+    type Result = ();
+
     async fn handle(
         &mut self,
         event: Option<MemberListKubeResource>,
@@ -208,7 +203,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                 let name = match &memberlist.metadata.name {
                     Some(name) => name,
                     None => {
-                        // TODO: Log an error
+                        tracing::error!("Memberlist event without memberlist name");
                         return;
                     }
                 };
@@ -221,15 +216,8 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                     .map(|member| member.member_id.clone())
                     .collect::<Vec<String>>();
                 {
-                    let curr_memberlist_handle = self.current_memberlist.write();
-                    match curr_memberlist_handle {
-                        Ok(mut curr_memberlist) => {
-                            *curr_memberlist = memberlist;
-                        }
-                        Err(_err) => {
-                            // TODO: Log an error
-                        }
-                    }
+                    let mut curr_memberlist_handle = self.current_memberlist.write();
+                    *curr_memberlist_handle = memberlist;
                 }
                 // Inform subscribers
                 self.notify_subscribers().await;
@@ -245,20 +233,19 @@ impl StreamHandler<Option<MemberListKubeResource>> for CustomResourceMemberlistP
 
 #[async_trait]
 impl MemberlistProvider for CustomResourceMemberlistProvider {
-    fn subscribe(&mut self, sender: Box<dyn Receiver<Memberlist> + Send>) -> () {
+    fn subscribe(&mut self, sender: Box<dyn ReceiverForMessage<Memberlist> + Send>) {
         self.subscribers.push(sender);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::system::System;
 
-    use super::*;
-
     #[tokio::test]
-    #[cfg(CHROMA_KUBERNETES_INTEGRATION)]
-    async fn it_can_work() {
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_it_can_work() {
         // TODO: This only works if you have a kubernetes cluster running locally with a memberlist
         // We need to implement a test harness for this. For now, it will silently do nothing
         // if you don't have a kubernetes cluster running locally and only serve as a reminder
@@ -271,7 +258,7 @@ mod tests {
             kube_ns.clone(),
             10,
         );
-        let mut system = System::new();
-        let handle = system.start_component(memberlist_provider);
+        let system = System::new();
+        let _handle = system.start_component(memberlist_provider);
     }
 }

@@ -82,7 +82,6 @@ class DistributedSegmentManager(SegmentManager):
         "DistributedSegmentManager.get_segment",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
         if type == MetadataReader:
             scope = SegmentScope.METADATA
@@ -142,7 +141,7 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
     # For the segment types with python implementations, we can propagate metadata
     if type in SEGMENT_TYPE_IMPLS:
         cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
-        collection_metadata = collection.get("metadata", None)
+        collection_metadata = collection.metadata
         if collection_metadata:
             metadata = cls.propagate_collection_metadata(collection_metadata)
 
@@ -150,6 +149,6 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
         id=uuid4(),
         type=type.value,
         scope=scope,
-        collection=collection["id"],
+        collection=collection.id,
         metadata=metadata,
     )

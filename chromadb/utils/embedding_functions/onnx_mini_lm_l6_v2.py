@@ -10,9 +10,7 @@ from typing import List, Optional, cast
 import numpy as np
 import numpy.typing as npt
 import httpx
-from onnxruntime import InferenceSession, get_available_providers, SessionOptions
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
-from tokenizers import Tokenizer
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -156,8 +154,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         return np.concatenate(all_embeddings)
 
     @cached_property
-    def tokenizer(self) -> Tokenizer:
-        tokenizer = Tokenizer.from_file(
+    def tokenizer(self) -> "Tokenizer":  # noqa F821
+        tokenizer = self.Tokenizer.from_file(
             os.path.join(
                 self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
             )
@@ -169,26 +167,26 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         return tokenizer
 
     @cached_property
-    def model(self) -> InferenceSession:
+    def model(self) -> "InferenceSession":  # noqa F821
         if self._preferred_providers is None or len(self._preferred_providers) == 0:
-            if len(get_available_providers()) > 0:
+            if len(self.ort.get_available_providers()) > 0:
                 logger.debug(
                     f"WARNING: No ONNX providers provided, defaulting to available providers: "
-                    f"{get_available_providers()}"
+                    f"{self.ort.get_available_providers()}"
                 )
-            self._preferred_providers = get_available_providers()
+            self._preferred_providers = self.ort.get_available_providers()
         elif not set(self._preferred_providers).issubset(
-            set(get_available_providers())
+            set(self.ort.get_available_providers())
         ):
             raise ValueError(
-                f"Preferred providers must be subset of available providers: {get_available_providers()}"
+                f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
             )
 
         # Suppress onnxruntime warnings. This produces logspew, mainly when onnx tries to use CoreML, which doesn't fit this model.
-        so = SessionOptions()
+        so = self.ort.SessionOptions()
         so.log_severity_level = 3
 
-        return InferenceSession(
+        return self.ort.InferenceSession(
             os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"),
             # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available - https://onnxruntime.ai/docs/api/python/api_summary.html
             # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
@@ -199,7 +197,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
-        return cast(Embeddings, self._forward(input).tolist())
+        return cast(Embeddings, self._forward(input))
 
     def _download_model_if_not_exists(self) -> None:
         onnx_files = [

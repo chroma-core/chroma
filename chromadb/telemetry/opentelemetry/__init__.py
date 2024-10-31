@@ -166,6 +166,7 @@ def add_attributes_to_current_span(
             Sequence[bool],
             Sequence[float],
             Sequence[int],
+            None,
         ],
     ]
 ) -> None:
@@ -176,4 +177,4 @@ def add_attributes_to_current_span(
     if not tracer:
         return
     span = trace.get_current_span()
-    span.set_attributes(attributes)
+    span.set_attributes({k: v for k, v in attributes.items() if v is not None})

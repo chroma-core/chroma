@@ -16,6 +16,7 @@ from typing import (
     Sequence,
     Tuple,
 )
+from chromadb.errors import BatchSizeExceededError
 from chromadb.ingest import Producer, Consumer
 from chromadb.db.impl.sqlite import SqliteDB
 from chromadb.test.conftest import ProducerFn
@@ -28,6 +29,7 @@ from chromadb.types import (
 from chromadb.config import System, Settings
 from pytest import FixtureRequest, approx
 from asyncio import Event, wait_for, TimeoutError
+import numpy as np
 
 
 def sqlite() -> Generator[Tuple[Producer, Consumer], None, None]:
@@ -72,7 +74,7 @@ def producer_consumer(
 @pytest.fixture(scope="module")
 def sample_embeddings() -> Iterator[OperationRecord]:
     def create_record(i: int) -> OperationRecord:
-        vector = [i + i * 0.1, i + 1 + i * 0.1]
+        vector = np.array([i + i * 0.1, i + 1 + i * 0.1])
         metadata: Optional[Dict[str, Union[str, int, float]]]
         if i % 2 == 0:
             metadata = None
@@ -135,16 +137,14 @@ def assert_records_match(
     """Given a list of inserted and consumed records, make sure they match"""
     assert len(consumed_records) == len(inserted_records)
     for inserted, consumed in zip(inserted_records, consumed_records):
-        assert inserted["id"] == consumed["operation_record"]["id"]
-        assert inserted["operation"] == consumed["operation_record"]["operation"]
-        assert inserted["encoding"] == consumed["operation_record"]["encoding"]
-        assert inserted["metadata"] == consumed["operation_record"]["metadata"]
+        assert inserted["id"] == consumed["record"]["id"]
+        assert inserted["operation"] == consumed["record"]["operation"]
+        assert inserted["encoding"] == consumed["record"]["encoding"]
+        assert inserted["metadata"] == consumed["record"]["metadata"]
 
         if inserted["embedding"] is not None:
-            assert consumed["operation_record"]["embedding"] is not None
-            assert_approx_equal(
-                inserted["embedding"], consumed["operation_record"]["embedding"]
-            )
+            assert consumed["record"]["embedding"] is not None
+            assert_approx_equal(inserted["embedding"], consumed["record"]["embedding"])
 
 
 @pytest.mark.asyncio
@@ -368,6 +368,6 @@ async def test_max_batch_size(
 
     embeddings = [next(sample_embeddings) for _ in range(max_batch_size + 1)]
     # Make sure that we can't produce a batch of size > max_batch_size
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(BatchSizeExceededError) as e:
         producer.submit_embeddings(collection, embeddings=embeddings)
     assert "Cannot submit more than" in str(e.value)

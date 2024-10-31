@@ -1,0 +1,30 @@
+[package]
+name = "chroma-storage"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bytes = "1.5.0"
+aws-sdk-s3 = "1.5.0"
+aws-smithy-types = "1.1.0"
+aws-config = { version = "1.1.2", features = ["behavior-version-latest"] }
+
+serde = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+parking_lot = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+
+[dev-dependencies]
+"rand" = { workspace = true}
+rand_xorshift = { workspace = true }
+tempfile = { workspace = true }

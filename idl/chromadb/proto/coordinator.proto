@@ -13,7 +13,8 @@ message CreateDatabaseRequest {
 }
 
 message CreateDatabaseResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetDatabaseRequest {
@@ -23,7 +24,8 @@ message GetDatabaseRequest {
 
 message GetDatabaseResponse {
   Database database = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
 }
 
 message CreateTenantRequest {
@@ -31,7 +33,8 @@ message CreateTenantRequest {
 }
 
 message CreateTenantResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetTenantRequest {
@@ -40,7 +43,8 @@ message GetTenantRequest {
 
 message GetTenantResponse {
   Tenant tenant = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
 }
 
 
@@ -49,36 +53,37 @@ message CreateSegmentRequest {
 }
 
 message CreateSegmentResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message DeleteSegmentRequest {
   string id = 1;
+  string collection = 2;
 }
 
 message DeleteSegmentResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetSegmentsRequest {
   optional string id = 1;
   optional string type = 2;
   optional SegmentScope scope = 3;
-  optional string collection = 5; // Collection ID
+  string collection = 4; // Collection ID
 }
 
 message GetSegmentsResponse {
   repeated Segment segments = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
 }
 
 
 message UpdateSegmentRequest {
   string id = 1;
-  oneof collection_update {
-    string collection = 4;
-    bool reset_collection = 5;
-  }
+  string collection = 4;
   oneof metadata_update {
     UpdateMetadata metadata = 6;
     bool reset_metadata = 7;
@@ -86,23 +91,26 @@ message UpdateSegmentRequest {
 }
 
 message UpdateSegmentResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message CreateCollectionRequest {
   string id = 1;
   string name = 2;
-  optional UpdateMetadata metadata = 3;
-  optional int32 dimension = 4;
-  optional bool get_or_create = 5;
-  string tenant = 6;
-  string database = 7;
+  string configuration_json_str = 3;
+  optional UpdateMetadata metadata = 4;
+  optional int32 dimension = 5;
+  optional bool get_or_create = 6;
+  string tenant = 7;
+  string database = 8;
 }
 
 message CreateCollectionResponse {
   Collection collection = 1;
   bool created = 2;
-  Status status = 3;
+  reserved 3;
+  reserved "status";
 }
 
 message DeleteCollectionRequest {
@@ -112,7 +120,8 @@ message DeleteCollectionRequest {
 }
 
 message DeleteCollectionResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetCollectionsRequest {
@@ -126,7 +135,8 @@ message GetCollectionsRequest {
 
 message GetCollectionsResponse {
   repeated Collection collections = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
 }
 
 message UpdateCollectionRequest {
@@ -140,18 +150,13 @@ message UpdateCollectionRequest {
 }
 
 message UpdateCollectionResponse {
-  Status status = 1;
-}
-
-message Notification {
-  int64 id = 1;
-  string collection_id = 2;
-  string type = 3;
-  string status = 4;
+  reserved 1;
+  reserved "status";
 }
 
 message ResetStateResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetLastCompactionTimeForTenantRequest {

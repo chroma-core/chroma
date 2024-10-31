@@ -4,6 +4,7 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
+from chromadb.api.configuration import CollectionConfiguration
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -20,6 +21,8 @@ from chromadb.api.types import (
     QueryResult,
     URIs,
 )
+from chromadb.auth import UserIdentity
+from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
@@ -55,12 +58,26 @@ class Client(SharedSystemClient, ClientAPI):
         super().__init__(settings=settings)
         self.tenant = tenant
         self.database = database
-        # Create an admin client for verifying that databases and tenants exist
-        self._admin_client = AdminClient.from_system(self._system)
-        self._validate_tenant_database(tenant=tenant, database=database)
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
+
+        user_identity = self.get_user_identity()
+
+        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+            user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            user_provided_tenant=tenant,
+            user_provided_database=database,
+        )
+        if maybe_tenant:
+            self.tenant = maybe_tenant
+        if maybe_database:
+            self.database = maybe_database
+
+        # Create an admin client for verifying that databases and tenants exist
+        self._admin_client = AdminClient.from_system(self._system)
+        self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
         self._submit_client_start_event()
 
@@ -78,6 +95,20 @@ class Client(SharedSystemClient, ClientAPI):
 
     # endregion
 
+    @override
+    def get_user_identity(self) -> UserIdentity:
+        try:
+            return self._server.get_user_identity()
+        except httpx.ConnectError:
+            raise ValueError(
+                "Could not connect to a Chroma server. Are you sure it is running?"
+            )
+        # Propagate ChromaErrors
+        except ChromaError as e:
+            raise e
+        except Exception as e:
+            raise ValueError(str(e))
+
     # region BaseAPI Methods
     # Note - we could do this in less verbose ways, but they break type checking
     @override
@@ -88,9 +119,12 @@ class Client(SharedSystemClient, ClientAPI):
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
     ) -> Sequence[Collection]:
-        return self._server.list_collections(
-            limit, offset, tenant=self.tenant, database=self.database
-        )
+        return [
+            Collection(client=self._server, model=model)
+            for model in self._server.list_collections(
+                limit, offset, tenant=self.tenant, database=self.database
+            )
+        ]
 
     @override
     def count_collections(self) -> int:
@@ -102,6 +136,7 @@ class Client(SharedSystemClient, ClientAPI):
     def create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -109,14 +144,19 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
-        return self._server.create_collection(
+        model = self._server.create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
             get_or_create=get_or_create,
+            configuration=configuration,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -129,32 +169,42 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_collection(
+        model = self._server.get_collection(
             id=id,
             name=name,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
     def get_or_create_collection(
         self,
         name: str,
+        configuration: Optional[CollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
-        return self._server.get_or_create_collection(
+        model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
             tenant=self.tenant,
             database=self.database,
+            configuration=configuration,
+        )
+        return Collection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
         )
 
     @override
@@ -166,6 +216,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> None:
         return self._server._modify(
             id=id,
+            tenant=self.tenant,
+            database=self.database,
             new_name=new_name,
             new_metadata=new_metadata,
         )
@@ -197,6 +249,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._add(
             ids=ids,
+            tenant=self.tenant,
+            database=self.database,
             collection_id=collection_id,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -216,6 +270,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._update(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -235,6 +291,8 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> bool:
         return self._server._upsert(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
@@ -246,6 +304,8 @@ class Client(SharedSystemClient, ClientAPI):
     def _count(self, collection_id: UUID) -> int:
         return self._server._count(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -253,6 +313,8 @@ class Client(SharedSystemClient, ClientAPI):
         return self._server._peek(
             collection_id=collection_id,
             n=n,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -260,17 +322,19 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
+        where: Optional[Where] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         return self._server._get(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             where=where,
             sort=sort,
@@ -286,11 +350,13 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
-    ) -> IDs:
-        return self._server._delete(
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ) -> None:
+        self._server._delete(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             ids=ids,
             where=where,
             where_document=where_document,
@@ -302,12 +368,14 @@ class Client(SharedSystemClient, ClientAPI):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         return self._server._query(
             collection_id=collection_id,
+            tenant=self.tenant,
+            database=self.database,
             query_embeddings=query_embeddings,
             n_results=n_results,
             where=where,
@@ -366,10 +434,6 @@ class Client(SharedSystemClient, ClientAPI):
         except httpx.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
-            )
-        except Exception:
-            raise ValueError(
-                f"Could not connect to database {database} for tenant {tenant}. Are you sure it exists?"
             )
 
     # endregion

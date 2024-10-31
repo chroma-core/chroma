@@ -13,6 +13,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.types import (
     LogRecord,
+    RequestVersionContext,
     VectorEmbeddingRecord,
     VectorQuery,
     VectorQueryResult,
@@ -26,6 +27,7 @@ from chromadb.errors import InvalidDimensionException
 import hnswlib
 from chromadb.utils.read_write_lock import ReadWriteLock, ReadRWLock, WriteRWLock
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ class LocalHnswSegment(VectorReader):
     _id: UUID
     _consumer: Consumer
     _collection: Optional[UUID]
-    _subscription: UUID
+    _subscription: Optional[UUID]
     _settings: Settings
     _params: HnswParams
 
@@ -60,6 +62,7 @@ class LocalHnswSegment(VectorReader):
         self._consumer = system.instance(Consumer)
         self._id = segment["id"]
         self._collection = segment["collection"]
+        self._subscription = None
         self._settings = system.settings
         self._params = HnswParams(segment["metadata"] or {})
 
@@ -74,7 +77,6 @@ class LocalHnswSegment(VectorReader):
 
         self._lock = ReadWriteLock()
         self._opentelemtry_client = system.require(OpenTelemetryClient)
-        super().__init__(system, segment)
 
     @staticmethod
     @override
@@ -103,7 +105,9 @@ class LocalHnswSegment(VectorReader):
     @trace_method("LocalHnswSegment.get_vectors", OpenTelemetryGranularity.ALL)
     @override
     def get_vectors(
-        self, ids: Optional[Sequence[str]] = None
+        self,
+        request_version_context: RequestVersionContext,
+        ids: Optional[Sequence[str]] = None,
     ) -> Sequence[VectorEmbeddingRecord]:
         if ids is None:
             labels = list(self._label_to_id.keys())
@@ -115,7 +119,9 @@ class LocalHnswSegment(VectorReader):
 
         results = []
         if self._index is not None:
-            vectors = cast(Sequence[Vector], self._index.get_items(labels))
+            vectors = cast(
+                Sequence[Vector], np.array(self._index.get_items(labels))
+            )  # version 0.8 of hnswlib allows return_type="numpy"
 
             for label, vector in zip(labels, vectors):
                 id = self._label_to_id[label]
@@ -154,7 +160,9 @@ class LocalHnswSegment(VectorReader):
 
         with ReadRWLock(self._lock):
             result_labels, distances = self._index.knn_query(
-                query_vectors, k=k, filter=filter_function if ids else None
+                np.array(query_vectors, dtype=np.float32),
+                k=k,
+                filter=filter_function if ids else None,
             )
 
             # TODO: these casts are not correct, hnswlib returns np
@@ -169,7 +177,9 @@ class LocalHnswSegment(VectorReader):
                 ):
                     id = self._label_to_id[label]
                     if query["include_embeddings"]:
-                        embedding = self._index.get_items([label])[0]
+                        embedding = np.array(
+                            self._index.get_items([label])[0]
+                        )  # version 0.8 of hnswlib allows return_type="numpy"
                     else:
                         embedding = None
                     results.append(
@@ -188,7 +198,7 @@ class LocalHnswSegment(VectorReader):
         return self._max_seq_id
 
     @override
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         return len(self._id_to_label)
 
     @trace_method("LocalHnswSegment._init_index", OpenTelemetryGranularity.ALL)
@@ -292,8 +302,8 @@ class LocalHnswSegment(VectorReader):
 
             for record in records:
                 self._max_seq_id = max(self._max_seq_id, record["log_offset"])
-                id = record["operation_record"]["id"]
-                op = record["operation_record"]["operation"]
+                id = record["record"]["id"]
+                op = record["record"]["operation"]
                 label = self._id_to_label.get(id, None)
 
                 if op == Operation.DELETE:
@@ -303,12 +313,12 @@ class LocalHnswSegment(VectorReader):
                         logger.warning(f"Delete of nonexisting embedding ID: {id}")
 
                 elif op == Operation.UPDATE:
-                    if record["operation_record"]["embedding"] is not None:
+                    if record["record"]["embedding"] is not None:
                         if label is not None:
                             batch.apply(record)
                         else:
                             logger.warning(
-                                f"Update of nonexisting embedding ID: {record['operation_record']['id']}"
+                                f"Update of nonexisting embedding ID: {record['record']['id']}"
                             )
                 elif op == Operation.ADD:
                     if not label:

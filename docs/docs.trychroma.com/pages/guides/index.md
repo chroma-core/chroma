@@ -39,11 +39,11 @@ The `path` is where Chroma will store its database files on disk, and load them 
 const { ChromaClient } = require("chromadb");
 
 // ESM
-import { ChromaClient } from 'chromadb'
+import { ChromaClient } from "chromadb";
 ```
 
 {% note type="note" title="Connecting to the backend" %}
-To connect with the JS client, you must connect to a backend running Chroma. See `Running Chroma in client/server mode` for how to do this.
+To connect with the JS client, you must connect to a backend running Chroma. See [Running Chroma in client-server mode](#running-chroma-in-client-server-mode) for how to do this.
 {% /note %}
 
 ```js
@@ -77,14 +77,14 @@ await client.reset() # Empties and completely resets the database. ⚠️ This i
 
 {% /tabs %}
 
-## Running Chroma in client/server mode
+## Running Chroma in client-server mode
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
 
 Chroma can also be configured to run in client/server mode. In this mode, the Chroma client connects to a Chroma server running in a separate process.
 
-To start the Chroma server, run the following command:
+To start the Chroma server locally, run the following command:
 
 ```bash
 chroma run --path /db_path
@@ -165,7 +165,7 @@ To run Chroma in client server mode, first install the chroma library and CLI vi
 pip install chromadb
 ```
 
-Then start the Chroma server:
+Then start the Chroma server locally:
 
 ```bash
 chroma run --path /db_path
@@ -178,12 +178,12 @@ The JS client then talks to the chroma server backend.
 const { ChromaClient } = require("chromadb");
 
 // ESM
-import { ChromaClient } from 'chromadb'
+import { ChromaClient } from "chromadb";
 
 const client = new ChromaClient();
 ```
 
-You can also run the Chroma server in a docker container, or deployed to a cloud provider. See the [deployment docs](./deployment.md) for more information.
+You can also run the Chroma server in a docker container, or deployed to a cloud provider. See the [deployment docs](./deployment/docker) for more information.
 
 {% /tab %}
 
@@ -226,7 +226,7 @@ The embedding function takes text as input, and performs tokenization and embedd
 const { ChromaClient } = require("chromadb");
 
 // ESM
-import { ChromaClient } from 'chromadb'
+import { ChromaClient } from "chromadb";
 ```
 
 The JS client talks to a chroma server backend. This can run on your local computer or be easily deployed to AWS.
@@ -271,18 +271,19 @@ client.delete_collection(name="my_collection") # Delete a collection and all ass
 Existing collections can be retrieved by name with `.getCollection`, and deleted with `.deleteCollection`.
 
 ```javascript
-const collection = await client.getCollection({name: "test"}) # Get a collection object from an existing collection, by name. Will raise an exception of it's not found.
-await client.deleteCollection({name: "my_collection"}) # Delete a collection and all associated embeddings, documents, and metadata. ⚠️ This is destructive and not reversible
+const collection = await client.getCollection({ name: "test" }); // Get a collection object from an existing collection, by name. Will raise an exception of it's not found.
+collection = await client.getOrCreateCollection({ name: "test" }); // Get a collection object from an existing collection, by name. If it doesn't exist, create it.
+await client.deleteCollection(collection); // Delete a collection and all associated embeddings, documents, and metadata. ⚠️ This is destructive and not reversible
 ```
 
 {% /tab %}
 
 {% /tabs %}
 
-Collections have a few useful convenience methods.
-
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
+
+Collections have a few useful convenience methods.
 
 ```python
 collection.peek() # returns a list of the first 10 items in the collection
@@ -292,6 +293,8 @@ collection.modify(name="new_name") # Rename the collection
 
 {% /tab %}
 {% tab label="Javascript" %}
+
+There are a few useful convenience methods for working with Collections.
 
 ```javascript
 await collection.peek(); // returns a list of the first 10 items in the collection
@@ -337,20 +340,20 @@ Valid options for `hnsw:space` are "l2", "ip, "or "cosine". The **default** is "
 {% special_table %}
 {% /special_table %}
 
-| Distance          | parameter | Equation |
-| ----------------- | :-------: | -------------------------------------------------------: |
-| Squared L2        |   `l2`    |                                       {% math latexText="d = \\sum\\left(A_i-B_i\\right)^2" %}{% /math %} |
-| Inner product     |   `ip`    |                                    {% math latexText="d = 1.0 - \\sum\\left(A_i \\times B_i\\right) " %}{% /math %} |
-| Cosine similarity | `cosine` | {% math latexText="d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}}" %}{% /math %} |
+| Distance          | parameter |                                                                                                                                                            Equation |
+| ----------------- | :-------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+| Squared L2        |   `l2`    |                                                                                                 {% math latexText="d = \\sum\\left(A_i-B_i\\right)^2" %}{% /math %} |
+| Inner product     |   `ip`    |                                                                                    {% math latexText="d = 1.0 - \\sum\\left(A_i \\times B_i\\right) " %}{% /math %} |
+| Cosine similarity | `cosine`  | {% math latexText="d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}}" %}{% /math %} |
 
 ### Adding data to a Collection
+
+{% tabs group="code-lang" hideTabs=true %}
+{% tab label="Python" %}
 
 Add data to Chroma with `.add`.
 
 Raw documents:
-
-{% tabs group="code-lang" hideTabs=true %}
-{% tab label="Python" %}
 
 ```python
 collection.add(
@@ -362,6 +365,10 @@ collection.add(
 
 {% /tab %}
 {% tab label="Javascript" %}
+
+Add data to Chroma with `.addRecords`.
+
+Raw documents:
 
 ```javascript
 await collection.add({
@@ -447,12 +454,12 @@ await collection.add({
 
 ### Querying a Collection
 
-Chroma collections can be queried in a variety of ways, using the `.query` method.
-
 You can query by a set of `query_embeddings`.
 
 {% tabs group="code-lang" hideTabs=true %}
 {% tab label="Python" %}
+
+Chroma collections can be queried in a variety of ways, using the `.query` method.
 
 ```python
 collection.query(
@@ -466,6 +473,8 @@ collection.query(
 {% /tab %}
 {% tab label="Javascript" %}
 
+Chroma collections can be queried in a variety of ways, using the `.queryRecords` method.
+
 ```javascript
 const result = await collection.query({
     queryEmbeddings: [[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
@@ -473,10 +482,10 @@ const result = await collection.query({
     where: {"metadata_field": "is_equal_to_this"},
 })
 // input order
-// query_embeddings - optional
+// queryEmbeddings - optional, exactly one of queryEmbeddings and queryTexts must be provided
+// queryTexts - optional
 // n_results - required
 // where - optional
-// query_texts - optional
 ```
 
 {% /tab %}
@@ -523,10 +532,10 @@ await collection.query({
 })
 ```
 
-You can also retrieve items from a collection by `id` using `.get`.
+You can also retrieve records from a collection by `id` using `.getRecords`.
 
 ```javascript
-await collection.get({
+await collection.get( {
 	ids: ["id1", "id2", "id3", ...], //ids
 	where: {"style": "style1"} // where
 })
@@ -540,10 +549,12 @@ await collection.get({
 
 ##### Choosing which data is returned
 
-When using get or query you can use the include parameter to specify which data you want returned - any of `embeddings`, `documents`, `metadatas`, and for query, `distances`. By default, Chroma will return the `documents`, `metadatas` and in the case of query, the `distances` of the results. `embeddings` are excluded by default for performance and the `ids` are always returned. You can specify which of these you want returned by passing an array of included field names to the includes parameter of the query or get method.
+When using get or query you can use the include parameter to specify which data you want returned - any of `embeddings`, `documents`, `metadatas`, and for query, `distances`. By default, Chroma will return the `documents`, `metadatas` and in the case of query, the `distances` of the results. `embeddings` are excluded by default for performance and the `ids` are always returned. You can specify which of these you want returned by passing an array of included field names to the includes parameter of the query or get method. Note that embeddings will be returned as a 2-d numpy array in `.get` and a python list of 2-d numpy arrays in `.query`.
 
-```javascript
+{% tabs group="code-lang" hideTabs=true %}
+{% tab label="Python" %}
 
+```python
 # Only get documents and ids
 collection.get(
     include=["documents"]
@@ -554,6 +565,25 @@ collection.query(
     include=["documents"]
 )
 ```
+
+{% /tab %}
+{% tab label="Javascript" %}
+
+```javascript
+# Only get documents and ids
+collection.get(
+    {include=["documents"]}
+)
+
+collection.get({
+    queryEmbeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
+    include=["documents"]
+})
+```
+
+{% /tab %}
+
+{% /tabs %}
 
 ### Using Where filters
 
@@ -688,16 +718,25 @@ An `$nin` operator will return results where the metadata attribute is not part 
 }
 ```
 
+{% tabs group="code-lang" hideTabs=true %}
+{% tab label="Python" %}
+
 {% note type="note" title="Practical examples" %}
 For additional examples and a demo how to use the inclusion operators, please see provided notebook [here](https://github.com/chroma-core/chroma/blob/main/examples/basic_functionality/in_not_in_filtering.ipynb)
 {% /note %}
 
-{% tabs group="code-lang" hideTabs=true %}
-{% tab label="Python" %}
+{% /tab %}
+{% tab label="Javascript" %}
+{% /tab %}
+
+{% /tabs %}
 
 ### Updating data in a collection
 
-Any property of items in a collection can be updated using `.update`.
+{% tabs group="code-lang" hideTabs=true %}
+{% tab label="Python" %}
+
+Any property of records in a collection can be updated using `.update`.
 
 ```python
 collection.update(
@@ -710,6 +749,19 @@ collection.update(
 
 {% /tab %}
 {% tab label="Javascript" %}
+
+Any property of records in a collection can be updated using `.updateRecords`.
+
+```javascript
+collection.update(
+    {
+      ids: ["id1", "id2", "id3", ...],
+      embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
+      metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
+      documents: ["doc1", "doc2", "doc3", ...],
+    },
+)
+```
 
 {% /tab %}
 
@@ -752,7 +804,6 @@ await collection.upsert({
   documents: ["doc1", "doc2", "doc3"],
 });
 ```
-
 
 {% /tab %}
 

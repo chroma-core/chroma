@@ -20,6 +20,56 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.5.17
+
+We no longer support sending empty lists or dictionaries for metadata filtering, ID filtering, etc. For example,
+
+```python
+collection.get(
+	ids=["id1", "id2", "id3", ...],
+	where={}
+)
+```
+
+is not supported. Instead, use:
+
+```python
+collection.get(ids=["id1", "id2", "id3", ...])
+```
+
+### v0.5.12
+
+The operators `$ne` (not equal) and `$nin` (not in) in `where` clauses have been updated:
+* Previously: They only matched records that had the specified key.
+* Now: They also match records that don't have the specified key at all.
+
+In other words, `$ne` and `$nin` now match the complement set of records (the exact opposite) that `$eq` (equals) and `$in` (in) would match, respectively.
+
+The `$not_contains` operator in the `where_document` clause has also been updated:
+* Previously: It only matched records that had a document field.
+* Now: It also matches records that don't have a document field at all.
+
+In other words, `$not_contains` now matches the exact opposite set of records that `$contains` would match.
+
+`RateLimitingProvider` is now deprecated and replaced by `RateLimitEnforcer`. This new interface allows you to wrap server calls with rate limiting logic. The default `SimpleRateLimitEnforcer` implementation allows all requests, but you can create custom implementations for more advanced rate limiting strategies.
+### v0.5.11
+
+The results returned by `collection.get()` is now ordered by internal ids. Whereas previously, the results were ordered by user provided ids, although this behavior was not explicitly documented. We would like to make the change because using user provided ids may not be ideal for performance in hosted Chroma, and we hope to propagate the change to local Chroma for consistency of behavior. In general, newer documents in Chroma has larger internal ids.
+
+A subsequent change in behavior is `limit` and `offset`, which depends on the order of returned results. For example, if you have a collection named `coll` of documents with ids `["3", "2", "1", "0"]` inserted in this order, then previously `coll.get(limit=2, offset=2)["ids"]` gives you `["2", "3"]`, while currently this will give you `["1", "0"]`.
+
+We have also modified the behavior of `client.get_or_create`. Previously, if a collection already existed and the `metadata` argument was provided, the existing collection's metadata would be overwritten with the new values. This has now changed. If the collection already exists, get_or_create will simply return the existing collection with the specified name, and any additional arguments—including `metadata`—will be ignored.
+
+Finally, the embeddings returned from `collection.get()`, `collection.query()`, and `collection.peek()` are now represented as 2-dimensional NumPy arrays instead of Python lists. When adding embeddings, you can still use either a Python list or a NumPy array. If your request returns multiple embeddings, the result will be a Python list containing 2-dimensional NumPy arrays. This change is part of our effort to enhance performance in Local Chroma by using NumPy arrays for internal representation of embeddings.
+
+### v0.5.6
+
+Chroma internally uses a write-ahead log. In all versions prior to v0.5.6, this log was never pruned. This resulted in the data directory being much larger than it needed to be, as well as the directory size not decreasing by the expected amount after deleting a collection.
+
+In v0.5.6 the write-ahead log is pruned automatically. However, this is not enabled by default for existing databases. After upgrading, you should run `chroma utils vacuum` once to reduce your database size and enable continuous pruning. See the [CLI reference](/reference/cli#vacuuming) for more details.
+
+This does not need to be run regularly and does not need to be run on new databases created with v0.5.6 or later.
+
 ### v0.5.1
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
@@ -59,7 +109,7 @@ We have consolidated these into three classes:
 
 `ServerAuthorizationProvider`s are responsible for turning information about the request and the `UserIdentity` which issued the request into an authorization decision. Configured via the `chroma_server_authz_config` and `chroma_server_authz_config_file` settings.
 
-*Either `_authn_credentials` or `authn_credentials_file` can be set, never both. Same for `authz_config` and `authz_config_file`. The value of the config (or data in the config file) will depend on your authn and authz providers. See [here](https://github.com/chroma-core/chroma/tree/main/examples/basic_functionality/authz) for more information.*
+_Either `_authn_credentials` or `authn_credentials_file` can be set, never both. Same for `authz_config` and `authz_config_file`. The value of the config (or data in the config file) will depend on your authn and authz providers. See [here](https://github.com/chroma-core/chroma/tree/main/examples/basic_functionality/authz) for more information._
 
 The two auth systems Chroma ships with are `Basic` and `Token`. We have a small migration guide for each.
 
@@ -74,7 +124,7 @@ CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER="chromadb.auth.providers.HtpasswdConfigu
 CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.basic.BasicAuthServerProvider"
 ```
 
-*Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both.*
+_Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
 And your corresponding client configation:
 
@@ -110,7 +160,7 @@ CHROMA_SERVER_AUTH_PROVIDER="chromadb.auth.token.TokenAuthServerProvider"
 CHROMA_SERVER_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 ```
 
-*Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both.*
+_Note: Only one of `AUTH_CREDENTIALS` and `AUTH_CREDENTIALS_FILE` can be set, but this guide shows how to migrate both._
 
 And your corresponding client configation:
 
@@ -186,14 +236,14 @@ class EmbeddingFunction(Protocol[D]):
 ```
 
 The key differences are:
+
 - `EmbeddingFunction` is now generic, and takes a type parameter `D` which is a subtype of `Embeddable`. This allows us to define `EmbeddingFunction`s which can embed multiple modalities.
 - `__call__` now takes a single argument, `input`, to support data of any type `D`. The `texts` argument has been removed.
-
-
 
 ### Migration from >0.4.0 to 0.4.0 - July 17, 2023
 
 What's new in this version?
+
 - New easy way to create clients
 - Changed storage method
 - `.persist()` removed, `.reset()` no longer on by default
@@ -258,7 +308,6 @@ client = chromadb.PersistentClient(
 This version of Chroma drops `duckdb` and `clickhouse` in favor of `sqlite` for metadata storage. This means migrating data over. We have created a migration CLI utility to do this.
 
 If you upgrade to `0.4.0` and try to access data stored in the old way, you will see this error message
-
 
 > You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!
 

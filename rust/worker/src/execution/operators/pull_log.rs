@@ -1,10 +1,7 @@
-use crate::execution::data::data_chunk::Chunk;
-use crate::execution::operator::Operator;
-use crate::log::log::Log;
-use crate::log::log::PullLogsError;
-use crate::types::LogRecord;
+use crate::execution::operator::{Operator, OperatorType};
+use crate::log::log::{Log, PullLogsError};
 use async_trait::async_trait;
-use uuid::Uuid;
+use chroma_types::{Chunk, CollectionUuid, LogRecord};
 
 /// The pull logs operator is responsible for reading logs from the log service.
 #[derive(Debug)]
@@ -30,7 +27,7 @@ impl PullLogsOperator {
 /// * `end_timestamp` - The end timestamp to read logs until.
 #[derive(Debug)]
 pub struct PullLogsInput {
-    collection_id: Uuid,
+    collection_id: CollectionUuid,
     offset: i64,
     batch_size: i32,
     num_records: Option<i32>,
@@ -46,7 +43,7 @@ impl PullLogsInput {
     /// * `num_records` - The maximum number of records to read.
     /// * `end_timestamp` - The end timestamp to read logs until.
     pub fn new(
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         num_records: Option<i32>,
@@ -87,6 +84,14 @@ impl PullLogsOutput {
 #[async_trait]
 impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
     type Error = PullLogsError;
+
+    fn get_name(&self) -> &'static str {
+        "PullLogsOperator"
+    }
+
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IO
+    }
 
     async fn run(&self, input: &PullLogsInput) -> Result<PullLogsOutput, PullLogsError> {
         // We expect the log to be cheaply cloneable, we need to clone it since we need
@@ -133,6 +138,7 @@ impl Operator<PullLogsInput, PullLogsOutput> for PullLogsOperator {
         if input.num_records.is_some() && result.len() > input.num_records.unwrap() as usize {
             result.truncate(input.num_records.unwrap() as usize);
         }
+        tracing::info!(name: "Pulled log records", num_records = result.len());
         // Convert to DataChunk
         let data_chunk = Chunk::new(result.into());
         Ok(PullLogsOutput::new(data_chunk))
@@ -144,22 +150,21 @@ mod tests {
     use super::*;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
+    use chroma_types::{CollectionUuid, LogRecord, Operation, OperationRecord};
     use std::str::FromStr;
 
     #[tokio::test]
     async fn test_pull_logs() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
 
         match *log {
             Log::InMemory(ref mut log) => {
                 log.add_log(
-                    collection_uuid_1.clone(),
-                    Box::new(InternalLogRecord {
-                        collection_id: collection_uuid_1.clone(),
+                    collection_uuid_1,
+                    InternalLogRecord {
+                        collection_id: collection_uuid_1,
                         log_offset: 0,
                         log_ts: 1,
                         record: LogRecord {
@@ -173,12 +178,12 @@ mod tests {
                                 operation: Operation::Add,
                             },
                         },
-                    }),
+                    },
                 );
                 log.add_log(
-                    collection_uuid_1.clone(),
-                    Box::new(InternalLogRecord {
-                        collection_id: collection_uuid_1.clone(),
+                    collection_uuid_1,
+                    InternalLogRecord {
+                        collection_id: collection_uuid_1,
                         log_offset: 1,
                         log_ts: 2,
                         record: LogRecord {
@@ -192,7 +197,7 @@ mod tests {
                                 operation: Operation::Add,
                             },
                         },
-                    }),
+                    },
                 );
             }
             _ => panic!("Expected InMemoryLog"),

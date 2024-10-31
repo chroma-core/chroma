@@ -1,0 +1,20 @@
+[package]
+name = "chroma-types"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+prost = { workspace = true }
+prost-types = { workspace = true }
+roaring = { workspace = true }
+thiserror = { workspace = true }
+tonic = { workspace = true }
+uuid = { workspace = true }
+
+chroma-error = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.10"

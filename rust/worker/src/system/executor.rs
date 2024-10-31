@@ -1,9 +1,4 @@
-use super::{
-    scheduler::Scheduler,
-    sender::{Sender, Wrapper},
-    system::System,
-    Component,
-};
+use super::{scheduler::Scheduler, system::System, Component, ComponentSender, WrappedMessage};
 use crate::system::ComponentContext;
 use std::sync::Arc;
 use tokio::select;
@@ -13,7 +8,7 @@ struct Inner<C>
 where
     C: Component,
 {
-    pub(super) sender: Sender<C>,
+    pub(super) sender: ComponentSender<C>,
     pub(super) cancellation_token: tokio_util::sync::CancellationToken,
     pub(super) system: System,
     pub(super) scheduler: Scheduler,
@@ -36,7 +31,7 @@ where
     C: Component + Send + 'static,
 {
     pub(super) fn new(
-        sender: Sender<C>,
+        sender: ComponentSender<C>,
         cancellation_token: tokio_util::sync::CancellationToken,
         handler: C,
         system: System,
@@ -53,7 +48,10 @@ where
         }
     }
 
-    pub(super) async fn run(&mut self, mut channel: tokio::sync::mpsc::Receiver<Wrapper<C>>) {
+    pub(super) async fn run(
+        &mut self,
+        mut channel: tokio::sync::mpsc::Receiver<WrappedMessage<C>>,
+    ) {
         self.handler
             .on_start(&ComponentContext {
                 system: self.inner.system.clone(),
@@ -70,16 +68,15 @@ where
                 message = channel.recv() => {
                     match message {
                         Some(mut message) => {
-                            let parent_span: tracing::Span;
-                            match message.get_tracing_context() {
+                            let parent_span: tracing::Span = match message.get_tracing_context() {
                                 Some(spn) => {
-                                    parent_span = spn;
+                                    spn
                                 },
                                 None => {
-                                    parent_span = Span::current().clone();
+                                    Span::current().clone()
                                 }
-                            }
-                            let child_span = trace_span!(parent: parent_span, "task handler");
+                            };
+                            let child_span = trace_span!(parent: parent_span, "Component received message", "name" =  C::get_name());
                             let component_context = ComponentContext {
                                     system: self.inner.system.clone(),
                                     sender: self.inner.sender.clone(),
@@ -90,7 +87,7 @@ where
                             task_future.instrument(child_span).await;
                         }
                         None => {
-                            // TODO: Log error
+                            tracing::error!("Channel closed");
                         }
                     }
                 }

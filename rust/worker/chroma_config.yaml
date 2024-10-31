@@ -21,23 +21,45 @@ query_service:
             host: "sysdb.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     storage:
-        S3:
-            bucket: "chroma-storage"
-            credentials: "Minio"
-            connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+        AdmissionControlledS3:
+            s3_config:
+                bucket: "chroma-storage"
+                credentials: "Minio"
+                connect_timeout_ms: 5000
+                request_timeout_ms: 30000 # 1 minute
+                upload_part_size_bytes: 536870912 # 512MiB
+                download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+                CountBasedPolicy:
+                    max_concurrent_requests: 15
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
         worker_queue_size: 100
+    blockfile_provider:
+        Arrow:
+            block_manager_config:
+                max_block_size_bytes: 16384
+                block_cache_config:
+                    lru:
+                        capacity: 1000
+            sparse_index_manager_config:
+                sparse_index_cache_config:
+                    lru:
+                        capacity: 1000
+    hnsw_provider:
+        hnsw_temporary_path: "~/tmp"
+        hnsw_cache_config:
+            weighted_lru:
+                capacity: 8589934592 # 8GB
 
 compaction_service:
     service_name: "compaction-service"
@@ -57,19 +79,25 @@ compaction_service:
             host: "sysdb.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     storage:
-        S3:
-            bucket: "chroma-storage"
-            credentials: "Minio"
-            connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+        AdmissionControlledS3:
+            s3_config:
+                bucket: "chroma-storage"
+                credentials: "Minio"
+                connect_timeout_ms: 5000
+                request_timeout_ms: 60000 # 1 minute
+                upload_part_size_bytes: 536870912 # 512MiB
+                download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+                CountBasedPolicy:
+                    max_concurrent_requests: 15
     log:
         Grpc:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 1000
+            request_timeout_ms: 5000
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -77,5 +105,23 @@ compaction_service:
     compactor:
         compaction_manager_queue_size: 1000
         max_concurrent_jobs: 100
-        compaction_interval_sec: 60
+        compaction_interval_sec: 10
         min_compaction_size: 10
+        max_compaction_size: 10000
+        max_partition_size: 5000
+    blockfile_provider:
+        Arrow:
+            block_manager_config:
+                max_block_size_bytes: 16384
+                block_cache_config:
+                    lru:
+                        capacity: 1000
+            sparse_index_manager_config:
+                sparse_index_cache_config:
+                    lru:
+                        capacity: 1000
+    hnsw_provider:
+        hnsw_temporary_path: "~/tmp"
+        hnsw_cache_config:
+            weighted_lru:
+                capacity: 8589934592 # 8GB

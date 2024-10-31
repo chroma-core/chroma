@@ -21,3 +21,13 @@ runs:
     - name: Start Tilt
       shell: bash
       run: tilt ci
+    - name: Forward ports
+      shell: bash
+      run: |
+        # tilt ci does not forward ports
+        # https://github.com/tilt-dev/tilt/issues/5964
+        kubectl -n chroma port-forward svc/sysdb 50051:50051 &
+        kubectl -n chroma port-forward svc/logservice 50052:50051 &
+        kubectl -n chroma port-forward svc/query-service 50053:50051 &
+        kubectl -n chroma port-forward svc/frontend-service 8000:8000 &
+        kubectl -n chroma port-forward svc/minio 9000:9000 &

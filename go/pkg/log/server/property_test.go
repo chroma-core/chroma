@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	log "github.com/chroma-core/chroma/go/database/log/db"
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
+	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
+	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -27,6 +28,8 @@ type ModelState struct {
 	CollectionData map[types.UniqueID][]ModelLogRecord
 	// The current compaction offset for each collection (the last offset that was compacted)
 	CollectionCompactionOffset map[types.UniqueID]uint64
+	// Offset upto which the log records have been purged.
+	CollectionPurgedOffset map[types.UniqueID]uint64
 }
 
 // A log entry in the model (for testing only)
@@ -41,6 +44,7 @@ type LogServerTestSuite struct {
 	model     ModelState
 	t         *testing.T
 	lr        *repository.LogRepository
+	sysDb     sysdb.ISysDB
 }
 
 func (suite *LogServerTestSuite) SetupSuite() {
@@ -54,12 +58,14 @@ func (suite *LogServerTestSuite) SetupSuite() {
 	assert.NoError(suite.t, err, "Failed to create new pg connection")
 	err = libs2.RunMigration(ctx, connectionString)
 	assert.NoError(suite.t, err, "Failed to run migration")
-	suite.lr = repository.NewLogRepository(conn)
+	suite.sysDb = sysdb.NewMockSysDB()
+	suite.lr = repository.NewLogRepository(conn, suite.sysDb)
 	suite.logServer = NewLogServer(suite.lr)
 	suite.model = ModelState{
 		CollectionEnumerationOffset: map[types.UniqueID]uint64{},
 		CollectionData:              map[types.UniqueID][]ModelLogRecord{},
 		CollectionCompactionOffset:  map[types.UniqueID]uint64{},
+		CollectionPurgedOffset:      map[types.UniqueID]uint64{},
 	}
 }
 
@@ -75,7 +81,7 @@ func (suite *LogServerTestSuite) invariantAllDirtyCollectionsAreReturnedForCompa
 	assert.NoError(suite.t, err)
 	numCollectionsNeedingCompaction := 0
 	// Iterate over collections with log data
-	for collectionId, _ := range suite.model.CollectionData {
+	for collectionId := range suite.model.CollectionData {
 		compactionOffset, ok := suite.model.CollectionCompactionOffset[collectionId]
 		if !ok {
 			compactionOffset = 0
@@ -85,7 +91,6 @@ func (suite *LogServerTestSuite) invariantAllDirtyCollectionsAreReturnedForCompa
 		if !ok {
 			t.Fatalf("State inconsistency: collection %s has no enumeration offset, yet has log data", collectionId)
 		}
-
 		if enumerationOffset-compactionOffset > 0 {
 			numCollectionsNeedingCompaction++
 			// Expect to find the collection in the result
@@ -116,7 +121,7 @@ func compareModelLogRecordToRecordLog(t *rapid.T, modelLogRecord ModelLogRecord,
 		t.Fatal(err)
 	}
 	if int64(modelLogRecord.offset) != recordLog.Offset {
-		t.Fatalf("expected offset %d, got %d", modelLogRecord.offset, recordLog.Offset)
+		t.Fatalf("expected offset %d, got %d for collection id %s", modelLogRecord.offset, recordLog.Offset, recordLog.CollectionID)
 	}
 	if modelLogRecord.record.Id != record.Id {
 		t.Fatalf("expected record id %s, got %s", modelLogRecord.record.Id, record.Id)
@@ -162,23 +167,38 @@ func compareModelLogRecordToLogRecord(t *rapid.T, modelLogRecord ModelLogRecord,
 	}
 }
 
-// Check that the set of logs from the compaction offset onwards
+// Check that the set of logs from the purged offset onwards (i.e. valid logs)
 // is the same in both the model and the SUT
 func (suite *LogServerTestSuite) invariantLogsAreTheSame(ctx context.Context, t *rapid.T) {
 	for id, model_log := range suite.model.CollectionData {
-		pulled_log, err := suite.lr.PullRecords(ctx, id.String(), 0, len(model_log), time.Now().UnixNano())
+		// CollectionPurgedOffset is the offset of the last purged record.
+		// CollectionPurgedOffset + 1 is the offset of the next record to pull.
+		next_offset := suite.model.CollectionPurgedOffset[id] + 1
+		pulled_log, err := suite.lr.PullRecords(ctx, id.String(), int64(next_offset), len(model_log), time.Now().UnixNano())
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Filter model_log to only include logs after the compaction offset.
+		expected_count := 0
+		for _, log := range model_log {
+			if log.offset >= next_offset {
+				expected_count++
+			}
+		}
 		// Length of log should be the same
-		if len(model_log) != len(pulled_log) {
+		if expected_count != len(pulled_log) {
 			t.Fatalf("expected log length %d, got %d", len(model_log), len(pulled_log))
 		}
 
 		// Each record should be the same
-		for i, modelLogRecord := range model_log {
+		i := 0
+		for _, modelLogRecord := range model_log {
+			if modelLogRecord.offset < next_offset {
+				continue
+			}
 			// Compare the record
 			compareModelLogRecordToRecordLog(t, modelLogRecord, pulled_log[i])
+			i++
 		}
 	}
 }
@@ -201,23 +221,28 @@ func (suite *LogServerTestSuite) modelPushLogs(ctx context.Context, t *rapid.T, 
 		suite.model.CollectionData[collectionId] = append(suite.model.CollectionData[collectionId], modelRecord)
 		suite.model.CollectionEnumerationOffset[collectionId] = startEnumerationOffset + uint64(i)
 	}
-
 }
 
 func (suite *LogServerTestSuite) modelPullLogs(ctx context.Context, t *rapid.T, c types.UniqueID) ([]ModelLogRecord, uint64, uint32) {
-	startOffset := rapid.Uint64Range(suite.model.CollectionCompactionOffset[c], suite.model.CollectionEnumerationOffset[c]).Draw(t, "start_offset")
-	// If start offset is 0, we need to set it to 1 as the offset is 1 based
-	if startOffset == 0 {
-		startOffset = 1
+	var startOffset uint64
+	// CollectionCompactionOffset is the last offset that was compacted.
+	// CollectionCompactionOffset + 1 is the first valid offset for a pull.
+	// Log is empty so return empty data.
+	if suite.model.CollectionCompactionOffset[c] == suite.model.CollectionEnumerationOffset[c] {
+		startOffset = suite.model.CollectionCompactionOffset[c] + 1
+		batchSize := rapid.Uint32Range(1, 20).Draw(t, "batch_size")
+		return []ModelLogRecord{}, startOffset, batchSize
+	} else {
+		startOffset = rapid.Uint64Range(suite.model.CollectionCompactionOffset[c]+1, suite.model.CollectionEnumerationOffset[c]).Draw(t, "start_offset")
 	}
 	batchSize := rapid.Uint32Range(1, 20).Draw(t, "batch_size")
 
 	// Pull logs from the model
 	modelLogs := suite.model.CollectionData[c]
-	// Find start offset in the model
+	// Find start offset in the model, which is the first offset that is greater than or equal to the start offset
 	startIndex := -1
 	for i, record := range modelLogs {
-		if record.offset == startOffset {
+		if record.offset >= startOffset {
 			startIndex = i
 			break
 		}
@@ -243,14 +268,29 @@ func (suite *LogServerTestSuite) modelPurgeLogs(ctx context.Context, t *rapid.T)
 
 		new_log := []ModelLogRecord{}
 		for _, record := range log {
-			// TODO: It is odd that the SUT purge behavior keeps the record
-			// with the compaction offset. Shouldn't we be able to purge this
-			// record?
-			if record.offset >= compactionOffset {
+			// Purge by adding everything after the compaction offset
+			if record.offset > compactionOffset {
 				new_log = append(new_log, record)
 			}
 		}
 		suite.model.CollectionData[id] = new_log
+		suite.model.CollectionPurgedOffset[id] = compactionOffset
+	}
+}
+
+func (suite *LogServerTestSuite) modelGarbageCollection(ctx context.Context, t *rapid.T) {
+	for id := range suite.model.CollectionData {
+		exist, err := suite.sysDb.CheckCollection(ctx, id.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !exist {
+			// Collection does not exist, so we can delete it
+			delete(suite.model.CollectionData, id)
+			delete(suite.model.CollectionEnumerationOffset, id)
+			delete(suite.model.CollectionCompactionOffset, id)
+			delete(suite.model.CollectionPurgedOffset, id)
+		}
 	}
 }
 
@@ -291,6 +331,9 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 		position := rapid.IntRange(0, maxCollections-1).Draw(t, "collection_position")
 		if _, ok := collections[position]; !ok {
 			collections[position] = types.NewUniqueID()
+		}
+		if position%2 == 0 {
+			suite.sysDb.AddCollection(ctx, collections[position].String())
 		}
 		return collections[position]
 	})
@@ -352,7 +395,6 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 					if err != nil {
 						t.Fatal(err)
 					}
-
 					// Update the model
 					suite.model.CollectionCompactionOffset[id] = compactionOffset
 				}
@@ -445,12 +487,26 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 				// Verify that all record logs are purged
 				for id, offset := range suite.model.CollectionCompactionOffset {
 					if offset != 0 {
-						var records []log.RecordLog
-						records, err = suite.lr.PullRecords(ctx, id.String(), 0, 1, time.Now().UnixNano())
-						suite.NoError(err)
-						if len(records) > 0 {
-							suite.Equal(int64(offset), records[0].Offset)
-						}
+						// Pulling from compaction_offset-1 should return an error
+						// because records upto compaction_offset are purged.
+						_, err = suite.lr.PullRecords(ctx, id.String(), int64(offset-1), 1, time.Now().UnixNano())
+						// Expect err here.
+						suite.Error(err)
+					}
+				}
+			},
+			"garbageCollection": func(t *rapid.T) {
+				// Garbage collect the model
+				suite.modelGarbageCollection(ctx, t)
+
+				// Garbage collect the SUT
+				err := suite.lr.GarbageCollection(ctx)
+				suite.NoError(err)
+				for id := range suite.model.CollectionData {
+					exist, err := suite.sysDb.CheckCollection(ctx, id.String())
+					suite.NoError(err)
+					if !exist {
+						t.Fatalf("collection id %s does not exist in sysdb", id)
 					}
 				}
 			},

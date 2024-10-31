@@ -1,0 +1,41 @@
+[package]
+name = "chroma-test"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.88"
+async-tempfile = "0.6.0"
+async-compression = { version = "0.4.12", features = [
+  "tokio",
+  "gzip",
+  "bzip2",
+] }
+
+bincode = { workspace = true }
+criterion = { workspace = true }
+futures = { workspace = true }
+indicatif = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tantivy = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+clap = { version = "4.5.17", features = ["derive"] }
+dirs = "5.0.1"
+reqwest = { version = "0.12.7", features = ["stream"] }
+tokio-stream = { version = "0.1.16", features = ["full"] }
+tokio-util = "0.7.12"
+bloom = "0.3.2"
+
+chroma-blockstore = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-storage = { workspace = true }
+chroma-types = { workspace = true }
+worker = { workspace = true }

@@ -3,9 +3,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
+use tracing::Span;
 
-use super::sender::Sender;
-use super::{Component, ComponentContext, Handler};
+use super::{Component, ComponentContext, Handler, Message};
 
 #[derive(Debug)]
 pub(crate) struct SchedulerTaskHandle {
@@ -25,31 +25,33 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn schedule<C, M>(
+    /// Schedule a message to be sent to the component after the specified duration.
+    ///
+    /// `span_factory` is called immediately before sending the scheduled message to the component.
+    pub(crate) fn schedule<C, M, S>(
         &self,
-        sender: Sender<C>,
         message: M,
         duration: Duration,
         ctx: &ComponentContext<C>,
+        // (This needs to be a factory, otherwise the span duration will include the time spent waiting for the scheduler to trigger).
+        span_factory: S,
     ) where
         C: Component + Handler<M>,
-        M: Debug + Send + 'static,
+        M: Message,
+        S: (Fn() -> Option<Span>) + Send + Sync + 'static,
     {
         let cancel = ctx.cancellation_token.clone();
+        let sender = ctx.receiver().clone();
         let handle = tokio::spawn(async move {
             select! {
-                _ = cancel.cancelled() => {
-                    return;
-                }
+                _ = cancel.cancelled() => {}
                 _ = tokio::time::sleep(duration) => {
-                    match sender.send(message, None).await {
+                    let span = span_factory();
+                    match sender.send(message, span).await {
                         Ok(_) => {
-                            return;
                         },
                         Err(e) => {
-                            // TODO: log error
-                            println!("Error: {:?}", e);
-                            return;
+                            tracing::error!("Error: {:?}", e);
                         }
                     }
                 }
@@ -62,18 +64,25 @@ impl Scheduler {
         self.handles.write().push(handle);
     }
 
-    pub(crate) fn schedule_interval<C, M>(
+    /// Schedule a message to be sent to the component at a regular interval.
+    ///
+    /// `span_factory` is called immediately before sending the scheduled message to the component.
+    #[cfg(test)]
+    pub(crate) fn schedule_interval<C, M, S>(
         &self,
-        sender: Sender<C>,
         message: M,
         duration: Duration,
         num_times: Option<usize>,
         ctx: &ComponentContext<C>,
+        span_factory: S,
     ) where
         C: Component + Handler<M>,
-        M: Debug + Send + Clone + 'static,
+        M: Message + Clone,
+        S: (Fn() -> Option<Span>) + Send + Sync + 'static,
     {
         let cancel = ctx.cancellation_token.clone();
+
+        let sender = ctx.receiver().clone();
 
         let handle = tokio::spawn(async move {
             let mut counter = 0;
@@ -83,12 +92,12 @@ impl Scheduler {
                         return;
                     }
                     _ = tokio::time::sleep(duration) => {
-                        match sender.send(message.clone(), None).await {
+                        let span = span_factory();
+                        match sender.send(message.clone(), span).await {
                             Ok(_) => {
                             },
                             Err(e) => {
-                                // TODO: log error
-                                println!("Error: {:?}", e);
+                                tracing::error!("Error: {:?}", e);
                             }
                         }
                     }
@@ -103,6 +112,7 @@ impl Scheduler {
         self.handles.write().push(handle);
     }
 
+    #[cfg(test)]
     fn should_continue(num_times: Option<usize>, counter: usize) -> bool {
         if num_times.is_some() {
             let num_times = num_times.unwrap();
@@ -116,14 +126,20 @@ impl Scheduler {
     // Note: this method holds the lock on the handles, should call it only after stop is
     // called.
     pub(crate) async fn join(&self) {
-        let mut handles = self.handles.write();
-        for handle in handles.iter_mut() {
-            if let Some(join_handle) = handle.join_handle.take() {
-                match join_handle.await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("Error: {:?}", e);
-                    }
+        // NOTE(rescrv):  Leaving this clippy in place until we can re-arch our way out.
+        // Do NOT simply silence this warning.
+        let mut handles = {
+            let mut handles = self.handles.write();
+            handles
+                .iter_mut()
+                .flat_map(|h| h.join_handle.take())
+                .collect::<Vec<_>>()
+        };
+        for join_handle in handles.iter_mut() {
+            match join_handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error: {:?}", e);
                 }
             }
         }
@@ -137,9 +153,11 @@ impl Scheduler {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::system::System;
+
     use async_trait::async_trait;
     use std::sync::Arc;
     use std::time::Duration;
@@ -165,6 +183,8 @@ mod tests {
     }
     #[async_trait]
     impl Handler<ScheduleMessage> for TestComponent {
+        type Result = ();
+
         async fn handle(
             &mut self,
             _message: ScheduleMessage,
@@ -187,15 +207,15 @@ mod tests {
         async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
             ctx.scheduler
-                .schedule(ctx.sender.clone(), ScheduleMessage {}, duration, ctx);
+                .schedule(ScheduleMessage {}, duration, ctx, || None);
 
             let num_times = 4;
             ctx.scheduler.schedule_interval(
-                ctx.sender.clone(),
                 ScheduleMessage {},
                 duration,
                 Some(num_times),
                 ctx,
+                || None,
             );
         }
     }

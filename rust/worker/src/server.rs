@@ -1,31 +1,28 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-
-use crate::blockstore::provider::BlockfileProvider;
-use crate::chroma_proto::{
-    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
-};
-use crate::chroma_proto::{
-    GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
-};
-use crate::config::{Configurable, QueryServiceConfig};
-use crate::errors::ChromaError;
-use crate::execution::operator::TaskMessage;
+use crate::config::QueryServiceConfig;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::orchestration::{
     CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
     MetadataQueryOrchestrator,
 };
-use crate::index::hnsw_provider::HnswIndexProvider;
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::{Receiver, System};
+use crate::system::{ComponentHandle, System};
 use crate::tracing::util::wrap_span_with_parent_context;
-use crate::types::MetadataValue;
-use crate::types::ScalarEncoding;
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_types::chroma_proto::{
+    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+};
+use chroma_types::chroma_proto::{
+    GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
+};
+use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, Where};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{trace, trace_span, Instrument};
+use tracing::{trace_span, Instrument};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -33,7 +30,7 @@ pub struct WorkerServer {
     // System
     system: Option<System>,
     // Component dependencies
-    dispatcher: Option<Box<dyn Receiver<TaskMessage>>>,
+    dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
     log: Box<Log>,
     sysdb: Box<SysDb>,
@@ -49,7 +46,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let sysdb = match crate::sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
-                println!("Failed to create sysdb component: {:?}", err);
+                tracing::error!("Failed to create sysdb component: {:?}", err);
                 return Err(err);
             }
         };
@@ -57,28 +54,33 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         let log = match crate::log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
-                println!("Failed to create log component: {:?}", err);
+                tracing::error!("Failed to create log component: {:?}", err);
                 return Err(err);
             }
         };
-        let storage = match crate::storage::from_config(&config.storage).await {
+        let storage = match chroma_storage::from_config(&config.storage).await {
             Ok(storage) => storage,
             Err(err) => {
-                println!("Failed to create storage component: {:?}", err);
+                tracing::error!("Failed to create storage component: {:?}", err);
                 return Err(err);
             }
         };
-        // TODO: inject hnsw index provider somehow
-        // TODO: inject blockfile provider somehow
-        // TODO: real path
-        let path = PathBuf::from("~/tmp");
+
+        let blockfile_provider = BlockfileProvider::try_from_config(&(
+            config.blockfile_provider.clone(),
+            storage.clone(),
+        ))
+        .await?;
+        let hnsw_index_provider =
+            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
+                .await?;
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
             sysdb,
             log,
-            hnsw_index_provider: HnswIndexProvider::new(storage.clone(), path),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            hnsw_index_provider,
+            blockfile_provider,
             port: config.my_port,
         })
     }
@@ -116,7 +118,7 @@ impl WorkerServer {
         Ok(())
     }
 
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: Box<dyn Receiver<TaskMessage>>) {
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
         self.dispatcher = Some(dispatcher);
     }
 
@@ -136,26 +138,39 @@ impl WorkerServer {
             }
         };
 
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+        let collection_uuid = CollectionUuid(collection_uuid);
+
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let mut proto_results_for_all = Vec::new();
 
-        let parse_vectors_span = trace_span!("Input vectors parsing");
         let mut query_vectors = Vec::new();
-        let _ = parse_vectors_span.in_scope(|| {
-            for proto_query_vector in request.vectors {
-                let (query_vector, _encoding) = match proto_query_vector.try_into() {
-                    Ok((vector, encoding)) => (vector, encoding),
-                    Err(e) => {
-                        return Err(Status::internal(format!("Error converting vector: {}", e)));
-                    }
-                };
-                query_vectors.push(query_vector);
-            }
-            trace!("Parsed vectors {:?}", query_vectors);
-            Ok(())
-        });
+        for proto_query_vector in request.vectors {
+            let (query_vector, _encoding) = match proto_query_vector.try_into() {
+                Ok((vector, encoding)) => (vector, encoding),
+                Err(e) => {
+                    return Err(Status::internal(format!("Error converting vector: {}", e)));
+                }
+            };
+            query_vectors.push(query_vector);
+        }
 
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 return Err(Status::internal("No dispatcher found"));
             }
@@ -171,11 +186,14 @@ impl WorkerServer {
                     request.allowed_ids,
                     request.include_embeddings,
                     segment_uuid,
+                    collection_uuid,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.hnsw_index_provider.clone(),
                     self.blockfile_provider.clone(),
-                    dispatcher.clone(),
+                    dispatcher,
+                    collection_version,
+                    log_position,
                 );
                 orchestrator.run().await
             }
@@ -187,10 +205,11 @@ impl WorkerServer {
         let result = match result {
             Ok(result) => result,
             Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                tracing::error!("Error running orchestrator: {}", e);
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
@@ -228,7 +247,7 @@ impl WorkerServer {
             results: proto_results_for_all,
         };
 
-        return Ok(Response::new(resp));
+        Ok(Response::new(resp))
     }
 
     async fn get_vectors_instrumented(
@@ -243,8 +262,26 @@ impl WorkerServer {
             }
         };
 
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+        let collection_uuid = CollectionUuid(collection_uuid);
+
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
+            Some(ref dispatcher) => dispatcher.clone(),
             None => {
                 return Err(Status::internal("No dispatcher found"));
             }
@@ -261,19 +298,23 @@ impl WorkerServer {
             system.clone(),
             request.ids,
             segment_uuid,
+            collection_uuid,
             self.log.clone(),
             self.sysdb.clone(),
-            dispatcher.clone(),
+            dispatcher,
             self.blockfile_provider.clone(),
+            collection_version,
+            log_position,
         );
         let result = orchestrator.run().await;
         let mut result = match result {
             Ok(result) => result,
             Err(e) => {
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                tracing::error!("Error running orchestrator: {}", e);
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
@@ -314,6 +355,24 @@ impl WorkerServer {
             }
         };
 
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+        let collection_uuid = CollectionUuid(collection_uuid);
+
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
             None => {
@@ -330,24 +389,17 @@ impl WorkerServer {
             }
         };
 
-        // For now we don't support limit/offset/where/where document
-        if request.limit.is_some() || request.offset.is_some() {
-            tracing::error!("Limit and offset not supported");
-            return Err(Status::unimplemented("Limit and offset not supported"));
-        }
-
         // If no ids are provided, pass None to the orchestrator
-        let query_ids = match request.ids.len() {
-            0 => None,
-            _ => Some(request.ids),
-        };
+        let query_ids = request.ids.map(|uids| uids.ids);
 
         let where_clause = match request.r#where {
             Some(where_clause) => match where_clause.try_into() {
                 Ok(where_clause) => Some(where_clause),
                 Err(_) => {
                     tracing::error!("Error converting where clause");
-                    return Err(Status::internal(format!("Error converting where clause",)));
+                    return Err(Status::internal(
+                        "Error converting where clause".to_string(),
+                    ));
                 }
             },
             None => None,
@@ -358,24 +410,35 @@ impl WorkerServer {
                 Ok(where_document_clause) => Some(where_document_clause),
                 Err(_) => {
                     tracing::error!("Error converting where document clause");
-                    return Err(Status::internal(format!(
-                        "Error converting where document clause",
-                    )));
+                    return Err(Status::internal(
+                        "Error converting where document clause".to_string(),
+                    ));
                 }
             },
             None => None,
         };
 
+        let clause = match (where_clause, where_document_clause) {
+            (Some(wc), Some(wdc)) => Some(Where::conjunction(vec![wc, wdc])),
+            (Some(c), None) | (None, Some(c)) => Some(c),
+            _ => None,
+        };
+
         let orchestrator = MetadataQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
+            &collection_uuid,
             query_ids,
             self.log.clone(),
             self.sysdb.clone(),
             dispatcher.clone(),
             self.blockfile_provider.clone(),
-            where_clause,
-            where_document_clause,
+            clause,
+            request.offset,
+            request.limit,
+            request.include_metadata,
+            collection_version,
+            log_position,
         );
 
         let result = orchestrator.run().await;
@@ -383,38 +446,39 @@ impl WorkerServer {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!("Error running orchestrator: {}", e);
-                return Err(Status::internal(format!(
-                    "Error running orchestrator: {}",
-                    e
-                )));
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
             }
         };
 
         let mut output = Vec::new();
         let (ids, metadatas, documents) = result;
-        for ((id, metadata), document) in ids
-            .into_iter()
-            .zip(metadatas.into_iter())
-            .zip(documents.into_iter())
-        {
-            // The transport layer assumes the document exists in the metadata
-            // with the special key "chroma:document"
-            let mut output_metadata = match metadata {
-                Some(metadata) => metadata,
-                None => HashMap::new(),
-            };
-            match document {
-                Some(document) => {
+        if request.include_metadata {
+            for ((id, metadata), document) in ids
+                .into_iter()
+                .zip(metadatas.into_iter())
+                .zip(documents.into_iter())
+            {
+                // The transport layer assumes the document exists in the metadata
+                // with the special key "chroma:document"
+                let mut output_metadata = metadata.unwrap_or_default();
+                if let Some(document) = document {
                     output_metadata
                         .insert("chroma:document".to_string(), MetadataValue::Str(document));
                 }
-                None => {}
+                let record = chroma_proto::MetadataEmbeddingRecord {
+                    id,
+                    metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
+                };
+                output.push(record);
             }
-            let record = chroma_proto::MetadataEmbeddingRecord {
-                id,
-                metadata: Some(chroma_proto::UpdateMetadata::from(output_metadata)),
-            };
-            output.push(record);
+        } else {
+            for id in ids {
+                let record = chroma_proto::MetadataEmbeddingRecord { id, metadata: None };
+                output.push(record);
+            }
         }
 
         // This is an implementation stub
@@ -476,7 +540,24 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
                 return Err(Status::invalid_argument("Invalid Segment UUID"));
             }
         };
-        println!("Querying count for segment {}", segment_uuid);
+        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
+            Ok(uuid) => uuid,
+            Err(_) => {
+                return Err(Status::invalid_argument("Invalid Collection UUID"));
+            }
+        };
+        let collection_uuid = CollectionUuid(collection_uuid);
+
+        let (collection_version, log_position) = match request.version_context {
+            Some(version_context) => (
+                version_context.collection_version,
+                version_context.log_position,
+            ),
+            None => {
+                return Err(Status::invalid_argument("No version context provided"));
+            }
+        };
+
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher,
             None => {
@@ -494,10 +575,13 @@ impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
         let orchestrator = CountQueryOrchestrator::new(
             system.clone(),
             &segment_uuid,
+            &collection_uuid,
             self.log.clone(),
             self.sysdb.clone(),
             dispatcher.clone(),
             self.blockfile_provider.clone(),
+            collection_version,
+            log_position,
         );
 
         let result = orchestrator.run().await;
@@ -562,24 +646,38 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 
 #[cfg(test)]
 mod tests {
-    use crate::execution::dispatcher;
-    use crate::log::log::InMemoryLog;
-    use crate::storage::local::LocalStorage;
-    use crate::storage::Storage;
-    use crate::sysdb::test_sysdb::TestSysDb;
-    use crate::system;
-
+    #[cfg(debug_assertions)]
     use super::*;
+    #[cfg(debug_assertions)]
+    use crate::execution::dispatcher;
+    #[cfg(debug_assertions)]
+    use crate::log::log::InMemoryLog;
+    #[cfg(debug_assertions)]
+    use crate::sysdb::test_sysdb::TestSysDb;
+    #[cfg(debug_assertions)]
+    use crate::system;
+    #[cfg(debug_assertions)]
+    use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    #[cfg(debug_assertions)]
+    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
+    #[cfg(debug_assertions)]
+    use chroma_storage::{local::LocalStorage, Storage};
+    #[cfg(debug_assertions)]
     use tempfile::tempdir;
 
     #[tokio::test]
+    #[cfg(debug_assertions)]
     async fn gracefully_handles_panics() {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let hnsw_index_cache = new_non_persistent_cache_for_test();
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let port = random_port::PortPicker::new().pick().unwrap();
         let mut server = WorkerServer {
             dispatcher: None,
@@ -589,8 +687,15 @@ mod tests {
             hnsw_index_provider: HnswIndexProvider::new(
                 storage.clone(),
                 tmp_dir.path().to_path_buf(),
+                hnsw_index_cache,
+                rx,
             ),
-            blockfile_provider: BlockfileProvider::new_arrow(storage),
+            blockfile_provider: BlockfileProvider::new_arrow(
+                storage,
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            ),
             port,
         };
 
@@ -599,7 +704,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
 
         server.set_system(system.clone());
-        server.set_dispatcher(dispatcher_handle.receiver());
+        server.set_dispatcher(dispatcher_handle);
 
         tokio::spawn(async move {
             let _ = crate::server::WorkerServer::run(server).await;

@@ -47,7 +47,7 @@ Check that chroma is running:
 
 ```bash
 export instance_public_ip=$(terraform output instance_url | sed 's/"//g')
-curl -v $instance_public_ip/api/v1/heartbeat
+curl -v $instance_public_ip/api/v2/heartbeat
 ```
 
 #### 4.1 Checking Auth
@@ -76,7 +76,7 @@ export CHROMA_AUTH=$(terraform output chroma_auth_token | sed 's/"//g')
 Using the credentials:
 
 ```bash
-curl -v $instance_public_ip/api/v1/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
+curl -v $instance_public_ip/api/v2/collections -H "Authorization: Bearer ${CHROMA_AUTH}"
 ```
 
 ##### Basic
@@ -102,7 +102,7 @@ export CHROMA_AUTH=$(terraform output chroma_auth_basic | sed 's/"//g')
 Using the credentials:
 
 ```bash
-curl -v https://$instance_public_ip:8000/api/v1/collections -u "${CHROMA_AUTH}"
+curl -v https://$instance_public_ip:8000/api/v2/collections -u "${CHROMA_AUTH}"
 ```
 
 > Note: Without `-u` you should be getting 401 Unauthorized response

@@ -57,3 +57,7 @@ Chroma requires SQLite > 3.35, if you encounter issues with having too low of a 
 ##  Illegal instruction (core dumped)
 
 If you encounter an error like this during setup and are using Docker - you may have built the library on a machine with a different CPU architecture than the one you are running it on. Try rebuilding the Docker image on the machine you are running it on.
+
+## My data directory is too large
+
+If you were using Chroma prior to v0.5.6, you may be able to significantly shrink your database by [vacuuming it](/reference/cli#vacuuming). After vacuuming once, automatic pruning (a new feature in v0.5.6) is enabled and will keep your database size in check.

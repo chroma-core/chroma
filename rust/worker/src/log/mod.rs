@@ -1,9 +1,9 @@
 pub(crate) mod config;
+#[allow(clippy::module_inception)]
 pub(crate) mod log;
-
-use crate::{config::Configurable, errors::ChromaError};
-
 use self::config::LogConfig;
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
 
 pub(crate) async fn from_config(config: &LogConfig) -> Result<Box<log::Log>, Box<dyn ChromaError>> {
     match &config {

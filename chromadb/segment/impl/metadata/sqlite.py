@@ -2,7 +2,7 @@ from typing import Optional, Sequence, Any, Tuple, cast, Generator, Union, Dict,
 from chromadb.segment import MetadataReader
 from chromadb.ingest import Consumer
 from chromadb.config import System
-from chromadb.types import Segment, InclusionExclusionOperator
+from chromadb.types import RequestVersionContext, Segment, InclusionExclusionOperator
 from chromadb.db.impl.sqlite import SqliteDB
 from overrides import override
 from chromadb.db.base import (
@@ -46,7 +46,7 @@ class SqliteMetadataSegment(MetadataReader):
     _id: UUID
     _opentelemetry_client: OpenTelemetryClient
     _collection_id: Optional[UUID]
-    _subscription: Optional[UUID]
+    _subscription: Optional[UUID] = None
 
     def __init__(self, system: System, segment: Segment):
         self._db = system.instance(SqliteDB)
@@ -89,11 +89,11 @@ class SqliteMetadataSegment(MetadataReader):
             if result is None:
                 return self._consumer.min_seqid()
             else:
-                return _decode_seq_id(result[0])
+                return self._db.decode_seq_id(result[0])
 
     @trace_method("SqliteMetadataSegment.count", OpenTelemetryGranularity.ALL)
     @override
-    def count(self) -> int:
+    def count(self, request_version_context: RequestVersionContext) -> int:
         embeddings_t = Table("embeddings")
         q = (
             self._db.querybuilder()
@@ -112,11 +112,13 @@ class SqliteMetadataSegment(MetadataReader):
     @override
     def get_metadata(
         self,
+        request_version_context: RequestVersionContext,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         ids: Optional[Sequence[str]] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
+        include_metadata: bool = True,
     ) -> Sequence[MetadataEmbeddingRecord]:
         """Query for embedding metadata."""
         embeddings_t, metadata_t, fulltext_t = Tables(
@@ -129,6 +131,22 @@ class SqliteMetadataSegment(MetadataReader):
         if limit < 0:
             raise ValueError("Limit cannot be negative")
 
+        select_clause = [
+            embeddings_t.id,
+            embeddings_t.embedding_id,
+            embeddings_t.seq_id,
+        ]
+        if include_metadata:
+            select_clause.extend(
+                [
+                    metadata_t.key,
+                    metadata_t.string_value,
+                    metadata_t.int_value,
+                    metadata_t.float_value,
+                    metadata_t.bool_value,
+                ]
+            )
+
         q = (
             (
                 self._db.querybuilder()
@@ -136,17 +154,8 @@ class SqliteMetadataSegment(MetadataReader):
                 .left_join(metadata_t)
                 .on(embeddings_t.id == metadata_t.id)
             )
-            .select(
-                embeddings_t.id,
-                embeddings_t.embedding_id,
-                embeddings_t.seq_id,
-                metadata_t.key,
-                metadata_t.string_value,
-                metadata_t.int_value,
-                metadata_t.float_value,
-                metadata_t.bool_value,
-            )
-            .orderby(embeddings_t.embedding_id)
+            .select(*select_clause)
+            .orderby(embeddings_t.id)
         )
 
         # If there is a query that touches the metadata table, it uses
@@ -154,11 +163,11 @@ class SqliteMetadataSegment(MetadataReader):
         if where is not None or where_document is not None:
             metadata_q = (
                 self._db.querybuilder()
-                .from_(metadata_t)
-                .select(metadata_t.id)
-                .join(embeddings_t)
+                .from_(embeddings_t)
+                .select(embeddings_t.id)
+                .left_join(metadata_t)
                 .on(embeddings_t.id == metadata_t.id)
-                .orderby(embeddings_t.embedding_id)
+                .orderby(embeddings_t.id)
                 .where(
                     embeddings_t.segment_id
                     == ParameterValue(self._db.uuid_to_db(self._id))
@@ -199,7 +208,7 @@ class SqliteMetadataSegment(MetadataReader):
                     embeddings_t.segment_id
                     == ParameterValue(self._db.uuid_to_db(self._id))
                 )
-                .orderby(embeddings_t.embedding_id)
+                .orderby(embeddings_t.id)
                 .limit(limit)
                 .offset(offset)
             )
@@ -213,10 +222,10 @@ class SqliteMetadataSegment(MetadataReader):
 
         with self._db.tx() as cur:
             # Execute the query with the limit and offset already applied
-            return list(self._records(cur, q))
+            return list(self._records(cur, q, include_metadata))
 
     def _records(
-        self, cur: Cursor, q: QueryBuilder
+        self, cur: Cursor, q: QueryBuilder, include_metadata: bool
     ) -> Generator[MetadataEmbeddingRecord, None, None]:
         """Given a cursor and a QueryBuilder, yield a generator of records. Assumes
         cursor returns rows in ID order."""
@@ -228,13 +237,18 @@ class SqliteMetadataSegment(MetadataReader):
         group_iterator = groupby(cur_iterator, lambda r: int(r[0]))
 
         for _, group in group_iterator:
-            yield self._record(list(group))
+            yield self._record(list(group), include_metadata)
 
     @trace_method("SqliteMetadataSegment._record", OpenTelemetryGranularity.ALL)
-    def _record(self, rows: Sequence[Tuple[Any, ...]]) -> MetadataEmbeddingRecord:
+    def _record(
+        self, rows: Sequence[Tuple[Any, ...]], include_metadata: bool
+    ) -> MetadataEmbeddingRecord:
         """Given a list of DB rows with the same ID, construct a
         MetadataEmbeddingRecord"""
         _, embedding_id, seq_id = rows[0][:3]
+        if not include_metadata:
+            return MetadataEmbeddingRecord(id=embedding_id, metadata=None)
+
         metadata = {}
         for row in rows:
             key, string_value, int_value, float_value, bool_value = row[3:]
@@ -265,11 +279,11 @@ class SqliteMetadataSegment(MetadataReader):
             .into(t)
             .columns(t.segment_id, t.embedding_id, t.seq_id)
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["operation_record"]["id"]))
+            .where(t.embedding_id == ParameterValue(record["record"]["id"]))
         ).insert(
             ParameterValue(self._db.uuid_to_db(self._id)),
-            ParameterValue(record["operation_record"]["id"]),
-            ParameterValue(_encode_seq_id(record["log_offset"])),
+            ParameterValue(record["record"]["id"]),
+            ParameterValue(self._db.encode_seq_id(record["log_offset"])),
         )
         sql, params = get_sql(q)
         sql = sql + "RETURNING id"
@@ -278,18 +292,17 @@ class SqliteMetadataSegment(MetadataReader):
         except sqlite3.IntegrityError:
             # Can't use INSERT OR REPLACE here because it changes the primary key.
             if upsert:
-                # Cast here because the OpenTel decorators obfuscate the type
-                return cast(None, self._update_record(cur, record))
+                return self._update_record(cur, record)
             else:
                 logger.warning(
-                    f"Insert of existing embedding ID: {record['operation_record']['id']}"
+                    f"Insert of existing embedding ID: {record['record']['id']}"
                 )
                 # We are trying to add for a record that already exists. Fail the call.
                 # We don't throw an exception since this is in principal an async path
                 return
 
-        if record["operation_record"]["metadata"]:
-            self._update_metadata(cur, id, record["operation_record"]["metadata"])
+        if record["record"]["metadata"]:
+            self._update_metadata(cur, id, record["record"]["metadata"])
 
     @trace_method(
         "SqliteMetadataSegment._update_metadata", OpenTelemetryGranularity.ALL
@@ -411,7 +424,7 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .from_(t)
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["operation_record"]["id"]))
+            .where(t.embedding_id == ParameterValue(record["record"]["id"]))
             .delete()
         )
         q_fts = (
@@ -426,10 +439,7 @@ class SqliteMetadataSegment(MetadataReader):
                     .where(
                         t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
                     )
-                    .where(
-                        t.embedding_id
-                        == ParameterValue(record["operation_record"]["id"])
-                    )
+                    .where(t.embedding_id == ParameterValue(record["record"]["id"]))
                 )
             )
         )
@@ -439,7 +449,7 @@ class SqliteMetadataSegment(MetadataReader):
         result = cur.execute(sql, params).fetchone()
         if result is None:
             logger.warning(
-                f"Delete of nonexisting embedding ID: {record['operation_record']['id']}"
+                f"Delete of nonexisting embedding ID: {record['record']['id']}"
             )
         else:
             id = result[0]
@@ -464,21 +474,21 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .update(t)
-            .set(t.seq_id, ParameterValue(_encode_seq_id(record["log_offset"])))
+            .set(t.seq_id, ParameterValue(self._db.encode_seq_id(record["log_offset"])))
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
-            .where(t.embedding_id == ParameterValue(record["operation_record"]["id"]))
+            .where(t.embedding_id == ParameterValue(record["record"]["id"]))
         )
         sql, params = get_sql(q)
         sql = sql + " RETURNING id"
         result = cur.execute(sql, params).fetchone()
         if result is None:
             logger.warning(
-                f"Update of nonexisting embedding ID: {record['operation_record']['id']}"
+                f"Update of nonexisting embedding ID: {record['record']['id']}"
             )
         else:
             id = result[0]
-            if record["operation_record"]["metadata"]:
-                self._update_metadata(cur, id, record["operation_record"]["metadata"])
+            if record["record"]["metadata"]:
+                self._update_metadata(cur, id, record["record"]["metadata"])
 
     @trace_method("SqliteMetadataSegment._write_metadata", OpenTelemetryGranularity.ALL)
     def _write_metadata(self, records: Sequence[LogRecord]) -> None:
@@ -486,27 +496,27 @@ class SqliteMetadataSegment(MetadataReader):
         records are append-only (that is, that seq-ids should increase monotonically)"""
         with self._db.tx() as cur:
             for record in records:
-                q = (
-                    self._db.querybuilder()
-                    .into(Table("max_seq_id"))
-                    .columns("segment_id", "seq_id")
-                    .insert(
-                        ParameterValue(self._db.uuid_to_db(self._id)),
-                        ParameterValue(_encode_seq_id(record["log_offset"])),
-                    )
-                )
-                sql, params = get_sql(q)
-                sql = sql.replace("INSERT", "INSERT OR REPLACE")
-                cur.execute(sql, params)
-
-                if record["operation_record"]["operation"] == Operation.ADD:
+                if record["record"]["operation"] == Operation.ADD:
                     self._insert_record(cur, record, False)
-                elif record["operation_record"]["operation"] == Operation.UPSERT:
+                elif record["record"]["operation"] == Operation.UPSERT:
                     self._insert_record(cur, record, True)
-                elif record["operation_record"]["operation"] == Operation.DELETE:
+                elif record["record"]["operation"] == Operation.DELETE:
                     self._delete_record(cur, record)
-                elif record["operation_record"]["operation"] == Operation.UPDATE:
+                elif record["record"]["operation"] == Operation.UPDATE:
                     self._update_record(cur, record)
+
+            q = (
+                self._db.querybuilder()
+                .into(Table("max_seq_id"))
+                .columns("segment_id", "seq_id")
+                .insert(
+                    ParameterValue(self._db.uuid_to_db(self._id)),
+                    ParameterValue(self._db.encode_seq_id(record["log_offset"])),
+                )
+            )
+            sql, params = get_sql(q)
+            sql = sql.replace("INSERT", "INSERT OR REPLACE")
+            cur.execute(sql, params)
 
     @trace_method(
         "SqliteMetadataSegment._where_map_criterion", OpenTelemetryGranularity.ALL
@@ -530,14 +540,7 @@ class SqliteMetadataSegment(MetadataReader):
                 clause.append(reduce(lambda x, y: x | y, criteria))
             else:
                 expr = cast(Union[LiteralValue, Dict[WhereOperator, LiteralValue]], v)
-                sq = (
-                    self._db.querybuilder()
-                    .from_(metadata_t)
-                    .select(metadata_t.id)
-                    .where(metadata_t.key == ParameterValue(k))
-                    .where(_where_clause(expr, metadata_t))
-                )
-                clause.append(metadata_t.id.isin(sq))
+                clause.append(_where_clause(k, expr, q, metadata_t, embeddings_t))
         return reduce(lambda x, y: x & y, clause)
 
     @trace_method(
@@ -568,7 +571,7 @@ class SqliteMetadataSegment(MetadataReader):
                     for w in cast(Sequence[WhereDocument], v)
                 ]
                 return reduce(lambda x, y: x | y, criteria)
-            elif k == "$contains":
+            elif k in ("$contains", "$not_contains"):
                 v = cast(str, v)
                 search_term = f"%{v}%"
 
@@ -578,20 +581,11 @@ class SqliteMetadataSegment(MetadataReader):
                     .select(fulltext_t.rowid)
                     .where(fulltext_t.string_value.like(ParameterValue(search_term)))
                 )
-                return metadata_t.id.isin(sq)
-            elif k == "$not_contains":
-                v = cast(str, v)
-                search_term = f"%{v}%"
-
-                sq = (
-                    self._db.querybuilder()
-                    .from_(fulltext_t)
-                    .select(fulltext_t.rowid)
-                    .where(
-                        fulltext_t.string_value.not_like(ParameterValue(search_term))
-                    )
+                return (
+                    embeddings_t.id.isin(sq)
+                    if k == "$contains"
+                    else embeddings_t.id.notin(sq)
                 )
-                return embeddings_t.id.isin(sq)
             else:
                 raise ValueError(f"Unknown where_doc operator {k}")
         raise ValueError("Empty where_doc")
@@ -653,122 +647,84 @@ class SqliteMetadataSegment(MetadataReader):
             cur.execute(*get_sql(q))
 
 
-def _encode_seq_id(seq_id: SeqId) -> bytes:
-    """Encode a SeqID into a byte array"""
-    if seq_id.bit_length() <= 64:
-        return int.to_bytes(seq_id, 8, "big")
-    elif seq_id.bit_length() <= 192:
-        return int.to_bytes(seq_id, 24, "big")
-    else:
-        raise ValueError(f"Unsupported SeqID: {seq_id}")
-
-
-def _decode_seq_id(seq_id_bytes: bytes) -> SeqId:
-    """Decode a byte array into a SeqID"""
-    if len(seq_id_bytes) == 8:
-        return int.from_bytes(seq_id_bytes, "big")
-    elif len(seq_id_bytes) == 24:
-        return int.from_bytes(seq_id_bytes, "big")
-    else:
-        raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
-
-
 def _where_clause(
+    key: str,
     expr: Union[
         LiteralValue,
         Dict[WhereOperator, LiteralValue],
         Dict[InclusionExclusionOperator, List[LiteralValue]],
         
     ],
-    table: Table,
+    metadata_q: QueryBuilder,
+    metadata_t: Table,
+    embeddings_t: Table,
 ) -> Criterion:
     """Given a field name, an expression, and a table, construct a Pypika Criterion"""
 
     # Literal value case
     if isinstance(expr, (str, int, float, bool)):
-        return _where_clause({cast(WhereOperator, "$eq"): expr}, table)
+        return _where_clause(
+            key,
+            {cast(WhereOperator, "$eq"): expr},
+            metadata_q,
+            metadata_t,
+            embeddings_t,
+        )
 
     # Operator dict case
     operator, value = next(iter(expr.items()))
-    return _value_criterion(value, operator, table)
+    return _value_criterion(key, value, operator, metadata_q, metadata_t, embeddings_t)
 
 
 def _value_criterion(
+    key: str,
     value: Union[LiteralValue, List[LiteralValue]],
     op: Union[WhereOperator, InclusionExclusionOperator],
-    table: Table,
+    metadata_q: QueryBuilder,
+    metadata_t: Table,
+    embeddings_t: Table,
 ) -> Criterion:
-    """Return a criterion to compare a value with the appropriate columns given its type
-    and the operation type."""
-    if isinstance(value, str):
-        cols = [table.string_value]
-    # isinstance(True, int) evaluates to True, so we need to check for bools separately
-    elif isinstance(value, bool) and op in ("$eq", "$ne"):
-        cols = [table.bool_value]
-    elif isinstance(value, int) and op in ("$eq", "$ne"):
-        cols = [table.int_value]
-    elif isinstance(value, float) and op in ("$eq", "$ne"):
-        cols = [table.float_value]
-    elif isinstance(value, list) and op in ("$in", "$nin"):
-        _v = value
-        if len(_v) == 0:
-            raise ValueError(f"Empty list for {op} operator")
-        if isinstance(value[0], str):
-            col_exprs = [
-                table.string_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.string_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], bool):
-            col_exprs = [
-                table.bool_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.bool_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], int):
-            col_exprs = [
-                table.int_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.int_value.notin(ParameterValue(_v))
-            ]
-        elif isinstance(value[0], float):
-            col_exprs = [
-                table.float_value.isin(ParameterValue(_v))
-                if op == "$in"
-                else table.float_value.notin(ParameterValue(_v))
-            ]
-    elif isinstance(value, list) and op in ("$in", "$nin"):
-        col_exprs = [
-            table.int_value.isin(ParameterValue(value))
-            if op == "$in"
-            else table.int_value.notin(ParameterValue(value)),
-            table.float_value.isin(ParameterValue(value))
-            if op == "$in"
-            else table.float_value.notin(ParameterValue(value)),
-        ]
+    """Creates the filter for a single operator"""
 
-    else:
-        cols = [table.int_value, table.float_value]
+    def is_numeric(obj: object) -> bool:
+        return (not isinstance(obj, bool)) and isinstance(obj, (int, float))
 
-    if op == "$eq":
-        col_exprs = [col == ParameterValue(value) for col in cols]
-    elif op == "$ne":
-        col_exprs = [col != ParameterValue(value) for col in cols]
-    elif op == "$gt":
-        col_exprs = [col > ParameterValue(value) for col in cols]
-    elif op == "$gte":
-        col_exprs = [col >= ParameterValue(value) for col in cols]
-    elif op == "$lt":
-        col_exprs = [col < ParameterValue(value) for col in cols]
-    elif op == "$lte":
-        col_exprs = [col <= ParameterValue(value) for col in cols]
-    elif op == "$like":
-        search_term = f"{cast(str, value)}"
-        col_exprs = [col.like(ParameterValue(search_term)) for col in cols]
-    elif op == "$nlike":
-        search_term = f"{cast(str, value)}"
-        col_exprs = [col.not_like(ParameterValue(search_term)) for col in cols]
-    if op == "$ne":
-        return reduce(lambda x, y: x & y, col_exprs)
+    sub_q = metadata_q.where(metadata_t.key == ParameterValue(key))
+    p_val = ParameterValue(value)
+
+    if is_numeric(value) or (isinstance(value, list) and is_numeric(value[0])):
+        int_col, float_col = metadata_t.int_value, metadata_t.float_value
+        if op in ("$eq", "$ne"):
+            expr = (int_col == p_val) | (float_col == p_val)
+        elif op == "$gt":
+            expr = (int_col > p_val) | (float_col > p_val)
+        elif op == "$gte":
+            expr = (int_col >= p_val) | (float_col >= p_val)
+        elif op == "$lt":
+            expr = (int_col < p_val) | (float_col < p_val)
+        elif op == "$lte":
+            expr = (int_col <= p_val) | (float_col <= p_val)
+        else:
+            expr = int_col.isin(p_val) | float_col.isin(p_val)
     else:
-        return reduce(lambda x, y: x | y, col_exprs)
+        if isinstance(value, bool) or (
+            isinstance(value, list) and isinstance(value[0], bool)
+        ):
+            col = metadata_t.bool_value
+        else:
+            col = metadata_t.string_value
+        if op in ("$eq", "$ne"):
+            expr = col == p_val
+        elif op == "$like":
+            search_term = f"{cast(str, value)}"
+            col_exprs = [col.like(ParameterValue(search_term)) for col in cols]
+        elif op == "$nlike":
+            search_term = f"{cast(str, value)}"
+            col_exprs = [col.not_like(ParameterValue(search_term)) for col in cols]
+        else:
+            expr = col.isin(p_val)
+
+    if op in ("$ne", "$nin"):
+        return embeddings_t.id.notin(sub_q.where(expr))
+    else:
+        return embeddings_t.id.isin(sub_q.where(expr))

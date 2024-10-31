@@ -1,3 +1,4 @@
+import logging
 from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Pool
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
@@ -20,6 +21,8 @@ from uuid import UUID
 from threading import local
 from importlib_resources import files
 from importlib_resources.abc import Traversable
+
+logger = logging.getLogger(__name__)
 
 
 class TxWrapper(base.TxWrapper):
@@ -99,6 +102,15 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
+
+        if (
+            # (don't attempt to access .config if migrations haven't been run)
+            self._settings.require("migrations") == "apply"
+            and self.config.get_parameter("automatically_purge").value is False
+        ):
+            logger.warn(
+                "⚠️ It looks like you upgraded from a version below 0.6 and could benefit from vacuuming your database. Run chromadb utils vacuum --help for more information."
+            )
 
     @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)
     @override
@@ -247,3 +259,15 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def unique_constraint_error() -> Type[BaseException]:
         return sqlite3.IntegrityError
+
+    def vacuum(self, timeout: int = 5) -> None:
+        """Runs VACUUM on the database. `timeout` is the maximum time to wait for an exclusive lock in seconds."""
+        conn = self._conn_pool.connect()
+        conn.execute(f"PRAGMA busy_timeout = {int(timeout) * 1000}")
+        conn.execute("VACUUM")
+        conn.execute(
+            """
+            INSERT INTO maintenance_log (operation, timestamp)
+            VALUES ('vacuum', CURRENT_TIMESTAMP)
+            """
+        )

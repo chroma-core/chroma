@@ -1,23 +1,15 @@
 use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
-use crate::chroma_proto;
-use crate::chroma_proto::sys_db_client;
-use crate::chroma_proto::sys_db_client::SysDbClient;
-use crate::config::Configurable;
-use crate::errors::ChromaError;
-use crate::errors::ErrorCodes;
 use crate::tracing::util::client_interceptor;
-use crate::types::Collection;
-use crate::types::CollectionConversionError;
-use crate::types::FlushCompactionResponse;
-use crate::types::FlushCompactionResponseConversionError;
-use crate::types::Segment;
-use crate::types::SegmentConversionError;
-use crate::types::SegmentFlushInfo;
-use crate::types::SegmentFlushInfoConversionError;
-use crate::types::SegmentScope;
-use crate::types::Tenant;
 use async_trait::async_trait;
+use chroma_config::Configurable;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::chroma_proto::sys_db_client::SysDbClient;
+use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError};
+use chroma_types::{
+    Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
+    FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,33 +20,29 @@ use tonic::Request;
 use tonic::Status;
 use uuid::Uuid;
 
-const DEFAULT_DATBASE: &str = "default_database";
-const DEFAULT_TENANT: &str = "default_tenant";
-
 #[derive(Debug, Clone)]
 pub(crate) enum SysDb {
     Grpc(GrpcSysDb),
+    #[allow(dead_code)]
     Test(TestSysDb),
 }
 
 impl SysDb {
     pub(crate) async fn get_collections(
         &mut self,
-        collection_id: Option<Uuid>,
+        collection_id: Option<CollectionUuid>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
             SysDb::Grpc(grpc) => {
-                return grpc
-                    .get_collections(collection_id, name, tenant, database)
-                    .await;
+                grpc.get_collections(collection_id, name, tenant, database)
+                    .await
             }
             SysDb::Test(test) => {
-                return test
-                    .get_collections(collection_id, name, tenant, database)
-                    .await;
+                test.get_collections(collection_id, name, tenant, database)
+                    .await
             }
         }
     }
@@ -64,15 +52,11 @@ impl SysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: CollectionUuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
-            SysDb::Grpc(grpc) => {
-                return grpc.get_segments(id, r#type, scope, collection).await;
-            }
-            SysDb::Test(test) => {
-                return test.get_segments(id, r#type, scope, collection).await;
-            }
+            SysDb::Grpc(grpc) => grpc.get_segments(id, r#type, scope, collection).await,
+            SysDb::Test(test) => test.get_segments(id, r#type, scope, collection).await,
         }
     }
 
@@ -81,45 +65,39 @@ impl SysDb {
         tanant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
         match self {
-            SysDb::Grpc(grpc) => {
-                return grpc.get_last_compaction_time(tanant_ids).await;
-            }
-            SysDb::Test(test) => {
-                return test.get_last_compaction_time(tanant_ids).await;
-            }
+            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tanant_ids).await,
+            SysDb::Test(test) => test.get_last_compaction_time(tanant_ids).await,
         }
     }
 
     pub(crate) async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                return grpc
-                    .flush_compaction(
-                        tenant_id,
-                        collection_id,
-                        log_position,
-                        collection_version,
-                        segment_flush_info,
-                    )
-                    .await;
+                grpc.flush_compaction(
+                    tenant_id,
+                    collection_id,
+                    log_position,
+                    collection_version,
+                    segment_flush_info,
+                )
+                .await
             }
             SysDb::Test(test) => {
-                return test
-                    .flush_compaction(
-                        tenant_id,
-                        collection_id,
-                        log_position,
-                        collection_version,
-                        segment_flush_info,
-                    )
-                    .await;
+                test.flush_compaction(
+                    tenant_id,
+                    collection_id,
+                    log_position,
+                    collection_version,
+                    segment_flush_info,
+                )
+                .await
             }
         }
     }
@@ -129,6 +107,7 @@ impl SysDb {
 // Since this uses tonic transport channel, cloning is cheap. Each client only supports
 // one inflight request at a time, so we need to clone the client for each requester.
 pub(crate) struct GrpcSysDb {
+    #[allow(clippy::type_complexity)]
     client: SysDbClient<
         interceptor::InterceptedService<
             tonic::transport::Channel,
@@ -163,9 +142,7 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                 let endpoint = match Endpoint::from_shared(connection_string) {
                     Ok(endpoint) => endpoint,
                     Err(e) => {
-                        return Err(Box::new(GrpcSysDbError::FailedToConnect(
-                            tonic::transport::Error::from(e),
-                        )));
+                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
                     }
                 };
 
@@ -183,9 +160,7 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                         return Ok(GrpcSysDb { client });
                     }
                     Err(e) => {
-                        return Err(Box::new(GrpcSysDbError::FailedToConnect(
-                            tonic::transport::Error::from(e),
-                        )));
+                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
                     }
                 };
             }
@@ -196,39 +171,22 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
 impl GrpcSysDb {
     async fn get_collections(
         &mut self,
-        collection_id: Option<Uuid>,
+        collection_id: Option<CollectionUuid>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         // TODO: move off of status into our own error type
-        let collection_id_str;
-        match collection_id {
-            Some(id) => {
-                collection_id_str = Some(id.to_string());
-            }
-            None => {
-                collection_id_str = None;
-            }
-        }
-
+        let collection_id_str = collection_id.map(|id| String::from(id.0));
         let res = self
             .client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
-                name: name,
+                name,
                 limit: None,
                 offset: None,
-                tenant: if tenant.is_some() {
-                    tenant.unwrap()
-                } else {
-                    "".to_string()
-                },
-                database: if database.is_some() {
-                    database.unwrap()
-                } else {
-                    "".to_string()
-                },
+                tenant: tenant.unwrap_or("".to_string()),
+                database: database.unwrap_or("".to_string()),
             })
             .await;
 
@@ -242,17 +200,11 @@ impl GrpcSysDb {
                     .collect::<Result<Vec<Collection>, CollectionConversionError>>();
 
                 match collections {
-                    Ok(collections) => {
-                        return Ok(collections);
-                    }
-                    Err(e) => {
-                        return Err(GetCollectionsError::ConversionError(e));
-                    }
+                    Ok(collections) => Ok(collections),
+                    Err(e) => Err(GetCollectionsError::ConversionError(e)),
                 }
             }
-            Err(e) => {
-                return Err(GetCollectionsError::FailedToGetCollections(e));
-            }
+            Err(e) => Err(GetCollectionsError::FailedToGetCollections(e)),
         }
     }
 
@@ -261,28 +213,16 @@ impl GrpcSysDb {
         id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: Option<Uuid>,
+        collection: CollectionUuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let res = self
             .client
             .get_segments(chroma_proto::GetSegmentsRequest {
                 // TODO: modularize
-                id: if id.is_some() {
-                    Some(id.unwrap().to_string())
-                } else {
-                    None
-                },
-                r#type: r#type,
-                scope: if scope.is_some() {
-                    Some(scope.unwrap() as i32)
-                } else {
-                    None
-                },
-                collection: if collection.is_some() {
-                    Some(collection.unwrap().to_string())
-                } else {
-                    None
-                },
+                id: id.map(String::from),
+                r#type,
+                scope: scope.map(|x| x as i32),
+                collection: collection.to_string(),
             })
             .await;
         match res {
@@ -294,17 +234,11 @@ impl GrpcSysDb {
                     .collect::<Result<Vec<Segment>, SegmentConversionError>>();
 
                 match converted_segments {
-                    Ok(segments) => {
-                        return Ok(segments);
-                    }
-                    Err(e) => {
-                        return Err(GetSegmentsError::ConversionError(e));
-                    }
+                    Ok(segments) => Ok(segments),
+                    Err(e) => Err(GetSegmentsError::ConversionError(e)),
                 }
             }
-            Err(e) => {
-                return Err(GetSegmentsError::FailedToGetSegments(e));
-            }
+            Err(e) => Err(GetSegmentsError::FailedToGetSegments(e)),
         }
     }
 
@@ -327,18 +261,16 @@ impl GrpcSysDb {
                     .into_iter()
                     .map(|proto_tenant| proto_tenant.try_into())
                     .collect::<Result<Vec<Tenant>, ()>>();
-                return Ok(last_compaction_times.unwrap());
+                Ok(last_compaction_times.unwrap())
             }
-            Err(e) => {
-                return Err(GetLastCompactionTimeError::FailedToGetLastCompactionTime(e));
-            }
+            Err(e) => Err(GetLastCompactionTimeError::FailedToGetLastCompactionTime(e)),
         }
     }
 
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: Uuid,
+        collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -361,7 +293,7 @@ impl GrpcSysDb {
 
         let req = chroma_proto::FlushCollectionCompactionRequest {
             tenant_id,
-            collection_id: collection_id.to_string(),
+            collection_id: collection_id.0.to_string(),
             log_position,
             collection_version,
             segment_compaction_info,
@@ -379,11 +311,9 @@ impl GrpcSysDb {
                         );
                     }
                 };
-                return Ok(res);
+                Ok(res)
             }
-            Err(e) => {
-                return Err(FlushCompactionError::FailedToFlushCompaction(e));
-            }
+            Err(e) => Err(FlushCompactionError::FailedToFlushCompaction(e)),
         }
     }
 }

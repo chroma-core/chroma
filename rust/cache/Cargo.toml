@@ -1,0 +1,35 @@
+[package]
+name = "chroma-cache"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+foyer = "0.12"
+anyhow = "1.0"
+opentelemetry = { version = "0.26.0", default-features = false, features = [
+  "trace",
+  "metrics",
+] }
+
+# TODO(rescrv):  Deprecated.  Find a suitable replacement for such things.
+serde_yaml = "0.9"
+
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-types = { workspace = true }
+
+[features]
+default = []
+tracing = ["foyer/tracing"]

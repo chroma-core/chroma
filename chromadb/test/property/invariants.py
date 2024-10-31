@@ -1,6 +1,16 @@
+import gc
 import math
+from uuid import UUID
+
+from chromadb.ingest.impl.utils import create_topic_name
+
+from chromadb.config import System
+from chromadb.db.base import get_sql
+from chromadb.db.impl.sqlite import SqliteDB
+from time import sleep
+import psutil
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
-from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast
+from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Any, Dict
 from typing_extensions import Literal
 import numpy as np
 import numpy.typing as npt
@@ -8,6 +18,7 @@ from chromadb.api import types
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
+from pypika import Table, functions
 
 from chromadb.utils import distance_functions
 
@@ -32,18 +43,31 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
         embedding_list = None
     elif isinstance(record_set["embeddings"], list):
         assert record_set["embeddings"] is not None
-        if len(record_set["embeddings"]) > 0 and not all(
-            isinstance(embedding, list) for embedding in record_set["embeddings"]
-        ):
-            if all(isinstance(e, (int, float)) for e in record_set["embeddings"]):
-                embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
+        if len(record_set["embeddings"]) > 0:
+            if all(
+                isinstance(embedding, list) for embedding in record_set["embeddings"]
+            ):
+                embedding_list = cast(types.Embeddings, record_set["embeddings"])
+            elif all(
+                isinstance(embedding, np.ndarray)
+                for embedding in record_set["embeddings"]
+            ):
+                embedding_list = cast(types.Embeddings, record_set["embeddings"])
             else:
-                raise InvalidArgument("an embedding must be a list of floats or ints")
+                if all(
+                    isinstance(e, (int, float, np.integer, np.floating))
+                    for e in record_set["embeddings"]
+                ):
+                    embedding_list = cast(types.Embeddings, [record_set["embeddings"]])
+                else:
+                    raise InvalidArgument(
+                        "an embedding must be a list of floats or ints"
+                    )
         else:
             embedding_list = cast(types.Embeddings, record_set["embeddings"])
     else:
         raise InvalidArgument(
-            "embeddings must be a list of lists, a list of numbers, or None"
+            "embeddings must be a list of lists, a list of numpy arrays, a list of numbers, or None"
         )
 
     return {
@@ -76,14 +100,17 @@ def _field_matches(
     The actual embedding field is equal to the expected field
     field_name: one of [documents, metadatas]
     """
-    result = collection.get(ids=normalized_record_set["ids"], include=[field_name])
+    result = collection.get(ids=normalized_record_set["ids"], include=[field_name])  # type: ignore[list-item]
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort by the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
     actual_field = result[field_name]
 
     if len(normalized_record_set["ids"]) == 0:
-        assert actual_field == []
+        if field_name == "embeddings":
+            assert cast(npt.NDArray[Any], actual_field).size == 0
+        else:
+            assert actual_field == []
         return
 
     # This assert should never happen, if we include metadatas/documents it will be
@@ -150,8 +177,8 @@ def _exact_distances(
     ] = distance_functions.l2,
 ) -> Tuple[List[List[int]], List[List[float]]]:
     """Return the ordered indices and distances from each query to each target"""
-    np_query = np.array(query)
-    np_targets = np.array(targets)
+    np_query = np.array(query, dtype=np.float32)
+    np_targets = np.array(targets, dtype=np.float32)
 
     # Compute the distance between each query and each target, using the distance function
     distances = np.apply_along_axis(
@@ -163,13 +190,37 @@ def _exact_distances(
     return np.argsort(distances).tolist(), distances.tolist()
 
 
+def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
+    """
+    Checks that the open file descriptors are not exceeding the threadpool size
+    works only for SegmentAPI
+    """
+    current_process = psutil.Process()
+    open_files = current_process.open_files()
+    max_retries = 5
+    retry_count = 0
+    # we probably don't need the below but we keep it to avoid flaky tests.
+    while (
+        len([p.path for p in open_files if "sqlite3" in p.path]) - 1 > threadpool_size
+        and retry_count < max_retries
+    ):
+        gc.collect()  # GC to collect the orphaned TLS objects
+        open_files = current_process.open_files()
+        retry_count += 1
+        sleep(1)
+    assert (
+        len([p.path for p in open_files if "sqlite3" in p.path]) - 1 <= threadpool_size
+    )
+
+
 def ann_accuracy(
     collection: Collection,
     record_set: RecordSet,
     n_results: int = 1,
     min_recall: float = 0.99,
-    embedding_function: Optional[types.EmbeddingFunction] = None,
+    embedding_function: Optional[types.EmbeddingFunction] = None,  # type: ignore[type-arg]
     query_indices: Optional[List[int]] = None,
+    query_embeddings: Optional[types.Embeddings] = None,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
@@ -197,7 +248,7 @@ def ann_accuracy(
         # The higher the dimensionality, the more noise is introduced, since each float element
         # of the vector has noise added, which is then subsequently included in all normalization calculations.
         # This means that higher dimensions will have more noise, and thus more error.
-        assert all(isinstance(e, list) for e in embeddings)
+        assert all(isinstance(e, (list, np.ndarray)) for e in embeddings)
         dim = len(embeddings[0])
         accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
@@ -207,9 +258,12 @@ def ann_accuracy(
             distance_function = distance_functions.ip
 
     # Perform exact distance computation
-    query_embeddings = (
-        embeddings if query_indices is None else [embeddings[i] for i in query_indices]
-    )
+    if query_embeddings is None:
+        query_embeddings = (
+            embeddings
+            if query_indices is None
+            else [embeddings[i] for i in query_indices]
+        )
     query_documents = normalized_record_set["documents"]
     if query_indices is not None and query_documents is not None:
         query_documents = [query_documents[i] for i in query_indices]
@@ -222,13 +276,17 @@ def ann_accuracy(
         query_embeddings=query_embeddings if have_embeddings else None,
         query_texts=query_documents if not have_embeddings else None,
         n_results=n_results,
-        include=["embeddings", "documents", "metadatas", "distances"],
+        include=["embeddings", "documents", "metadatas", "distances"],  # type: ignore[list-item]
     )
 
+    _query_results_are_correct_shape(query_results, n_results)
+
+    # Assert fields are not None for type checking
+    assert query_results["ids"] is not None
     assert query_results["distances"] is not None
+    assert query_results["embeddings"] is not None
     assert query_results["documents"] is not None
     assert query_results["metadatas"] is not None
-    assert query_results["embeddings"] is not None
 
     # Dict of ids to indices
     id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
@@ -276,7 +334,7 @@ def ann_accuracy(
 
     try:
         note(
-            f"recall: {recall}, missing {missing} out of {size}, accuracy threshold {accuracy_threshold}"
+            f"# recall: {recall}, missing {missing} out of {size}, accuracy threshold {accuracy_threshold}"
         )
     except InvalidArgument:
         pass  # it's ok if we're running outside hypothesis
@@ -286,3 +344,116 @@ def ann_accuracy(
     # Ensure that the query results are sorted by distance
     for distance_result in query_results["distances"]:
         assert np.allclose(np.sort(distance_result), distance_result)
+
+
+def _query_results_are_correct_shape(
+    query_results: types.QueryResult, n_results: int
+) -> None:
+    for result_type in ["distances", "embeddings", "documents", "metadatas"]:
+        assert query_results[result_type] is not None  # type: ignore[literal-required]
+        assert all(
+            len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
+        )
+
+
+def _total_embedding_queue_log_size(sqlite: SqliteDB) -> int:
+    t = Table("embeddings_queue")
+    q = sqlite.querybuilder().from_(t)
+
+    with sqlite.tx() as cur:
+        sql, params = get_sql(
+            q.select(functions.Count(t.seq_id)), sqlite.parameter_format()
+        )
+        result = cur.execute(sql, params)
+        return cast(int, result.fetchone()[0])
+
+
+def log_size_below_max(
+    system: System, collections: List[Collection], has_collection_mutated: bool
+) -> None:
+    sqlite = system.instance(SqliteDB)
+
+    if has_collection_mutated:
+        # Must always keep one entry to avoid reusing seq_ids
+        assert _total_embedding_queue_log_size(sqlite) >= 1
+
+        # We purge per-collection as the sync_threshold is a per-collection setting
+        sync_threshold_sum = sum(
+            collection.metadata.get("hnsw:sync_threshold", 1000)
+            if collection.metadata is not None
+            else 1000
+            for collection in collections
+        )
+        batch_size_sum = sum(
+            collection.metadata.get("hnsw:batch_size", 100)
+            if collection.metadata is not None
+            else 100
+            for collection in collections
+        )
+
+        # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
+        # And if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
+        assert (
+            _total_embedding_queue_log_size(sqlite) - 1
+            <= sync_threshold_sum + batch_size_sum
+        )
+    else:
+        assert _total_embedding_queue_log_size(sqlite) == 0
+
+
+def _total_embedding_queue_log_size_per_collection(
+    system: System,
+    collections: List[Collection],
+) -> Dict[UUID, int]:
+    sqlite = system.instance(SqliteDB)
+    t = Table("embeddings_queue")
+    q = sqlite.querybuilder().from_(t)
+    _tenant = system.settings.require("tenant_id")
+    _topic_namespace = system.settings.require("topic_namespace")
+    topic_mappings = {
+        create_topic_name(_tenant, _topic_namespace, collection.id): collection
+        for collection in collections
+    }
+    with sqlite.tx() as cur:
+        sql, params = get_sql(
+            q.select(t.topic, functions.Count(t.seq_id)).groupby("topic"),
+            sqlite.parameter_format(),
+        )
+        result = cur.execute(sql, params)
+        out = {}
+        for res in result.fetchall():
+            out[topic_mappings[res[0]].id] = res[1]
+        return out
+
+
+def log_size_for_collections_match_expected(
+    system: System, collections: List[Collection], has_collection_mutated: bool
+) -> None:
+    sqlite = system.instance(SqliteDB)
+
+    if has_collection_mutated:
+        # Must always keep one entry to avoid reusing seq_ids
+        assert _total_embedding_queue_log_size(sqlite) >= 1
+
+        batch_size_sum = {
+            collection.id: collection.metadata.get("hnsw:batch_size", 100)
+            if collection.metadata is not None
+            else 100
+            for collection in collections
+        }
+        expected_sizes = {
+            collection.id: collection.count() % batch_size_sum[collection.id] + 1
+            for collection in collections
+        }
+
+        actual_sizes = _total_embedding_queue_log_size_per_collection(
+            system, collections
+        )
+        assert set(actual_sizes.keys()) == set(expected_sizes.keys())
+        assert all(
+            actual_sizes[collection.id] == expected_sizes[collection.id]
+            for collection in collections
+        )
+
+    else:
+        assert _total_embedding_queue_log_size(sqlite) == 0

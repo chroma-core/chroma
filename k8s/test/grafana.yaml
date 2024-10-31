@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-config
+  namespace: chroma
+data:
+  grafana.ini: |
+    [paths]
+    data = /var/lib/grafana/data
+    logs = /var/log/grafana
+    plugins = /var/lib/grafana/plugins
+    provisioning = /etc/grafana/provisioning
+
+    [server]
+    http_port = 3000
+
+    [auth.anonymous]
+    enabled = true
+    org_name = Main Org.
+    org_role = Admin
+
+    [security]
+    admin_user = admin
+    admin_password = admin
+    disable_login_form = true
+    disable_signout_menu = true
+
+    [provisioning]
+    enabled = true
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-prometheus-config
+  namespace: chroma
+data:
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        editable: true
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana-oss:11.1.4
+          ports:
+            - containerPort: 3000
+              name: http-port
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/grafana
+            - name: prometheus-volume
+              mountPath: /etc/grafana/provisioning/datasources
+      volumes:
+        - name: config-volume
+          configMap:
+            name: grafana-config
+        - name: prometheus-volume
+          configMap:
+            name: grafana-prometheus-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: chroma
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      name: http-port
+  selector:
+    app: grafana

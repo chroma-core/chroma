@@ -1,35 +1,25 @@
-use crate::errors::{ChromaError, ErrorCodes};
-use crate::execution::data::data_chunk::Chunk;
+use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::{wrap, TaskResult};
-use crate::execution::operators::count_records::{
-    CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
-};
-use crate::execution::operators::merge_metadata_results::{
-    MergeMetadataResultsOperator, MergeMetadataResultsOperatorError,
-    MergeMetadataResultsOperatorInput, MergeMetadataResultsOperatorOutput,
+use crate::execution::operators::hydrate_metadata_results::{
+    HydrateMetadataResultsOperator, HydrateMetadataResultsOperatorError,
+    HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperatorOutput,
 };
 use crate::execution::operators::metadata_filtering::{
     MetadataFilteringError, MetadataFilteringInput, MetadataFilteringOperator,
     MetadataFilteringOutput,
 };
 use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
-use crate::index::metadata::types::MetadataIndexError;
+use crate::execution::orchestration::common::terminate_with_error;
 use crate::log::log::PullLogsError;
-use crate::segment::metadata_segment::MetadataSegmentReader;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
-use crate::system::{Component, ComponentContext, Handler};
-use crate::types::{Collection, LogRecord, Metadata, SegmentType};
-use crate::types::{Where, WhereDocument};
-use crate::{
-    blockstore::provider::BlockfileProvider,
-    execution::operator::TaskMessage,
-    log::log::Log,
-    sysdb::sysdb::SysDb,
-    system::{Receiver, System},
-    types::Segment,
-};
+use crate::system::{Component, ComponentContext, ComponentHandle, Handler};
+use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
 use async_trait::async_trait;
-use std::collections::HashSet;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::Where;
+use chroma_types::{Chunk, Segment};
+use chroma_types::{Collection, CollectionUuid, LogRecord, Metadata, SegmentType};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -54,425 +44,103 @@ pub(crate) struct MetadataQueryOrchestrator {
     system: System,
     // Query state
     metadata_segment_id: Uuid,
+    collection_id: CollectionUuid,
     query_ids: Option<Vec<String>>,
     // State fetched or created for query execution
     record_segment: Option<Segment>,
     metadata_segment: Option<Segment>,
     collection: Option<Collection>,
-    // State machine management
-    merge_dependency_count: u32,
     // Services
     log: Box<Log>,
     sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
+    dispatcher: ComponentHandle<Dispatcher>,
     blockfile_provider: BlockfileProvider,
     // Query params
     where_clause: Option<Where>,
-    where_document_clause: Option<WhereDocument>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+    include_metadata: bool,
     // Result channel
     result_channel: Option<tokio::sync::oneshot::Sender<MetadataQueryOrchestratorResult>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct CountQueryOrchestrator {
-    // Component Execution
-    system: System,
-    // Query state
-    metadata_segment_id: Uuid,
-    // State fetched or created for query execution
-    record_segment: Option<Segment>,
-    collection: Option<Collection>,
-    // Services
-    log: Box<Log>,
-    sysdb: Box<SysDb>,
-    dispatcher: Box<dyn Receiver<TaskMessage>>,
-    blockfile_provider: BlockfileProvider,
-    // Result channel
-    result_channel: Option<tokio::sync::oneshot::Sender<Result<usize, Box<dyn ChromaError>>>>,
+    // Request version context
+    collection_version: u32,
+    log_position: u64,
 }
 
 #[derive(Error, Debug)]
-enum MetadataSegmentQueryError {
+enum MetadataQueryOrchestratorError {
     #[error("Blockfile metadata segment with id: {0} not found")]
     BlockfileMetadataSegmentNotFound(Uuid),
-    #[error("Get segments error")]
+    #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Record segment not found for collection: {0}")]
-    RecordSegmentNotFound(Uuid),
-    #[error("Metadata segment has no collection")]
-    MetadataSegmentHasNoCollection,
+    RecordSegmentNotFound(CollectionUuid),
     #[error("System Time Error")]
     SystemTimeError(#[from] std::time::SystemTimeError),
     #[error("Collection not found for id: {0}")]
-    CollectionNotFound(Uuid),
-    #[error("Get collection error")]
+    CollectionNotFound(CollectionUuid),
+    #[error("Get collection error: {0}")]
     GetCollectionError(#[from] GetCollectionsError),
+    #[error("Collection version mismatch")]
+    CollectionVersionMismatch,
 }
 
-impl ChromaError for MetadataSegmentQueryError {
+impl ChromaError for MetadataQueryOrchestratorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::GetSegmentsError(e) => e.code(),
-            MetadataSegmentQueryError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::MetadataSegmentHasNoCollection => {
-                ErrorCodes::InvalidArgument
+            MetadataQueryOrchestratorError::BlockfileMetadataSegmentNotFound(_) => {
+                ErrorCodes::NotFound
             }
-            MetadataSegmentQueryError::SystemTimeError(_) => ErrorCodes::Internal,
-            MetadataSegmentQueryError::CollectionNotFound(_) => ErrorCodes::NotFound,
-            MetadataSegmentQueryError::GetCollectionError(e) => e.code(),
-        }
-    }
-}
-
-impl CountQueryOrchestrator {
-    pub(crate) fn new(
-        system: System,
-        metadata_segment_id: &Uuid,
-        log: Box<Log>,
-        sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
-        blockfile_provider: BlockfileProvider,
-    ) -> Self {
-        Self {
-            system,
-            metadata_segment_id: *metadata_segment_id,
-            record_segment: None,
-            collection: None,
-            log,
-            sysdb,
-            dispatcher,
-            blockfile_provider,
-            result_channel: None,
-        }
-    }
-
-    async fn start(&mut self, ctx: &ComponentContext<Self>) {
-        println!("Starting Count Query Orchestrator");
-        // Populate the orchestrator with the initial state - The Record Segment and the Collection
-        let metdata_segment = self
-            .get_metadata_segment_from_id(self.sysdb.clone(), &self.metadata_segment_id)
-            .await;
-
-        let metadata_segment = match metdata_segment {
-            Ok(segment) => segment,
-            Err(e) => {
-                tracing::error!("Error getting metadata segment: {:?}", e);
-                self.terminate_with_error(e, ctx);
-                return;
-            }
-        };
-
-        let collection_id = match metadata_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                tracing::error!("Metadata segment has no collection");
-                self.terminate_with_error(
-                    Box::new(MetadataSegmentQueryError::MetadataSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
-
-        let record_segment = self
-            .get_record_segment_from_collection_id(self.sysdb.clone(), &collection_id)
-            .await;
-
-        let record_segment = match record_segment {
-            Ok(segment) => segment,
-            Err(e) => {
-                tracing::error!("Error getting record segment: {:?}", e);
-                self.terminate_with_error(e, ctx);
-                return;
-            }
-        };
-
-        let collection = match self
-            .get_collection_from_id(self.sysdb.clone(), &collection_id, ctx)
-            .await
-        {
-            Ok(collection) => collection,
-            Err(e) => {
-                tracing::error!("Error getting collection: {:?}", e);
-                self.terminate_with_error(e, ctx);
-                return;
-            }
-        };
-
-        self.record_segment = Some(record_segment);
-        self.collection = Some(collection);
-    }
-
-    async fn pull_logs(&mut self, ctx: &ComponentContext<Self>) {
-        println!("Count query orchestrator pulling logs");
-
-        let operator = PullLogsOperator::new(self.log.clone());
-        let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
-        let end_timestamp = match end_timestamp {
-            Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
-            Err(e) => {
-                tracing::error!("Error getting system time: {:?}", e);
-                self.terminate_with_error(
-                    Box::new(MetadataSegmentQueryError::SystemTimeError(e)),
-                    ctx,
-                );
-                return;
-            }
-        };
-
-        let collection = self
-            .collection
-            .as_ref()
-            .expect("Invariant violation. Collection is not set before pull logs state.");
-        let input = PullLogsInput::new(
-            collection.id,
-            // The collection log position is inclusive, and we want to start from the next log.
-            collection.log_position + 1,
-            100,
-            None,
-            Some(end_timestamp),
-        );
-
-        let task = wrap(operator, input, ctx.sender.as_receiver());
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implies the dispatcher was dropped somehow
-                // and is likely fatal
-                println!("Error sending Count Query task: {:?}", e);
-            }
-        }
-    }
-
-    async fn get_metadata_segment_from_id(
-        &self,
-        mut sysdb: Box<SysDb>,
-        metadata_segment_id: &Uuid,
-    ) -> Result<Segment, Box<dyn ChromaError>> {
-        let segments = sysdb
-            .get_segments(Some(*metadata_segment_id), None, None, None)
-            .await;
-        let segment = match segments {
-            Ok(segments) => {
-                if segments.is_empty() {
-                    return Err(Box::new(
-                        MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(
-                            *metadata_segment_id,
-                        ),
-                    ));
-                }
-                segments[0].clone()
-            }
-            Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
-            }
-        };
-
-        if segment.r#type != SegmentType::BlockfileMetadata {
-            return Err(Box::new(
-                MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(*metadata_segment_id),
-            ));
-        }
-        Ok(segment)
-    }
-
-    async fn get_record_segment_from_collection_id(
-        &self,
-        mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
-    ) -> Result<Segment, Box<dyn ChromaError>> {
-        let segments = sysdb
-            .get_segments(
-                None,
-                Some(SegmentType::BlockfileRecord.into()),
-                None,
-                Some(*collection_id),
-            )
-            .await;
-
-        match segments {
-            Ok(segments) => {
-                if segments.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::RecordSegmentNotFound(
-                        *collection_id,
-                    )));
-                }
-                // Unwrap is safe as we know at least one segment exists from
-                // the check above
-                return Ok(segments.into_iter().next().unwrap());
-            }
-            Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
-            }
-        };
-    }
-
-    async fn get_collection_from_id(
-        &self,
-        mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
-    ) -> Result<Collection, Box<dyn ChromaError>> {
-        let collections = sysdb
-            .get_collections(Some(*collection_id), None, None, None)
-            .await;
-
-        match collections {
-            Ok(collections) => {
-                if collections.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::CollectionNotFound(
-                        *collection_id,
-                    )));
-                }
-                // Unwrap is safe as we know at least one collection exists from
-                // the check above
-                return Ok(collections.into_iter().next().unwrap());
-            }
-            Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetCollectionError(e)));
-            }
-        };
-    }
-
-    fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
-        let result_channel = self
-            .result_channel
-            .take()
-            .expect("Invariant violation. Result channel is not set.");
-        match result_channel.send(Err(error)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implied the listener was dropped
-                println!("[CountQueryOrchestrator] Result channel dropped before sending error");
-            }
-        }
-        // Cancel the orchestrator so it stops processing
-        ctx.cancellation_token.cancel();
-    }
-
-    ///  Run the orchestrator and return the result.
-    ///  # Note
-    ///  Use this over spawning the component directly. This method will start the component and
-    ///  wait for it to finish before returning the result.
-    pub(crate) async fn run(mut self) -> Result<usize, Box<dyn ChromaError>> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.result_channel = Some(tx);
-        let mut handle = self.system.clone().start_component(self);
-        let result = rx.await;
-        handle.stop();
-        result.unwrap()
-    }
-}
-
-#[async_trait]
-impl Component for CountQueryOrchestrator {
-    fn get_name() -> &'static str {
-        "Count Query Orchestrator"
-    }
-
-    fn queue_size(&self) -> usize {
-        1000 // TODO: make this configurable
-    }
-
-    async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
-        self.start(ctx).await;
-        self.pull_logs(ctx).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrator {
-    async fn handle(
-        &mut self,
-        message: TaskResult<PullLogsOutput, PullLogsError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let message = message.into_inner();
-        match message {
-            Ok(logs) => {
-                let operator = CountRecordsOperator::new();
-                let input = CountRecordsInput::new(
-                    self.record_segment
-                        .as_ref()
-                        .expect("Expect segment")
-                        .clone(),
-                    self.blockfile_provider.clone(),
-                    logs.logs(),
-                );
-                let msg = wrap(operator, input, ctx.sender.as_receiver());
-                match self.dispatcher.send(msg, None).await {
-                    Ok(_) => (),
-                    Err(e) => {
-                        // Log an error - this implies the dispatcher was dropped somehow
-                        // and is likely fatal
-                        println!("Error sending Count Query task: {:?}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                self.terminate_with_error(Box::new(e), ctx);
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountQueryOrchestrator {
-    async fn handle(
-        &mut self,
-        message: TaskResult<CountRecordsOutput, CountRecordsError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let message = message.into_inner();
-        let msg = match message {
-            Ok(m) => m,
-            Err(e) => {
-                return self.terminate_with_error(Box::new(e), ctx);
-            }
-        };
-        let channel = self
-            .result_channel
-            .take()
-            .expect("Expect channel to be present");
-        match channel.send(Ok(msg.count)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implied the listener was dropped
-                println!("[CountQueryOrchestrator] Result channel dropped before sending result");
+            MetadataQueryOrchestratorError::GetSegmentsError(e) => e.code(),
+            MetadataQueryOrchestratorError::RecordSegmentNotFound(_) => ErrorCodes::NotFound,
+            MetadataQueryOrchestratorError::SystemTimeError(_) => ErrorCodes::Internal,
+            MetadataQueryOrchestratorError::CollectionNotFound(_) => ErrorCodes::NotFound,
+            MetadataQueryOrchestratorError::GetCollectionError(e) => e.code(),
+            MetadataQueryOrchestratorError::CollectionVersionMismatch => {
+                ErrorCodes::VersionMismatch
             }
         }
     }
 }
 
 impl MetadataQueryOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         system: System,
         metadata_segment_id: &Uuid,
+        collection_id: &CollectionUuid,
         query_ids: Option<Vec<String>>,
         log: Box<Log>,
         sysdb: Box<SysDb>,
-        dispatcher: Box<dyn Receiver<TaskMessage>>,
+        dispatcher: ComponentHandle<Dispatcher>,
         blockfile_provider: BlockfileProvider,
         where_clause: Option<Where>,
-        where_document_clause: Option<WhereDocument>,
+        offset: Option<u32>,
+        limit: Option<u32>,
+        include_metadata: bool,
+        collection_version: u32,
+        log_position: u64,
     ) -> Self {
         Self {
             state: ExecutionState::Pending,
             system,
             metadata_segment_id: *metadata_segment_id,
+            collection_id: *collection_id,
             query_ids,
             record_segment: None,
             metadata_segment: None,
             collection: None,
-            merge_dependency_count: 2,
             log,
             sysdb,
             dispatcher,
             blockfile_provider,
             where_clause,
-            where_document_clause,
+            offset,
+            limit,
+            include_metadata,
             result_channel: None,
+            collection_version,
+            log_position,
         }
     }
 
@@ -480,27 +148,22 @@ impl MetadataQueryOrchestrator {
         tracing::info!("Starting Metadata Query Orchestrator");
         // Populate the orchestrator with the initial state - The Metadata Segment, The Record Segment and the Collection
         let metdata_segment = self
-            .get_metadata_segment_from_id(self.sysdb.clone(), &self.metadata_segment_id)
+            .get_metadata_segment_from_id(
+                self.sysdb.clone(),
+                &self.metadata_segment_id,
+                &self.collection_id,
+            )
             .await;
 
         let metadata_segment = match metdata_segment {
             Ok(segment) => segment,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
 
-        let collection_id = match metadata_segment.collection {
-            Some(collection_id) => collection_id,
-            None => {
-                self.terminate_with_error(
-                    Box::new(MetadataSegmentQueryError::MetadataSegmentHasNoCollection),
-                    ctx,
-                );
-                return;
-            }
-        };
+        let collection_id = metadata_segment.collection;
         self.metadata_segment = Some(metadata_segment);
 
         let record_segment = self
@@ -510,7 +173,7 @@ impl MetadataQueryOrchestrator {
         let record_segment = match record_segment {
             Ok(segment) => segment,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
@@ -521,13 +184,24 @@ impl MetadataQueryOrchestrator {
         {
             Ok(collection) => collection,
             Err(e) => {
-                self.terminate_with_error(e, ctx);
+                terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
         };
 
+        // If the collection version does not match the version in the request, return an error
+        if collection.version as u32 != self.collection_version {
+            terminate_with_error(
+                self.result_channel.take(),
+                Box::new(MetadataQueryOrchestratorError::CollectionVersionMismatch),
+                ctx,
+            );
+            return;
+        }
+
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
+        self.pull_logs(ctx).await;
     }
 
     async fn pull_logs(&mut self, ctx: &ComponentContext<Self>) {
@@ -539,8 +213,9 @@ impl MetadataQueryOrchestrator {
         let end_timestamp = match end_timestamp {
             Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
             Err(e) => {
-                self.terminate_with_error(
-                    Box::new(MetadataSegmentQueryError::SystemTimeError(e)),
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(MetadataQueryOrchestratorError::SystemTimeError(e)),
                     ctx,
                 );
                 return;
@@ -552,15 +227,17 @@ impl MetadataQueryOrchestrator {
             .as_ref()
             .expect("Invariant violation. Collection is not set before pull logs state.");
         let input = PullLogsInput::new(
-            collection.id,
+            collection.collection_id,
             // The collection log position is inclusive, and we want to start from the next log.
-            collection.log_position + 1,
+            // Note: We use the log position sent in the request for transactionality
+            // TODO: Change log service to use u64 instead of i64
+            (self.log_position as i64) + 1,
             100,
             None,
             Some(end_timestamp),
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -571,12 +248,12 @@ impl MetadataQueryOrchestrator {
         }
     }
 
-    async fn filter(&mut self, mut logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
+    async fn filter(&mut self, logs: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
         tracing::debug!("Filtering logs and searching metadata segment");
         self.state = ExecutionState::Filter;
 
         let input = MetadataFilteringInput::new(
-            logs,
+            self.blockfile_provider.clone(),
             self.record_segment
                 .as_ref()
                 .expect("Expected record segment to be set")
@@ -585,14 +262,15 @@ impl MetadataQueryOrchestrator {
                 .as_ref()
                 .expect("Expected metadata segment to be set")
                 .clone(),
-            self.blockfile_provider.clone(),
-            self.where_clause.clone(),
-            self.where_document_clause.clone(),
+            logs,
             self.query_ids.clone(),
+            self.where_clause.clone(),
+            self.offset,
+            self.limit,
         );
 
         let op = MetadataFilteringOperator::new();
-        let task = wrap(op, input, ctx.sender.as_receiver());
+        let task = wrap(op, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -607,15 +285,16 @@ impl MetadataQueryOrchestrator {
         &self,
         mut sysdb: Box<SysDb>,
         metadata_segment_id: &Uuid,
+        collection_id: &CollectionUuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
-            .get_segments(Some(*metadata_segment_id), None, None, None)
+            .get_segments(Some(*metadata_segment_id), None, None, *collection_id)
             .await;
         let segment = match segments {
             Ok(segments) => {
                 if segments.is_empty() {
                     return Err(Box::new(
-                        MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(
+                        MetadataQueryOrchestratorError::BlockfileMetadataSegmentNotFound(
                             *metadata_segment_id,
                         ),
                     ));
@@ -623,13 +302,17 @@ impl MetadataQueryOrchestrator {
                 segments[0].clone()
             }
             Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
+                return Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
+                    e,
+                )));
             }
         };
 
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(Box::new(
-                MetadataSegmentQueryError::BlockfileMetadataSegmentNotFound(*metadata_segment_id),
+                MetadataQueryOrchestratorError::BlockfileMetadataSegmentNotFound(
+                    *metadata_segment_id,
+                ),
             ));
         }
         Ok(segment)
@@ -638,39 +321,39 @@ impl MetadataQueryOrchestrator {
     async fn get_record_segment_from_collection_id(
         &self,
         mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
             .get_segments(
                 None,
                 Some(SegmentType::BlockfileRecord.into()),
                 None,
-                Some(*collection_id),
+                *collection_id,
             )
             .await;
 
         match segments {
             Ok(segments) => {
                 if segments.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::RecordSegmentNotFound(
-                        *collection_id,
-                    )));
+                    return Err(Box::new(
+                        MetadataQueryOrchestratorError::RecordSegmentNotFound(*collection_id),
+                    ));
                 }
                 // Unwrap is safe as we know at least one segment exists from
                 // the check above
-                return Ok(segments.into_iter().next().unwrap());
+                Ok(segments.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetSegmentsError(e)));
-            }
-        };
+            Err(e) => Err(Box::new(MetadataQueryOrchestratorError::GetSegmentsError(
+                e,
+            ))),
+        }
     }
 
     async fn get_collection_from_id(
         &self,
         mut sysdb: Box<SysDb>,
-        collection_id: &Uuid,
-        ctx: &ComponentContext<Self>,
+        collection_id: &CollectionUuid,
+        _ctx: &ComponentContext<Self>,
     ) -> Result<Collection, Box<dyn ChromaError>> {
         let collections = sysdb
             .get_collections(Some(*collection_id), None, None, None)
@@ -679,34 +362,18 @@ impl MetadataQueryOrchestrator {
         match collections {
             Ok(collections) => {
                 if collections.is_empty() {
-                    return Err(Box::new(MetadataSegmentQueryError::CollectionNotFound(
-                        *collection_id,
-                    )));
+                    return Err(Box::new(
+                        MetadataQueryOrchestratorError::CollectionNotFound(*collection_id),
+                    ));
                 }
                 // Unwrap is safe as we know at least one collection exists from
                 // the check above
-                return Ok(collections.into_iter().next().unwrap());
+                Ok(collections.into_iter().next().unwrap())
             }
-            Err(e) => {
-                return Err(Box::new(MetadataSegmentQueryError::GetCollectionError(e)));
-            }
-        };
-    }
-
-    fn terminate_with_error(&mut self, error: Box<dyn ChromaError>, ctx: &ComponentContext<Self>) {
-        let result_channel = self
-            .result_channel
-            .take()
-            .expect("Invariant violation. Result channel is not set.");
-        match result_channel.send(Err(error)) {
-            Ok(_) => (),
-            Err(e) => {
-                // Log an error - this implied the listener was dropped
-                println!("[MetadataQueryOrchestrator] Result channel dropped before sending error");
-            }
+            Err(e) => Err(Box::new(
+                MetadataQueryOrchestratorError::GetCollectionError(e),
+            )),
         }
-        // Cancel the orchestrator so it stops processing
-        ctx.cancellation_token.cancel();
     }
 
     ///  Run the orchestrator and return the result.
@@ -735,12 +402,13 @@ impl Component for MetadataQueryOrchestrator {
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         self.start(ctx).await;
-        self.pull_logs(ctx).await;
     }
 }
 
 #[async_trait]
 impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchestrator {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<PullLogsOutput, PullLogsError>,
@@ -754,7 +422,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
             }
             Err(e) => {
                 tracing::error!("Error pulling logs: {:?}", e);
-                self.terminate_with_error(Box::new(e), ctx);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }
@@ -764,6 +432,8 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for MetadataQueryOrchest
 impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
     for MetadataQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
         message: TaskResult<MetadataFilteringOutput, MetadataFilteringError>,
@@ -774,25 +444,25 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
             Ok(output) => output,
             Err(e) => {
                 tracing::error!("Error merging metadata results: {:?}", e);
-                return self.terminate_with_error(Box::new(e), ctx);
+                return terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         };
 
         self.state = ExecutionState::MergeResults;
 
-        let operator = MergeMetadataResultsOperator::new();
-        let input = MergeMetadataResultsOperatorInput::new(
-            output.log_records,
-            output.user_supplied_filtered_offset_ids,
-            output.where_condition_filtered_offset_ids,
+        let operator = HydrateMetadataResultsOperator::new();
+        let input = HydrateMetadataResultsOperatorInput::new(
+            self.blockfile_provider.clone(),
             self.record_segment
                 .as_ref()
                 .expect("Invariant violation. Record segment is not set.")
                 .clone(),
-            self.blockfile_provider.clone(),
+            output.log_records,
+            output.offset_ids,
+            self.include_metadata,
         );
 
-        let task = wrap(operator, input, ctx.sender.as_receiver());
+        let task = wrap(operator, input, ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
@@ -805,12 +475,17 @@ impl Handler<TaskResult<MetadataFilteringOutput, MetadataFilteringError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>>
+impl Handler<TaskResult<HydrateMetadataResultsOperatorOutput, HydrateMetadataResultsOperatorError>>
     for MetadataQueryOrchestrator
 {
+    type Result = ();
+
     async fn handle(
         &mut self,
-        message: TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResultsOperatorError>,
+        message: TaskResult<
+            HydrateMetadataResultsOperatorOutput,
+            HydrateMetadataResultsOperatorError,
+        >,
         ctx: &ComponentContext<Self>,
     ) {
         let message = message.into_inner();
@@ -818,7 +493,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
             Ok(output) => output,
             Err(e) => {
                 tracing::error!("Error merging metadata results: {:?}", e);
-                return self.terminate_with_error(Box::new(e), ctx);
+                return terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         };
 
@@ -832,7 +507,7 @@ impl Handler<TaskResult<MergeMetadataResultsOperatorOutput, MergeMetadataResults
 
         match result_channel.send(Ok(output)) {
             Ok(_) => (),
-            Err(e) => {
+            Err(_) => {
                 // Log an error - this implied the listener was dropped
                 println!(
                     "[MetadataQueryOrchestrator] Result channel dropped before sending result"

@@ -20,10 +20,10 @@ export function Note({ type, title, children }: NoteProps) {
     >
       <div className={`flex flex-row ${iconFlex}`}>
 
-      {(type === 'tip')? <Icons.info className={`mr-2 ${(title !== undefined)? 'mt-1': null}`} /> : null}
-      {(type === 'default')? <Icons.info className={`mr-2 ${(title !== undefined)? 'mt-1': null}`} /> : null}
-      {(type === 'warning')? <Icons.warning className={`mr-2 ${(title !== undefined)? 'mt-1': null}`} /> : null}
-      {(type === 'caution')? <Icons.warning className={`mr-2 ${(title !== undefined)? 'mt-1': null}`} /> : null}
+      {(type === 'tip')? <Icons.info className={`mr-2 flex-shrink-0 ${(title !== undefined)? 'mt-1': null}`} /> : null}
+      {(type === 'default')? <Icons.info className={`mr-2 flex-shrink-0 ${(title !== undefined)? 'mt-1': null}`} /> : null}
+      {(type === 'warning')? <Icons.warning className={`mr-2 flex-shrink-0 ${(title !== undefined)? 'mt-1': null}`} /> : null}
+      {(type === 'caution')? <Icons.warning className={`mr-2 flex-shrink-0 ${(title !== undefined)? 'mt-1': null}`} /> : null}
 
       <div>
       {title ? (

@@ -9,6 +9,7 @@ interface OpenAIAPI {
     model: string;
     input: string[];
     user?: string;
+    dimensions?: number;
   }) => Promise<number[][]>;
 }
 
@@ -28,6 +29,7 @@ class OpenAIAPIv3 implements OpenAIAPI {
     model: string;
     input: string[];
     user?: string;
+    dimensions?: number;
   }): Promise<number[][]> {
     const embeddings: number[][] = [];
     const response = await this.openai
@@ -62,6 +64,7 @@ class OpenAIAPIv4 implements OpenAIAPI {
     model: string;
     input: string[];
     user?: string;
+    dimensions?: number;
   }): Promise<number[][]> {
     const embeddings: number[][] = [];
     const response = await this.openai.embeddings.create(params);
@@ -78,21 +81,25 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   private org_id: string;
   private model: string;
   private openaiApi?: OpenAIAPI;
+  private dimensions?: number;
 
   constructor({
     openai_api_key,
     openai_model,
     openai_organization_id,
+    openai_embedding_dimensions,
   }: {
     openai_api_key: string;
     openai_model?: string;
     openai_organization_id?: string;
+    openai_embedding_dimensions?: number;
   }) {
     // we used to construct the client here, but we need to async import the types
     // for the openai npm package, and the constructor can not be async
     this.api_key = openai_api_key;
     this.org_id = openai_organization_id || "";
     this.model = openai_model || "text-embedding-ada-002";
+    this.dimensions = openai_embedding_dimensions;
   }
 
   private async loadClient() {
@@ -109,7 +116,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       if (_a.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the openai package to use the OpenAIEmbeddingFunction, `npm install -S openai`",
+          "Please install the openai package to use the OpenAIEmbeddingFunction, e.g. `npm install openai`",
         );
       }
       throw _a; // Re-throw other errors
@@ -131,6 +138,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     return await this.openaiApi!.createEmbedding({
       model: this.model,
       input: texts,
+      dimensions: this.dimensions,
     }).catch((error: any) => {
       throw error;
     });
@@ -147,10 +155,11 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       const { default: openai } = await import("openai");
       // @ts-ignore
       const { VERSION } = await import("openai/version");
+      // @ts-ignore
       return { openai, version: VERSION };
     } catch (e) {
       throw new Error(
-        "Please install openai as a dependency with, e.g. `yarn add openai`",
+        "Please install the openai package to use the OpenAIEmbeddingFunction, e.g. `npm install openai`",
       );
     }
   }

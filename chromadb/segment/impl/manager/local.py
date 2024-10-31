@@ -67,7 +67,7 @@ class LocalSegmentManager(SegmentManager):
         self.logger = logging.getLogger(__name__)
         self._instances = {}
         self.segment_cache: Dict[SegmentScope, SegmentCache] = {
-            SegmentScope.METADATA: BasicCache()
+            SegmentScope.METADATA: BasicCache()  # type: ignore[no-untyped-call]
         }
         if (
             system.settings.chroma_segment_cache_policy == "LRU"
@@ -79,7 +79,7 @@ class LocalSegmentManager(SegmentManager):
                 size_func=lambda k: self._get_segment_disk_size(k),
             )
         else:
-            self.segment_cache[SegmentScope.VECTOR] = BasicCache()
+            self.segment_cache[SegmentScope.VECTOR] = BasicCache()  # type: ignore[no-untyped-call]
 
         self._lock = Lock()
 
@@ -103,7 +103,7 @@ class LocalSegmentManager(SegmentManager):
         "LocalSegmentManager.callback_cache_evict",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def callback_cache_evict(self, segment: Segment):
+    def callback_cache_evict(self, segment: Segment) -> None:
         collection_id = segment["collection"]
         self.logger.info(f"LRU cache evict collection {collection_id}")
         instance = self._instance(segment)
@@ -158,7 +158,7 @@ class LocalSegmentManager(SegmentManager):
                     instance = self.get_segment(collection_id, VectorReader)
                     instance.delete()
                 elif segment["type"] == SegmentType.SQLITE.value:
-                    instance = self.get_segment(collection_id, MetadataReader)
+                    instance = self.get_segment(collection_id, MetadataReader)  # type: ignore[assignment]
                     instance.delete()
                 del self._instances[segment["id"]]
             if segment["scope"] is SegmentScope.VECTOR:
@@ -186,7 +186,7 @@ class LocalSegmentManager(SegmentManager):
         "LocalSegmentManager._get_segment_sysdb",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def _get_segment_sysdb(self, collection_id: UUID, scope: SegmentScope):
+    def _get_segment_sysdb(self, collection_id: UUID, scope: SegmentScope) -> Segment:
         segments = self._sysdb.get_segments(collection=collection_id, scope=scope)
         known_types = set([k.value for k in SEGMENT_TYPE_IMPLS.keys()])
         # Get the first segment of a known type
@@ -197,7 +197,6 @@ class LocalSegmentManager(SegmentManager):
         "LocalSegmentManager.get_segment",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    @override
     def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
         if type == MetadataReader:
             scope = SegmentScope.METADATA
@@ -252,7 +251,7 @@ class LocalSegmentManager(SegmentManager):
 def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> Segment:
     """Create a metadata dict, propagating metadata correctly for the given segment type."""
     cls = get_class(SEGMENT_TYPE_IMPLS[type], SegmentImplementation)
-    collection_metadata = collection.get("metadata", None)
+    collection_metadata = collection.metadata
     metadata: Optional[Metadata] = None
     if collection_metadata:
         metadata = cls.propagate_collection_metadata(collection_metadata)
@@ -261,6 +260,6 @@ def _segment(type: SegmentType, scope: SegmentScope, collection: Collection) -> 
         id=uuid4(),
         type=type.value,
         scope=scope,
-        collection=collection["id"],
+        collection=collection.id,
         metadata=metadata,
     )

@@ -17,19 +17,19 @@ from chromadb.test.property.invariants import _exact_distances
 # then hashes them to a fixed dimension.
 class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
     def __init__(self) -> None:
-        self._hef = hashing_embedding_function(dim=10, dtype=np.float_)
+        self._hef = hashing_embedding_function(dim=10, dtype=np.float64)
 
     def __call__(self, input: Embeddable) -> Embeddings:
         to_texts = [str(i) for i in input]
         embeddings = np.array(self._hef(to_texts))
         # Normalize the embeddings
         # This is so we can generate random unit vectors and have them be close to the embeddings
-        embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)  # type: ignore[misc]
         return cast(Embeddings, embeddings.tolist())
 
 
 def random_image() -> Image:
-    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int32)
+    return np.random.randint(0, 255, size=(10, 10, 3), dtype=np.int64)
 
 
 def random_document() -> Document:
@@ -69,7 +69,9 @@ def test_multimodal(
 
     # Trying to add a document and an image at the same time should fail
     with pytest.raises(
-        ValueError, match="You can only provide documents or images, not both."
+        ValueError,
+        # This error string may be in any order
+        match=r"Exactly one of (images|documents|uris)(?:, (images|documents|uris))?(?:, (images|documents|uris))? must be provided in add\.",
     ):
         multimodal_collection.add(
             ids=image_ids[0], documents=documents[0], images=images[0]
@@ -82,7 +84,7 @@ def test_multimodal(
 
     # get() should return all the documents and images
     # ids corresponding to images should not have documents
-    get_result = multimodal_collection.get(include=["documents"])
+    get_result = multimodal_collection.get(include=["documents"])  # type: ignore[list-item]
     assert len(get_result["ids"]) == len(document_ids) + len(image_ids)
     for i, id in enumerate(get_result["ids"]):
         assert id in document_ids or id in image_ids
@@ -124,14 +126,14 @@ def test_multimodal(
 
     # Query with images
     query_result = multimodal_collection.query(
-        query_images=[query_image], n_results=n_query_results, include=["documents"]
+        query_images=[query_image], n_results=n_query_results, include=["documents"]  # type: ignore[list-item]
     )
 
     assert query_result["ids"][0] == nearest_image_neighbor_ids
 
     # Query with documents
     query_result = multimodal_collection.query(
-        query_texts=[query_document], n_results=n_query_results, include=["documents"]
+        query_texts=[query_document], n_results=n_query_results, include=["documents"]  # type: ignore[list-item]
     )
 
     assert query_result["ids"][0] == nearest_document_neighbor_ids
@@ -152,6 +154,6 @@ def test_multimodal_update_with_image(
 
     multimodal_collection.update(ids=id, images=image)
 
-    get_result = multimodal_collection.get(ids=id, include=["documents"])
+    get_result = multimodal_collection.get(ids=id, include=["documents"])  # type: ignore[list-item]
     assert get_result["documents"] is not None
     assert get_result["documents"][0] is None

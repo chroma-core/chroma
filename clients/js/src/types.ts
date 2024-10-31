@@ -8,15 +8,14 @@ export enum IncludeEnum {
   Distances = "distances",
 }
 
-type Number = number;
-export type Embedding = Array<Number>;
-export type Embeddings = Array<Embedding>;
+export type Embedding = number[];
+export type Embeddings = Embedding[];
 
 export type Metadata = Record<string, string | number | boolean>;
-export type Metadatas = Array<Metadata>;
+export type Metadatas = Metadata[];
 
 export type Document = string;
-export type Documents = Array<Document>;
+export type Documents = Document[];
 
 export type ID = string;
 export type IDs = ID[];
@@ -59,29 +58,47 @@ export type CollectionType = {
   name: string;
   id: string;
   metadata: Metadata | null;
+  configuration_json: any;
 };
 
-export type GetResponse = {
+export type MultiGetResponse = {
   ids: IDs;
-  embeddings: null | Embeddings;
-  documents: (null | Document)[];
-  metadatas: (null | Metadata)[];
-  error: null | string;
+  embeddings: Embeddings | null;
+  documents: (Document | null)[];
+  metadatas: (Metadata | null)[];
   included: IncludeEnum[];
 };
 
-export type QueryResponse = {
+export type GetResponse = MultiGetResponse;
+
+export type SingleQueryResponse = {
+  ids: IDs;
+  embeddings: Embeddings | null;
+  documents: (Document | null)[];
+  metadatas: (Metadata | null)[];
+  distances: number[] | null;
+  included: IncludeEnum[];
+};
+
+export type MultiQueryResponse = {
   ids: IDs[];
-  embeddings: null | Embeddings[];
-  documents: (null | Document)[][];
-  metadatas: (null | Metadata)[][];
-  distances: null | number[][];
+  embeddings: Embeddings[] | null;
+  documents: (Document | null)[][];
+  metadatas: (Metadata | null)[][];
+  distances: number[][] | null;
   included: IncludeEnum[];
 };
 
-export type AddResponse = {
-  error: string;
-};
+export type QueryResponse = SingleQueryResponse | MultiQueryResponse;
+
+export type AddResponse = {};
+
+export interface CollectionParams {
+  name: string;
+  id: string;
+  metadata: CollectionMetadata | undefined;
+  embeddingFunction: IEmbeddingFunction;
+}
 
 export type CollectionMetadata = Record<string, unknown>;
 
@@ -91,7 +108,7 @@ export type ConfigOptions = {
   options?: RequestInit;
 };
 
-export type GetParams = {
+export type BaseGetParams = {
   ids?: ID | IDs;
   where?: Where;
   limit?: PositiveInteger;
@@ -99,6 +116,16 @@ export type GetParams = {
   include?: IncludeEnum[];
   whereDocument?: WhereDocument;
 };
+
+export type SingleGetParams = BaseGetParams & {
+  ids: ID;
+};
+
+export type MultiGetParams = BaseGetParams & {
+  ids?: IDs;
+};
+
+export type GetParams = SingleGetParams | MultiGetParams;
 
 export type ListCollectionsParams = {
   limit?: PositiveInteger;
@@ -123,36 +150,106 @@ export type GetOrCreateCollectionParams = CreateCollectionParams;
 
 export type GetCollectionParams = {
   name: string;
-  embeddingFunction?: IEmbeddingFunction;
+  embeddingFunction: IEmbeddingFunction;
 };
 
 export type DeleteCollectionParams = {
   name: string;
 };
 
-export type AddParams = {
+export type BaseRecordOperationParams = {
   ids: ID | IDs;
   embeddings?: Embedding | Embeddings;
   metadatas?: Metadata | Metadatas;
   documents?: Document | Documents;
 };
 
-export type UpsertParams = AddParams;
-export type UpdateParams = AddParams;
+export type SingleRecordOperationParams = BaseRecordOperationParams & {
+  ids: ID;
+  embeddings?: Embedding;
+  metadatas?: Metadata;
+  documents?: Document;
+};
+
+type SingleEmbeddingRecordOperationParams = SingleRecordOperationParams & {
+  embeddings: Embedding;
+};
+
+type SingleContentRecordOperationParams = SingleRecordOperationParams & {
+  documents: Document;
+};
+
+export type SingleAddRecordOperationParams =
+  | SingleEmbeddingRecordOperationParams
+  | SingleContentRecordOperationParams;
+
+export type MultiRecordOperationParams = BaseRecordOperationParams & {
+  ids: IDs;
+  embeddings?: Embeddings;
+  metadatas?: Metadatas;
+  documents?: Documents;
+};
+
+type MultiEmbeddingRecordOperationParams = MultiRecordOperationParams & {
+  embeddings: Embeddings;
+};
+
+type MultiContentRecordOperationParams = MultiRecordOperationParams & {
+  documents: Documents;
+};
+
+export type MultiAddRecordsOperationParams =
+  | MultiEmbeddingRecordOperationParams
+  | MultiContentRecordOperationParams;
+
+export type AddRecordsParams =
+  | SingleAddRecordOperationParams
+  | MultiAddRecordsOperationParams;
+
+export type UpsertRecordsParams = AddRecordsParams;
+export type UpdateRecordsParams =
+  | MultiRecordOperationParams
+  | SingleRecordOperationParams;
 
 export type ModifyCollectionParams = {
   name?: string;
   metadata?: CollectionMetadata;
 };
 
-export type QueryParams = {
-  queryEmbeddings?: Embedding | Embeddings;
+export type BaseQueryParams = {
   nResults?: PositiveInteger;
   where?: Where;
   queryTexts?: string | string[];
+  queryEmbeddings?: Embedding | Embeddings;
   whereDocument?: WhereDocument; // {"$contains":"search_string"}
   include?: IncludeEnum[]; // ["metadata", "document"]
 };
+
+export type SingleTextQueryParams = BaseQueryParams & {
+  queryTexts: string;
+  queryEmbeddings?: never;
+};
+
+export type SingleEmbeddingQueryParams = BaseQueryParams & {
+  queryTexts?: never;
+  queryEmbeddings: Embedding;
+};
+
+export type MultiTextQueryParams = BaseQueryParams & {
+  queryTexts: string[];
+  queryEmbeddings?: never;
+};
+
+export type MultiEmbeddingQueryParams = BaseQueryParams & {
+  queryTexts?: never;
+  queryEmbeddings: Embeddings;
+};
+
+export type QueryRecordsParams =
+  | SingleTextQueryParams
+  | SingleEmbeddingQueryParams
+  | MultiTextQueryParams
+  | MultiEmbeddingQueryParams;
 
 export type PeekParams = { limit?: PositiveInteger };
 
@@ -160,4 +257,9 @@ export type DeleteParams = {
   ids?: ID | IDs;
   where?: Where;
   whereDocument?: WhereDocument;
+};
+
+export type UserIdentity = {
+  tenant: string;
+  databases: string[];
 };

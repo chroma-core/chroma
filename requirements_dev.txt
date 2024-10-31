@@ -1,11 +1,13 @@
 black==23.3.0 # match what's in pyproject.toml
 build
-grpcio-tools
+grpcio-tools==1.62.3 # Later version not compatible with protobuf 4.25.5
 httpx
-hypothesis>=6.103.1
-hypothesis[numpy]>=6.103.1
+hypothesis==6.112.2 # TODO: Resolve breaking changes and bump version
+hypothesis[numpy]==6.112.2 # TODO: Resolve breaking changes and bump version
 mypy-protobuf
 pre-commit
+protobuf==4.25.5 # Later version not compatible with opentelemetry 1.27.0
+psutil
 pytest
 pytest-asyncio
 pytest-xdist

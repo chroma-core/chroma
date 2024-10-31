@@ -2,6 +2,7 @@ import importlib
 import inspect
 import logging
 from abc import ABC
+from enum import Enum
 from graphlib import TopologicalSorter
 from typing import Optional, List, Any, Dict, Set, Iterable, Union
 from typing import Type, TypeVar, cast
@@ -76,10 +77,12 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
+    "chromadb.execution.executor.abstract.Executor": "chroma_executor_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
-    "chromadb.rate_limiting.RateLimitingProvider": "chroma_rate_limiting_provider_impl",
+    "chromadb.quota.QuotaEnforcer": "chroma_quota_enforcer_impl",
+    "chromadb.rate_limit.RateLimitEnforcer": "chroma_rate_limit_enforcer_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
@@ -88,6 +91,11 @@ _abstract_type_keys: Dict[str, str] = {
 
 DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
+
+
+class APIVersion(str, Enum):
+    V1 = "/api/v1"
+    V2 = "/api/v2"
 
 
 class Settings(BaseSettings):  # type: ignore
@@ -123,7 +131,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_ssl_enabled: Optional[bool] = False
 
     chroma_server_ssl_verify: Optional[Union[bool, str]] = None
-    chroma_server_api_default_path: Optional[str] = "/api/v1"
+    chroma_server_api_default_path: Optional[APIVersion] = APIVersion.V2
     # eg ["http://localhost:3000"]
     chroma_server_cors_allow_origins: List[str] = []
 
@@ -161,12 +169,15 @@ class Settings(BaseSettings):  # type: ignore
     # ================
 
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
+        f"{APIVersion.V2}": ["GET"],
+        f"{APIVersion.V2}/heartbeat": ["GET"],
+        f"{APIVersion.V2}/version": ["GET"],
+        f"{APIVersion.V1}": ["GET"],
+        f"{APIVersion.V1}/heartbeat": ["GET"],
+        f"{APIVersion.V1}/version": ["GET"],
     }
     # Overwrite singleton tenant and database access from the auth provider
-    # if applicable. See chromadb/server/fastapi/__init__.py's
+    # if applicable. See chromadb/auth/utils/__init__.py's
     # authenticate_and_authorize_or_raise method.
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
@@ -231,12 +242,28 @@ class Settings(BaseSettings):  # type: ignore
     chroma_segment_manager_impl: str = (
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
+    chroma_executor_impl: str = "chromadb.execution.executor.local.LocalExecutor"
 
     chroma_logservice_host = "localhost"
     chroma_logservice_port = 50052
 
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
+
+    chroma_quota_enforcer_impl: str = (
+        "chromadb.quota.simple_quota_enforcer.SimpleQuotaEnforcer"
+    )
+
+    chroma_rate_limit_enforcer_impl: str = (
+        "chromadb.rate_limit.simple_rate_limit.SimpleRateLimitEnforcer"
+    )
+
+    # ==========
+    # gRPC service config
+    # ==========
+    chroma_logservice_request_timeout_seconds: int = 3
+    chroma_sysdb_request_timeout_seconds: int = 3
+    chroma_query_request_timeout_seconds: int = 60
 
     # ======
     # Legacy

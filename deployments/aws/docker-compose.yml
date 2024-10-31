@@ -1,0 +1,23 @@
+version: '3.9'
+
+networks:
+  net:
+    driver: bridge
+
+services:
+  server:
+    image: ghcr.io/chroma-core/chroma:CHROMA_VERSION
+    volumes:
+      - index_data:/index_data
+    ports:
+      - "8000:8000"
+    networks:
+      - net
+    env_file:
+      - .env
+
+volumes:
+  index_data:
+    driver: local
+  backups:
+    driver: local
