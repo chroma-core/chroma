@@ -3,7 +3,7 @@ use chroma_types::SignedRoaringBitmap;
 use thiserror::Error;
 use tonic::async_trait;
 
-use crate::execution::{operator::Operator, utils::Distance};
+use crate::execution::{operator::Operator, utils::RecordDistance};
 
 use super::{
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
@@ -13,13 +13,12 @@ use super::{
 #[derive(Debug)]
 struct KnnHnswInput {
     segments: FetchSegmentOutput,
-    compact_oids: SignedRoaringBitmap,
+    compact_offset_ids: SignedRoaringBitmap,
 }
 
 #[derive(Debug)]
 pub struct KnnHnswOutput {
-    pub segments: FetchSegmentOutput,
-    pub distances: Vec<Distance>,
+    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -44,36 +43,35 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
     type Error = KnnHnswError;
 
     async fn run(&self, input: &KnnHnswInput) -> Result<KnnHnswOutput, KnnHnswError> {
-        let (allowed, disallowed) = match &input.compact_oids {
+        let (allowed, disallowed) = match &input.compact_offset_ids {
             SignedRoaringBitmap::Include(rbm) if rbm.is_empty() => {
                 return Ok(KnnHnswOutput {
-                    segments: input.segments.clone(),
-                    distances: Vec::new(),
+                    record_distances: Vec::new(),
                 })
             }
-            SignedRoaringBitmap::Include(rbm) => {
-                (rbm.iter().map(|oid| oid as usize).collect(), Vec::new())
-            }
-            SignedRoaringBitmap::Exclude(rbm) => {
-                (Vec::new(), rbm.iter().map(|oid| oid as usize).collect())
-            }
+            SignedRoaringBitmap::Include(rbm) => (
+                rbm.iter().map(|offset_id| offset_id as usize).collect(),
+                Vec::new(),
+            ),
+            SignedRoaringBitmap::Exclude(rbm) => (
+                Vec::new(),
+                rbm.iter().map(|offset_id| offset_id as usize).collect(),
+            ),
         };
 
-        let distances = match input.segments.knn_segment_reader().await? {
+        let record_distances = match input.segments.knn_segment_reader().await? {
             Some(reader) => {
-                let (oids, distances) =
+                let (offset_ids, distances) =
                     reader.query(&self.embedding, self.fetch as usize, &allowed, &disallowed)?;
-                oids.into_iter()
-                    .map(|oid| oid as u32)
+                offset_ids
+                    .into_iter()
+                    .map(|offset_id| offset_id as u32)
                     .zip(distances)
-                    .map(|(oid, measure)| Distance { oid, measure })
+                    .map(|(offset_id, measure)| RecordDistance { offset_id, measure })
                     .collect()
             }
             None => Vec::new(),
         };
-        Ok(KnnHnswOutput {
-            segments: input.segments.clone(),
-            distances,
-        })
+        Ok(KnnHnswOutput { record_distances })
     }
 }

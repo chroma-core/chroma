@@ -1,26 +1,26 @@
 use std::cmp::Ordering;
 
 #[derive(Clone, Debug)]
-pub struct Distance {
-    pub oid: u32,
+pub struct RecordDistance {
+    pub offset_id: u32,
     pub measure: f32,
 }
 
-impl PartialEq for Distance {
+impl PartialEq for RecordDistance {
     fn eq(&self, other: &Self) -> bool {
         self.measure.eq(&other.measure)
     }
 }
 
-impl Eq for Distance {}
+impl Eq for RecordDistance {}
 
-impl Ord for Distance {
+impl Ord for RecordDistance {
     fn cmp(&self, other: &Self) -> Ordering {
         self.measure.total_cmp(&other.measure)
     }
 }
 
-impl PartialOrd for Distance {
+impl PartialOrd for RecordDistance {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }

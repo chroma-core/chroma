@@ -9,7 +9,7 @@ use tonic::async_trait;
 use crate::{
     execution::{
         operator::Operator,
-        utils::{normalize, Distance},
+        utils::{normalize, RecordDistance},
     },
     segment::{LogMaterializer, LogMaterializerError},
 };
@@ -24,13 +24,12 @@ use super::{
 struct KnnLogInput {
     logs: FetchLogOutput,
     segments: FetchSegmentOutput,
-    log_oids: SignedRoaringBitmap,
+    log_offset_ids: SignedRoaringBitmap,
 }
 
 #[derive(Debug)]
 pub struct KnnLogOutput {
-    pub logs: FetchLogOutput,
-    pub distances: Vec<Distance>,
+    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -74,13 +73,13 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
             &self.embedding
         };
 
-        let mut heap = BinaryHeap::with_capacity(self.fetch as usize);
+        let mut max_heap = BinaryHeap::with_capacity(self.fetch as usize);
 
         for (log, _) in logs.iter() {
             if !matches!(
                 log.final_operation,
                 MaterializedLogOperation::DeleteExisting
-            ) && match &input.log_oids {
+            ) && match &input.log_offset_ids {
                 SignedRoaringBitmap::Include(rbm) => rbm.contains(log.offset_id),
                 SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(log.offset_id),
             } {
@@ -92,23 +91,22 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
                     log.merged_embeddings()
                 };
 
-                let distance = Distance {
-                    oid: log.offset_id,
+                let distance = RecordDistance {
+                    offset_id: log.offset_id,
                     measure: metric.distance(target_embedding, log_embedding),
                 };
-                if heap.len() < self.fetch as usize {
-                    heap.push(distance);
-                } else if let Some(far) = heap.peek() {
-                    if &distance < far {
-                        heap.pop();
-                        heap.push(distance);
+                if max_heap.len() < self.fetch as usize {
+                    max_heap.push(distance);
+                } else if let Some(furthest_distance) = max_heap.peek() {
+                    if &distance < furthest_distance {
+                        max_heap.pop();
+                        max_heap.push(distance);
                     }
                 }
             }
         }
         Ok(KnnLogOutput {
-            logs: input.logs.clone(),
-            distances: heap.into_sorted_vec(),
+            record_distances: max_heap.into_sorted_vec(),
         })
     }
 }
