@@ -201,9 +201,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(
-                    NgramTokenizer::new(3, 3, false).unwrap(),
-                ));
+                let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,
@@ -214,9 +212,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             _ => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
 
-        let full_text_writer_tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(3, 3, false).unwrap(),
-        ));
+        let full_text_writer_tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
         let full_text_index_writer = FullTextIndexWriter::new(
             full_text_index_reader,
             pls_writer,
@@ -597,6 +593,35 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         records: Chunk<MaterializedLogRecord<'log_records>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         let mut count = 0u64;
+        let full_text_writer_batch = records
+            .iter()
+            .filter_map(|record| {
+                let offset_id = record.0.offset_id;
+                let old_document = record.0.data_record.as_ref().and_then(|r| r.document);
+                let new_document = record.0.final_document;
+
+                if matches!(
+                    record.0.final_operation,
+                    MaterializedLogOperation::UpdateExisting
+                ) && new_document.is_none()
+                {
+                    return None;
+                }
+
+                if old_document.is_none() && new_document.is_none() {
+                    return None;
+                }
+
+                Some((offset_id, old_document, new_document))
+            })
+            .collect::<Vec<_>>();
+
+        self.full_text_index_writer
+            .as_ref()
+            .unwrap()
+            .handle_batch(&full_text_writer_batch)
+            .unwrap(); // todo
+
         for record in records.iter() {
             count += 1;
             let segment_offset_id = record.0.offset_id;
@@ -614,18 +639,18 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 }
                             }
                         }
-                    if let Some(document) = &record.0.final_document {
-                        match &self.full_text_index_writer {
-                            Some(writer) => {
-                                let _ = writer
-                                    .add_document(document, segment_offset_id)
-                                    .await;
-                            }
-                            None => panic!(
-                                "Invariant violation. Expected full text index writer to be set"
-                            ),
-                        }
-                    }
+                    // if let Some(document) = &record.0.final_document {
+                    //     match &self.full_text_index_writer {
+                    //         Some(writer) => {
+                    //             let _ = writer
+                    //                 .add_document(document, segment_offset_id)
+                    //                 .await;
+                    //         }
+                    //         None => panic!(
+                    //             "Invariant violation. Expected full text index writer to be set"
+                    //         ),
+                    //     }
+                    // }
                 }
                 MaterializedLogOperation::DeleteExisting => match &record.0.data_record {
                     Some(data_record) => {
@@ -642,26 +667,26 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                     }
                                 }
                             }
-                        if let Some(document) = &data_record.document {
-                            match &self.full_text_index_writer {
-                                Some(writer) => {
-                                    let err =
-                                        writer.delete_document(document, segment_offset_id).await;
-                                    match err {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            tracing::error!("Error deleting document {:?}", e);
-                                            return Err(
-                                                ApplyMaterializedLogError::FTSDocumentDelete,
-                                            );
-                                        }
-                                    }
-                                }
-                                None => {
-                                    panic!("Invariant violation. FTS index writer should be set")
-                                }
-                            }
-                        }
+                        // if let Some(document) = &data_record.document {
+                        //     match &self.full_text_index_writer {
+                        //         Some(writer) => {
+                        //             let err =
+                        //                 writer.delete_document(document, segment_offset_id).await;
+                        //             match err {
+                        //                 Ok(_) => {}
+                        //                 Err(e) => {
+                        //                     tracing::error!("Error deleting document {:?}", e);
+                        //                     return Err(
+                        //                         ApplyMaterializedLogError::FTSDocumentDelete,
+                        //                     );
+                        //                 }
+                        //             }
+                        //         }
+                        //         None => {
+                        //             panic!("Invariant violation. FTS index writer should be set")
+                        //         }
+                        //     }
+                        // }
                     }
                     None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                 },
@@ -704,49 +729,49 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         }
                     }
                     // Update the document if present.
-                    if let Some(doc) = record.0.final_document {
-                        match &self.full_text_index_writer {
-                            Some(writer) => match &record.0.data_record {
-                                Some(record) => match record.document {
-                                    Some(old_doc) => {
-                                        match writer
-                                            .update_document(old_doc, doc, segment_offset_id)
-                                            .await
-                                        {
-                                            Ok(_) => {}
-                                            Err(e) => {
-                                                tracing::error!(
-                                                    "FTS Update document failed {:?}",
-                                                    e
-                                                );
-                                                return Err(
-                                                    ApplyMaterializedLogError::FTSDocumentUpdate,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    // Previous version of record does not contain document string.
-                                    None => match writer
-                                        .add_document(doc, segment_offset_id)
-                                        .await
-                                    {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            tracing::error!(
-                                                "Add document for an update failed {:?}",
-                                                e
-                                            );
-                                            return Err(
-                                                ApplyMaterializedLogError::FTSDocumentAdd,
-                                            );
-                                        }
-                                    },
-                                },
-                                None => panic!("Invariant violation. Record should be set by materializer for an update")
-                            },
-                            None => panic!("Invariant violation. FTS index writer should be set"),
-                        }
-                    }
+                    // if let Some(doc) = record.0.final_document {
+                    //     match &self.full_text_index_writer {
+                    //         Some(writer) => match &record.0.data_record {
+                    //             Some(record) => match record.document {
+                    //                 Some(old_doc) => {
+                    //                     match writer
+                    //                         .update_document(old_doc, doc, segment_offset_id)
+                    //                         .await
+                    //                     {
+                    //                         Ok(_) => {}
+                    //                         Err(e) => {
+                    //                             tracing::error!(
+                    //                                 "FTS Update document failed {:?}",
+                    //                                 e
+                    //                             );
+                    //                             return Err(
+                    //                                 ApplyMaterializedLogError::FTSDocumentUpdate,
+                    //                             );
+                    //                         }
+                    //                     }
+                    //                 }
+                    //                 // Previous version of record does not contain document string.
+                    //                 None => match writer
+                    //                     .add_document(doc, segment_offset_id)
+                    //                     .await
+                    //                 {
+                    //                     Ok(_) => {}
+                    //                     Err(e) => {
+                    //                         tracing::error!(
+                    //                             "Add document for an update failed {:?}",
+                    //                             e
+                    //                         );
+                    //                         return Err(
+                    //                             ApplyMaterializedLogError::FTSDocumentAdd,
+                    //                         );
+                    //                     }
+                    //                 },
+                    //             },
+                    //             None => panic!("Invariant violation. Record should be set by materializer for an update")
+                    //         },
+                    //         None => panic!("Invariant violation. FTS index writer should be set"),
+                    //     }
+                    // }
                 }
                 MaterializedLogOperation::OverwriteExisting => {
                     // Delete existing.
@@ -765,26 +790,26 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                         }
                                     }
                                 }
-                            if let Some(document) = data_record.document {
-                                match &self.full_text_index_writer {
-                                    Some(writer) => {
-                                        let err =
-                                            writer.delete_document(document, segment_offset_id).await;
-                                        match err {
-                                            Ok(_) => {}
-                                            Err(e) => {
-                                                tracing::error!("Error deleting document {:?}", e);
-                                                return Err(
-                                                    ApplyMaterializedLogError::FTSDocumentDelete,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        panic!("Invariant violation. FTS index writer should be set")
-                                    }
-                                }
-                            }
+                            // if let Some(document) = data_record.document {
+                            //     match &self.full_text_index_writer {
+                            //         Some(writer) => {
+                            //             let err =
+                            //                 writer.delete_document(document, segment_offset_id).await;
+                            //             match err {
+                            //                 Ok(_) => {}
+                            //                 Err(e) => {
+                            //                     tracing::error!("Error deleting document {:?}", e);
+                            //                     return Err(
+                            //                         ApplyMaterializedLogError::FTSDocumentDelete,
+                            //                     );
+                            //                 }
+                            //             }
+                            //         }
+                            //         None => {
+                            //             panic!("Invariant violation. FTS index writer should be set")
+                            //         }
+                            //     }
+                            // }
                         },
                         None => panic!("Invariant violation. Data record should be set by materializer in case of Deletes")
                     };
@@ -799,18 +824,18 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                                 }
                             }
                         }
-                    if let Some(document) = &record.0.final_document {
-                        match &self.full_text_index_writer {
-                            Some(writer) => {
-                                let _ = writer
-                                    .add_document(document, segment_offset_id)
-                                    .await;
-                            }
-                            None => panic!(
-                                "Invariant violation. Expected full text index writer to be set"
-                            ),
-                        }
-                    }
+                    // if let Some(document) = &record.0.final_document {
+                    //     match &self.full_text_index_writer {
+                    //         Some(writer) => {
+                    //             let _ = writer
+                    //                 .add_document(document, segment_offset_id)
+                    //                 .await;
+                    //         }
+                    //         None => panic!(
+                    //             "Invariant violation. Expected full text index writer to be set"
+                    //         ),
+                    //     }
+                    // }
                 },
                 MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
@@ -1008,9 +1033,7 @@ impl MetadataSegmentReader<'_> {
         };
         let full_text_index_reader = match (pls_reader, freqs_reader) {
             (Some(pls_reader), Some(freqs_reader)) => {
-                let tokenizer = Box::new(TantivyChromaTokenizer::new(
-                    NgramTokenizer::new(3, 3, false).unwrap(),
-                ));
+                let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
                 Some(FullTextIndexReader::new(
                     pls_reader,
                     freqs_reader,
