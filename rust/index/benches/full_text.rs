@@ -40,9 +40,7 @@ async fn compact_log_and_get_reader<'a>(
     let postings_blockfile_id = postings_blockfile_writer.id();
     let frequencies_blockfile_id = frequencies_blockfile_writer.id();
 
-    let tokenizer = Box::new(TantivyChromaTokenizer::new(
-        NgramTokenizer::new(3, 3, false).unwrap(),
-    ));
+    let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
 
     let mut full_text_index_writer = FullTextIndexWriter::new(
         None,
@@ -71,9 +69,7 @@ async fn compact_log_and_get_reader<'a>(
         .await
         .unwrap();
 
-    let tokenizer = Box::new(TantivyChromaTokenizer::new(
-        NgramTokenizer::new(3, 3, false).unwrap(),
-    ));
+    let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
 
     Ok(FullTextIndexReader::new(
         postings_blockfile_reader,
