@@ -28,6 +28,7 @@ use uuid::Uuid;
 type BlockIdAndEndKey = (Uuid, Option<CompositeKey>);
 type CurrentDeltaAndEndKey = (OrderedBlockDelta, Option<CompositeKey>);
 
+#[derive(Default)]
 struct Inner {
     /// On construction, this contains all existing block IDs and the end of their key range ordered by end key (asc).
     /// As mutations are made, the writer pops from the front of this stack to determine which block to mutate.
@@ -128,9 +129,11 @@ impl ArrowOrderedBlockfileWriter {
     pub(crate) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
-        let mut inner = Arc::into_inner(self.inner)
-            .expect("There should be no other strong references to the completed block deltas")
-            .into_inner();
+        // let mut inner = Arc::into_inner(self.inner)
+        //     .expect("There should be no other strong references to the completed block deltas")
+        //     .into_inner();
+
+        let mut inner = std::mem::take(&mut *self.inner.lock().await);
 
         Self::complete_current_delta::<K, V>(&mut inner);
 
