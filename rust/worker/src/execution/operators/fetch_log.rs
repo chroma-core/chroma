@@ -130,7 +130,7 @@ mod tests {
 
         let fetch_log_operator = FetchLogOperator {
             log_client,
-            batch_size: 100,
+            batch_size: 2,
             start_log_offset_id: 0,
             maximum_fetch_count: None,
             collection_uuid,
@@ -154,7 +154,7 @@ mod tests {
 
         let fetch_log_operator = FetchLogOperator {
             log_client,
-            batch_size: 100,
+            batch_size: 2,
             start_log_offset_id: 3,
             maximum_fetch_count: Some(3),
             collection_uuid,

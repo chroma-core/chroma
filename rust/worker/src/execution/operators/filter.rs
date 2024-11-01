@@ -453,7 +453,8 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 #[cfg(test)]
 mod tests {
     use chroma_types::{
-        DirectWhereComparison, MetadataValue, PrimitiveOperator, SignedRoaringBitmap, Where,
+        BooleanOperator, DirectDocumentComparison, DirectWhereComparison, MetadataSetValue,
+        MetadataValue, PrimitiveOperator, SetOperator, SignedRoaringBitmap, Where, WhereChildren,
         WhereComparison,
     };
 
@@ -504,7 +505,7 @@ mod tests {
         assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::full());
         assert_eq!(
             filter_output.compact_offset_ids,
-            SignedRoaringBitmap::Exclude((11..=21).collect())
+            SignedRoaringBitmap::Exclude((11..=20).collect())
         );
     }
 
@@ -599,6 +600,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_simple_in() {
+        let filter_input = setup_filter_input().await;
+
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "is_even".to_string(),
+            comparison: WhereComparison::Set(
+                SetOperator::In,
+                MetadataSetValue::Bool(vec![false, true]),
+            ),
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include((51..=100).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((21..=50).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_nin() {
+        let filter_input = setup_filter_input().await;
+
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "modulo_3".to_string(),
+            comparison: WhereComparison::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![1, 2])),
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Exclude((51..=100).filter(|offset| offset % 3 != 0).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Exclude(
+                (21..=50)
+                    .filter(|offset| offset % 3 != 0)
+                    .chain(11..=20)
+                    .collect()
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn test_simple_gt() {
         let filter_input = setup_filter_input().await;
 
@@ -627,6 +694,210 @@ mod tests {
         assert_eq!(
             filter_output.compact_offset_ids,
             SignedRoaringBitmap::Include((37..=50).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_contains() {
+        let filter_input = setup_filter_input().await;
+
+        let where_clause = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+            operator: chroma_types::DocumentOperator::Contains,
+            document: "<cat>".to_string(),
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include((51..=100).filter(|offset| offset % 3 == 0).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((21..=50).filter(|offset| offset % 3 == 0).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_not_contains() {
+        let filter_input = setup_filter_input().await;
+
+        let where_clause = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+            operator: chroma_types::DocumentOperator::NotContains,
+            document: "<dog>".to_string(),
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Exclude((51..=100).filter(|offset| offset % 5 == 0).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Exclude(
+                (21..=50)
+                    .filter(|offset| offset % 5 == 0)
+                    .chain(11..=20)
+                    .collect()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_and() {
+        let filter_input = setup_filter_input().await;
+
+        let where_sub_clause_1 = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "id".to_string(),
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::GreaterThan,
+                MetadataValue::Int(36),
+            ),
+        });
+
+        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "is_even".to_string(),
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Bool(false),
+            ),
+        });
+
+        let where_clause = Where::WhereChildren(WhereChildren {
+            operator: BooleanOperator::And,
+            children: vec![where_sub_clause_1, where_sub_clause_2],
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include((51..=100).filter(|offset| offset % 2 == 1).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((37..=50).filter(|offset| offset % 2 == 1).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_or() {
+        let filter_input = setup_filter_input().await;
+
+        let where_sub_clause_1 = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "modulo_3".to_string(),
+            comparison: WhereComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(0)),
+        });
+
+        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "modulo_3".to_string(),
+            comparison: WhereComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(2)),
+        });
+
+        let where_clause = Where::WhereChildren(WhereChildren {
+            operator: BooleanOperator::Or,
+            children: vec![where_sub_clause_1, where_sub_clause_2],
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include((51..=100).filter(|offset| offset % 3 != 1).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((21..=50).filter(|offset| offset % 3 != 1).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_complex() {
+        let filter_input = setup_filter_input().await;
+
+        let where_sub_clause_1 = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+            operator: chroma_types::DocumentOperator::NotContains,
+            document: "<dog>".to_string(),
+        });
+
+        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "id".to_string(),
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::LessThan,
+                MetadataValue::Int(72),
+            ),
+        });
+
+        let where_sub_clause_3 = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "modulo_3".to_string(),
+            comparison: WhereComparison::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![0, 1])),
+        });
+
+        let where_clause = Where::WhereChildren(WhereChildren {
+            operator: BooleanOperator::And,
+            children: vec![
+                where_sub_clause_1,
+                Where::WhereChildren(WhereChildren {
+                    operator: BooleanOperator::Or,
+                    children: vec![where_sub_clause_2, where_sub_clause_3],
+                }),
+            ],
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: Some((0..96).map(int_as_id).collect()),
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include(
+                (51..96)
+                    .filter(|offset| offset % 5 != 0 && (offset < &72 || offset % 3 == 2))
+                    .collect()
+            )
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((21..=50).filter(|offset| offset % 5 != 0).collect())
         );
     }
 }
