@@ -93,7 +93,7 @@ class LocalSegmentManager(SegmentManager):
                 self._max_file_handles = ctypes.windll.msvcrt._getmaxstdio()  # type: ignore
             segment_limit = (
                 self._max_file_handles
-                // PersistentLocalHnswSegment.get_file_handle_count()
+                # PersistentLocalHnswSegment.get_file_handle_count()
             )
             self._vector_instances_file_handle_cache = LRUCache(
                 segment_limit, callback=lambda _, v: v.close_persistent_index()
