@@ -131,11 +131,11 @@ impl CompactionManager {
 
                 match orchestrator.run().await {
                     Ok(result) => {
-                        println!("Compaction Job completed");
+                        tracing::info!("Compaction Job completed: {:?}", result);
                         return Ok(result);
                     }
                     Err(e) => {
-                        println!("Compaction Job failed");
+                        tracing::error!("Compaction Job failed: {:?}", e);
                         return Err(e);
                     }
                 }
