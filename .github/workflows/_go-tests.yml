@@ -25,7 +25,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/go
       - name: Build and test
@@ -39,7 +39,7 @@ jobs:
     runs-on: "depot-ubuntu-22.04-16"
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/go
       - uses: ./.github/actions/tilt
