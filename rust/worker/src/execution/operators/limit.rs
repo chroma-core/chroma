@@ -118,6 +118,9 @@ impl<'me> SkipScanner<'me> {
     // The implementation is a binary search based on [`std::slice::binary_search_by`]
     //
     // [`std::slice::binary_search_by`]: https://github.com/rust-lang/rust/blob/705cfe0e966399e061d64dd3661bfbc57553ed87/library/core/src/slice/mod.rs#L2731-L2827
+    // Retrieval timestamp: Nov 1, 2024
+    // Source commit hash: a0215d8e46aab41219dea0bb1cbaaf97dafe2f89
+    // Source license: Apache-2.0 or MIT
     async fn skip_to_start(&self, skip: usize) -> Result<(usize, usize), LimitError> {
         if skip == 0 {
             return Ok((0, 0));
