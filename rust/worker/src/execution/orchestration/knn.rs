@@ -11,14 +11,14 @@ use crate::{
         operators::{
             fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
             fetch_segment::{FetchSegmentError, FetchSegmentOperator, FetchSegmentOutput},
-            filter::{FilterError, FilterInput, FilterOperator, FilterOutput, PreFilterState},
-            knn::KnnOperator,
+            filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
+            knn::{KnnOperator, RecordDistance},
             knn_hnsw::{KnnHnswError, KnnHnswInput, KnnHnswOutput},
             knn_log::{KnnLogError, KnnLogInput, KnnLogOutput},
-            knn_merge::{
-                KnnMergeError, KnnMergeInput, KnnMergeOperator, KnnMergeOutput, PreKnnMergeState,
+            knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOperator, KnnMergeOutput},
+            knn_projection::{
+                KnnProjectionError, KnnProjectionInput, KnnProjectionOperator, KnnProjectionOutput,
             },
-            knn_projection::{KnnProjectionError, KnnProjectionOperator, KnnProjectionOutput},
         },
         orchestration::common::terminate_with_error,
     },
@@ -78,7 +78,12 @@ where
     }
 }
 
-type KnnFilterOutput = FilterOutput;
+#[derive(Clone, Debug)]
+pub struct KnnFilterOutput {
+    pub logs: FetchLogOutput,
+    pub segments: FetchSegmentOutput,
+    pub filter_output: FilterOutput,
+}
 
 type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 
@@ -92,8 +97,9 @@ pub struct KnnFilterOrchestrator {
     fetch_log: FetchLogOperator,
     fetch_segment: FetchSegmentOperator,
 
-    // Pre-filter state
-    prefilter_state: PreFilterState,
+    // Fetch output
+    fetch_log_output: Option<FetchLogOutput>,
+    fetch_segment_output: Option<FetchSegmentOutput>,
 
     // Pipelined operators
     filter: FilterOperator,
@@ -115,7 +121,8 @@ impl KnnFilterOrchestrator {
             queue,
             fetch_log,
             fetch_segment,
-            prefilter_state: PreFilterState::default(),
+            fetch_log_output: None,
+            fetch_segment_output: None,
             filter,
             result_channel: None,
         }
@@ -137,6 +144,25 @@ impl KnnFilterOrchestrator {
         let knn_err = err.into();
         tracing::error!("Error running orchestrator: {}", &knn_err);
         terminate_with_error(self.result_channel.take(), knn_err, ctx);
+    }
+
+    async fn try_start_filter_operator(&mut self, ctx: &ComponentContext<Self>) {
+        if let (Some(logs), Some(segments)) = (
+            self.fetch_log_output.as_ref(),
+            self.fetch_segment_output.as_ref(),
+        ) {
+            let task = wrap(
+                Box::new(self.filter.clone()),
+                FilterInput {
+                    logs: logs.clone(),
+                    segments: segments.clone(),
+                },
+                ctx.receiver(),
+            );
+            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+                self.terminate_with_error(ctx, err);
+            }
+        }
     }
 }
 
@@ -181,14 +207,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
                 return;
             }
         };
-        self.prefilter_state.logs = Some(output);
-        let next_input = FilterInput::try_from(self.prefilter_state.clone());
-        if let Ok(input) = next_input {
-            let task = wrap(Box::new(self.filter.clone()), input, ctx.receiver());
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
-        }
+        self.fetch_log_output = Some(output);
+        self.try_start_filter_operator(ctx).await;
     }
 }
 
@@ -208,14 +228,8 @@ impl Handler<TaskResult<FetchSegmentOutput, FetchSegmentError>> for KnnFilterOrc
                 return;
             }
         };
-        self.prefilter_state.segments = Some(output);
-        let next_input = FilterInput::try_from(self.prefilter_state.clone());
-        if let Ok(input) = next_input {
-            let task = wrap(Box::new(self.filter.clone()), input, ctx.receiver());
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
-        }
+        self.fetch_segment_output = Some(output);
+        self.try_start_filter_operator(ctx).await;
     }
 }
 
@@ -236,7 +250,20 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             }
         };
         if let Some(chan) = self.result_channel.take() {
-            if chan.send(Ok(output)).is_err() {
+            if chan
+                .send(Ok(KnnFilterOutput {
+                    logs: self
+                        .fetch_log_output
+                        .take()
+                        .expect("FetchLogOperator should have finished already"),
+                    segments: self
+                        .fetch_segment_output
+                        .take()
+                        .expect("FetchSegmentOperator should have finished already"),
+                    filter_output: output,
+                }))
+                .is_err()
+            {
                 tracing::error!("Error sending final result");
             };
         }
@@ -258,8 +285,9 @@ pub struct KnnOrchestrator {
     // Knn operator shared between log and segments
     knn: KnnOperator,
 
-    // Partial merge input
-    preknnmerge_state: PreKnnMergeState,
+    // Knn output
+    knn_log_distances: Option<Vec<RecordDistance>>,
+    knn_segment_distances: Option<Vec<RecordDistance>>,
 
     // Merge and project
     merge: KnnMergeOperator,
@@ -283,11 +311,21 @@ impl KnnOrchestrator {
             queue,
             knn_filter_output,
             knn,
-            preknnmerge_state: PreKnnMergeState::default(),
+            knn_log_distances: None,
+            knn_segment_distances: None,
             merge: KnnMergeOperator { fetch },
             knn_projection,
             result_channel: None,
         }
+    }
+
+    pub async fn run(mut self, system: System) -> KnnResult {
+        let (tx, rx) = oneshot::channel();
+        self.result_channel = Some(tx);
+        let mut handle = system.start_component(self);
+        let result = rx.await;
+        handle.stop();
+        result?
     }
 
     fn terminate_with_error<E>(&mut self, ctx: &ComponentContext<Self>, err: E)
@@ -299,13 +337,23 @@ impl KnnOrchestrator {
         terminate_with_error(self.result_channel.take(), knn_err, ctx);
     }
 
-    pub async fn run(mut self, system: System) -> KnnResult {
-        let (tx, rx) = oneshot::channel();
-        self.result_channel = Some(tx);
-        let mut handle = system.start_component(self);
-        let result = rx.await;
-        handle.stop();
-        result?
+    async fn try_start_knn_merge_operator(&mut self, ctx: &ComponentContext<Self>) {
+        if let (Some(log_distances), Some(segment_distances)) = (
+            self.knn_log_distances.as_ref(),
+            self.knn_segment_distances.as_ref(),
+        ) {
+            let task = wrap(
+                Box::new(self.merge.clone()),
+                KnnMergeInput {
+                    log_distances: log_distances.clone(),
+                    segment_distances: segment_distances.clone(),
+                },
+                ctx.receiver(),
+            );
+            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+                self.terminate_with_error(ctx, err);
+            }
+        }
     }
 }
 
@@ -322,12 +370,23 @@ impl Component for KnnOrchestrator {
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         let knn_log_task = wrap(
             Box::new(self.knn.clone()),
-            KnnLogInput::from(self.knn_filter_output.clone()),
+            KnnLogInput {
+                logs: self.knn_filter_output.logs.clone(),
+                segments: self.knn_filter_output.segments.clone(),
+                log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+            },
             ctx.receiver(),
         );
         let knn_segment_task = wrap(
             Box::new(self.knn.clone()),
-            KnnHnswInput::from(self.knn_filter_output.clone()),
+            KnnHnswInput {
+                segments: self.knn_filter_output.segments.clone(),
+                compact_offset_ids: self
+                    .knn_filter_output
+                    .filter_output
+                    .compact_offset_ids
+                    .clone(),
+            },
             ctx.receiver(),
         );
         if let Err(err) = self
@@ -362,15 +421,8 @@ impl Handler<TaskResult<KnnLogOutput, KnnLogError>> for KnnOrchestrator {
                 return;
             }
         };
-        self.preknnmerge_state.logs = Some(output.logs);
-        self.preknnmerge_state.log_distance = Some(output.distances);
-        let next_input = KnnMergeInput::try_from(self.preknnmerge_state.clone());
-        if let Ok(input) = next_input {
-            let task = wrap(Box::new(self.merge.clone()), input, ctx.receiver());
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
-        }
+        self.knn_log_distances = Some(output.record_distances);
+        self.try_start_knn_merge_operator(ctx).await;
     }
 }
 
@@ -390,15 +442,8 @@ impl Handler<TaskResult<KnnHnswOutput, KnnHnswError>> for KnnOrchestrator {
                 return;
             }
         };
-        self.preknnmerge_state.segments = Some(output.segments);
-        self.preknnmerge_state.segment_distance = Some(output.distances);
-        let next_input = KnnMergeInput::try_from(self.preknnmerge_state.clone());
-        if let Ok(input) = next_input {
-            let task = wrap(Box::new(self.merge.clone()), input, ctx.receiver());
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
-        }
+        self.knn_segment_distances = Some(output.record_distances);
+        self.try_start_knn_merge_operator(ctx);
     }
 }
 
@@ -420,7 +465,11 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         };
         let task = wrap(
             Box::new(self.knn_projection.clone()),
-            output.into(),
+            KnnProjectionInput {
+                logs: self.knn_filter_output.logs.clone(),
+                segments: self.knn_filter_output.segments.clone(),
+                record_distances: output.record_distances,
+            },
             ctx.receiver(),
         );
         if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
