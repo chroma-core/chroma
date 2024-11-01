@@ -594,8 +594,8 @@ def validate_where(where: Where) -> None:
     """
     if not isinstance(where, dict):
         raise ValueError(f"Expected where to be a dict, got {where}")
-    if len(where) != 1:
-        raise ValueError(f"Expected where to have exactly one operator, got {where}")
+    if len(where) > 1:
+        raise ValueError(f"Expected where to have at most one operator, got {where}")
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")

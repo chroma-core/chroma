@@ -142,9 +142,9 @@ class GrpcMetadataSegment(MetadataReader):
         response = pb.Where()
         if where is None:
             return response
-        if len(where) != 1:
+        if len(where) > 1:
             raise ValueError(
-                f"Expected where to have exactly one operator, got {where}"
+                f"Expected where to have at most one operator, got {where}"
             )
 
         for key, value in where.items():
