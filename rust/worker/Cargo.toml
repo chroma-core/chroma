@@ -50,7 +50,6 @@ prost-types = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
 tantivy = { workspace = true }
-indicatif = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-error = { workspace = true }

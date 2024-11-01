@@ -23,7 +23,7 @@ pub struct LimitOperator {
     pub fetch: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LimitInput {
     pub logs: FetchLogOutput,
     pub segments: FetchSegmentOutput,

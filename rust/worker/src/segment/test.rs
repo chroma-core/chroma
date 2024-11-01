@@ -6,7 +6,6 @@ use chroma_types::{
     test_segment, Chunk, Collection, CollectionUuid, LogRecord, OperationRecord, Segment,
     SegmentScope,
 };
-use indicatif::ProgressIterator;
 
 use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
 
@@ -76,7 +75,7 @@ impl TestSegment {
         G: Fn(usize) -> OperationRecord,
     {
         let ids: Vec<_> = (1..=size).collect();
-        for chunk in ids.chunks(100).progress() {
+        for chunk in ids.chunks(100) {
             self.compact_log(
                 generator.generate_chunk(chunk.iter().copied()),
                 chunk
@@ -105,7 +104,7 @@ impl Default for TestSegment {
         };
         Self {
             hnsw: test_hnsw_index_provider(),
-            blockfile: test_arrow_blockfile_provider(),
+            blockfile: test_arrow_blockfile_provider(2 << 22),
             knn: test_segment(collection_uuid, SegmentScope::VECTOR),
             metadata: test_segment(collection_uuid, SegmentScope::METADATA),
             record: test_segment(collection_uuid, SegmentScope::RECORD),

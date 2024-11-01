@@ -3,11 +3,12 @@ use chroma_types::{Chunk, SignedRoaringBitmap};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
+use worker::execution::operators::fetch_segment::FetchSegmentOutput;
 use worker::execution::operators::limit::{LimitInput, LimitOperator};
 use worker::log::test::{upsert_generator, LogGenerator};
 use worker::segment::test::TestSegment;
 
-const LIMIT: usize = 100;
+const FETCH: usize = 100;
 
 fn bench_limit(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
@@ -15,18 +16,39 @@ fn bench_limit(criterion: &mut Criterion) {
         generator: upsert_generator,
     };
 
-    let routine = |_limit_input| async move {
-        // TODO: Run limit operator
-    };
-
     for record_count in [1000, 10000, 100000] {
-        let mut compact = TestSegment::default();
-        runtime.block_on(async { compact.populate_with_generator(record_count, &logen).await });
+        let test_segment = runtime.block_on(async {
+            let mut segment = TestSegment::default();
+            segment.populate_with_generator(record_count, &logen).await;
+            segment
+        });
 
-        for offset in [0, record_count / 2, record_count - LIMIT] {
-            let setup = || {
-                // TODO: Construct limit input
+        let limit_input = LimitInput {
+            logs: Chunk::new(Vec::new().into()),
+            segments: FetchSegmentOutput {
+                hnsw: test_segment.hnsw,
+                blockfile: test_segment.blockfile,
+                knn: test_segment.knn,
+                metadata: test_segment.metadata,
+                record: test_segment.record,
+                collection: test_segment.collection,
+            },
+            log_offset_ids: SignedRoaringBitmap::empty(),
+            compact_offset_ids: SignedRoaringBitmap::full(),
+        };
+
+        for offset in [0, record_count / 2, record_count - FETCH] {
+            let limit_operator = LimitOperator {
+                skip: offset as u32,
+                fetch: Some(FETCH as u32),
             };
+
+            let routine = |(op, input): (LimitOperator, LimitInput)| async move {
+                op.run(&input).await.expect("LimitOperator should not fail");
+            };
+
+            let setup = || (limit_operator.clone(), limit_input.clone());
+
             bench_run(
                 format!("limit-{}-{}", record_count, offset).as_str(),
                 criterion,

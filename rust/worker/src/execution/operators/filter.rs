@@ -34,7 +34,7 @@ pub struct FilterOperator {
     pub where_clause: Option<Where>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FilterInput {
     pub logs: FetchLogOutput,
     pub segments: FetchSegmentOutput,

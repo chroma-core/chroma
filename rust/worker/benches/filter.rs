@@ -8,6 +8,7 @@ use chroma_types::{
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
+use worker::execution::operators::fetch_segment::FetchSegmentOutput;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
 use worker::log::test::{upsert_generator, LogGenerator};
 use worker::segment::test::TestSegment;
@@ -75,20 +76,41 @@ fn bench_filter(criterion: &mut Criterion) {
         generator: upsert_generator,
     };
 
-    let routine = |_filter_input| async move {
-        // TODO: Run filter operator
-    };
-
     for record_count in [1000, 10000, 100000] {
-        let mut compact = TestSegment::default();
-        runtime.block_on(async { compact.populate_with_generator(record_count, &logen).await });
+        let test_segment = runtime.block_on(async {
+            let mut segment = TestSegment::default();
+            segment.populate_with_generator(record_count, &logen).await;
+            segment
+        });
 
-        for (op, _where_clause) in baseline_where_clauses() {
-            let setup = || {
-                // TODO: Construct filter input
+        let filter_input = FilterInput {
+            logs: Chunk::new(Vec::new().into()),
+            segments: FetchSegmentOutput {
+                hnsw: test_segment.hnsw,
+                blockfile: test_segment.blockfile,
+                knn: test_segment.knn,
+                metadata: test_segment.metadata,
+                record: test_segment.record,
+                collection: test_segment.collection,
+            },
+        };
+
+        for (op, where_clause) in baseline_where_clauses() {
+            let filter_operator = FilterOperator {
+                query_ids: None,
+                where_clause: where_clause.clone(),
             };
+
+            let routine = |(op, input): (FilterOperator, FilterInput)| async move {
+                op.run(&input)
+                    .await
+                    .expect("FilterOperator should not fail");
+            };
+
+            let setup = || (filter_operator.clone(), filter_input.clone());
+
             bench_run(
-                format!("metadata-filtering-{}-{}", record_count, op).as_str(),
+                format!("filter-{}-{}", record_count, op).as_str(),
                 criterion,
                 &runtime,
                 setup,
