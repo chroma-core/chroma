@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Callable, TypeVar, Any, Dict
+from typing import Callable, TypeVar, Any
 from chromadb.config import Component, System
 
 T = TypeVar("T", bound=Callable[..., Any])
@@ -13,14 +13,6 @@ class QuotaProvider(Component):
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
-    @property
-    @abstractmethod
-    def quota_rules(self) -> Dict[str, int]:
-        """
-        A dictionary mapping a quota rule to its integer value.
-        """
-        pass
-
 
 class QuotaEnforcer(Component):
     """
@@ -32,7 +24,7 @@ class QuotaEnforcer(Component):
         super().__init__(system)
 
     @abstractmethod
-    def enforce(self) -> None:
+    def enforce(self, tenant: str, action: str) -> None:
         """
         Enforces general quota rules.
         """
