@@ -263,7 +263,7 @@ impl BlockManager {
                     .storage
                     .get(&key)
                     .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get {id}"),
+                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
                     )
                     .await;
                 match bytes_res {
@@ -303,7 +303,7 @@ impl BlockManager {
                         Err(GetError::StorageGetError(e))
                     }
                 }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold")).await
+            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
         }
     }
 
