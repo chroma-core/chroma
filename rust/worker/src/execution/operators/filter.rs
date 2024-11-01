@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_trivial() {
+    async fn test_trivial_filter() {
         let filter_input = setup_filter_input().await;
 
         let filter_operator = FilterOperator {
@@ -510,7 +510,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_user_allowed_ids() {
+    async fn test_simple_user_allowed_ids() {
         let filter_input = setup_filter_input().await;
 
         let filter_operator = FilterOperator {
@@ -845,7 +845,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_complex() {
+    async fn test_complex_filter() {
         let filter_input = setup_filter_input().await;
 
         let where_sub_clause_1 = Where::DirectWhereDocumentComparison(DirectDocumentComparison {

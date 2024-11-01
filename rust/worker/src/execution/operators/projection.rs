@@ -136,3 +136,85 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
         Ok(ProjectionOutput { records })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        execution::{
+            operator::Operator,
+            operators::{fetch_segment::FetchSegmentOutput, projection::ProjectionOperator},
+        },
+        log::test::{int_as_id, upsert_generator, LogGenerator},
+        segment::test::TestSegment,
+    };
+
+    use super::ProjectionInput;
+
+    async fn setup_projection_input(offset_ids: Vec<u32>) -> ProjectionInput {
+        let mut test_segment = TestSegment::default();
+        let generator = LogGenerator {
+            generator: upsert_generator,
+        };
+        test_segment.populate_with_generator(100, &generator).await;
+        ProjectionInput {
+            logs: generator.generate_chunk(81..=120),
+            segments: FetchSegmentOutput {
+                hnsw: test_segment.hnsw,
+                blockfile: test_segment.blockfile,
+                knn: test_segment.knn,
+                metadata: test_segment.metadata,
+                record: test_segment.record,
+                collection: test_segment.collection,
+            },
+            offset_ids,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_trivial_projection() {
+        let projection_input = setup_projection_input((1..=120).collect()).await;
+
+        let projection_operator = ProjectionOperator {
+            document: false,
+            embedding: false,
+            metadata: false,
+        };
+
+        let projection_output = projection_operator
+            .run(&projection_input)
+            .await
+            .expect("ProjectionOperator should not fail");
+
+        assert_eq!(projection_output.records.len(), 120);
+        for (offset, record) in projection_output.records.into_iter().enumerate() {
+            assert_eq!(record.id, int_as_id(offset + 1));
+            assert!(record.document.is_none());
+            assert!(record.embedding.is_none());
+            assert!(record.metadata.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_full_projection() {
+        let projection_input = setup_projection_input((1..=120).collect()).await;
+
+        let projection_operator = ProjectionOperator {
+            document: true,
+            embedding: true,
+            metadata: true,
+        };
+
+        let projection_output = projection_operator
+            .run(&projection_input)
+            .await
+            .expect("ProjectionOperator should not fail");
+
+        assert_eq!(projection_output.records.len(), 120);
+        for (offset, record) in projection_output.records.into_iter().enumerate() {
+            assert_eq!(record.id, int_as_id(offset + 1));
+            assert!(record.document.is_some());
+            assert!(record.embedding.is_some());
+            assert!(record.metadata.is_some());
+        }
+    }
+}

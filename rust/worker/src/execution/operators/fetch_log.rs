@@ -98,7 +98,7 @@ mod tests {
         execution::{operator::Operator, operators::fetch_log::FetchLogOperator},
         log::{
             log::{InMemoryLog, InternalLogRecord},
-            test::{add_generator, LogGenerator},
+            test::{upsert_generator, LogGenerator},
         },
     };
 
@@ -108,7 +108,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let mut in_memory_log = InMemoryLog::new();
         let generator = LogGenerator {
-            generator: add_generator,
+            generator: upsert_generator,
         };
         generator.generate_vec(0..10).into_iter().for_each(|log| {
             in_memory_log.add_log(

@@ -9,7 +9,7 @@ use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
-use worker::log::test::{add_generator, LogGenerator};
+use worker::log::test::{upsert_generator, LogGenerator};
 use worker::segment::test::TestSegment;
 
 fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
@@ -72,7 +72,7 @@ fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
 fn bench_filter(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
     let logen = LogGenerator {
-        generator: add_generator,
+        generator: upsert_generator,
     };
 
     let routine = |_filter_input| async move {

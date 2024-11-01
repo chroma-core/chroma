@@ -56,15 +56,15 @@ impl ChromaError for LimitError {
     }
 }
 
-// This struct aims to help scanning a number of elements from a fixed offset in the imaginary
-// segment where the log is compacted and the element in the mask is ignored.
-struct SkipScanner<'me> {
+// This struct aims to help scanning a number of elements starting from a given offset
+// in the imaginarysegment where the log is compacted and the element in the mask is ignored
+struct SeekScanner<'me> {
     log_offset_ids: &'me RoaringBitmap,
     record_segment: &'me RecordSegmentReader<'me>,
     mask: &'me RoaringBitmap,
 }
 
-impl<'me> SkipScanner<'me> {
+impl<'me> SeekScanner<'me> {
     // Find the rank of the target offset id in the imaginary segment
     //
     // The rank of a target is the number of elements strictly less than it
@@ -82,16 +82,17 @@ impl<'me> SkipScanner<'me> {
         Ok(log_rank + record_rank - mask_rank)
     }
 
-    // Seek the starting index in log and record segment given the number of elements to skip
+    // Seek the starting offset given the number of elements to skip
+    // There should be exactly skip elements before the starting offset in the maginary segment
     // The implementation is a binary search based on [`std::slice::binary_search_by`]
     //
     // [`std::slice::binary_search_by`]: https://github.com/rust-lang/rust/blob/705cfe0e966399e061d64dd3661bfbc57553ed87/library/core/src/slice/mod.rs#L2731-L2827
     // Retrieval timestamp: Nov 1, 2024
     // Source commit hash: a0215d8e46aab41219dea0bb1cbaaf97dafe2f89
     // Source license: Apache-2.0 or MIT
-    async fn seek_starting_index(&self, skip: usize) -> Result<(usize, usize), LimitError> {
+    async fn seek_starting_offset(&self, skip: usize) -> Result<u32, LimitError> {
         if skip == 0 {
-            return Ok((0, 0));
+            return Ok(0);
         }
 
         let mut size = self
@@ -100,7 +101,7 @@ impl<'me> SkipScanner<'me> {
             .load(atomic::Ordering::Relaxed)
             .max(self.log_offset_ids.max().unwrap_or(0));
         if size == 0 {
-            return Ok((0, 0));
+            return Ok(0);
         }
 
         let mut base = 0;
@@ -113,10 +114,7 @@ impl<'me> SkipScanner<'me> {
             size -= half;
         }
 
-        Ok((
-            self.log_offset_ids.rank(base) as usize - self.log_offset_ids.contains(base) as usize,
-            self.record_segment.get_offset_id_rank(base).await?,
-        ))
+        Ok(base)
     }
 
     // Seek the start in the log and record segment, then scan for the specified number of offset ids
@@ -126,7 +124,13 @@ impl<'me> SkipScanner<'me> {
         mut fetch: usize,
     ) -> Result<RoaringBitmap, LimitError> {
         let record_count = self.record_segment.count().await?;
-        let (mut log_index, mut record_index) = self.seek_starting_index(skip).await?;
+        let starting_offset = self.seek_starting_offset(skip).await?;
+        let mut log_index = self.log_offset_ids.rank(starting_offset) as usize
+            - self.log_offset_ids.contains(starting_offset) as usize;
+        let mut record_index = self
+            .record_segment
+            .get_offset_id_rank(starting_offset)
+            .await?;
         let mut merged_result = Vec::new();
 
         while fetch > 0 {
@@ -158,7 +162,7 @@ impl<'me> SkipScanner<'me> {
                     merged_result.push(oid);
                     log_index += 1;
                 }
-                _ => {}
+                _ => break,
             };
             fetch -= 1;
         }
@@ -205,12 +209,15 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         // Materialize all filtered offset ids with the compact segment
         let materialized_offset_ids = match &input.compact_offset_ids {
             SignedRoaringBitmap::Include(rbm) => {
-                let mut merged_oids = materialized_log_offset_ids | rbm;
-                merged_oids.remove_smallest(self.skip as u64);
+                let mut merged_offset_ids = materialized_log_offset_ids | rbm;
+                merged_offset_ids.remove_smallest(self.skip as u64);
                 if let Some(take_count) = self.fetch {
-                    merged_oids.into_iter().take(take_count as usize).collect()
+                    merged_offset_ids
+                        .into_iter()
+                        .take(take_count as usize)
+                        .collect()
                 } else {
-                    merged_oids
+                    merged_offset_ids
                 }
             }
             SignedRoaringBitmap::Exclude(rbm) => {
@@ -222,12 +229,12 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                     let truncated_fetch = (self.fetch.unwrap_or(u32::MAX) as usize)
                         .min(filter_match_count - truncated_skip);
 
-                    let skip_scanner = SkipScanner {
+                    let seek_scanner = SeekScanner {
                         log_offset_ids: &materialized_log_offset_ids,
                         record_segment: &reader,
                         mask: rbm,
                     };
-                    skip_scanner
+                    seek_scanner
                         .seek_and_scan(truncated_skip, truncated_fetch)
                         .await?
                 } else {
@@ -247,5 +254,157 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         Ok(LimitOutput {
             offset_ids: materialized_offset_ids,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chroma_types::SignedRoaringBitmap;
+    use roaring::RoaringBitmap;
+
+    use crate::{
+        execution::{
+            operator::Operator,
+            operators::{fetch_segment::FetchSegmentOutput, limit::LimitOperator},
+        },
+        log::test::{upsert_generator, LogGenerator},
+        segment::test::TestSegment,
+    };
+
+    use super::LimitInput;
+
+    async fn setup_limit_input(
+        log_offset_ids: SignedRoaringBitmap,
+        compact_offset_ids: SignedRoaringBitmap,
+    ) -> LimitInput {
+        let mut test_segment = TestSegment::default();
+        let generator = LogGenerator {
+            generator: upsert_generator,
+        };
+        test_segment.populate_with_generator(100, &generator).await;
+        LimitInput {
+            logs: generator.generate_chunk(31..=60),
+            segments: FetchSegmentOutput {
+                hnsw: test_segment.hnsw,
+                blockfile: test_segment.blockfile,
+                knn: test_segment.knn,
+                metadata: test_segment.metadata,
+                record: test_segment.record,
+                collection: test_segment.collection,
+            },
+            log_offset_ids,
+            compact_offset_ids,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_trivial_limit() {
+        let limit_input = setup_limit_input(
+            SignedRoaringBitmap::full(),
+            SignedRoaringBitmap::Exclude((31..=60).collect()),
+        )
+        .await;
+
+        let limit_operator = LimitOperator {
+            skip: 0,
+            fetch: None,
+        };
+
+        let limit_output = limit_operator
+            .run(&limit_input)
+            .await
+            .expect("LimitOperator should not fail");
+
+        assert_eq!(limit_output.offset_ids, (1..=100).collect());
+    }
+
+    #[tokio::test]
+    async fn test_overskip() {
+        let limit_input = setup_limit_input(
+            SignedRoaringBitmap::full(),
+            SignedRoaringBitmap::Exclude((31..=60).collect()),
+        )
+        .await;
+
+        let limit_operator = LimitOperator {
+            skip: 100,
+            fetch: None,
+        };
+
+        let limit_output = limit_operator
+            .run(&limit_input)
+            .await
+            .expect("LimitOperator should not fail");
+
+        assert_eq!(limit_output.offset_ids, RoaringBitmap::new());
+    }
+
+    #[tokio::test]
+    async fn test_overfetch() {
+        let limit_input = setup_limit_input(
+            SignedRoaringBitmap::full(),
+            SignedRoaringBitmap::Exclude((31..=60).collect()),
+        )
+        .await;
+
+        let limit_operator = LimitOperator {
+            skip: 0,
+            fetch: Some(1000),
+        };
+
+        let limit_output = limit_operator
+            .run(&limit_input)
+            .await
+            .expect("LimitOperator should not fail");
+
+        assert_eq!(limit_output.offset_ids, (1..=100).collect());
+    }
+
+    #[tokio::test]
+    async fn test_simple_range() {
+        let limit_input = setup_limit_input(
+            SignedRoaringBitmap::full(),
+            SignedRoaringBitmap::Exclude((31..=60).collect()),
+        )
+        .await;
+
+        let limit_operator = LimitOperator {
+            skip: 60,
+            fetch: Some(30),
+        };
+
+        let limit_output = limit_operator
+            .run(&limit_input)
+            .await
+            .expect("LimitOperator should not fail");
+
+        assert_eq!(limit_output.offset_ids, (61..=90).collect());
+    }
+
+    #[tokio::test]
+    async fn test_complex_limit() {
+        let limit_input = setup_limit_input(
+            SignedRoaringBitmap::Include((31..=60).filter(|offset| offset % 2 == 0).collect()),
+            SignedRoaringBitmap::Exclude((21..=80).collect()),
+        )
+        .await;
+
+        let limit_operator = LimitOperator {
+            skip: 30,
+            fetch: Some(20),
+        };
+
+        let limit_output = limit_operator
+            .run(&limit_input)
+            .await
+            .expect("LimitOperator should not fail");
+
+        assert_eq!(
+            limit_output.offset_ids,
+            (51..=60)
+                .filter(|offset| offset % 2 == 0)
+                .chain(81..=95)
+                .collect()
+        );
     }
 }

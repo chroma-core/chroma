@@ -77,14 +77,14 @@ pub fn modulo_document(value: usize) -> String {
     format!("{cat}{dog}")
 }
 
-pub fn add_generator(offset: usize) -> OperationRecord {
+pub fn upsert_generator(offset: usize) -> OperationRecord {
     OperationRecord {
         id: int_as_id(offset),
         embedding: Some(random_embedding(TEST_EMBEDDING_DIMENSION)),
         encoding: None,
         metadata: Some(modulo_metadata(offset)),
         document: Some(random_document(6)),
-        operation: Operation::Add,
+        operation: Operation::Upsert,
     }
 }
 
