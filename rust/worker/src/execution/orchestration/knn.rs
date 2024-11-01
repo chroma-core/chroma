@@ -443,7 +443,7 @@ impl Handler<TaskResult<KnnHnswOutput, KnnHnswError>> for KnnOrchestrator {
             }
         };
         self.knn_segment_distances = Some(output.record_distances);
-        self.try_start_knn_merge_operator(ctx);
+        self.try_start_knn_merge_operator(ctx).await;
     }
 }
 
