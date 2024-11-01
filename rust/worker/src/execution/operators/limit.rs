@@ -94,6 +94,11 @@ struct SkipScanner<'me> {
 
 impl<'me> SkipScanner<'me> {
     // Find the rank of the target offset id in the imaginary segment
+    //
+    // The rank of a target is the number of elements strictly less than it
+    //
+    // Alternatively, it's the index in the imaginary segment that it can be
+    // inserted into while maintaining the order of the imaginary segment
     async fn joint_rank(&self, target: u32) -> Result<usize, LimitError> {
         // # of elements strictly less than target in materialized log
         let log_rank =
@@ -110,7 +115,9 @@ impl<'me> SkipScanner<'me> {
     }
 
     // Skip to the start in log and record segment
-    // The following implementation is based on std implementation
+    // The implementation is a binary search based on [`std::slice::binary_search_by`]
+    //
+    // [`std::slice::binary_search_by`]: https://github.com/rust-lang/rust/blob/705cfe0e966399e061d64dd3661bfbc57553ed87/library/core/src/slice/mod.rs#L2731-L2827
     async fn skip_to_start(&self, skip: usize) -> Result<(usize, usize), LimitError> {
         if skip == 0 {
             return Ok((0, 0));
