@@ -214,7 +214,7 @@ impl WorkerServer {
                 version: collection_version,
             },
             FilterOperator {
-                query_ids: Some(request.allowed_ids),
+                query_ids: (!request.allowed_ids.is_empty()).then_some(request.allowed_ids),
                 where_clause: None,
             },
         );
