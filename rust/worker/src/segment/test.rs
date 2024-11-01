@@ -1,10 +1,14 @@
 use std::sync::atomic::AtomicU32;
 
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
-use chroma_types::{test_segment, Chunk, LogRecord, OperationRecord, Segment, SegmentScope};
+use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
+use chroma_types::{
+    test_segment, Chunk, Collection, CollectionUuid, LogRecord, OperationRecord, Segment,
+    SegmentScope,
+};
 use indicatif::ProgressIterator;
 
-use crate::log::test::LogGenerator;
+use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
 
 use super::{
     metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter, LogMaterializer,
@@ -12,9 +16,12 @@ use super::{
 };
 
 pub struct TestSegment {
-    pub blockfile_provider: BlockfileProvider,
+    pub hnsw: HnswIndexProvider,
+    pub blockfile: BlockfileProvider,
+    pub knn: Segment,
     pub metadata: Segment,
     pub record: Segment,
+    pub collection: Collection,
 }
 
 impl TestSegment {
@@ -28,7 +35,7 @@ impl TestSegment {
             .expect("Should be able to materialize log.");
 
         let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&self.metadata, &self.blockfile_provider)
+            MetadataSegmentWriter::from_segment(&self.metadata, &self.blockfile)
                 .await
                 .expect("Should be able to initialize metadata writer.");
         metadata_writer
@@ -47,10 +54,9 @@ impl TestSegment {
             .await
             .expect("Should be able to flush metadata.");
 
-        let record_writer =
-            RecordSegmentWriter::from_segment(&self.record, &self.blockfile_provider)
-                .await
-                .expect("Should be able to initiaize record writer.");
+        let record_writer = RecordSegmentWriter::from_segment(&self.record, &self.blockfile)
+            .await
+            .expect("Should be able to initiaize record writer.");
         record_writer
             .apply_materialized_log_chunk(materialized_logs)
             .await
@@ -86,10 +92,24 @@ impl TestSegment {
 
 impl Default for TestSegment {
     fn default() -> Self {
+        let collection_uuid = CollectionUuid::new();
+        let collection = Collection {
+            collection_id: collection_uuid,
+            name: "Test Collection".to_string(),
+            metadata: None,
+            dimension: Some(TEST_EMBEDDING_DIMENSION as i32),
+            tenant: "Test Tenant".to_string(),
+            database: String::new(),
+            log_position: 0,
+            version: 0,
+        };
         Self {
-            blockfile_provider: test_arrow_blockfile_provider(),
-            metadata: test_segment(SegmentScope::METADATA),
-            record: test_segment(SegmentScope::RECORD),
+            hnsw: test_hnsw_index_provider(),
+            blockfile: test_arrow_blockfile_provider(),
+            knn: test_segment(collection_uuid, SegmentScope::VECTOR),
+            metadata: test_segment(collection_uuid, SegmentScope::METADATA),
+            record: test_segment(collection_uuid, SegmentScope::RECORD),
+            collection,
         }
     }
 }

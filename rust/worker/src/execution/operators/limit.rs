@@ -15,7 +15,6 @@ use crate::{
 use super::{
     fetch_log::FetchLogOutput,
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-    filter::FilterOutput,
 };
 
 #[derive(Clone, Debug)]
@@ -26,27 +25,14 @@ pub struct LimitOperator {
 
 #[derive(Debug)]
 pub struct LimitInput {
-    logs: FetchLogOutput,
-    segments: FetchSegmentOutput,
-    log_oids: SignedRoaringBitmap,
-    compact_oids: SignedRoaringBitmap,
-}
-
-impl From<FilterOutput> for LimitInput {
-    fn from(value: FilterOutput) -> Self {
-        Self {
-            logs: value.logs,
-            segments: value.segments,
-            log_oids: value.log_oids,
-            compact_oids: value.compact_oids,
-        }
-    }
+    pub logs: FetchLogOutput,
+    pub segments: FetchSegmentOutput,
+    pub log_offset_ids: SignedRoaringBitmap,
+    pub compact_offset_ids: SignedRoaringBitmap,
 }
 
 #[derive(Debug)]
 pub struct LimitOutput {
-    pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
     pub offset_ids: RoaringBitmap,
 }
 
@@ -73,7 +59,7 @@ impl ChromaError for LimitError {
 // This struct aims to help scanning a number of elements from a fixed offset in the imaginary
 // segment where the log is compacted and the element in the mask is ignored.
 struct SkipScanner<'me> {
-    log_oids: &'me RoaringBitmap,
+    log_offset_ids: &'me RoaringBitmap,
     record_segment: &'me RecordSegmentReader<'me>,
     mask: &'me RoaringBitmap,
 }
@@ -87,8 +73,8 @@ impl<'me> SkipScanner<'me> {
     // inserted into while maintaining the order of the imaginary segment
     async fn joint_rank(&self, target: u32) -> Result<usize, LimitError> {
         // # of elements strictly less than target in materialized log
-        let log_rank =
-            self.log_oids.rank(target) as usize - self.log_oids.contains(target) as usize;
+        let log_rank = self.log_offset_ids.rank(target) as usize
+            - self.log_offset_ids.contains(target) as usize;
         // # of elements strictly less than target in the record segment
         let record_rank = self.record_segment.get_offset_id_rank(target).await?;
         // # of elements strictly less than target in the mask
@@ -96,14 +82,14 @@ impl<'me> SkipScanner<'me> {
         Ok(log_rank + record_rank - mask_rank)
     }
 
-    // Skip to the start in log and record segment
+    // Seek the starting index in log and record segment given the number of elements to skip
     // The implementation is a binary search based on [`std::slice::binary_search_by`]
     //
     // [`std::slice::binary_search_by`]: https://github.com/rust-lang/rust/blob/705cfe0e966399e061d64dd3661bfbc57553ed87/library/core/src/slice/mod.rs#L2731-L2827
     // Retrieval timestamp: Nov 1, 2024
     // Source commit hash: a0215d8e46aab41219dea0bb1cbaaf97dafe2f89
     // Source license: Apache-2.0 or MIT
-    async fn skip_to_start(&self, skip: usize) -> Result<(usize, usize), LimitError> {
+    async fn seek_starting_index(&self, skip: usize) -> Result<(usize, usize), LimitError> {
         if skip == 0 {
             return Ok((0, 0));
         }
@@ -112,7 +98,7 @@ impl<'me> SkipScanner<'me> {
             .record_segment
             .get_current_max_offset_id()
             .load(atomic::Ordering::Relaxed)
-            .max(self.log_oids.max().unwrap_or(0));
+            .max(self.log_offset_ids.max().unwrap_or(0));
         if size == 0 {
             return Ok((0, 0));
         }
@@ -128,39 +114,39 @@ impl<'me> SkipScanner<'me> {
         }
 
         Ok((
-            self.log_oids.rank(base) as usize - self.log_oids.contains(base) as usize,
+            self.log_offset_ids.rank(base) as usize - self.log_offset_ids.contains(base) as usize,
             self.record_segment.get_offset_id_rank(base).await?,
         ))
     }
 
-    // Skip to the start in the log and record segment, then scan for the specified number of offset ids
-    async fn skip_and_scan(
+    // Seek the start in the log and record segment, then scan for the specified number of offset ids
+    async fn seek_and_scan(
         &self,
         skip: usize,
         mut fetch: usize,
     ) -> Result<RoaringBitmap, LimitError> {
         let record_count = self.record_segment.count().await?;
-        let (mut log_index, mut record_index) = self.skip_to_start(skip).await?;
+        let (mut log_index, mut record_index) = self.seek_starting_index(skip).await?;
         let mut merged_result = Vec::new();
 
         while fetch > 0 {
-            let log_oid = self.log_oids.select(log_index as u32);
-            let record_oid = (record_index < record_count).then_some(
+            let log_offset_id = self.log_offset_ids.select(log_index as u32);
+            let record_offset_id = (record_index < record_count).then_some(
                 self.record_segment
                     .get_offset_id_at_index(record_index)
                     .await?,
             );
-            match (log_oid, record_oid) {
+            match (log_offset_id, record_offset_id) {
                 (_, Some(oid)) if self.mask.contains(oid) => {
                     record_index += 1;
                     continue;
                 }
-                (Some(l), Some(r)) => {
-                    if l < r {
-                        merged_result.push(l);
+                (Some(log_oid), Some(record_oid)) => {
+                    if log_oid < record_oid {
+                        merged_result.push(log_oid);
                         log_index += 1;
                     } else {
-                        merged_result.push(r);
+                        merged_result.push(record_oid);
                         record_index += 1;
                     }
                 }
@@ -192,7 +178,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         let record_segment_reader = input.segments.record_segment_reader().await?;
 
         // Materialize the filtered offset ids from the materialized log
-        let mut materialized_log_oids = match &input.log_oids {
+        let mut materialized_log_offset_ids = match &input.log_offset_ids {
             SignedRoaringBitmap::Include(rbm) => rbm.clone(),
             SignedRoaringBitmap::Exclude(rbm) => {
                 let materializer =
@@ -217,9 +203,9 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         };
 
         // Materialize all filtered offset ids with the compact segment
-        let materialized_oids = match &input.compact_oids {
+        let materialized_offset_ids = match &input.compact_offset_ids {
             SignedRoaringBitmap::Include(rbm) => {
-                let mut merged_oids = materialized_log_oids | rbm;
+                let mut merged_oids = materialized_log_offset_ids | rbm;
                 merged_oids.remove_smallest(self.skip as u64);
                 if let Some(take_count) = self.fetch {
                     merged_oids.into_iter().take(take_count as usize).collect()
@@ -230,38 +216,36 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
             SignedRoaringBitmap::Exclude(rbm) => {
                 if let Some(reader) = record_segment_reader {
                     let record_count = reader.count().await?;
-                    let log_count = materialized_log_oids.len() as usize;
+                    let log_count = materialized_log_offset_ids.len() as usize;
                     let filter_match_count = log_count + record_count - rbm.len() as usize;
                     let truncated_skip = (self.skip as usize).min(filter_match_count);
                     let truncated_fetch = (self.fetch.unwrap_or(u32::MAX) as usize)
                         .min(filter_match_count - truncated_skip);
 
                     let skip_scanner = SkipScanner {
-                        log_oids: &materialized_log_oids,
+                        log_offset_ids: &materialized_log_offset_ids,
                         record_segment: &reader,
                         mask: rbm,
                     };
                     skip_scanner
-                        .skip_and_scan(truncated_skip, truncated_fetch)
+                        .seek_and_scan(truncated_skip, truncated_fetch)
                         .await?
                 } else {
-                    materialized_log_oids.remove_smallest(self.skip as u64);
+                    materialized_log_offset_ids.remove_smallest(self.skip as u64);
                     if let Some(take_count) = self.fetch {
-                        materialized_log_oids
+                        materialized_log_offset_ids
                             .into_iter()
                             .take(take_count as usize)
                             .collect()
                     } else {
-                        materialized_log_oids
+                        materialized_log_offset_ids
                     }
                 }
             }
         };
 
         Ok(LimitOutput {
-            logs: input.logs.clone(),
-            segments: input.segments.clone(),
-            offset_ids: materialized_oids,
+            offset_ids: materialized_offset_ids,
         })
     }
 }

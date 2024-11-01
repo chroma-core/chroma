@@ -19,6 +19,7 @@ tracing = { workspace = true }
 roaring = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
+tempfile = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
@@ -29,7 +30,6 @@ chroma-storage = { workspace = true }
 chroma-distance = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
 chroma-benchmark = { workspace = true }

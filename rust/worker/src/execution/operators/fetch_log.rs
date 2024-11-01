@@ -98,17 +98,17 @@ mod tests {
         execution::{operator::Operator, operators::fetch_log::FetchLogOperator},
         log::{
             log::{InMemoryLog, InternalLogRecord},
-            test::{add_generator_0, LogGenerator},
+            test::{add_generator, LogGenerator},
         },
     };
 
     use super::Log;
 
-    fn in_memory_log_setup() -> (CollectionUuid, Box<Log>) {
+    fn setup_in_memory_log() -> (CollectionUuid, Box<Log>) {
         let collection_id = CollectionUuid::new();
         let mut in_memory_log = InMemoryLog::new();
         let generator = LogGenerator {
-            generator: add_generator_0,
+            generator: add_generator,
         };
         generator.generate_vec(0..10).into_iter().for_each(|log| {
             in_memory_log.add_log(
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pull_all() {
-        let (collection_uuid, log_client) = in_memory_log_setup();
+        let (collection_uuid, log_client) = setup_in_memory_log();
 
         let fetch_log_operator = FetchLogOperator {
             log_client,
@@ -150,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pull_range() {
-        let (collection_uuid, log_client) = in_memory_log_setup();
+        let (collection_uuid, log_client) = setup_in_memory_log();
 
         let fetch_log_operator = FetchLogOperator {
             log_client,
@@ -163,7 +163,7 @@ mod tests {
         let logs = fetch_log_operator
             .run(&())
             .await
-            .expect("Fetch log operator should not fail");
+            .expect("FetchLogOperator should not fail");
 
         assert_eq!(logs.len(), 3);
         logs.iter()

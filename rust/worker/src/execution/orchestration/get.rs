@@ -11,9 +11,9 @@ use crate::{
         operators::{
             fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
             fetch_segment::{FetchSegmentError, FetchSegmentOperator, FetchSegmentOutput},
-            filter::{FilterError, FilterInput, FilterOperator, FilterOutput, PreFilterState},
-            limit::{LimitError, LimitOperator, LimitOutput},
-            projection::{ProjectionError, ProjectionOperator, ProjectionOutput},
+            filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
+            limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
+            projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
         },
         orchestration::common::terminate_with_error,
     },
@@ -81,8 +81,9 @@ pub struct GetOrchestrator {
     fetch_log: FetchLogOperator,
     fetch_segment: FetchSegmentOperator,
 
-    // Pre-filter state
-    prefilter_state: PreFilterState,
+    // Fetch output
+    fetch_log_output: Option<FetchLogOutput>,
+    fetch_segment_output: Option<FetchSegmentOutput>,
 
     // Pipelined operators
     filter: FilterOperator,
@@ -108,7 +109,8 @@ impl GetOrchestrator {
             queue,
             fetch_log,
             fetch_segment,
-            prefilter_state: PreFilterState::default(),
+            fetch_log_output: None,
+            fetch_segment_output: None,
             filter,
             limit,
             projection,
@@ -159,6 +161,23 @@ impl GetOrchestrator {
             true
         }
     }
+
+    async fn try_start_filter_operator(&mut self, ctx: &ComponentContext<Self>) {
+        if let (Some(logs), Some(segments)) = (
+            self.fetch_log_output.as_ref(),
+            self.fetch_segment_output.as_ref(),
+        ) {
+            let task = wrap(
+                Box::new(self.filter.clone()),
+                FilterInput {
+                    logs: logs.clone(),
+                    segments: segments.clone(),
+                },
+                ctx.receiver(),
+            );
+            self.send_task(ctx, task).await;
+        }
+    }
 }
 
 #[async_trait]
@@ -194,12 +213,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
             Some(output) => output,
             None => return,
         };
-        self.prefilter_state.logs = Some(output);
-        let next_input = FilterInput::try_from(self.prefilter_state.clone());
-        if let Ok(input) = next_input {
-            let task = wrap(Box::new(self.filter.clone()), input, ctx.receiver());
-            self.send_task(ctx, task).await;
-        }
+        self.fetch_log_output = Some(output);
+        self.try_start_filter_operator(ctx).await;
     }
 }
 
@@ -216,12 +231,8 @@ impl Handler<TaskResult<FetchSegmentOutput, FetchSegmentError>> for GetOrchestra
             Some(output) => output,
             None => return,
         };
-        self.prefilter_state.segments = Some(output);
-        let next_input = FilterInput::try_from(self.prefilter_state.clone());
-        if let Ok(input) = next_input {
-            let task = wrap(Box::new(self.filter.clone()), input, ctx.receiver());
-            self.send_task(ctx, task).await;
-        }
+        self.fetch_segment_output = Some(output);
+        self.try_start_filter_operator(ctx).await;
     }
 }
 
@@ -238,7 +249,24 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
             Some(output) => output,
             None => return,
         };
-        let task = wrap(Box::new(self.limit.clone()), output.into(), ctx.receiver());
+        let task = wrap(
+            Box::new(self.limit.clone()),
+            LimitInput {
+                logs: self
+                    .fetch_log_output
+                    .as_ref()
+                    .expect("FetchLogOperator should have finished already")
+                    .clone(),
+                segments: self
+                    .fetch_segment_output
+                    .as_ref()
+                    .expect("FetchSegmentOperator should have finished already")
+                    .clone(),
+                log_offset_ids: output.log_offset_ids,
+                compact_offset_ids: output.compact_offset_ids,
+            },
+            ctx.receiver(),
+        );
         self.send_task(ctx, task).await;
     }
 }
@@ -258,7 +286,19 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         };
         let task = wrap(
             Box::new(self.projection.clone()),
-            output.into(),
+            ProjectionInput {
+                logs: self
+                    .fetch_log_output
+                    .as_ref()
+                    .expect("FetchLogOperator should have finished already")
+                    .clone(),
+                segments: self
+                    .fetch_segment_output
+                    .as_ref()
+                    .expect("FetchSegmentOperator should have finished already")
+                    .clone(),
+                offset_ids: output.offset_ids.into_iter().collect(),
+            },
             ctx.receiver(),
         );
         self.send_task(ctx, task).await;

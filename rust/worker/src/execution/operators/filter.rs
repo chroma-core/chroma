@@ -34,24 +34,16 @@ pub struct FilterOperator {
     pub where_clause: Option<Where>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct PreFilterState {
-    pub logs: Option<FetchLogOutput>,
-    pub segments: Option<FetchSegmentOutput>,
-}
-
 #[derive(Debug)]
 pub struct FilterInput {
-    logs: FetchLogOutput,
-    segments: FetchSegmentOutput,
+    pub logs: FetchLogOutput,
+    pub segments: FetchSegmentOutput,
 }
 
 #[derive(Debug)]
 pub struct FilterOutput {
-    pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
-    pub log_oids: SignedRoaringBitmap,
-    pub compact_oids: SignedRoaringBitmap,
+    pub log_offset_ids: SignedRoaringBitmap,
+    pub compact_offset_ids: SignedRoaringBitmap,
 }
 
 #[derive(Error, Debug)]
@@ -59,9 +51,7 @@ pub enum FilterError {
     #[error("Error processing fetch segment output: {0}")]
     FetchSegment(#[from] FetchSegmentError),
     #[error("Error reading metadata index: {0}")]
-    IndexError(#[from] MetadataIndexError),
-    #[error("Error converting incomplete input")]
-    IncompleteInput,
+    Index(#[from] MetadataIndexError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
 }
@@ -70,25 +60,8 @@ impl ChromaError for FilterError {
     fn code(&self) -> ErrorCodes {
         match self {
             FilterError::FetchSegment(e) => e.code(),
-            FilterError::IndexError(e) => e.code(),
-            FilterError::IncompleteInput => ErrorCodes::InvalidArgument,
+            FilterError::Index(e) => e.code(),
             FilterError::LogMaterializer(e) => e.code(),
-        }
-    }
-}
-
-impl TryFrom<PreFilterState> for FilterInput {
-    type Error = FilterError;
-
-    fn try_from(value: PreFilterState) -> Result<Self, FilterError> {
-        if let PreFilterState {
-            logs: Some(logs),
-            segments: Some(segments),
-        } = value
-        {
-            Ok(FilterInput { logs, segments })
-        } else {
-            Err(FilterError::IncompleteInput)
         }
     }
 }
@@ -102,9 +75,9 @@ pub(crate) struct MetadataLogReader<'me> {
     // This maps offset ids to documents, excluding deleted ones
     document: HashMap<u32, &'me str>,
     // This contains all existing offset ids that are touched by the logs
-    touched_oids: RoaringBitmap,
+    updated_offset_ids: RoaringBitmap,
     // This maps user ids to offset ids, excluding deleted ones
-    uid_to_oid: HashMap<&'me str, u32>,
+    user_id_to_offset_id: HashMap<&'me str, u32>,
 }
 
 impl<'me> MetadataLogReader<'me> {
@@ -112,22 +85,22 @@ impl<'me> MetadataLogReader<'me> {
         let mut compact_metadata: HashMap<_, BTreeMap<&MetadataValue, RoaringBitmap>> =
             HashMap::new();
         let mut document = HashMap::new();
-        let mut touched_oids = RoaringBitmap::new();
-        let mut uid_to_oid = HashMap::new();
+        let mut updated_offset_ids = RoaringBitmap::new();
+        let mut user_id_to_offset_id = HashMap::new();
         for (log, _) in logs.iter() {
             if !matches!(
                 log.final_operation,
                 MaterializedLogOperation::Initial | MaterializedLogOperation::AddNew
             ) {
-                touched_oids.insert(log.offset_id);
+                updated_offset_ids.insert(log.offset_id);
             }
             if !matches!(
                 log.final_operation,
                 MaterializedLogOperation::DeleteExisting
             ) {
-                uid_to_oid.insert(log.merged_user_id_ref(), log.offset_id);
-                let log_meta = log.merged_metadata_ref();
-                for (key, val) in log_meta.into_iter() {
+                user_id_to_offset_id.insert(log.merged_user_id_ref(), log.offset_id);
+                let log_metadata = log.merged_metadata_ref();
+                for (key, val) in log_metadata.into_iter() {
                     compact_metadata
                         .entry(key)
                         .or_default()
@@ -143,8 +116,8 @@ impl<'me> MetadataLogReader<'me> {
         Self {
             compact_metadata,
             document,
-            touched_oids,
-            uid_to_oid,
+            updated_offset_ids,
+            user_id_to_offset_id,
         }
     }
     pub(crate) fn get(
@@ -153,7 +126,7 @@ impl<'me> MetadataLogReader<'me> {
         val: &MetadataValue,
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
-        if let Some(btm) = self.compact_metadata.get(key) {
+        if let Some(metadata_value_to_offset_ids) = self.compact_metadata.get(key) {
             let bounds = match op {
                 PrimitiveOperator::Equal => (Bound::Included(&val), Bound::Included(&val)),
                 PrimitiveOperator::GreaterThan => (Bound::Excluded(&val), Bound::Unbounded),
@@ -164,7 +137,7 @@ impl<'me> MetadataLogReader<'me> {
                     "Inequality filter should be handled above the metadata provider level"
                 ),
             };
-            Ok(btm
+            Ok(metadata_value_to_offset_ids
                 .range::<&MetadataValue, _>(bounds)
                 .map(|(_, v)| v)
                 .fold(RoaringBitmap::new(), BitOr::bitor))
@@ -173,9 +146,10 @@ impl<'me> MetadataLogReader<'me> {
         }
     }
 
-    pub(crate) fn search_user_ids(&self, uids: &[&str]) -> RoaringBitmap {
-        uids.iter()
-            .filter_map(|uid| self.uid_to_oid.get(uid))
+    pub(crate) fn search_user_ids(&self, user_ids: &[&str]) -> RoaringBitmap {
+        user_ids
+            .iter()
+            .filter_map(|id| self.user_id_to_offset_id.get(id))
             .collect()
     }
 }
@@ -212,7 +186,7 @@ impl<'me> MetadataProvider<'me> {
             MetadataProvider::Log(metadata_log_reader) => Ok(metadata_log_reader
                 .document
                 .iter()
-                .filter_map(|(oid, doc)| doc.contains(query).then_some(oid))
+                .filter_map(|(offset_id, document)| document.contains(query).then_some(offset_id))
                 .collect()),
         }
     }
@@ -268,25 +242,25 @@ impl<'me> MetadataProvider<'me> {
 pub(crate) trait RoaringMetadataFilter<'me> {
     async fn eval(
         &'me self,
-        meta_provider: &MetadataProvider<'me>,
+        metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError>;
 }
 
 impl<'me> RoaringMetadataFilter<'me> for Where {
     async fn eval(
         &'me self,
-        meta_provider: &MetadataProvider<'me>,
+        metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         match self {
             Where::DirectWhereComparison(direct_comparison) => {
-                direct_comparison.eval(meta_provider).await
+                direct_comparison.eval(metadata_provider).await
             }
             Where::DirectWhereDocumentComparison(direct_document_comparison) => {
-                direct_document_comparison.eval(meta_provider).await
+                direct_document_comparison.eval(metadata_provider).await
             }
             Where::WhereChildren(where_children) => {
                 // Box::pin is required to avoid infinite size future when recurse in async
-                Box::pin(where_children.eval(meta_provider)).await
+                Box::pin(where_children.eval(metadata_provider)).await
             }
         }
     }
@@ -295,14 +269,14 @@ impl<'me> RoaringMetadataFilter<'me> for Where {
 impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
     async fn eval(
         &'me self,
-        meta_provider: &MetadataProvider<'me>,
+        metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let result = match &self.comparison {
             WhereComparison::Primitive(primitive_operator, metadata_value) => {
                 match primitive_operator {
                     // We convert the inequality check in to an equality check, and then negate the result
                     PrimitiveOperator::NotEqual => SignedRoaringBitmap::Exclude(
-                        meta_provider
+                        metadata_provider
                             .filter_by_metadata(
                                 &self.key,
                                 metadata_value,
@@ -315,7 +289,7 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
                     | PrimitiveOperator::GreaterThanOrEqual
                     | PrimitiveOperator::LessThan
                     | PrimitiveOperator::LessThanOrEqual => SignedRoaringBitmap::Include(
-                        meta_provider
+                        metadata_provider
                             .filter_by_metadata(&self.key, metadata_value, primitive_operator)
                             .await?,
                     ),
@@ -336,21 +310,25 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
                         vec.iter().map(|s| MetadataValue::Str(s.clone())).collect()
                     }
                 };
-                let mut child_evals = Vec::with_capacity(child_values.len());
-                for val in child_values {
-                    let eval = meta_provider
-                        .filter_by_metadata(&self.key, &val, &PrimitiveOperator::Equal)
+                let mut child_evaluations = Vec::with_capacity(child_values.len());
+                for value in child_values {
+                    let eval = metadata_provider
+                        .filter_by_metadata(&self.key, &value, &PrimitiveOperator::Equal)
                         .await?;
                     match set_operator {
-                        SetOperator::In => child_evals.push(SignedRoaringBitmap::Include(eval)),
-                        SetOperator::NotIn => child_evals.push(SignedRoaringBitmap::Exclude(eval)),
+                        SetOperator::In => {
+                            child_evaluations.push(SignedRoaringBitmap::Include(eval))
+                        }
+                        SetOperator::NotIn => {
+                            child_evaluations.push(SignedRoaringBitmap::Exclude(eval))
+                        }
                     };
                 }
                 match set_operator {
-                    SetOperator::In => child_evals
+                    SetOperator::In => child_evaluations
                         .into_iter()
                         .fold(SignedRoaringBitmap::empty(), BitOr::bitor),
-                    SetOperator::NotIn => child_evals
+                    SetOperator::NotIn => child_evaluations
                         .into_iter()
                         .fold(SignedRoaringBitmap::full(), BitAnd::bitand),
                 }
@@ -363,9 +341,9 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
 impl<'me> RoaringMetadataFilter<'me> for DirectDocumentComparison {
     async fn eval(
         &'me self,
-        meta_provider: &MetadataProvider<'me>,
+        metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        let contain = meta_provider
+        let contain = metadata_provider
             .filter_by_document(self.document.as_str())
             .await?;
         match self.operator {
@@ -378,17 +356,17 @@ impl<'me> RoaringMetadataFilter<'me> for DirectDocumentComparison {
 impl<'me> RoaringMetadataFilter<'me> for WhereChildren {
     async fn eval(
         &'me self,
-        meta_provider: &MetadataProvider<'me>,
+        metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        let mut child_evals = Vec::new();
+        let mut child_evaluations = Vec::new();
         for child in &self.children {
-            child_evals.push(child.eval(meta_provider).await?);
+            child_evaluations.push(child.eval(metadata_provider).await?);
         }
         match self.operator {
-            BooleanOperator::And => Ok(child_evals
+            BooleanOperator::And => Ok(child_evaluations
                 .into_iter()
                 .fold(SignedRoaringBitmap::full(), BitAnd::bitand)),
-            BooleanOperator::Or => Ok(child_evals
+            BooleanOperator::Or => Ok(child_evaluations
                 .into_iter()
                 .fold(SignedRoaringBitmap::empty(), BitOr::bitor)),
         }
@@ -418,53 +396,237 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
 
         // Get offset ids corresponding to user ids
-        let (user_log_oids, user_compact_oids) = if let Some(uids) = self.query_ids.as_ref() {
-            let log_oids = SignedRoaringBitmap::Include(
-                metadata_log_reader.search_user_ids(
-                    uids.iter()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<_>>()
-                        .as_slice(),
-                ),
-            );
-            let compact_oids = if let Some(reader) = record_segment_reader.as_ref() {
-                let mut compact_oids = RoaringBitmap::new();
-                for uid in uids {
-                    if let Ok(oid) = reader.get_offset_id_for_user_id(uid.as_str()).await {
-                        compact_oids.insert(oid);
+        let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
+            if let Some(user_allowed_ids) = self.query_ids.as_ref() {
+                let log_offset_ids = SignedRoaringBitmap::Include(
+                    metadata_log_reader.search_user_ids(
+                        user_allowed_ids
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>()
+                            .as_slice(),
+                    ),
+                );
+                let compact_offset_ids = if let Some(reader) = record_segment_reader.as_ref() {
+                    let mut offset_ids = RoaringBitmap::new();
+                    for user_id in user_allowed_ids {
+                        if let Ok(offset_id) =
+                            reader.get_offset_id_for_user_id(user_id.as_str()).await
+                        {
+                            offset_ids.insert(offset_id);
+                        }
                     }
-                }
-                SignedRoaringBitmap::Include(compact_oids)
+                    SignedRoaringBitmap::Include(offset_ids)
+                } else {
+                    SignedRoaringBitmap::full()
+                };
+                (log_offset_ids, compact_offset_ids)
             } else {
-                SignedRoaringBitmap::full()
+                (SignedRoaringBitmap::full(), SignedRoaringBitmap::full())
             };
-            (log_oids, compact_oids)
-        } else {
-            (SignedRoaringBitmap::full(), SignedRoaringBitmap::full())
-        };
 
         // Filter the offset ids in the log if the where clause is provided
-        let log_oids = if let Some(clause) = self.where_clause.as_ref() {
-            clause.eval(&log_metadata_provider).await? & user_log_oids
+        let log_offset_ids = if let Some(clause) = self.where_clause.as_ref() {
+            clause.eval(&log_metadata_provider).await? & user_allowed_log_offset_ids
         } else {
-            user_log_oids
+            user_allowed_log_offset_ids
         };
 
         // Filter the offset ids in the metadata segment if the where clause is provided
         // This always exclude all offsets that is present in the materialized log
-        let compact_oids = if let Some(clause) = self.where_clause.as_ref() {
+        let compact_offset_ids = if let Some(clause) = self.where_clause.as_ref() {
             clause.eval(&compact_metadata_provider).await?
-                & user_compact_oids
-                & SignedRoaringBitmap::Exclude(metadata_log_reader.touched_oids)
+                & user_allowed_compact_offset_ids
+                & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids)
         } else {
-            user_compact_oids & SignedRoaringBitmap::Exclude(metadata_log_reader.touched_oids)
+            user_allowed_compact_offset_ids
+                & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids)
         };
 
         Ok(FilterOutput {
-            logs: input.logs.clone(),
-            segments: input.segments.clone(),
-            log_oids,
-            compact_oids,
+            log_offset_ids,
+            compact_offset_ids,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chroma_types::{
+        DirectWhereComparison, MetadataValue, PrimitiveOperator, SignedRoaringBitmap, Where,
+        WhereComparison,
+    };
+
+    use crate::{
+        execution::{
+            operator::Operator,
+            operators::{fetch_segment::FetchSegmentOutput, filter::FilterOperator},
+        },
+        log::test::{add_delete_generator, int_as_id, LogGenerator},
+        segment::test::TestSegment,
+    };
+
+    use super::FilterInput;
+
+    async fn setup_filter_input() -> FilterInput {
+        let mut test_segment = TestSegment::default();
+        let generator = LogGenerator {
+            generator: add_delete_generator,
+        };
+        test_segment.populate_with_generator(60, &generator).await;
+        FilterInput {
+            logs: generator.generate_chunk(61..=120),
+            segments: FetchSegmentOutput {
+                hnsw: test_segment.hnsw,
+                blockfile: test_segment.blockfile,
+                knn: test_segment.knn,
+                metadata: test_segment.metadata,
+                record: test_segment.record,
+                collection: test_segment.collection,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_trivial() {
+        let filter_input = setup_filter_input().await;
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: None,
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::full());
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Exclude((11..=21).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_user_allowed_ids() {
+        let filter_input = setup_filter_input().await;
+
+        let filter_operator = FilterOperator {
+            query_ids: Some((0..30).map(int_as_id).collect()),
+            where_clause: None,
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::empty());
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((21..30).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_eq() {
+        let filter_input = setup_filter_input().await;
+
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "is_even".to_string(),
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Bool(true),
+            ),
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include((51..=100).filter(|offset| offset % 2 == 0).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((21..=50).filter(|offset| offset % 2 == 0).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_ne() {
+        let filter_input = setup_filter_input().await;
+
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "modulo_3".to_string(),
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::NotEqual,
+                MetadataValue::Int(0),
+            ),
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Exclude((51..=100).filter(|offset| offset % 3 == 0).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Exclude(
+                (21..=50)
+                    .filter(|offset| offset % 3 == 0)
+                    .chain(11..=20)
+                    .collect()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_simple_gt() {
+        let filter_input = setup_filter_input().await;
+
+        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+            key: "id".to_string(),
+            comparison: WhereComparison::Primitive(
+                PrimitiveOperator::GreaterThan,
+                MetadataValue::Int(36),
+            ),
+        });
+
+        let filter_operator = FilterOperator {
+            query_ids: None,
+            where_clause: Some(where_clause),
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("FilterOperator should not fail");
+
+        assert_eq!(
+            filter_output.log_offset_ids,
+            SignedRoaringBitmap::Include((51..=100).collect())
+        );
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::Include((37..=50).collect())
+        );
     }
 }

@@ -14,7 +14,6 @@ use crate::{
 use super::{
     fetch_log::FetchLogOutput,
     fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-    limit::LimitOutput,
 };
 
 #[derive(Clone, Debug)]
@@ -26,19 +25,9 @@ pub struct ProjectionOperator {
 
 #[derive(Debug)]
 pub struct ProjectionInput {
-    logs: FetchLogOutput,
-    segments: FetchSegmentOutput,
-    offset_ids: Vec<u32>,
-}
-
-impl From<LimitOutput> for ProjectionInput {
-    fn from(value: LimitOutput) -> Self {
-        Self {
-            logs: value.logs,
-            segments: value.segments,
-            offset_ids: value.offset_ids.into_iter().collect(),
-        }
-    }
+    pub logs: FetchLogOutput,
+    pub segments: FetchSegmentOutput,
+    pub offset_ids: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -111,8 +100,8 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 
         let mut records = Vec::with_capacity(input.offset_ids.len());
 
-        for oid in &input.offset_ids {
-            let record = match oid_to_log_record.get(oid) {
+        for offset_id in &input.offset_ids {
+            let record = match oid_to_log_record.get(offset_id) {
                 // The offset id is in the log
                 Some(&log) => ProjectionRecord {
                     id: log.merged_user_id().to_string(),
@@ -121,12 +110,12 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                     metadata: self
                         .metadata
                         .then_some(log.merged_metadata())
-                        .filter(|m| !m.is_empty()),
+                        .filter(|metadata| !metadata.is_empty()),
                 },
                 // The offset id is in the record segment
                 None => {
                     if let Some(reader) = record_segment_reader.as_ref() {
-                        let record = reader.get_data_for_offset_id(*oid).await?;
+                        let record = reader.get_data_for_offset_id(*offset_id).await?;
                         ProjectionRecord {
                             id: record.id.to_string(),
                             document: record

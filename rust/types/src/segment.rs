@@ -131,7 +131,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
     }
 }
 
-pub fn test_segment(scope: SegmentScope) -> Segment {
+pub fn test_segment(collection_uuid: CollectionUuid, scope: SegmentScope) -> Segment {
     let r#type = match scope {
         SegmentScope::METADATA => SegmentType::BlockfileMetadata,
         SegmentScope::RECORD => SegmentType::BlockfileRecord,
@@ -142,7 +142,7 @@ pub fn test_segment(scope: SegmentScope) -> Segment {
         id: Uuid::new_v4(),
         r#type,
         scope,
-        collection: CollectionUuid(Uuid::new_v4()),
+        collection: collection_uuid,
         metadata: None,
         file_path: HashMap::new(),
     }
