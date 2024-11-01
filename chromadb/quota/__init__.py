@@ -16,16 +16,15 @@ class QuotaProvider(Component):
 
 class QuotaEnforcer(Component):
     """
-    Exposes hooks to enforce quota rules. A distinction is drawn between
-    general quotas and rate limits, which are a specific type of quota.
+    Exposes hooks to enforce quotas.
     """
 
     def __init__(self, system: System) -> None:
         super().__init__(system)
 
     @abstractmethod
-    def enforce(self, tenant: str, action: str) -> None:
+    def enforce(self) -> None:
         """
-        Enforces general quota rules.
+        Enforces a quota.
         """
         pass
