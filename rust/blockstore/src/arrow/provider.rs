@@ -263,7 +263,7 @@ impl BlockManager {
                     .storage
                     .get(&key)
                     .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
+                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get {id}"),
                     )
                     .await;
                 match bytes_res {

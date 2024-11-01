@@ -577,7 +577,9 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         &self,
         records: Chunk<MaterializedLogRecord<'log_records>>,
     ) -> Result<(), ApplyMaterializedLogError> {
+        let mut count = 0u64;
         for record in records.iter() {
+            count += 1;
             let segment_offset_id = record.0.offset_id;
             match record.0.final_operation {
                 MaterializedLogOperation::AddNew => {
@@ -794,6 +796,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                 MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
         }
+        tracing::info!("Applied {} records to metadata segment", count,);
         Ok(())
     }
 
