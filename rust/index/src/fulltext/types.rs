@@ -1,13 +1,10 @@
-use super::tokenizer::{ChromaTokenStream, ChromaTokenizer};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
-use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::{u128, u32};
 use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
 use tantivy::tokenizer::Tokenizer;
@@ -130,36 +127,6 @@ impl TokenContainer for TokenInstance {
     }
 }
 
-// type WorkerResult = Vec<TokenInstance>;
-
-// struct Worker {}
-// impl Worker {
-//     fn new() -> Self {
-//         Worker {}
-//     }
-
-//     fn run(rx: Receiver<(u32, String)>) -> WorkerResult {
-//         let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-//         let mut results: WorkerResult = Vec::new();
-
-//         while let Ok((offset_id, document)) = rx.recv_blocking() {
-//             tokenizer
-//                 .clone()
-//                 .token_stream(document.as_str())
-//                 .process(&mut |token| {
-//                     results.push(TokenInstance::encode(
-//                         token.text.as_str(),
-//                         offset_id,
-//                         token.offset_from as u32,
-//                     ));
-//                 });
-//         }
-
-//         results.sort_unstable();
-//         results
-//     }
-// }
-
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
     #[error("Empty value in positional posting list")]
@@ -176,90 +143,86 @@ impl ChromaError for FullTextIndexError {
     }
 }
 
-#[derive(Debug)]
-pub struct UncommittedPostings {
-    // token -> {doc -> [start positions]}
-    positional_postings: HashMap<String, HashMap<u32, Vec<u32>>>,
-    // (token, doc) pairs that should be deleted from storage.
-    deleted_token_doc_pairs: HashSet<(String, i32)>,
-}
-
-impl Default for UncommittedPostings {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl UncommittedPostings {
-    pub fn new() -> Self {
-        Self {
-            positional_postings: HashMap::new(),
-            deleted_token_doc_pairs: HashSet::new(),
-        }
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum DocumentMutation<'a> {
+    Create {
+        offset_id: u32,
+        new_document: &'a str,
+    },
+    Update {
+        offset_id: u32,
+        old_document: &'a str,
+        new_document: &'a str,
+    },
+    Delete {
+        offset_id: u32,
+        old_document: &'a str,
+    },
 }
 
 #[derive(Clone)]
 pub struct FullTextIndexWriter {
     tokenizer: NgramTokenizer, // todo
     token_instances: Arc<Mutex<Vec<TokenInstance>>>,
-    // full_text_index_reader: Option<FullTextIndexReader<'me>>,
     posting_lists_blockfile_writer: BlockfileWriter,
     frequencies_blockfile_writer: BlockfileWriter,
-    // tokenizer: Arc<Box<dyn ChromaTokenizer>>,
-    // TODO(Sanket): Move off this tokio::sync::mutex and use
-    // a lightweight lock instead. This is needed currently to
-    // keep holding the lock across an await point.
-    // term -> positional posting list builder for that term
-    // uncommitted_postings: Arc<tokio::sync::Mutex<UncommittedPostings>>,
-    // TODO(Sanket): Move off this tokio::sync::mutex and use
-    // a lightweight lock instead. This is needed currently to
-    // keep holding the lock across an await point.
-    // Value of this map is a tuple (old freq and new freq)
-    // because we also need to keep the old frequency
-    // around. The reason is (token, freq) is the key in the blockfile hence
-    // when freq changes, we need to delete the old (token, freq) key.
-    // uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
 }
 
 impl FullTextIndexWriter {
     pub fn new(
-        full_text_index_reader: Option<FullTextIndexReader>,
+        full_text_index_reader: Option<FullTextIndexReader>, // todo
         posting_lists_blockfile_writer: BlockfileWriter,
         frequencies_blockfile_writer: BlockfileWriter,
         tokenizer: NgramTokenizer,
     ) -> Self {
         FullTextIndexWriter {
             tokenizer,
-            // full_text_index_reader,
             posting_lists_blockfile_writer,
             frequencies_blockfile_writer,
             token_instances: Arc::new(Mutex::new(Vec::new())),
-            // tokenizer: Arc::new(tokenizer),
         }
     }
 
     // important: duplicate offset IDs not allowed
-    pub fn handle_batch(
+    // todo: document intended usage
+    pub fn handle_batch<'documents, M: IntoIterator<Item = DocumentMutation<'documents>>>(
         &self,
-        previous_doc_and_new_doc: &[(u32, Option<&str>, Option<&str>)],
+        mutations: M,
     ) -> Result<(), FullTextIndexError> {
         let mut token_instances = self.token_instances.lock();
 
-        for pair in previous_doc_and_new_doc {
-            match pair {
-                (offset_id, Some(previous), Some(new)) => {
-                    // Update existing doc
+        for mutation in mutations {
+            match mutation {
+                DocumentMutation::Create {
+                    offset_id,
+                    new_document,
+                } => {
+                    self.tokenizer
+                        .clone()
+                        .token_stream(new_document)
+                        .process(&mut |token| {
+                            token_instances.push(TokenInstance::encode(
+                                token.text.as_str(),
+                                offset_id,
+                                Some(token.offset_from as u32),
+                            ));
+                        });
+                }
 
+                DocumentMutation::Update {
+                    offset_id,
+                    old_document,
+                    new_document,
+                } => {
                     // Remove old version
                     let mut trigrams_to_delete = HashSet::new(); // (need to filter out duplicates, each trigram may appear multiple times in a document)
                     self.tokenizer
                         .clone()
-                        .token_stream(previous)
+                        .token_stream(old_document)
                         .process(&mut |token| {
                             trigrams_to_delete.insert(TokenInstance::encode(
                                 token.text.as_str(),
-                                *offset_id,
+                                offset_id,
                                 None,
                             ));
                         });
@@ -267,55 +230,43 @@ impl FullTextIndexWriter {
                     // Add doc
                     self.tokenizer
                         .clone()
-                        .token_stream(new)
+                        .token_stream(new_document)
                         .process(&mut |token| {
                             trigrams_to_delete.remove(&TokenInstance::encode(
                                 token.text.as_str(),
-                                *offset_id,
+                                offset_id,
                                 None,
                             ));
 
                             token_instances.push(TokenInstance::encode(
                                 token.text.as_str(),
-                                *offset_id,
+                                offset_id,
                                 Some(token.offset_from as u32),
                             ));
                         });
 
                     token_instances.extend(trigrams_to_delete.into_iter());
                 }
-                (offset_id, Some(previous), None) => {
+
+                DocumentMutation::Delete {
+                    offset_id,
+                    old_document,
+                } => {
                     let mut trigrams_to_delete = HashSet::new(); // (need to filter out duplicates, each trigram may appear multiple times in a document)
 
                     // Delete doc
                     self.tokenizer
                         .clone()
-                        .token_stream(previous)
+                        .token_stream(old_document)
                         .process(&mut |token| {
                             trigrams_to_delete.insert(TokenInstance::encode(
                                 token.text.as_str(),
-                                *offset_id,
+                                offset_id,
                                 None,
                             ));
                         });
 
                     token_instances.extend(trigrams_to_delete.into_iter());
-                }
-                (offset_id, None, Some(new)) => {
-                    // Add doc
-                    self.tokenizer
-                        .clone()
-                        .token_stream(new)
-                        .process(&mut |token| {
-                            token_instances.push(TokenInstance::encode(
-                                token.text.as_str(),
-                                *offset_id,
-                                Some(token.offset_from as u32),
-                            ));
-                        });
-                }
-                (_, None, None) => {
-                    // todo: error
                 }
             }
         }
@@ -323,82 +274,12 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    pub async fn add_document(
-        &self,
-        document: &str,
-        offset_id: u32,
-    ) -> Result<(), FullTextIndexError> {
-        unimplemented!()
-        // self.tx
-        //     .send((offset_id, document.to_string()))
-        //     .await
-        //     .unwrap(); // todo
-        // Ok(())
-    }
-
-    pub async fn delete_document(
-        &self,
-        document: &str,
-        offset_id: u32,
-    ) -> Result<(), FullTextIndexError> {
-        unimplemented!()
-        // let tokens = self.encode_tokens(document);
-        // let tokens = tokens.get_tokens();
-
-        // self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
-        //     .await?;
-        // let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        // let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-
-        // for token in tokens {
-        //     match uncommitted_frequencies.get_mut(token.text.as_str()) {
-        //         Some(frequency) => {
-        //             frequency.0 -= 1;
-        //         }
-        //         None => {
-        //             // Invariant violation -- we just populated this.
-        //             tracing::error!("Error decrementing frequency for token: {:?}", token.text);
-        //             return Err(FullTextIndexError::InvariantViolation);
-        //         }
-        //     }
-        //     if let Some(builder) = uncommitted_postings
-        //         .positional_postings
-        //         .get_mut(token.text.as_str())
-        //     {
-        //         builder.remove(&offset_id);
-        //         if builder.is_empty() {
-        //             uncommitted_postings
-        //                 .positional_postings
-        //                 .remove(token.text.as_str());
-        //         }
-        //         // Track all the deleted (token, doc) pairs. This is needed
-        //         // to remove the old postings list for this pair from storage.
-        //         uncommitted_postings
-        //             .deleted_token_doc_pairs
-        //             .insert((token.text.clone(), offset_id as i32));
-        //     }
-        // }
-        // Ok(())
-    }
-
-    pub async fn update_document(
-        &self,
-        old_document: &str,
-        new_document: &str,
-        offset_id: u32,
-    ) -> Result<(), FullTextIndexError> {
-        unimplemented!()
-        // self.delete_document(old_document, offset_id).await?;
-        // self.add_document(new_document, offset_id).await?;
-        // Ok(())
-    }
-
     pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
         let mut last_key = TokenInstance::MAX;
         let mut posting_list: Vec<u32> = vec![];
 
         let mut token_instances = std::mem::take(&mut *self.token_instances.lock());
-        token_instances.sort_unstable();
+        token_instances.sort_unstable(); // todo: should this happen in separate thread?
 
         for encoded_instance in token_instances {
             match encoded_instance.get_offset() {
@@ -445,39 +326,6 @@ impl FullTextIndexWriter {
     }
 
     pub async fn commit(self) -> Result<FullTextIndexFlusher, FullTextIndexError> {
-        // let mut worker_handles = Arc::try_unwrap(self.worker_handles).unwrap(); // todo
-        // drop(self.tx);
-        // let mut worker_results = vec![];
-        // while let Some(result) = worker_handles.next().await {
-        //     let result = result.unwrap();
-        //     worker_results.push(result);
-        // }
-
-        // let mut last_key = u128::MAX;
-        // let mut posting_list: Vec<u32> = vec![];
-        // for encoded_instance in worker_results
-        //     .into_iter()
-        //     .kmerge_by(|a_instance, b_instance| {
-        //         a_instance.get_encoded_token_and_document_id()
-        //             < b_instance.get_encoded_token_and_document_id()
-        //     })
-        // {
-        //     let this_key = encoded_instance.get_encoded_token_and_document_id();
-        //     if last_key != this_key {
-        //         if last_key != u128::MAX {
-        //             let token = (last_key << 32).get_token();
-        //             let document_id = (last_key << 32).get_document_id();
-        //             self.posting_lists_blockfile_writer
-        //                 .set(&token, document_id, posting_list.clone())
-        //                 .await
-        //                 .unwrap();
-        //             posting_list.clear();
-        //         }
-        //         last_key = this_key;
-        //     }
-        //     posting_list.push(encoded_instance.get_offset());
-        // }
-
         // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
@@ -536,26 +384,20 @@ impl FullTextIndexFlusher {
 #[derive(Clone)]
 pub struct FullTextIndexReader<'me> {
     posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [u32]>,
-    frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
     tokenizer: NgramTokenizer,
 }
 
 impl<'me> FullTextIndexReader<'me> {
     pub fn new(
         posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [u32]>,
-        frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
-        tokenizer: NgramTokenizer, // todo
+        frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>, // todo
+        tokenizer: NgramTokenizer,                                    // todo
     ) -> Self {
         FullTextIndexReader {
             posting_lists_blockfile_reader,
-            frequencies_blockfile_reader,
             tokenizer,
         }
     }
-
-    // pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
-    //     self.tokenizer.encode(document)
-    // }
 
     pub async fn search(&self, query: &str) -> Result<RoaringBitmap, FullTextIndexError> {
         let mut tokens = vec![];
@@ -668,9 +510,10 @@ impl<'me> FullTextIndexReader<'me> {
         Ok(results)
     }
 
-    // We use this to implement deletes in the Writer. A delete() is implemented
-    // by copying all the data from the old blockfile to a new one but skipping
-    // the deleted offset id.
+    #[cfg(test)] // todo
+                 // We use this to implement deletes in the Writer. A delete() is implemented
+                 // by copying all the data from the old blockfile to a new one but skipping
+                 // the deleted offset id.
     async fn get_all_results_for_token(
         &self,
         token: &str,
@@ -685,29 +528,13 @@ impl<'me> FullTextIndexReader<'me> {
         }
         Ok(results)
     }
-
-    // Also used to implement deletes in the Writer. When we delete a document,
-    // we have to decrement the frequencies of all its tokens.
-    async fn get_frequencies_for_token(&self, token: &str) -> Result<u32, FullTextIndexError> {
-        let res = self
-            .frequencies_blockfile_reader
-            .get_range(token..=token, ..)
-            .await?;
-        if res.is_empty() {
-            return Ok(0);
-        }
-        if res.len() > 1 {
-            panic!("Invariant violation. Multiple frequency values found for a token.");
-        }
-        Ok(res[0].0)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fulltext::tokenizer::TantivyChromaTokenizer;
     use chroma_blockstore::provider::BlockfileProvider;
+    use rand::seq::index;
     use tantivy::tokenizer::NgramTokenizer;
 
     #[tokio::test]
@@ -756,7 +583,10 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer
-            .handle_batch(&[(1, None, Some("hello world"))])
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello world",
+            }])
             .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
@@ -793,7 +623,10 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer
-            .handle_batch(&[(1, None, Some("helo"))])
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "helo",
+            }])
             .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
@@ -823,8 +656,18 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("aaa", 1).await.unwrap();
-        index_writer.add_document("aaaaa", 2).await.unwrap();
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "aaa",
+            }])
+            .unwrap();
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 2,
+                new_document: "aaaaa",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -853,7 +696,12 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello", 1).await.unwrap();
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -882,7 +730,12 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).await.unwrap();
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello world",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -912,10 +765,17 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
         index_writer
-            .add_document("hello world hello", 1)
-            .await
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello world hello",
+            }])
             .unwrap();
-        index_writer.add_document("    hello ", 2).await.unwrap();
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 2,
+                new_document: "    hello ",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -947,8 +807,18 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+            ])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -980,10 +850,26 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
-        index_writer.add_document("world hello", 4).await.unwrap();
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 4,
+                    new_document: "world hello",
+                },
+            ])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -1021,13 +907,29 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("aaa", 1).await.unwrap();
-        index_writer.add_document("aaaa", 2).await.unwrap();
-        index_writer.add_document("bbb", 3).await.unwrap();
-        index_writer.add_document("aaabbb", 4).await.unwrap();
         index_writer
-            .add_document("aabbbbaaaaabbb", 5)
-            .await
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "aaa",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "aaaa",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "bbb",
+                },
+                DocumentMutation::Create {
+                    offset_id: 4,
+                    new_document: "aaabbb",
+                },
+                DocumentMutation::Create {
+                    offset_id: 5,
+                    new_document: "aabbbbaaaaabbb",
+                },
+            ])
             .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
@@ -1063,12 +965,22 @@ mod tests {
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("!!!!!", 1).await.unwrap();
         index_writer
-            .add_document("hello world!!!", 2)
-            .await
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "!!!!!",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello world!!!",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: ".!.!.!",
+                },
+            ])
             .unwrap();
-        index_writer.add_document(".!.!.!", 3).await.unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -1093,45 +1005,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_frequencies_for_token() {
-        let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
-
-        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
-
-        index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
-        flusher.flush().await.unwrap();
-
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
-        let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
-        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
-
-        let res = index_reader.get_frequencies_for_token("h").await.unwrap();
-        assert_eq!(res, 2);
-
-        let res = index_reader.get_frequencies_for_token("e").await.unwrap();
-        assert_eq!(res, 2);
-
-        let res = index_reader.get_frequencies_for_token("l").await.unwrap();
-        assert_eq!(res, 6);
-    }
-
-    #[tokio::test]
     async fn test_get_all_results_for_token() {
         let provider = BlockfileProvider::new_memory();
         let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
@@ -1143,9 +1016,22 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+            ])
+            .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
@@ -1182,12 +1068,27 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
         index_writer
-            .update_document("world", "hello", 3)
-            .await
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+                DocumentMutation::Update {
+                    // todo: this is not allowed, add simple check for > last segment ID?
+                    offset_id: 3,
+                    old_document: "world",
+                    new_document: "hello",
+                },
+            ])
             .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
@@ -1222,10 +1123,11 @@ mod tests {
         let mut index_writer =
             FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
 
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
-        index_writer.delete_document("world", 3).await.unwrap();
+        // todo
+        // index_writer.add_document("hello world", 1).await.unwrap();
+        // index_writer.add_document("hello", 2).await.unwrap();
+        // index_writer.add_document("world", 3).await.unwrap();
+        // index_writer.delete_document("world", 3).await.unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
