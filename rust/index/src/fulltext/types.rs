@@ -168,11 +168,7 @@ pub struct FullTextIndexWriter {
 }
 
 impl FullTextIndexWriter {
-    pub fn new(
-        full_text_index_reader: Option<FullTextIndexReader>, // todo
-        posting_lists_blockfile_writer: BlockfileWriter,
-        tokenizer: NgramTokenizer,
-    ) -> Self {
+    pub fn new(posting_lists_blockfile_writer: BlockfileWriter, tokenizer: NgramTokenizer) -> Self {
         FullTextIndexWriter {
             tokenizer,
             posting_lists_blockfile_writer,
@@ -511,7 +507,10 @@ impl<'me> FullTextIndexReader<'me> {
 mod tests {
     use super::*;
     use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
+    use chroma_cache::new_cache_for_test;
+    use chroma_storage::{local::LocalStorage, Storage};
     use tantivy::tokenizer::NgramTokenizer;
+    use tempfile::tempdir;
 
     #[tokio::test]
     async fn test_new_writer() {
@@ -520,12 +519,8 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let _index = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let _index = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
     }
 
     #[tokio::test]
@@ -538,7 +533,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
@@ -561,7 +556,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -599,7 +594,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -631,7 +626,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -669,7 +664,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -701,7 +696,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -733,7 +728,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -774,7 +769,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -815,7 +810,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -870,7 +865,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -926,7 +921,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -974,7 +969,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
 
         index_writer
             .handle_batch([
@@ -1016,7 +1011,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_document() {
-        let provider = BlockfileProvider::new_memory();
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
@@ -1024,7 +1023,7 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
 
         index_writer
             .handle_batch([
@@ -1040,13 +1039,26 @@ mod tests {
                     offset_id: 3,
                     new_document: "world",
                 },
-                DocumentMutation::Update {
-                    // todo: this is not allowed, add simple check for > last segment ID?
-                    offset_id: 3,
-                    old_document: "world",
-                    new_document: "hello",
-                },
             ])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        // Update document 3
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().fork(pl_blockfile_id))
+            .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Update {
+                offset_id: 3,
+                old_document: "world",
+                new_document: "hello",
+            }])
             .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
@@ -1069,7 +1081,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_document() {
-        let provider = BlockfileProvider::new_memory();
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
@@ -1077,13 +1093,42 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
 
-        // todo
-        // index_writer.add_document("hello world", 1).await.unwrap();
-        // index_writer.add_document("hello", 2).await.unwrap();
-        // index_writer.add_document("world", 3).await.unwrap();
-        // index_writer.delete_document("world", 3).await.unwrap();
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+            ])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        // Delete document 3
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().fork(pl_blockfile_id))
+            .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Delete {
+                offset_id: 3,
+                old_document: "world",
+            }])
+            .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
