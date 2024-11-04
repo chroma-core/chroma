@@ -1,29 +1,31 @@
 use std::collections::BinaryHeap;
 
-use chroma_distance::DistanceFunction;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::{normalize, DistanceFunction, DistanceFunctionError};
 use chroma_error::ChromaError;
-use chroma_types::{MaterializedLogOperation, SignedRoaringBitmap};
+use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SignedRoaringBitmap};
 use thiserror::Error;
 use tonic::async_trait;
 
 use crate::{
-    execution::{
-        operator::Operator,
-        utils::{normalize, RecordDistance},
+    execution::operator::Operator,
+    segment::{
+        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+        LogMaterializer, LogMaterializerError,
     },
-    segment::{LogMaterializer, LogMaterializerError},
 };
 
 use super::{
     fetch_log::{FetchLogError, FetchLogOutput},
-    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-    knn::KnnOperator,
+    knn::{KnnOperator, RecordDistance},
 };
 
 #[derive(Debug)]
 struct KnnLogInput {
     logs: FetchLogOutput,
-    segments: FetchSegmentOutput,
+    blockfile_provider: BlockfileProvider,
+    record_segment: Segment,
+    vector_segment: Segment,
     log_offset_ids: SignedRoaringBitmap,
 }
 
@@ -34,20 +36,23 @@ pub struct KnnLogOutput {
 
 #[derive(Error, Debug)]
 pub enum KnnLogError {
+    #[error("Error instantiating distance function: {0}")]
+    DistanceFunction(#[from] DistanceFunctionError),
     #[error("Error processing fetch log output: {0}")]
     FetchLog(#[from] FetchLogError),
-    #[error("Error processing fetch segment output: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
+    #[error("Error creating record segment reader: {0}")]
+    RecordReader(#[from] RecordSegmentReaderCreationError),
 }
 
 impl ChromaError for KnnLogError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
+            KnnLogError::DistanceFunction(e) => e.code(),
             KnnLogError::FetchLog(e) => e.code(),
-            KnnLogError::FetchSegment(e) => e.code(),
             KnnLogError::LogMaterializer(e) => e.code(),
+            KnnLogError::RecordReader(e) => e.code(),
         }
     }
 }
@@ -57,14 +62,30 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
     type Error = KnnLogError;
 
     async fn run(&self, input: &KnnLogInput) -> Result<KnnLogOutput, KnnLogError> {
-        let materializer = LogMaterializer::new(
-            input.segments.record_segment_reader().await?,
-            input.logs.clone(),
-            None,
-        );
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &input.record_segment,
+            &input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }?;
+
+        let materializer = LogMaterializer::new(record_segment_reader, input.logs.clone(), None);
         let logs = materializer.materialize().await?;
 
-        let metric = input.segments.knn_config()?.distance_function;
+        let space = match input.vector_segment.metadata.as_ref() {
+            Some(metadata) => match metadata.get("hnsw:space") {
+                Some(MetadataValue::Str(space)) => space,
+                _ => "l2",
+            },
+            None => "l2",
+        };
+        let metric = DistanceFunction::try_from(space)?;
         let target_vector;
         let target_embedding = if let DistanceFunction::Cosine = metric {
             target_vector = normalize(&self.embedding);

@@ -15,12 +15,12 @@ use super::{
 };
 
 pub struct TestSegment {
-    pub hnsw: HnswIndexProvider,
-    pub blockfile: BlockfileProvider,
-    pub knn: Segment,
-    pub metadata: Segment,
-    pub record: Segment,
+    pub hnsw_provider: HnswIndexProvider,
+    pub blockfile_provider: BlockfileProvider,
     pub collection: Collection,
+    pub metadata_segment: Segment,
+    pub record_segment: Segment,
+    pub vector_segment: Segment,
 }
 
 impl TestSegment {
@@ -34,7 +34,7 @@ impl TestSegment {
             .expect("Should be able to materialize log.");
 
         let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&self.metadata, &self.blockfile)
+            MetadataSegmentWriter::from_segment(&self.metadata_segment, &self.blockfile_provider)
                 .await
                 .expect("Should be able to initialize metadata writer.");
         metadata_writer
@@ -45,7 +45,7 @@ impl TestSegment {
             .write_to_blockfiles()
             .await
             .expect("Should be able to write to blockfile.");
-        self.metadata.file_path = metadata_writer
+        self.metadata_segment.file_path = metadata_writer
             .commit()
             .await
             .expect("Should be able to commit metadata.")
@@ -53,15 +53,16 @@ impl TestSegment {
             .await
             .expect("Should be able to flush metadata.");
 
-        let record_writer = RecordSegmentWriter::from_segment(&self.record, &self.blockfile)
-            .await
-            .expect("Should be able to initiaize record writer.");
+        let record_writer =
+            RecordSegmentWriter::from_segment(&self.record_segment, &self.blockfile_provider)
+                .await
+                .expect("Should be able to initiaize record writer.");
         record_writer
             .apply_materialized_log_chunk(materialized_logs)
             .await
             .expect("Should be able to apply materialized log.");
 
-        self.record.file_path = record_writer
+        self.record_segment.file_path = record_writer
             .commit()
             .await
             .expect("Should be able to commit metadata.")
@@ -103,12 +104,12 @@ impl Default for TestSegment {
             version: 0,
         };
         Self {
-            hnsw: test_hnsw_index_provider(),
-            blockfile: test_arrow_blockfile_provider(2 << 22),
-            knn: test_segment(collection_uuid, SegmentScope::VECTOR),
-            metadata: test_segment(collection_uuid, SegmentScope::METADATA),
-            record: test_segment(collection_uuid, SegmentScope::RECORD),
+            hnsw_provider: test_hnsw_index_provider(),
+            blockfile_provider: test_arrow_blockfile_provider(2 << 22),
             collection,
+            metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
+            record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
+            vector_segment: test_segment(collection_uuid, SegmentScope::VECTOR),
         }
     }
 }

@@ -1,7 +1,8 @@
-use std::{cmp::Ordering, sync::atomic};
+use std::{cmp::Ordering, num::TryFromIntError, sync::atomic};
 
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{MaterializedLogOperation, SignedRoaringBitmap};
+use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tonic::async_trait;
@@ -9,14 +10,30 @@ use tracing::{trace, Instrument, Span};
 
 use crate::{
     execution::operator::Operator,
-    segment::{record_segment::RecordSegmentReader, LogMaterializer, LogMaterializerError},
+    segment::{
+        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+        LogMaterializer, LogMaterializerError,
+    },
 };
 
-use super::{
-    fetch_log::FetchLogOutput,
-    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-};
-
+/// The `LimitOperator` selects a range or records sorted by their offset ids
+///
+/// # Parameters
+/// - `skip`: The number of records to skip in the beginning
+/// - `fetch`: The number of records to fetch after `skip`
+///
+/// # Inputs
+/// - `logs`: The latest logs of the collection
+/// - `blockfile_provider`: The blockfile provider
+/// - `record_segment`: The record segment information
+/// - `log_offset_ids`: The offset ids in the logs to include or exclude before range selection
+/// - `compact_offset_ids`: The offset ids in the blockfile to include or exclude before range selection
+///
+/// # Outputs
+/// - `offset_ids`: The selected offset ids in either logs or blockfile
+///
+/// # Usage
+/// It can be used to derive the range of offset ids that should be used by the next operator
 #[derive(Clone, Debug)]
 pub struct LimitOperator {
     pub skip: u32,
@@ -25,8 +42,9 @@ pub struct LimitOperator {
 
 #[derive(Clone, Debug)]
 pub struct LimitInput {
-    pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
+    pub logs: Chunk<LogRecord>,
+    pub blockfile_provider: BlockfileProvider,
+    pub record_segment: Segment,
     pub log_offset_ids: SignedRoaringBitmap,
     pub compact_offset_ids: SignedRoaringBitmap,
 }
@@ -38,10 +56,12 @@ pub struct LimitOutput {
 
 #[derive(Error, Debug)]
 pub enum LimitError {
-    #[error("Error processing fetch segment output: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
+    #[error("Integer conversion out of bound: {0}")]
+    OutOfBound(#[from] TryFromIntError),
+    #[error("Error creating record segment reader: {0}")]
+    RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
 }
@@ -49,8 +69,9 @@ pub enum LimitError {
 impl ChromaError for LimitError {
     fn code(&self) -> ErrorCodes {
         match self {
-            LimitError::FetchSegment(e) => e.code(),
             LimitError::LogMaterializer(e) => e.code(),
+            LimitError::OutOfBound(_) => ErrorCodes::OutOfRange,
+            LimitError::RecordReader(e) => e.code(),
             LimitError::RecordSegment(e) => e.code(),
         }
     }
@@ -71,14 +92,14 @@ impl<'me> SeekScanner<'me> {
     //
     // Alternatively, it's the index in the imaginary segment that it can be
     // inserted into while maintaining the order of the imaginary segment
-    async fn joint_rank(&self, target: u32) -> Result<usize, LimitError> {
+    async fn joint_rank(&self, target: u32) -> Result<u64, LimitError> {
         // # of elements strictly less than target in materialized log
-        let log_rank = self.log_offset_ids.rank(target) as usize
-            - self.log_offset_ids.contains(target) as usize;
+        let log_rank =
+            self.log_offset_ids.rank(target) - self.log_offset_ids.contains(target) as u64;
         // # of elements strictly less than target in the record segment
-        let record_rank = self.record_segment.get_offset_id_rank(target).await?;
+        let record_rank = self.record_segment.get_offset_id_rank(target).await? as u64;
         // # of elements strictly less than target in the mask
-        let mask_rank = self.mask.rank(target) as usize - self.mask.contains(target) as usize;
+        let mask_rank = self.mask.rank(target) - self.mask.contains(target) as u64;
         Ok(log_rank + record_rank - mask_rank)
     }
 
@@ -90,7 +111,7 @@ impl<'me> SeekScanner<'me> {
     // Retrieval timestamp: Nov 1, 2024
     // Source commit hash: a0215d8e46aab41219dea0bb1cbaaf97dafe2f89
     // Source license: Apache-2.0 or MIT
-    async fn seek_starting_offset(&self, skip: usize) -> Result<u32, LimitError> {
+    async fn seek_starting_offset(&self, skip: u64) -> Result<u32, LimitError> {
         if skip == 0 {
             return Ok(0);
         }
@@ -118,15 +139,11 @@ impl<'me> SeekScanner<'me> {
     }
 
     // Seek the start in the log and record segment, then scan for the specified number of offset ids
-    async fn seek_and_scan(
-        &self,
-        skip: usize,
-        mut fetch: usize,
-    ) -> Result<RoaringBitmap, LimitError> {
+    async fn seek_and_scan(&self, skip: u64, mut fetch: u64) -> Result<RoaringBitmap, LimitError> {
         let record_count = self.record_segment.count().await?;
         let starting_offset = self.seek_starting_offset(skip).await?;
-        let mut log_index = self.log_offset_ids.rank(starting_offset) as usize
-            - self.log_offset_ids.contains(starting_offset) as usize;
+        let mut log_index = self.log_offset_ids.rank(starting_offset)
+            - self.log_offset_ids.contains(starting_offset) as u64;
         let mut record_index = self
             .record_segment
             .get_offset_id_rank(starting_offset)
@@ -134,7 +151,7 @@ impl<'me> SeekScanner<'me> {
         let mut merged_result = Vec::new();
 
         while fetch > 0 {
-            let log_offset_id = self.log_offset_ids.select(log_index as u32);
+            let log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
             let record_offset_id = (record_index < record_count).then_some(
                 self.record_segment
                     .get_offset_id_at_index(record_index)
@@ -179,7 +196,18 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        let record_segment_reader = input.segments.record_segment_reader().await?;
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &input.record_segment,
+            &input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }?;
 
         // Materialize the filtered offset ids from the materialized log
         let mut materialized_log_offset_ids = match &input.log_offset_ids {
@@ -211,22 +239,20 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
             SignedRoaringBitmap::Include(rbm) => {
                 let mut merged_offset_ids = materialized_log_offset_ids | rbm;
                 merged_offset_ids.remove_smallest(self.skip as u64);
-                if let Some(take_count) = self.fetch {
+                if let Some(fetch_count) = self.fetch {
+                    let truncated_fetch_count = merged_offset_ids.len().min(fetch_count as u64);
                     merged_offset_ids
-                        .into_iter()
-                        .take(take_count as usize)
-                        .collect()
-                } else {
-                    merged_offset_ids
+                        .remove_biggest(merged_offset_ids.len() - truncated_fetch_count);
                 }
+                merged_offset_ids
             }
             SignedRoaringBitmap::Exclude(rbm) => {
                 if let Some(reader) = record_segment_reader {
                     let record_count = reader.count().await?;
-                    let log_count = materialized_log_offset_ids.len() as usize;
-                    let filter_match_count = log_count + record_count - rbm.len() as usize;
-                    let truncated_skip = (self.skip as usize).min(filter_match_count);
-                    let truncated_fetch = (self.fetch.unwrap_or(u32::MAX) as usize)
+                    let log_count = materialized_log_offset_ids.len();
+                    let filter_match_count = log_count + record_count as u64 - rbm.len();
+                    let truncated_skip = (self.skip as u64).min(filter_match_count);
+                    let truncated_fetch = (self.fetch.unwrap_or(u32::MAX) as u64)
                         .min(filter_match_count - truncated_skip);
 
                     let seek_scanner = SeekScanner {
@@ -263,16 +289,18 @@ mod tests {
     use roaring::RoaringBitmap;
 
     use crate::{
-        execution::{
-            operator::Operator,
-            operators::{fetch_segment::FetchSegmentOutput, limit::LimitOperator},
-        },
+        execution::{operator::Operator, operators::limit::LimitOperator},
         log::test::{upsert_generator, LogGenerator},
         segment::test::TestSegment,
     };
 
     use super::LimitInput;
 
+    /// The unit tests for `LimitOperator` uses the following test data
+    /// It first generates 100 log records and compact them,
+    /// then generate 30 log records that overwrite the compacted data
+    /// - Log: Upsert [31..=60]
+    /// - Compacted: Upsert [1..=100]
     async fn setup_limit_input(
         log_offset_ids: SignedRoaringBitmap,
         compact_offset_ids: SignedRoaringBitmap,
@@ -284,14 +312,8 @@ mod tests {
         test_segment.populate_with_generator(100, &generator).await;
         LimitInput {
             logs: generator.generate_chunk(31..=60),
-            segments: FetchSegmentOutput {
-                hnsw: test_segment.hnsw,
-                blockfile: test_segment.blockfile,
-                knn: test_segment.knn,
-                metadata: test_segment.metadata,
-                record: test_segment.record,
-                collection: test_segment.collection,
-            },
+            blockfile_provider: test_segment.blockfile_provider,
+            record_segment: test_segment.record_segment,
             log_offset_ids,
             compact_offset_ids,
         }

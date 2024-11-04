@@ -1,18 +1,23 @@
-use chroma_error::ChromaError;
-use chroma_types::SignedRoaringBitmap;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_types::{Collection, Segment, SignedRoaringBitmap};
 use thiserror::Error;
 use tonic::async_trait;
 
-use crate::execution::{operator::Operator, utils::RecordDistance};
-
-use super::{
-    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-    knn::KnnOperator,
+use crate::{
+    execution::operator::Operator,
+    segment::distributed_hnsw_segment::{
+        DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
+    },
 };
+
+use super::knn::{KnnOperator, RecordDistance};
 
 #[derive(Debug)]
 struct KnnHnswInput {
-    segments: FetchSegmentOutput,
+    hnsw_provider: HnswIndexProvider,
+    collection: Collection,
+    hnsw_segment: Segment,
     compact_offset_ids: SignedRoaringBitmap,
 }
 
@@ -23,17 +28,20 @@ pub struct KnnHnswOutput {
 
 #[derive(Error, Debug)]
 pub enum KnnHnswError {
-    #[error("Error processing fetch segment output: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
-    #[error("Error querying knn index: {0}")]
-    KnnIndex(#[from] Box<dyn ChromaError>),
+    #[error("Error querying hnsw index: {0}")]
+    HnswIndex(#[from] Box<dyn ChromaError>),
+    #[error("Error creating hnsw segment reader: {0}")]
+    HnswReader(#[from] DistributedHNSWSegmentFromSegmentError),
+    #[error("Error resolving collection dimension")]
+    NoCollectionDimension,
 }
 
 impl ChromaError for KnnHnswError {
-    fn code(&self) -> chroma_error::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
-            KnnHnswError::FetchSegment(e) => e.code(),
-            KnnHnswError::KnnIndex(e) => e.code(),
+            KnnHnswError::HnswReader(e) => e.code(),
+            KnnHnswError::HnswIndex(e) => e.code(),
+            KnnHnswError::NoCollectionDimension => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -59,19 +67,34 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
             ),
         };
 
-        let record_distances = match input.segments.knn_segment_reader().await? {
-            Some(reader) => {
+        match DistributedHNSWSegmentReader::from_segment(
+            &input.hnsw_segment,
+            input
+                .collection
+                .dimension
+                .ok_or(KnnHnswError::NoCollectionDimension)? as usize,
+            input.hnsw_provider.clone(),
+        )
+        .await
+        {
+            Ok(reader) => {
                 let (offset_ids, distances) =
                     reader.query(&self.embedding, self.fetch as usize, &allowed, &disallowed)?;
-                offset_ids
-                    .into_iter()
-                    .map(|offset_id| offset_id as u32)
-                    .zip(distances)
-                    .map(|(offset_id, measure)| RecordDistance { offset_id, measure })
-                    .collect()
+                Ok(KnnHnswOutput {
+                    record_distances: offset_ids
+                        .into_iter()
+                        .map(|offset_id| offset_id as u32)
+                        .zip(distances)
+                        .map(|(offset_id, measure)| RecordDistance { offset_id, measure })
+                        .collect(),
+                })
             }
-            None => Vec::new(),
-        };
-        Ok(KnnHnswOutput { record_distances })
+            Err(e) if matches!(*e, DistributedHNSWSegmentFromSegmentError::Uninitialized) => {
+                Ok(KnnHnswOutput {
+                    record_distances: Vec::new(),
+                })
+            }
+            Err(e) => Err((*e).into()),
+        }
     }
 }

@@ -1,8 +1,5 @@
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{
-    hnsw_provider::HnswIndexProvider, IndexConfig, IndexConfigFromSegmentError, IndexUuid,
-};
+use chroma_index::IndexUuid;
 use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType};
 use thiserror::Error;
 use tonic::async_trait;
@@ -10,41 +7,44 @@ use tracing::trace;
 
 use crate::{
     execution::operator::{Operator, OperatorType},
-    segment::{
-        distributed_hnsw_segment::{
-            DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
-        },
-        metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
-        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    },
     sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb},
 };
 
+/// The `FetchSegmentOperator` fetches collection and segment information from SysDB
+///
+/// # Parameters
+/// - `sysdb`: The SysDB reader
+/// - `*_uuid`: The uuids of the collection and segments
+/// - `collection_version`: The version of the collection to verify against
+///
+/// # Inputs
+/// - No input is required
+///
+/// # Outputs
+/// - `collection`: The collection information
+/// - `*_segment`: The segment information
+///
+/// # Usage
+/// It should be run at the start of an orchestrator to get the latest data of a collection
 #[derive(Clone, Debug)]
 pub struct FetchSegmentOperator {
-    // Data provider
     pub(crate) sysdb: Box<SysDb>,
-    pub hnsw: HnswIndexProvider,
-    pub blockfile: BlockfileProvider,
-    // TODO: Enforce uuid
-    pub knn: Option<IndexUuid>,
-    pub metadata: Option<IndexUuid>,
-    pub record: Option<IndexUuid>,
-    pub collection: CollectionUuid,
-    // Version
-    pub version: u32,
+    pub collection_uuid: CollectionUuid,
+    pub collection_version: u32,
+    // TODO: Enforce segments uuid
+    pub metadata_uuid: Option<IndexUuid>,
+    pub record_uuid: Option<IndexUuid>,
+    pub vector_uuid: Option<IndexUuid>,
 }
 
-pub type FetchSegmentInput = ();
+type FetchSegmentInput = ();
 
 #[derive(Clone, Debug)]
 pub struct FetchSegmentOutput {
-    pub hnsw: HnswIndexProvider,
-    pub blockfile: BlockfileProvider,
-    pub knn: Segment,
-    pub metadata: Segment,
-    pub record: Segment,
     pub collection: Collection,
+    pub metadata_segment: Segment,
+    pub record_segment: Segment,
+    pub vector_segment: Segment,
 }
 
 #[derive(Error, Debug)]
@@ -53,20 +53,10 @@ pub enum FetchSegmentError {
     GetCollection(#[from] GetCollectionsError),
     #[error("Error when getting segment: {0}")]
     GetSegment(#[from] GetSegmentsError),
-    #[error("Error when getting HNSW index config: {0}")]
-    HNSWConfigError(#[from] IndexConfigFromSegmentError),
-    #[error("Unable to create HNSW segment reader: {0}")]
-    HNSWSegmentReaderCreation(#[from] DistributedHNSWSegmentFromSegmentError),
-    #[error("Unable to create metadata segment reader: {0}")]
-    MetadataSegmentReaderCreation(#[from] MetadataSegmentError),
     #[error("No collection found")]
     NoCollection,
-    #[error("No collection dimensionality")]
-    NoCollectionDimension,
     #[error("No segment found")]
     NoSegment,
-    #[error("Unable to create record segment reader: {0}")]
-    RecordSegmentReaderCreation(#[from] RecordSegmentReaderCreationError),
     // The frontend relies on ths content of the error message here to detect version mismatch
     // TODO: Refactor frontend to properly detect version mismatch
     #[error("Collection version mismatch")]
@@ -78,64 +68,9 @@ impl ChromaError for FetchSegmentError {
         match self {
             FetchSegmentError::GetCollection(e) => e.code(),
             FetchSegmentError::GetSegment(e) => e.code(),
-            FetchSegmentError::HNSWConfigError(e) => e.code(),
-            FetchSegmentError::HNSWSegmentReaderCreation(e) => e.code(),
-            FetchSegmentError::MetadataSegmentReaderCreation(e) => e.code(),
             FetchSegmentError::NoCollection => ErrorCodes::NotFound,
-            FetchSegmentError::NoCollectionDimension => ErrorCodes::InvalidArgument,
             FetchSegmentError::NoSegment => ErrorCodes::NotFound,
-            FetchSegmentError::RecordSegmentReaderCreation(e) => e.code(),
             FetchSegmentError::VersionMismatch => ErrorCodes::VersionMismatch,
-        }
-    }
-}
-
-impl FetchSegmentOutput {
-    pub(super) async fn knn_segment_reader(
-        &self,
-    ) -> Result<Option<DistributedHNSWSegmentReader>, FetchSegmentError> {
-        match DistributedHNSWSegmentReader::from_segment(
-            &self.knn,
-            self.collection
-                .dimension
-                .ok_or(FetchSegmentError::NoCollectionDimension)? as usize,
-            self.hnsw.clone(),
-        )
-        .await
-        {
-            Ok(reader) => Ok(Some(*reader)),
-            Err(e) => match *e {
-                DistributedHNSWSegmentFromSegmentError::Uninitialized => Ok(None),
-                e => Err(e.into()),
-            },
-        }
-    }
-
-    pub(super) fn knn_config(&self) -> Result<IndexConfig, FetchSegmentError> {
-        Ok(IndexConfig::from_segment(
-            &self.knn,
-            self.collection
-                .dimension
-                .ok_or(FetchSegmentError::NoCollectionDimension)?,
-        )
-        .map_err(|e| *e)?)
-    }
-
-    pub(super) async fn metadata_segment_reader(
-        &self,
-    ) -> Result<MetadataSegmentReader, FetchSegmentError> {
-        Ok(MetadataSegmentReader::from_segment(&self.metadata, &self.blockfile).await?)
-    }
-
-    pub(super) async fn record_segment_reader(
-        &self,
-    ) -> Result<Option<RecordSegmentReader>, FetchSegmentError> {
-        match RecordSegmentReader::from_segment(&self.record, &self.blockfile).await {
-            Ok(reader) => Ok(Some(reader)),
-            Err(e) => match *e {
-                RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
-                e => Err(e.into()),
-            },
         }
     }
 }
@@ -145,11 +80,11 @@ impl FetchSegmentOperator {
         let collection = self
             .sysdb
             .clone()
-            .get_collections(Some(self.collection), None, None, None)
+            .get_collections(Some(self.collection_uuid), None, None, None)
             .await?
             .pop()
             .ok_or(FetchSegmentError::NoCollection)?;
-        if collection.version != self.version as i32 {
+        if collection.version != self.collection_version as i32 {
             Err(FetchSegmentError::VersionMismatch)
         } else {
             Ok(collection)
@@ -164,9 +99,9 @@ impl FetchSegmentOperator {
         };
         // TODO: Add segment uuid
         let segment_id = match scope {
-            SegmentScope::VECTOR => self.knn,
-            SegmentScope::METADATA => self.metadata,
-            SegmentScope::RECORD => self.record,
+            SegmentScope::VECTOR => self.vector_uuid,
+            SegmentScope::METADATA => self.metadata_uuid,
+            SegmentScope::RECORD => self.record_uuid,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
         };
         self.sysdb
@@ -175,7 +110,7 @@ impl FetchSegmentOperator {
                 segment_id.map(|id| id.0),
                 Some(segment_type.into()),
                 Some(scope),
-                self.collection,
+                self.collection_uuid,
             )
             .await?
             // Each scope should have a single segment
@@ -196,12 +131,10 @@ impl Operator<FetchSegmentInput, FetchSegmentOutput> for FetchSegmentOperator {
         trace!("[{}]: {:?}", self.get_name(), self);
 
         Ok(FetchSegmentOutput {
-            hnsw: self.hnsw.clone(),
-            blockfile: self.blockfile.clone(),
-            knn: self.get_segment(SegmentScope::VECTOR).await?,
-            metadata: self.get_segment(SegmentScope::METADATA).await?,
-            record: self.get_segment(SegmentScope::RECORD).await?,
             collection: self.get_collection().await?,
+            metadata_segment: self.get_segment(SegmentScope::METADATA).await?,
+            record_segment: self.get_segment(SegmentScope::RECORD).await?,
+            vector_segment: self.get_segment(SegmentScope::VECTOR).await?,
         })
     }
 }

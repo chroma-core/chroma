@@ -8,7 +8,6 @@ use chroma_types::{
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
-use worker::execution::operators::fetch_segment::FetchSegmentOutput;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
 use worker::log::test::{upsert_generator, LogGenerator};
 use worker::segment::test::TestSegment;
@@ -85,14 +84,9 @@ fn bench_filter(criterion: &mut Criterion) {
 
         let filter_input = FilterInput {
             logs: Chunk::new(Vec::new().into()),
-            segments: FetchSegmentOutput {
-                hnsw: test_segment.hnsw,
-                blockfile: test_segment.blockfile,
-                knn: test_segment.knn,
-                metadata: test_segment.metadata,
-                record: test_segment.record,
-                collection: test_segment.collection,
-            },
+            blockfile_provider: test_segment.blockfile_provider,
+            metadata_segment: test_segment.metadata_segment,
+            record_segment: test_segment.record_segment,
         };
 
         for (op, where_clause) in baseline_where_clauses() {

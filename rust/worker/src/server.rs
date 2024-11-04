@@ -431,6 +431,7 @@ impl WorkerServer {
         };
 
         let orchestrator = GetOrchestrator::new(
+            self.blockfile_provider.clone(),
             dispatcher.clone(),
             // TODO: Load the configuration for this
             1000,
@@ -443,13 +444,11 @@ impl WorkerServer {
             },
             FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),
-                hnsw: self.hnsw_index_provider.clone(),
-                blockfile: self.blockfile_provider.clone(),
-                knn: None,
-                metadata: Some(IndexUuid(segment_uuid)),
-                record: None,
-                collection: collection_uuid,
-                version: collection_version,
+                vector_uuid: None,
+                metadata_uuid: Some(IndexUuid(segment_uuid)),
+                record_uuid: None,
+                collection_uuid,
+                collection_version,
             },
             FilterOperator {
                 query_ids,

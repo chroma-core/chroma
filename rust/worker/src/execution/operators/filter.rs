@@ -3,12 +3,13 @@ use std::{
     ops::{BitAnd, BitOr, Bound},
 };
 
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_types::{
     BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
-    MaterializedLogOperation, MetadataSetValue, MetadataValue, PrimitiveOperator, SetOperator,
-    SignedRoaringBitmap, Where, WhereChildren, WhereComparison,
+    LogRecord, MaterializedLogOperation, MetadataSetValue, MetadataValue, PrimitiveOperator,
+    Segment, SetOperator, SignedRoaringBitmap, Where, WhereChildren, WhereComparison,
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
@@ -18,16 +19,31 @@ use tracing::{trace, Instrument, Span};
 use crate::{
     execution::operator::Operator,
     segment::{
-        metadata_segment::MetadataSegmentReader, LogMaterializer, LogMaterializerError,
-        MaterializedLogRecord,
+        metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
+        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
     },
 };
 
-use super::{
-    fetch_log::FetchLogOutput,
-    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-};
-
+/// The `FilterOperator` filters the collection with specified criteria
+///
+/// # Parameters
+/// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
+/// - `where_clause`: The predicate on individual record
+///
+/// # Inputs
+/// - `logs`: The latest log of the collection
+/// - `blockfile_provider`: The blockfile provider
+/// - `metadata_segment`: The metadata segment information
+/// - `record_segment`: The record segment information
+///
+/// # Outputs
+/// - `log_offset_ids`: The offset ids in the logs to include or exclude
+/// - `compact_offset_ids`: The offset ids in the blockfile to include or exclude
+///   All offsets ids present in the logs should be excluded in `compact_offset_ids`
+///
+/// # Usage
+/// It can be used to derive the mask of offset ids that should be included or excluded by the next operator
 #[derive(Clone, Debug)]
 pub struct FilterOperator {
     pub query_ids: Option<Vec<String>>,
@@ -36,8 +52,10 @@ pub struct FilterOperator {
 
 #[derive(Clone, Debug)]
 pub struct FilterInput {
-    pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
+    pub logs: Chunk<LogRecord>,
+    pub blockfile_provider: BlockfileProvider,
+    pub metadata_segment: Segment,
+    pub record_segment: Segment,
 }
 
 #[derive(Debug)]
@@ -48,20 +66,23 @@ pub struct FilterOutput {
 
 #[derive(Error, Debug)]
 pub enum FilterError {
-    #[error("Error processing fetch segment output: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
     #[error("Error reading metadata index: {0}")]
     Index(#[from] MetadataIndexError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
+    #[error("Error creating metadata segment reader: {0}")]
+    MetadataReader(#[from] MetadataSegmentError),
+    #[error("Error creating record segment reader: {0}")]
+    RecordReader(#[from] RecordSegmentReaderCreationError),
 }
 
 impl ChromaError for FilterError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FilterError::FetchSegment(e) => e.code(),
             FilterError::Index(e) => e.code(),
             FilterError::LogMaterializer(e) => e.code(),
+            FilterError::MetadataReader(e) => e.code(),
+            FilterError::RecordReader(e) => e.code(),
         }
     }
 }
@@ -380,7 +401,18 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        let record_segment_reader = input.segments.record_segment_reader().await?;
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &input.record_segment,
+            &input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }?;
         let materializer =
             LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
         let materialized_logs = materializer
@@ -391,7 +423,9 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         let log_metadata_provider =
             MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 
-        let metadata_segement_reader = input.segments.metadata_segment_reader().await?;
+        let metadata_segement_reader =
+            MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
+                .await?;
         let compact_metadata_provider =
             MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
 
@@ -407,7 +441,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                             .as_slice(),
                     ),
                 );
-                let compact_offset_ids = if let Some(reader) = record_segment_reader.as_ref() {
+                let compact_offset_ids = if let Some(reader) = record_segment_reader {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
                         if let Ok(offset_id) =
@@ -459,16 +493,17 @@ mod tests {
     };
 
     use crate::{
-        execution::{
-            operator::Operator,
-            operators::{fetch_segment::FetchSegmentOutput, filter::FilterOperator},
-        },
+        execution::{operator::Operator, operators::filter::FilterOperator},
         log::test::{add_delete_generator, int_as_id, LogGenerator},
         segment::test::TestSegment,
     };
 
     use super::FilterInput;
 
+    /// The unit tests for `FilterOperator` uses the following test data
+    /// It generates 120 log records, where the first 60 is compacted:
+    /// - Log: Delete [11..=20], add [51..=100]
+    /// - Compacted: Delete [1..=10] deletion, add [11..=50]
     async fn setup_filter_input() -> FilterInput {
         let mut test_segment = TestSegment::default();
         let generator = LogGenerator {
@@ -477,14 +512,9 @@ mod tests {
         test_segment.populate_with_generator(60, &generator).await;
         FilterInput {
             logs: generator.generate_chunk(61..=120),
-            segments: FetchSegmentOutput {
-                hnsw: test_segment.hnsw,
-                blockfile: test_segment.blockfile,
-                knn: test_segment.knn,
-                metadata: test_segment.metadata,
-                record: test_segment.record,
-                collection: test_segment.collection,
-            },
+            blockfile_provider: test_segment.blockfile_provider,
+            metadata_segment: test_segment.metadata_segment,
+            record_segment: test_segment.record_segment,
         }
     }
 

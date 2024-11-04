@@ -88,6 +88,10 @@ pub fn upsert_generator(offset: usize) -> OperationRecord {
     }
 }
 
+/// Adds new record and deletes from the start every 6 records`
+///
+/// # Illustration for head of log
+/// [Add 1], [Add 2], [Add 3], [Add 4], [Add 5], [Del 1], [Add 6] ...
 pub fn add_delete_generator(offset: usize) -> OperationRecord {
     if offset % 6 == 0 {
         OperationRecord {

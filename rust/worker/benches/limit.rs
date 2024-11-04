@@ -25,14 +25,8 @@ fn bench_limit(criterion: &mut Criterion) {
 
         let limit_input = LimitInput {
             logs: Chunk::new(Vec::new().into()),
-            segments: FetchSegmentOutput {
-                hnsw: test_segment.hnsw,
-                blockfile: test_segment.blockfile,
-                knn: test_segment.knn,
-                metadata: test_segment.metadata,
-                record: test_segment.record,
-                collection: test_segment.collection,
-            },
+            blockfile_provider: test_segment.blockfile_provider,
+            record_segment: test_segment.record_segment,
             log_offset_ids: SignedRoaringBitmap::empty(),
             compact_offset_ids: SignedRoaringBitmap::full(),
         };

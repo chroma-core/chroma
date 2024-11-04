@@ -1,21 +1,39 @@
 use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::Metadata;
+use chroma_types::{Chunk, LogRecord, Metadata, Segment};
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
 use crate::{
     execution::operator::{Operator, OperatorType},
-    segment::{LogMaterializer, LogMaterializerError},
+    segment::{
+        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+        LogMaterializer, LogMaterializerError,
+    },
 };
 
-use super::{
-    fetch_log::FetchLogOutput,
-    fetch_segment::{FetchSegmentError, FetchSegmentOutput},
-};
-
+/// The `ProjectionOperator` retrieves record content by offset ids
+///
+/// # Parameters
+/// - `document`: Whether to retrieve document
+/// - `embedding`: Whether to retrieve embedding
+/// - `metadata`: Whether to retrieve metadata
+///
+/// # Inputs
+/// - `logs`: The latest logs of the collection
+/// - `blockfile_provider`: The blockfile provider
+/// - `record_segment`: The record segment information
+/// - `offset_ids`: The offset ids in either logs or blockfile to retrieve for
+///
+/// # Outputs
+/// - `records`: The retrieved records in the same order as `offset_ids`
+///
+/// # Usage
+/// It can be used to retrieve record contents as user requested
+/// It should be run as the last step of an orchestrator
 #[derive(Clone, Debug)]
 pub struct ProjectionOperator {
     pub document: bool,
@@ -25,8 +43,9 @@ pub struct ProjectionOperator {
 
 #[derive(Debug)]
 pub struct ProjectionInput {
-    pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
+    pub logs: Chunk<LogRecord>,
+    pub blockfile_provider: BlockfileProvider,
+    pub record_segment: Segment,
     pub offset_ids: Vec<u32>,
 }
 
@@ -45,10 +64,10 @@ pub struct ProjectionOutput {
 
 #[derive(Error, Debug)]
 pub enum ProjectionError {
-    #[error("Error processing fetch segment output: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
+    #[error("Error creating record segment reader: {0}")]
+    RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading unitialized record segment")]
@@ -58,8 +77,8 @@ pub enum ProjectionError {
 impl ChromaError for ProjectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ProjectionError::FetchSegment(e) => e.code(),
             ProjectionError::LogMaterializer(e) => e.code(),
+            ProjectionError::RecordReader(e) => e.code(),
             ProjectionError::RecordSegment(e) => e.code(),
             ProjectionError::RecordSegmentUninitialized => ErrorCodes::Internal,
         }
@@ -77,7 +96,18 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        let record_segment_reader = input.segments.record_segment_reader().await?;
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &input.record_segment,
+            &input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }?;
         let materializer =
             LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
         let materialized_logs = materializer
@@ -114,7 +144,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                 },
                 // The offset id is in the record segment
                 None => {
-                    if let Some(reader) = record_segment_reader.as_ref() {
+                    if let Some(reader) = &record_segment_reader {
                         let record = reader.get_data_for_offset_id(*offset_id).await?;
                         ProjectionRecord {
                             id: record.id.to_string(),
@@ -140,16 +170,20 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 #[cfg(test)]
 mod tests {
     use crate::{
-        execution::{
-            operator::Operator,
-            operators::{fetch_segment::FetchSegmentOutput, projection::ProjectionOperator},
-        },
+        execution::{operator::Operator, operators::projection::ProjectionOperator},
         log::test::{int_as_id, upsert_generator, LogGenerator},
         segment::test::TestSegment,
     };
 
     use super::ProjectionInput;
 
+    /// The unit tests for `ProjectionOperator` uses the following test data
+    /// It first generates 100 log records and compact them,
+    /// then generate 20 log records that overwrite the compacted data,
+    /// and finally generate 20 log records of new data:
+    ///
+    /// - Log: Upsert [81..=120]
+    /// - Compacted: Upsert [1..=100]
     async fn setup_projection_input(offset_ids: Vec<u32>) -> ProjectionInput {
         let mut test_segment = TestSegment::default();
         let generator = LogGenerator {
@@ -158,14 +192,8 @@ mod tests {
         test_segment.populate_with_generator(100, &generator).await;
         ProjectionInput {
             logs: generator.generate_chunk(81..=120),
-            segments: FetchSegmentOutput {
-                hnsw: test_segment.hnsw,
-                blockfile: test_segment.blockfile,
-                knn: test_segment.knn,
-                metadata: test_segment.metadata,
-                record: test_segment.record,
-                collection: test_segment.collection,
-            },
+            blockfile_provider: test_segment.blockfile_provider,
+            record_segment: test_segment.record_segment,
             offset_ids,
         }
     }

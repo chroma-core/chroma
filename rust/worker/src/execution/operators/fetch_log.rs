@@ -11,6 +11,25 @@ use crate::{
     log::log::{Log, PullLogsError},
 };
 
+/// The `FetchLogOperator` fetches logs from the log service
+///
+/// # Parameters
+/// - `log_client`: The log service reader
+/// - `batch_size`: The maximum number of logs to fetch by `log_client` at a time
+/// - `start_log_offset_id`: The offset id of the first log to read
+/// - `maximum_fetch_count`: The maximum number of logs to fetch in total
+/// - `collection_uuid`: The uuid of the collection where the fetched logs should belong
+///
+/// # Inputs
+/// - No input is required
+///
+/// # Outputs
+/// - The contiguous chunk of logs belong to the collection with `collection_uuid`
+///   starting from `start_log_offset_id`. At most `maximum_fetch_count` number of logs
+///   will be fetched
+///
+/// # Usage
+/// It should be run at the start of an orchestrator to get the latest data of a collection
 #[derive(Clone, Debug)]
 pub struct FetchLogOperator {
     pub(crate) log_client: Box<Log>,
@@ -20,7 +39,7 @@ pub struct FetchLogOperator {
     pub collection_uuid: CollectionUuid,
 }
 
-pub type FetchLogInput = ();
+type FetchLogInput = ();
 
 pub type FetchLogOutput = Chunk<LogRecord>;
 
