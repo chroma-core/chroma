@@ -13,6 +13,7 @@ use chroma_types::DataRecord;
 use roaring::RoaringBitmap;
 use std::fmt::{Debug, Display};
 use std::mem::size_of;
+use std::ops::Bound;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -282,7 +283,9 @@ impl<
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_by_prefix(prefix).await,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, ..).await
+            }
         }
     }
 
@@ -293,7 +296,11 @@ impl<
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gt(prefix, key).await,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader
+                    .get_range(prefix..=prefix, (Bound::Excluded(key), Bound::Unbounded))
+                    .await
+            }
         }
     }
 
@@ -304,7 +311,9 @@ impl<
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lt(prefix, key).await,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, ..key).await
+            }
         }
     }
 
@@ -315,7 +324,9 @@ impl<
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gte(prefix, key).await,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, key..).await
+            }
         }
     }
 
@@ -326,7 +337,9 @@ impl<
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lte(prefix, key).await,
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_range(prefix..=prefix, ..=key).await
+            }
         }
     }
 
