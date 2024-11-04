@@ -14,6 +14,7 @@ use crate::BlockfileError;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
+use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::mem::transmute;
@@ -37,12 +38,15 @@ pub struct ArrowBlockfileWriter {
 pub enum ArrowBlockfileError {
     #[error("Block not found")]
     BlockNotFound,
+    #[error("Could not fetch block")]
+    BlockFetchError(#[from] GetError),
 }
 
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
             ArrowBlockfileError::BlockNotFound => ErrorCodes::Internal,
+            ArrowBlockfileError::BlockFetchError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -478,7 +482,44 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 
     // Returns all Arrow records in the specified range.
-    pub(crate) async fn get_range<'prefix, PrefixRange, KeyRange>(
+    pub(crate) fn get_range_stream<'prefix, PrefixRange, KeyRange>(
+        &'me self,
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + Send + 'me
+    where
+        PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'me,
+        KeyRange: RangeBounds<K> + Clone + Send + 'me,
+        K: Sync,
+        V: Sync,
+    {
+        futures::stream::iter(
+            self.root
+                .sparse_index
+                .get_block_ids_range(prefix_range.clone(), key_range.clone())
+                .into_iter()
+                .map(Ok),
+        )
+        .try_filter_map(move |block_id| async move {
+            match self.get_block(block_id).await {
+                Ok(Some(block)) => Ok(Some(block)),
+                Ok(None) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
+                Err(e) => Err(Box::new(ArrowBlockfileError::BlockFetchError(e))),
+            }
+        })
+        .map(move |block| match block {
+            Ok(block) => futures::stream::iter(
+                block
+                    .get_range::<K, V, _, _>(prefix_range.clone(), key_range.clone())
+                    .map(Ok),
+            )
+            .boxed(),
+            Err(e) => futures::stream::once(async { Err(e as Box<dyn ChromaError>) }).boxed(),
+        })
+        .flatten()
+    }
+
+    pub async fn get_range<'prefix, PrefixRange, KeyRange>(
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
@@ -596,6 +637,7 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
+    use futures::{StreamExt, TryStreamExt};
     use parking_lot::Mutex;
     use proptest::prelude::*;
     use proptest::test_runner::Config;
@@ -672,9 +714,9 @@ mod tests {
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
             let prefix_query = format!("{}/{}", "prefix", prefix_for_query);
             println!("Query {}, num_keys {}", prefix_query, num_keys);
-            let res = reader
-                .get_range(prefix_query.as_str()..=prefix_query.as_str(), ..)
-                .await;
+            let range_iter =
+                reader.get_range_stream(prefix_query.as_str()..=prefix_query.as_str(), ..);
+            let res = range_iter.try_collect::<Vec<_>>().await;
             match res {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
@@ -735,7 +777,26 @@ mod tests {
             let query = format!("{}/{}", "key", query_key);
             println!("Query {}", query);
             println!("Operation {:?}", operation);
-            let greater_than = match operation {
+
+            let range_stream = match operation {
+                ComparisonOperation::GreaterThan => reader
+                    .get_range_stream(
+                        prefix..=prefix,
+                        (Bound::Excluded(query.as_str()), Bound::Unbounded),
+                    )
+                    .boxed_local(),
+                ComparisonOperation::GreaterThanOrEquals => reader
+                    .get_range_stream(prefix..=prefix, query.as_str()..)
+                    .boxed_local(),
+                ComparisonOperation::LessThan => reader
+                    .get_range_stream(prefix..=prefix, ..query.as_str())
+                    .boxed_local(),
+                ComparisonOperation::LessThanOrEquals => reader
+                    .get_range_stream(prefix..=prefix, ..=query.as_str())
+                    .boxed_local(),
+            };
+
+            let materialized_range = match operation {
                 ComparisonOperation::GreaterThan => {
                     reader
                         .get_range(
@@ -745,45 +806,63 @@ mod tests {
                         .await
                 }
                 ComparisonOperation::GreaterThanOrEquals => {
-                    reader.get_range(prefix..=prefix, query.as_str()..).await
+                    reader
+                        .get_range(
+                            prefix..=prefix,
+                            (Bound::Included(query.as_str()), Bound::Unbounded),
+                        )
+                        .await
                 }
                 ComparisonOperation::LessThan => {
-                    reader.get_range(prefix..=prefix, ..query.as_str()).await
+                    reader
+                        .get_range(
+                            prefix..=prefix,
+                            (Bound::Unbounded, Bound::Excluded(query.as_str())),
+                        )
+                        .await
                 }
                 ComparisonOperation::LessThanOrEquals => {
-                    reader.get_range(prefix..=prefix, ..=query.as_str()).await
+                    reader
+                        .get_range(
+                            prefix..=prefix,
+                            (Bound::Unbounded, Bound::Included(query.as_str())),
+                        )
+                        .await
                 }
-            };
-            match greater_than {
-                Ok(c) => {
-                    let mut kv_map = HashMap::new();
-                    for entry in c {
-                        kv_map.insert(entry.0, entry.1);
-                    }
-                    for i in 1..num_keys {
-                        let key = format!("{}/{}", "key", i);
-                        let condition: bool = match operation {
-                            ComparisonOperation::GreaterThan => key > query,
-                            ComparisonOperation::GreaterThanOrEquals => key >= query,
-                            ComparisonOperation::LessThan => key < query,
-                            ComparisonOperation::LessThanOrEquals => key <= query,
-                        };
-                        if condition {
-                            assert!(
-                                kv_map.contains_key(key.as_str()),
-                                "{}",
-                                format!("Key {} should be present but not found", key)
-                            );
-                        } else {
-                            assert!(
-                                !kv_map.contains_key(key.as_str()),
-                                "{}",
-                                format!("Key {} should not be present but found", key)
-                            );
-                        }
-                    }
+            }
+            .unwrap();
+
+            let stream_result = range_stream.try_collect::<Vec<_>>().await.unwrap();
+            assert_eq!(
+                materialized_range, stream_result,
+                ".get_range() and .get_range_stream() should return the same result"
+            );
+
+            let mut kv_map = HashMap::new();
+            for entry in materialized_range {
+                kv_map.insert(entry.0, entry.1);
+            }
+            for i in 1..num_keys {
+                let key = format!("{}/{}", "key", i);
+                let condition: bool = match operation {
+                    ComparisonOperation::GreaterThan => key > query,
+                    ComparisonOperation::GreaterThanOrEquals => key >= query,
+                    ComparisonOperation::LessThan => key < query,
+                    ComparisonOperation::LessThanOrEquals => key <= query,
+                };
+                if condition {
+                    assert!(
+                        kv_map.contains_key(key.as_str()),
+                        "{}",
+                        format!("Key {} should be present but not found", key)
+                    );
+                } else {
+                    assert!(
+                        !kv_map.contains_key(key.as_str()),
+                        "{}",
+                        format!("Key {} should not be present but found", key)
+                    );
                 }
-                Err(_) => panic!("Error getting gt"),
             }
         });
     }

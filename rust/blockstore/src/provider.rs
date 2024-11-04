@@ -65,8 +65,9 @@ impl BlockfileProvider {
             + Into<KeyWrapper>
             + TryFrom<&'new KeyWrapper, Error = InvalidKeyConversion>
             + ArrowReadableKey<'new>
+            + Sync
             + 'new,
-        V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
+        V: Value + Readable<'new> + ArrowReadableValue<'new> + Sync + 'new,
     >(
         &self,
         id: &uuid::Uuid,

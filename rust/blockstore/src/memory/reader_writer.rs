@@ -97,11 +97,11 @@ impl<
         }
     }
 
-    pub(crate) fn get_range<'prefix, PrefixRange, KeyRange>(
+    pub(crate) fn get_range_iter<'prefix, PrefixRange, KeyRange>(
         &'storage self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    ) -> Result<impl Iterator<Item = (K, V)> + 'storage, Box<dyn ChromaError>>
     where
         PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
@@ -118,11 +118,9 @@ impl<
             return Err(Box::new(BlockfileError::NotFoundError));
         }
 
-        let values = values
-            .iter()
-            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
-            .collect();
-        Ok(values)
+        Ok(values
+            .into_iter()
+            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value)))
     }
 
     pub(crate) fn get_at_index(
@@ -313,7 +311,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<&str, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -334,7 +333,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", (Bound::Excluded(3), Bound::Unbounded));
+        let values =
+            reader.get_range_iter("prefix"..="prefix", (Bound::Excluded(3), Bound::Unbounded));
         assert!(values.is_err());
     }
 
@@ -349,9 +349,10 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader
-            .get_range("prefix"..="prefix", (Bound::Excluded(0), Bound::Unbounded))
+        let range_iter = reader
+            .get_range_iter("prefix"..="prefix", (Bound::Excluded(0), Bound::Unbounded))
             .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -375,9 +376,10 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader
-            .get_range("prefix"..="prefix", (Bound::Excluded(1), Bound::Unbounded))
+        let range_iter = reader
+            .get_range_iter("prefix"..="prefix", (Bound::Excluded(1), Bound::Unbounded))
             .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -398,7 +400,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range(
+        let values = reader.get_range_iter(
             "prefix"..="prefix",
             (Bound::Excluded(3.0), Bound::Unbounded),
         );
@@ -416,12 +418,13 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader
-            .get_range(
+        let range_iter = reader
+            .get_range_iter(
                 "prefix"..="prefix",
                 (Bound::Excluded(0.0), Bound::Unbounded),
             )
             .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -445,12 +448,13 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader
-            .get_range(
+        let range_iter = reader
+            .get_range_iter(
                 "prefix"..="prefix",
                 (Bound::Excluded(1.0), Bound::Unbounded),
             )
             .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -471,7 +475,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", 4..);
+        let values = reader.get_range_iter("prefix"..="prefix", 4..);
         assert!(values.is_err());
     }
 
@@ -486,7 +490,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", 1..).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 1..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -510,7 +515,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", 2..).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 2..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -531,7 +537,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", 3.5..);
+        let values = reader.get_range_iter("prefix"..="prefix", 3.5..);
         assert!(values.is_err());
     }
 
@@ -546,7 +552,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", 0.5..).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 0.5..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -570,7 +577,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", 1.5..).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 1.5..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -591,7 +599,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..1);
+        let values = reader.get_range_iter("prefix"..="prefix", ..1);
         assert!(values.is_err());
     }
 
@@ -606,7 +614,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..4).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..4).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -630,7 +639,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..3).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..3).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -651,7 +661,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..0.5);
+        let values = reader.get_range_iter("prefix"..="prefix", ..0.5);
         assert!(values.is_err());
     }
 
@@ -666,7 +676,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..3.5).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..3.5).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -690,7 +701,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..2.5).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..2.5).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -711,7 +723,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..=0);
+        let values = reader.get_range_iter("prefix"..="prefix", ..=0);
         assert!(values.is_err());
     }
 
@@ -726,7 +738,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..=3).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=3).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -750,7 +763,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..=2).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=2).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -771,7 +785,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..=0.5);
+        let values = reader.get_range_iter("prefix"..="prefix", ..=0.5);
         assert!(values.is_err());
     }
 
@@ -786,7 +800,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..=3.0).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=3.0).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -810,7 +825,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_range("prefix"..="prefix", ..=2.0).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=2.0).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
