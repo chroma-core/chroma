@@ -8,7 +8,7 @@ use tracing::Span;
 use crate::{
     execution::{
         dispatcher::Dispatcher,
-        operator::{wrap, TaskError, TaskMessage, TaskResult},
+        operator::{wrap, TaskError, TaskResult},
         operators::{
             fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
             fetch_segment::{FetchSegmentError, FetchSegmentOperator, FetchSegmentOutput},
@@ -131,39 +131,13 @@ impl GetOrchestrator {
         result?
     }
 
-    // Cleanup the task result and produce the output if any
-    // Terminate the orchestrator if there is any error
-    fn cleanup_response<O, E>(
-        &mut self,
-        ctx: &ComponentContext<Self>,
-        message: TaskResult<O, E>,
-    ) -> Option<O>
+    fn terminate_with_error<E>(&mut self, ctx: &ComponentContext<Self>, err: E)
     where
         E: Into<GetError>,
     {
-        match message.into_inner() {
-            Ok(output) => Some(output),
-            Err(err) => {
-                self.terminate_with_error(ctx, err.into());
-                None
-            }
-        }
-    }
-
-    fn terminate_with_error(&mut self, ctx: &ComponentContext<Self>, err: GetError) {
-        tracing::error!("Error running orchestrator: {}", err);
-        terminate_with_error(self.result_channel.take(), err, ctx);
-    }
-
-    // Sends the task to dispatcher and returns whether the action is successful
-    // Terminate the orchestrator if there is any error
-    async fn send_task(&mut self, ctx: &ComponentContext<Self>, task: TaskMessage) -> bool {
-        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-            self.terminate_with_error(ctx, err.into());
-            false
-        } else {
-            true
-        }
+        let get_err = err.into();
+        tracing::error!("Error running orchestrator: {}", &get_err);
+        terminate_with_error(self.result_channel.take(), get_err, ctx);
     }
 
     async fn try_start_filter_operator(&mut self, ctx: &ComponentContext<Self>) {
@@ -181,7 +155,9 @@ impl GetOrchestrator {
                 },
                 ctx.receiver(),
             );
-            self.send_task(ctx, task).await;
+            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+                self.terminate_with_error(ctx, err);
+            }
         }
     }
 }
@@ -199,9 +175,14 @@ impl Component for GetOrchestrator {
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         let log_task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
         let segment_task = wrap(Box::new(self.fetch_segment.clone()), (), ctx.receiver());
-        let log_task_success = self.send_task(ctx, log_task).await;
-        if log_task_success {
-            self.send_task(ctx, segment_task).await;
+        if let Err(err) = self.dispatcher.send(log_task, Some(Span::current())).await {
+            self.terminate_with_error(ctx, err);
+        } else if let Err(err) = self
+            .dispatcher
+            .send(segment_task, Some(Span::current()))
+            .await
+        {
+            self.terminate_with_error(ctx, err);
         }
     }
 }
@@ -215,9 +196,12 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.cleanup_response(ctx, message) {
-            Some(output) => output,
-            None => return,
+        let output = match message.into_inner() {
+            Ok(output) => output,
+            Err(err) => {
+                self.terminate_with_error(ctx, err);
+                return;
+            }
         };
         self.fetch_log_output = Some(output);
         self.try_start_filter_operator(ctx).await;
@@ -233,9 +217,12 @@ impl Handler<TaskResult<FetchSegmentOutput, FetchSegmentError>> for GetOrchestra
         message: TaskResult<FetchSegmentOutput, FetchSegmentError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.cleanup_response(ctx, message) {
-            Some(output) => output,
-            None => return,
+        let output = match message.into_inner() {
+            Ok(output) => output,
+            Err(err) => {
+                self.terminate_with_error(ctx, err);
+                return;
+            }
         };
         self.fetch_segment_output = Some(output);
         self.try_start_filter_operator(ctx).await;
@@ -251,9 +238,12 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
         message: TaskResult<FilterOutput, FilterError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.cleanup_response(ctx, message) {
-            Some(output) => output,
-            None => return,
+        let output = match message.into_inner() {
+            Ok(output) => output,
+            Err(err) => {
+                self.terminate_with_error(ctx, err);
+                return;
+            }
         };
         let task = wrap(
             Box::new(self.limit.clone()),
@@ -275,7 +265,9 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send_task(ctx, task).await;
+        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+            self.terminate_with_error(ctx, err);
+        }
     }
 }
 
@@ -288,9 +280,12 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         message: TaskResult<LimitOutput, LimitError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.cleanup_response(ctx, message) {
-            Some(output) => output,
-            None => return,
+        let output = match message.into_inner() {
+            Ok(output) => output,
+            Err(err) => {
+                self.terminate_with_error(ctx, err);
+                return;
+            }
         };
         let task = wrap(
             Box::new(self.projection.clone()),
@@ -311,7 +306,9 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send_task(ctx, task).await;
+        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+            self.terminate_with_error(ctx, err);
+        }
     }
 }
 
@@ -324,9 +321,12 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         message: TaskResult<ProjectionOutput, ProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.cleanup_response(ctx, message) {
-            Some(output) => output,
-            None => return,
+        let output = match message.into_inner() {
+            Ok(output) => output,
+            Err(err) => {
+                self.terminate_with_error(ctx, err);
+                return;
+            }
         };
         if let Some(chan) = self.result_channel.take() {
             if chan.send(Ok(output)).is_err() {

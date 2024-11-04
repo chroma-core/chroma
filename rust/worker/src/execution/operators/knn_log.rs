@@ -20,13 +20,13 @@ use super::{
     knn::{KnnOperator, RecordDistance},
 };
 
-#[derive(Debug)]
-struct KnnLogInput {
-    logs: FetchLogOutput,
-    blockfile_provider: BlockfileProvider,
-    record_segment: Segment,
-    vector_segment: Segment,
-    log_offset_ids: SignedRoaringBitmap,
+#[derive(Clone, Debug)]
+pub struct KnnLogInput {
+    pub logs: FetchLogOutput,
+    pub blockfile_provider: BlockfileProvider,
+    pub record_segment: Segment,
+    pub vector_segment: Segment,
+    pub log_offset_ids: SignedRoaringBitmap,
 }
 
 #[derive(Debug)]
