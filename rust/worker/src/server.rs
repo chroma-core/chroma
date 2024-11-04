@@ -193,6 +193,7 @@ impl WorkerServer {
         };
 
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
+            self.blockfile_provider.clone(),
             dispatcher.clone(),
             // TODO: Load the configuration for this
             1000,
@@ -205,13 +206,11 @@ impl WorkerServer {
             },
             FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),
-                hnsw: self.hnsw_index_provider.clone(),
-                blockfile: self.blockfile_provider.clone(),
-                knn: Some(IndexUuid(segment_uuid)),
-                metadata: None,
-                record: None,
-                collection: collection_uuid,
-                version: collection_version,
+                collection_uuid,
+                collection_version,
+                metadata_uuid: None,
+                record_uuid: None,
+                vector_uuid: Some(IndexUuid(segment_uuid)),
             },
             FilterOperator {
                 query_ids: (!request.allowed_ids.is_empty()).then_some(request.allowed_ids),
@@ -236,7 +235,9 @@ impl WorkerServer {
             .into_iter()
             .map(|embedding| {
                 KnnOrchestrator::new(
+                    self.blockfile_provider.clone(),
                     dispatcher.clone(),
+                    self.hnsw_index_provider.clone(),
                     // TODO: Load the configuration for this
                     1000,
                     knn_filter_output.clone(),

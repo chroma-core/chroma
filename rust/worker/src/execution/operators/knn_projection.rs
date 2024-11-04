@@ -1,4 +1,6 @@
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
+use chroma_types::Segment;
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
@@ -10,7 +12,6 @@ use crate::execution::{
 
 use super::{
     fetch_log::FetchLogOutput,
-    fetch_segment::FetchSegmentOutput,
     knn::RecordDistance,
     projection::{ProjectionError, ProjectionOperator, ProjectionRecord},
 };
@@ -24,7 +25,8 @@ pub struct KnnProjectionOperator {
 #[derive(Clone, Debug)]
 pub struct KnnProjectionInput {
     pub logs: FetchLogOutput,
-    pub segments: FetchSegmentOutput,
+    pub blockfile_provider: BlockfileProvider,
+    pub record_segment: Segment,
     pub record_distances: Vec<RecordDistance>,
 }
 
@@ -69,7 +71,8 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
 
         let projection_input = ProjectionInput {
             logs: input.logs.clone(),
-            segments: input.segments.clone(),
+            blockfile_provider: input.blockfile_provider.clone(),
+            record_segment: input.record_segment.clone(),
             offset_ids: input
                 .record_distances
                 .iter()

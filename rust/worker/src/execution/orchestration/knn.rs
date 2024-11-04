@@ -1,4 +1,6 @@
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::hnsw_provider::HnswIndexProvider;
 use thiserror::Error;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tonic::async_trait;
@@ -90,6 +92,7 @@ type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 #[derive(Debug)]
 pub struct KnnFilterOrchestrator {
     // Orchestrator parameters
+    blockfile_provider: BlockfileProvider,
     dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
 
@@ -110,6 +113,7 @@ pub struct KnnFilterOrchestrator {
 
 impl KnnFilterOrchestrator {
     pub fn new(
+        blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         fetch_log: FetchLogOperator,
@@ -117,6 +121,7 @@ impl KnnFilterOrchestrator {
         filter: FilterOperator,
     ) -> Self {
         Self {
+            blockfile_provider,
             dispatcher,
             queue,
             fetch_log,
@@ -155,7 +160,9 @@ impl KnnFilterOrchestrator {
                 Box::new(self.filter.clone()),
                 FilterInput {
                     logs: logs.clone(),
-                    segments: segments.clone(),
+                    blockfile_provider: self.blockfile_provider.clone(),
+                    metadata_segment: segments.metadata_segment.clone(),
+                    record_segment: segments.record_segment.clone(),
                 },
                 ctx.receiver(),
             );
@@ -276,7 +283,9 @@ type KnnResult = Result<KnnOutput, KnnError>;
 #[derive(Debug)]
 pub struct KnnOrchestrator {
     // Orchestrator parameters
+    blockfile_provider: BlockfileProvider,
     dispatcher: ComponentHandle<Dispatcher>,
+    hnsw_provider: HnswIndexProvider,
     queue: usize,
 
     // Output from KnnFilterOrchestrator
@@ -299,7 +308,9 @@ pub struct KnnOrchestrator {
 
 impl KnnOrchestrator {
     pub fn new(
+        blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
+        hnsw_provider: HnswIndexProvider,
         queue: usize,
         knn_filter_output: KnnFilterOutput,
         knn: KnnOperator,
@@ -307,7 +318,9 @@ impl KnnOrchestrator {
     ) -> Self {
         let fetch = knn.fetch;
         Self {
+            blockfile_provider,
             dispatcher,
+            hnsw_provider,
             queue,
             knn_filter_output,
             knn,
@@ -372,7 +385,9 @@ impl Component for KnnOrchestrator {
             Box::new(self.knn.clone()),
             KnnLogInput {
                 logs: self.knn_filter_output.logs.clone(),
-                segments: self.knn_filter_output.segments.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                record_segment: self.knn_filter_output.segments.record_segment.clone(),
+                vector_segment: self.knn_filter_output.segments.vector_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
             },
             ctx.receiver(),
@@ -380,7 +395,9 @@ impl Component for KnnOrchestrator {
         let knn_segment_task = wrap(
             Box::new(self.knn.clone()),
             KnnHnswInput {
-                segments: self.knn_filter_output.segments.clone(),
+                hnsw_provider: self.hnsw_provider.clone(),
+                collection: self.knn_filter_output.segments.collection.clone(),
+                hnsw_segment: self.knn_filter_output.segments.vector_segment.clone(),
                 compact_offset_ids: self
                     .knn_filter_output
                     .filter_output
@@ -467,7 +484,8 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             Box::new(self.knn_projection.clone()),
             KnnProjectionInput {
                 logs: self.knn_filter_output.logs.clone(),
-                segments: self.knn_filter_output.segments.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                record_segment: self.knn_filter_output.segments.record_segment.clone(),
                 record_distances: output.record_distances,
             },
             ctx.receiver(),
