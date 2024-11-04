@@ -80,7 +80,6 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.execution.executor.abstract.Executor": "chroma_executor_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
-    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
     "chromadb.quota.QuotaEnforcer": "chroma_quota_enforcer_impl",
     "chromadb.rate_limit.RateLimitEnforcer": "chroma_rate_limit_enforcer_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
