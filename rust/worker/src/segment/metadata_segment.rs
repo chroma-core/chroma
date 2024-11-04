@@ -29,7 +29,6 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const FULL_TEXT_PLS: &str = "full_text_pls";
-const FULL_TEXT_FREQS: &str = "full_text_freqs";
 const STRING_METADATA: &str = "string_metadata";
 const BOOL_METADATA: &str = "bool_metadata";
 const F32_METADATA: &str = "f32_metadata";
@@ -110,20 +109,6 @@ impl<'me> MetadataSegmentWriter<'me> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
-        if segment.file_path.contains_key(FULL_TEXT_FREQS)
-            && !segment.file_path.contains_key(FULL_TEXT_PLS)
-        {
-            return Err(MetadataSegmentError::MissingFile(
-                (*FULL_TEXT_PLS).to_string(),
-            ));
-        }
-        if segment.file_path.contains_key(FULL_TEXT_PLS)
-            && !segment.file_path.contains_key(FULL_TEXT_FREQS)
-        {
-            return Err(MetadataSegmentError::MissingFile(
-                (*FULL_TEXT_FREQS).to_string(),
-            ));
-        }
         let (pls_writer, pls_reader) = match segment.file_path.get(FULL_TEXT_PLS) {
             Some(pls_path) => match pls_path.first() {
                 Some(pls_uuid) => {
@@ -160,55 +145,13 @@ impl<'me> MetadataSegmentWriter<'me> {
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
-        let (freqs_writer, freqs_reader) = match segment.file_path.get(FULL_TEXT_FREQS) {
-            Some(freqs_path) => match freqs_path.first() {
-                Some(freqs_uuid) => {
-                    let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
-                        Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(MetadataSegmentError::UuidParseError(
-                                freqs_uuid.to_string(),
-                            ))
-                        }
-                    };
-                    let freqs_writer = match blockfile_provider
-                        .write::<u32, u32>(
-                            BlockfileWriterOptions::new()
-                                .fork(freqs_uuid)
-                                .ordered_mutations(),
-                        )
-                        .await
-                    {
-                        Ok(writer) => writer,
-                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                    };
-                    let freqs_reader = match blockfile_provider.open::<u32, u32>(&freqs_uuid).await
-                    {
-                        Ok(reader) => reader,
-                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    (freqs_writer, Some(freqs_reader))
-                }
-                None => return Err(MetadataSegmentError::EmptyPathVector),
-            },
-            None => match blockfile_provider
-                .write::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
-                .await
-            {
-                Ok(writer) => (writer, None),
-                Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-            },
-        };
-        let full_text_index_reader = match (pls_reader, freqs_reader) {
-            (Some(pls_reader), Some(freqs_reader)) => {
+
+        let full_text_index_reader = match (pls_reader) {
+            (Some(pls_reader)) => {
                 let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-                Some(FullTextIndexReader::new(
-                    pls_reader,
-                    freqs_reader,
-                    tokenizer,
-                ))
+                Some(FullTextIndexReader::new(pls_reader, tokenizer))
             }
-            (None, None) => None,
+            (None) => None,
             _ => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
         };
 
@@ -216,7 +159,6 @@ impl<'me> MetadataSegmentWriter<'me> {
         let full_text_index_writer = FullTextIndexWriter::new(
             full_text_index_reader,
             pls_writer,
-            freqs_writer,
             full_text_writer_tokenizer,
         );
 
@@ -812,7 +754,6 @@ pub(crate) struct MetadataSegmentFlusher {
 impl SegmentFlusher for MetadataSegmentFlusher {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let full_text_pls_id = self.full_text_index_flusher.pls_id();
-        let full_text_freqs_id = self.full_text_index_flusher.freqs_id();
         let string_metadata_id = self.string_metadata_index_flusher.id();
         let bool_metadata_id = self.bool_metadata_index_flusher.id();
         let f32_metadata_id = self.f32_metadata_index_flusher.id();
@@ -827,10 +768,6 @@ impl SegmentFlusher for MetadataSegmentFlusher {
         flushed.insert(
             FULL_TEXT_PLS.to_string(),
             vec![full_text_pls_id.to_string()],
-        );
-        flushed.insert(
-            FULL_TEXT_FREQS.to_string(),
-            vec![full_text_freqs_id.to_string()],
         );
 
         match self.bool_metadata_index_flusher.flush().await {
@@ -883,20 +820,7 @@ impl MetadataSegmentReader<'_> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
-        if segment.file_path.contains_key(FULL_TEXT_FREQS)
-            && !segment.file_path.contains_key(FULL_TEXT_PLS)
-        {
-            return Err(MetadataSegmentError::MissingFile(
-                (*FULL_TEXT_PLS).to_string(),
-            ));
-        }
-        if segment.file_path.contains_key(FULL_TEXT_PLS)
-            && !segment.file_path.contains_key(FULL_TEXT_FREQS)
-        {
-            return Err(MetadataSegmentError::MissingFile(
-                (*FULL_TEXT_FREQS).to_string(),
-            ));
-        }
+
         let pls_reader = match segment.file_path.get(FULL_TEXT_PLS) {
             Some(pls_path) => match pls_path.first() {
                 Some(pls_uuid) => {
@@ -916,37 +840,12 @@ impl MetadataSegmentReader<'_> {
             },
             None => None,
         };
-        let freqs_reader = match segment.file_path.get(FULL_TEXT_FREQS) {
-            Some(freqs_path) => match freqs_path.first() {
-                Some(freqs_uuid) => {
-                    let freqs_uuid = match Uuid::parse_str(freqs_uuid) {
-                        Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(MetadataSegmentError::UuidParseError(
-                                freqs_uuid.to_string(),
-                            ))
-                        }
-                    };
-                    match blockfile_provider.open::<u32, u32>(&freqs_uuid).await {
-                        Ok(reader) => Some(reader),
-                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    }
-                }
-                None => None,
-            },
-            None => None,
-        };
-        let full_text_index_reader = match (pls_reader, freqs_reader) {
-            (Some(pls_reader), Some(freqs_reader)) => {
+
+        let full_text_index_reader = match (pls_reader) {
+            (Some(pls_reader)) => {
                 let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-                Some(FullTextIndexReader::new(
-                    pls_reader,
-                    freqs_reader,
-                    tokenizer,
-                ))
+                Some(FullTextIndexReader::new(pls_reader, tokenizer))
             }
-            (Some(_), None) => return Err(MetadataSegmentError::FullTextIndexFilesIntegrityError),
-            (None, Some(_)) => return Err(MetadataSegmentError::FullTextIndexFilesIntegrityError),
             _ => None,
         };
 
