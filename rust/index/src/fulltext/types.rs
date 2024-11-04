@@ -165,20 +165,17 @@ pub struct FullTextIndexWriter {
     tokenizer: NgramTokenizer, // todo
     token_instances: Arc<Mutex<Vec<TokenInstance>>>,
     posting_lists_blockfile_writer: BlockfileWriter,
-    frequencies_blockfile_writer: BlockfileWriter,
 }
 
 impl FullTextIndexWriter {
     pub fn new(
         full_text_index_reader: Option<FullTextIndexReader>, // todo
         posting_lists_blockfile_writer: BlockfileWriter,
-        frequencies_blockfile_writer: BlockfileWriter,
         tokenizer: NgramTokenizer,
     ) -> Self {
         FullTextIndexWriter {
             tokenizer,
             posting_lists_blockfile_writer,
-            frequencies_blockfile_writer,
             token_instances: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -331,20 +328,14 @@ impl FullTextIndexWriter {
             .posting_lists_blockfile_writer
             .commit::<u32, Vec<u32>>()
             .await?;
-        let frequencies_blockfile_flusher = self
-            .frequencies_blockfile_writer
-            .commit::<u32, String>()
-            .await?;
         Ok(FullTextIndexFlusher {
             posting_lists_blockfile_flusher,
-            frequencies_blockfile_flusher,
         })
     }
 }
 
 pub struct FullTextIndexFlusher {
     posting_lists_blockfile_flusher: BlockfileFlusher,
-    frequencies_blockfile_flusher: BlockfileFlusher,
 }
 
 impl FullTextIndexFlusher {
@@ -359,25 +350,12 @@ impl FullTextIndexFlusher {
                 return Err(FullTextIndexError::BlockfileWriteError(e));
             }
         };
-        match self
-            .frequencies_blockfile_flusher
-            .flush::<u32, String>()
-            .await
-        {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(FullTextIndexError::BlockfileWriteError(e));
-            }
-        };
+
         Ok(())
     }
 
     pub fn pls_id(&self) -> Uuid {
         self.posting_lists_blockfile_flusher.id()
-    }
-
-    pub fn freqs_id(&self) -> Uuid {
-        self.frequencies_blockfile_flusher.id()
     }
 }
 
@@ -390,8 +368,7 @@ pub struct FullTextIndexReader<'me> {
 impl<'me> FullTextIndexReader<'me> {
     pub fn new(
         posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [u32]>,
-        frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>, // todo
-        tokenizer: NgramTokenizer,                                    // todo
+        tokenizer: NgramTokenizer, // todo
     ) -> Self {
         FullTextIndexReader {
             posting_lists_blockfile_reader,
@@ -548,38 +525,30 @@ mod tests {
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let _index =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let _index = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
     }
 
     #[tokio::test]
     async fn test_new_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_id = freq_blockfile_writer.id();
         let pl_blockfile_id = pl_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let _ = FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let _ = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
     }
 
     #[tokio::test]
@@ -589,16 +558,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -609,14 +572,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1]));
@@ -635,16 +596,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -655,14 +610,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert!(res.is_empty());
@@ -675,16 +628,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -701,14 +648,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("aaaa").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([2]));
@@ -721,16 +666,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -741,14 +680,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("helo").await.unwrap();
         assert!(res.is_empty());
@@ -761,16 +698,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -781,14 +712,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("chroma").await;
         assert!(res.is_err());
@@ -801,16 +730,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([DocumentMutation::Create {
                 offset_id: 1,
@@ -827,14 +750,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2]));
@@ -850,16 +771,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -876,14 +791,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2]));
@@ -899,16 +812,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -933,14 +840,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2, 4]));
@@ -962,16 +867,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -1000,14 +899,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("aaa").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2, 4, 5]));
@@ -1026,16 +923,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
         index_writer
             .handle_batch([
                 DocumentMutation::Create {
@@ -1056,14 +947,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("!!!!!").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1]));
@@ -1082,16 +971,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
 
         index_writer
             .handle_batch([
@@ -1114,14 +997,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.get_all_results_for_token("h").await.unwrap();
         assert_eq!(res.len(), 2);
@@ -1140,16 +1021,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
 
         index_writer
             .handle_batch([
@@ -1178,14 +1053,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2, 3]));
@@ -1201,16 +1074,10 @@ mod tests {
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        let freq_blockfile_writer = provider
-            .write::<u32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let mut index_writer = FullTextIndexWriter::new(None, pl_blockfile_writer, tokenizer);
 
         // todo
         // index_writer.add_document("hello world", 1).await.unwrap();
@@ -1222,14 +1089,12 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
             .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("world").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1]));
