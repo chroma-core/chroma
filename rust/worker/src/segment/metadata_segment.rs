@@ -109,7 +109,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
-        let (pls_writer, pls_reader) = match segment.file_path.get(FULL_TEXT_PLS) {
+        let pls_writer = match segment.file_path.get(FULL_TEXT_PLS) {
             Some(pls_path) => match pls_path.first() {
                 Some(pls_uuid) => {
                     let pls_uuid = match Uuid::parse_str(pls_uuid) {
@@ -118,22 +118,15 @@ impl<'me> MetadataSegmentWriter<'me> {
                             return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
                         }
                     };
-                    let pls_writer = match blockfile_provider
+
+                    blockfile_provider
                         .write::<u32, Vec<u32>>(
                             BlockfileWriterOptions::new()
                                 .fork(pls_uuid)
                                 .ordered_mutations(),
                         )
                         .await
-                    {
-                        Ok(writer) => writer,
-                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                    };
-                    let pls_reader = match blockfile_provider.open::<u32, &[u32]>(&pls_uuid).await {
-                        Ok(reader) => reader,
-                        Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
-                    };
-                    (pls_writer, Some(pls_reader))
+                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
@@ -141,26 +134,14 @@ impl<'me> MetadataSegmentWriter<'me> {
                 .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
                 .await
             {
-                Ok(writer) => (writer, None),
+                Ok(writer) => writer,
                 Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
             },
         };
 
-        let full_text_index_reader = match (pls_reader) {
-            (Some(pls_reader)) => {
-                let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-                Some(FullTextIndexReader::new(pls_reader, tokenizer))
-            }
-            (None) => None,
-            _ => return Err(MetadataSegmentError::IncorrectNumberOfFiles),
-        };
-
         let full_text_writer_tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-        let full_text_index_writer = FullTextIndexWriter::new(
-            full_text_index_reader,
-            pls_writer,
-            full_text_writer_tokenizer,
-        );
+        let full_text_index_writer =
+            FullTextIndexWriter::new(pls_writer, full_text_writer_tokenizer);
 
         let (string_metadata_writer, string_metadata_index_reader) =
             match segment.file_path.get(STRING_METADATA) {
@@ -841,13 +822,10 @@ impl MetadataSegmentReader<'_> {
             None => None,
         };
 
-        let full_text_index_reader = match (pls_reader) {
-            (Some(pls_reader)) => {
-                let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
-                Some(FullTextIndexReader::new(pls_reader, tokenizer))
-            }
-            _ => None,
-        };
+        let full_text_index_reader = pls_reader.map(|reader| {
+            let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+            FullTextIndexReader::new(reader, tokenizer)
+        });
 
         let string_metadata_reader = match segment.file_path.get(STRING_METADATA) {
             Some(string_metadata_path) => match string_metadata_path.first() {
