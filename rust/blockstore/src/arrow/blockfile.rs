@@ -601,6 +601,7 @@ mod tests {
     use proptest::test_runner::Config;
     use rand::seq::IteratorRandom;
     use std::collections::HashMap;
+    use std::ops::Bound;
     use std::sync::Arc;
     use tokio::runtime::Runtime;
     use uuid::Uuid;
@@ -671,7 +672,9 @@ mod tests {
             let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
             let prefix_query = format!("{}/{}", "prefix", prefix_for_query);
             println!("Query {}, num_keys {}", prefix_query, num_keys);
-            let res = reader.get_by_prefix(prefix_query.as_str()).await;
+            let res = reader
+                .get_range(prefix_query.as_str()..=prefix_query.as_str(), ..)
+                .await;
             match res {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
@@ -733,13 +736,22 @@ mod tests {
             println!("Query {}", query);
             println!("Operation {:?}", operation);
             let greater_than = match operation {
-                ComparisonOperation::GreaterThan => reader.get_gt(prefix, query.as_str()).await,
-                ComparisonOperation::GreaterThanOrEquals => {
-                    reader.get_gte(prefix, query.as_str()).await
+                ComparisonOperation::GreaterThan => {
+                    reader
+                        .get_range(
+                            prefix..=prefix,
+                            (Bound::Excluded(query.as_str()), Bound::Unbounded),
+                        )
+                        .await
                 }
-                ComparisonOperation::LessThan => reader.get_lt(prefix, query.as_str()).await,
+                ComparisonOperation::GreaterThanOrEquals => {
+                    reader.get_range(prefix..=prefix, query.as_str()..).await
+                }
+                ComparisonOperation::LessThan => {
+                    reader.get_range(prefix..=prefix, ..query.as_str()).await
+                }
                 ComparisonOperation::LessThanOrEquals => {
-                    reader.get_lte(prefix, query.as_str()).await
+                    reader.get_range(prefix..=prefix, ..=query.as_str()).await
                 }
             };
             match greater_than {

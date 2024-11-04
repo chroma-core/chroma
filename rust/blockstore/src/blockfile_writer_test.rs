@@ -177,16 +177,12 @@ mod tests {
             assert_eq!(block_on(reader.count()).unwrap(), ref_last_commit.len());
 
             // Check that entries are ordered and match expected
-            if let Some(min_key) = ref_last_commit.keys().next() {
-                let all_entries =
-                    block_on(reader.get_gte(min_key.0.as_str(), min_key.1.as_str())).unwrap();
+            let all_entries = block_on(reader.get_range(.., ..)).unwrap();
 
-                for (blockfile_entry, expected_entry) in
-                    all_entries.iter().zip(ref_last_commit.iter())
-                {
-                    assert_eq!(blockfile_entry.0, expected_entry.0 .1); // key matches
-                    assert_eq!(blockfile_entry.1, expected_entry.1); // value matches
-                }
+            for (blockfile_entry, expected_entry) in all_entries.iter().zip(ref_last_commit.iter())
+            {
+                assert_eq!(blockfile_entry.0, expected_entry.0 .1); // key matches
+                assert_eq!(blockfile_entry.1, expected_entry.1); // value matches
             }
         }
     }
