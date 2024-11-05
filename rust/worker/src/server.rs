@@ -1,3 +1,5 @@
+use std::iter::once;
+
 use crate::config::QueryServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operators::fetch_log::FetchLogOperator;
@@ -8,7 +10,7 @@ use crate::execution::operators::knn_projection::KnnProjectionOperator;
 use crate::execution::operators::limit::LimitOperator;
 use crate::execution::operators::projection::ProjectionOperator;
 use crate::execution::orchestration::get::GetOrchestrator;
-use crate::execution::orchestration::knn::{KnnFilterOrchestrator, KnnOrchestrator};
+use crate::execution::orchestration::knn::{KnnError, KnnFilterOrchestrator, KnnOrchestrator};
 use crate::execution::orchestration::{CountQueryOrchestrator, GetVectorsOrchestrator};
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
@@ -220,6 +222,16 @@ impl WorkerServer {
 
         let knn_filter_output = match knn_filter_orchestrator.run(system.clone()).await {
             Ok(output) => output,
+            Err(KnnError::EmptyCollection) => {
+                return Ok(Response::new(chroma_proto::QueryVectorsResponse {
+                    results: once(chroma_proto::VectorQueryResults {
+                        results: Vec::new(),
+                    })
+                    .cycle()
+                    .take(query_vectors.len())
+                    .collect(),
+                }));
+            }
             Err(e) => {
                 tracing::error!("Error running orchestrator: {}", e);
                 return Err(Status::new(

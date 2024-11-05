@@ -1,7 +1,7 @@
 use chroma_distance::{normalize, DistanceFunction, DistanceFunctionError};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::{Collection, MetadataValue, Segment, SignedRoaringBitmap};
+use chroma_types::{MetadataValue, Segment, SignedRoaringBitmap};
 use thiserror::Error;
 use tonic::async_trait;
 
@@ -17,8 +17,8 @@ use super::knn::{KnnOperator, RecordDistance};
 #[derive(Debug)]
 pub struct KnnHnswInput {
     pub hnsw_provider: HnswIndexProvider,
-    pub collection: Collection,
     pub hnsw_segment: Segment,
+    pub collection_dimension: u32,
     pub compact_offset_ids: SignedRoaringBitmap,
 }
 
@@ -35,8 +35,6 @@ pub enum KnnHnswError {
     HnswIndex(#[from] Box<dyn ChromaError>),
     #[error("Error creating hnsw segment reader: {0}")]
     HnswReader(#[from] DistributedHNSWSegmentFromSegmentError),
-    #[error("Error resolving collection dimension")]
-    NoCollectionDimension,
 }
 
 impl ChromaError for KnnHnswError {
@@ -45,7 +43,6 @@ impl ChromaError for KnnHnswError {
             KnnHnswError::DistanceFunction(e) => e.code(),
             KnnHnswError::HnswReader(e) => e.code(),
             KnnHnswError::HnswIndex(e) => e.code(),
-            KnnHnswError::NoCollectionDimension => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -89,10 +86,7 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
 
         match DistributedHNSWSegmentReader::from_segment(
             &input.hnsw_segment,
-            input
-                .collection
-                .dimension
-                .ok_or(KnnHnswError::NoCollectionDimension)? as usize,
+            input.collection_dimension as usize,
             input.hnsw_provider.clone(),
         )
         .await
