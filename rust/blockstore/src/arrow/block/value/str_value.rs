@@ -4,10 +4,10 @@ use crate::{
             single_column_size_tracker::SingleColumnSizeTracker,
             single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
-        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{Array, StringArray, StringBuilder},
@@ -44,7 +44,7 @@ impl ArrowWriteableValue for String {
         }
     }
 
-    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> BlockStorage {
         BlockStorage::String(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
@@ -77,8 +77,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str 
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockStorage,
+        storage: &mut BlockStorage,
     ) {
-        String::add(prefix, key.into(), value.to_string(), delta);
+        String::add(prefix, key.into(), value.to_string(), storage);
     }
 }

@@ -37,9 +37,9 @@ impl<'referred_data> ArrowReadableKey<'referred_data> for &'referred_data str {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut BlockStorage,
+        storage: &mut BlockStorage,
     ) {
         // We could probably enclose this somehow to make it more ergonomic
-        V::add_to_delta(prefix, key, value, delta);
+        V::add_to_delta(prefix, key, value, storage);
     }
 }

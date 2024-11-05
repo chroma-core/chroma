@@ -2,12 +2,12 @@ use crate::{
     arrow::{
         block::delta::{
             single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, UnorderedBlockDelta, BlockStorage,
+            single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
-        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{Array, Int32Array, ListArray, ListBuilder, UInt32Array, UInt32Builder},
@@ -48,7 +48,7 @@ impl ArrowWriteableValue for Vec<u32> {
         }
     }
 
-    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> BlockStorage {
         BlockStorage::VecUInt32(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
@@ -126,8 +126,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockStorage,
+        storage: &mut BlockStorage,
     ) {
-        <Vec<u32>>::add(prefix, key.into(), value.to_vec(), delta);
+        <Vec<u32>>::add(prefix, key.into(), value.to_vec(), storage);
     }
 }

@@ -1223,7 +1223,6 @@ dependencies = [
  "chroma-error",
  "chroma-storage",
  "chroma-types",
- "either",
  "flatbuffers",
  "futures",
  "itertools 0.13.0",

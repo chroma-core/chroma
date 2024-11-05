@@ -1,5 +1,4 @@
 use crate::{arrow::types::ArrowWriteableValue, key::CompositeKey};
-use either::Either;
 use std::collections::BTreeMap;
 
 pub struct BTreeBuilderStorage<V: ArrowWriteableValue> {
@@ -81,7 +80,7 @@ impl<V: ArrowWriteableValue> VecBuilderStorage<V> {
         &'referred_data self,
     ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
     {
-        Box::new(self.storage.iter().map(|(k, v)| (k, v)))
+        Box::new(self.storage.iter().map(|(k, v)| (k, v))) // .map transforms from &(k, v) to (&k, &v)
     }
 
     fn into_iter(self) -> impl Iterator<Item = (CompositeKey, V)> {
@@ -100,6 +99,27 @@ impl<V: ArrowWriteableValue> Default for VecBuilderStorage<V> {
 pub enum BuilderStorage<V: ArrowWriteableValue> {
     BTreeBuilderStorage(BTreeBuilderStorage<V>),
     VecBuilderStorage(VecBuilderStorage<V>),
+}
+
+enum Either<V, Left: Iterator<Item = (CompositeKey, V)>, Right: Iterator<Item = (CompositeKey, V)>>
+{
+    Left(Left),
+    Right(Right),
+}
+
+impl<V, Left, Right> Iterator for Either<V, Left, Right>
+where
+    Left: Iterator<Item = (CompositeKey, V)>,
+    Right: Iterator<Item = (CompositeKey, V)>,
+{
+    type Item = (CompositeKey, V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Either::Left(left) => left.next(),
+            Either::Right(right) => right.next(),
+        }
+    }
 }
 
 impl<V: ArrowWriteableValue> BuilderStorage<V> {

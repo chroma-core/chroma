@@ -260,11 +260,11 @@ impl BlockManager {
 
     pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
-        builder: impl Delta,
+        delta: impl Delta,
     ) -> Block {
-        let builder_id = builder.id();
-        let record_batch = builder.finish::<K, V>(None);
-        Block::from_record_batch(builder_id, record_batch)
+        let delta_id = delta.id();
+        let record_batch = delta.finish::<K, V>(None);
+        Block::from_record_batch(delta_id, record_batch)
     }
 
     pub(super) async fn cached(&self, id: &Uuid) -> bool {

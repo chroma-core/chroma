@@ -34,6 +34,7 @@ async fn migrate_v1_to_v1_1(
     block_manager: &BlockManager,
     new_block_ids: &HashSet<Uuid>,
 ) -> Result<(), MigrationError> {
+    // MIGRATION(10/15/2024 @hammadb) Get all the blocks and manually update the sparse index
     if root.version == Version::V1 {
         root.version = Version::V1_1;
         let block_ids;
