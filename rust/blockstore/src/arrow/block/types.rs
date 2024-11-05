@@ -346,6 +346,26 @@ impl Block {
         }
     }
 
+    pub fn get_all_data<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me self,
+    ) -> Vec<(&'me str, K, V)> {
+        let prefix_arr = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let mut result = Vec::new();
+        for i in 0..self.data.num_rows() {
+            result.push((
+                prefix_arr.value(i),
+                K::get(self.data.column(1), i),
+                V::get(self.data.column(2), i),
+            ));
+        }
+        result
+    }
+
     /// Get all the values for a given prefix & key range in the block
     /// ### Panics
     /// - If the underlying data types are not the same as the types specified in the function signature

@@ -9,20 +9,6 @@ pub struct IndexConfig {
     pub distance_function: DistanceFunction,
 }
 
-#[derive(Error, Debug)]
-pub enum IndexConfigFromSegmentError {
-    #[error("Invalid distance function")]
-    InvalidDistanceFunction(#[from] DistanceFunctionError),
-}
-
-impl ChromaError for IndexConfigFromSegmentError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            IndexConfigFromSegmentError::InvalidDistanceFunction(_) => ErrorCodes::InvalidArgument,
-        }
-    }
-}
-
 impl IndexConfig {
     pub fn new(dimensionality: i32, distance_function: DistanceFunction) -> Self {
         IndexConfig {

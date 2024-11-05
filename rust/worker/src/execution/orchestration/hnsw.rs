@@ -26,9 +26,9 @@ use crate::execution::operators::record_segment_prefetch::{
 };
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
-    distance_function_from_segment, DistributedHNSWSegmentFromSegmentError,
-    DistributedHNSWSegmentReader,
+    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
+use crate::segment::utils::distance_function_from_segment;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, ComponentHandle, System};
 use crate::{

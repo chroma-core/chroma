@@ -37,14 +37,12 @@ pub struct HnswIndexConfig {
 }
 
 #[derive(Error, Debug)]
-pub enum HnswIndexFromSegmentError {
+pub enum HnswIndexConfigError {
     #[error("Missing config `{0}`")]
     MissingConfig(String),
-    #[error("Invalid metadata value")]
-    MetadataValueError(#[from] MetadataValueConversionError),
 }
 
-impl ChromaError for HnswIndexFromSegmentError {
+impl ChromaError for HnswIndexConfigError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::InvalidArgument
     }
@@ -56,11 +54,11 @@ impl HnswIndexConfig {
         ef_construction: usize,
         ef_search: usize,
         persist_path: &Path,
-    ) -> Result<Self, Box<HnswIndexFromSegmentError>> {
+    ) -> Result<Self, Box<HnswIndexConfigError>> {
         let persist_path = match persist_path.to_str() {
             Some(persist_path) => persist_path,
             None => {
-                return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                return Err(Box::new(HnswIndexConfigError::MissingConfig(
                     "persist_path".to_string(),
                 )))
             }
