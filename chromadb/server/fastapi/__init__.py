@@ -1,3 +1,4 @@
+from functools import wraps
 from typing import (
     Any,
     Callable,
@@ -37,6 +38,7 @@ from chromadb.auth import (
     ServerAuthenticationProvider,
     ServerAuthorizationProvider,
 )
+from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.api import ServerAPI
 from chromadb.errors import (
@@ -77,6 +79,17 @@ from chromadb.telemetry.opentelemetry import (
 from chromadb.types import Collection as CollectionModel
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound=Callable[..., Any])
+
+
+def rate_limit(func: T) -> T:
+    @wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        self = args[0]
+        return self._rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
+
+    return wrapper  # type: ignore
 
 
 def use_route_names_as_operation_ids(app: _FastAPI) -> None:
@@ -177,6 +190,7 @@ class FastAPI(Server):
         self._system = System(settings)
         self._api: ServerAPI = self._system.instance(ServerAPI)
         self._opentelemetry_client = self._api.require(OpenTelemetryClient)
+        self._rate_limit_enforcer = self._system.require(RateLimitEnforcer)
         self._capacity_limiter = CapacityLimiter(
             settings.chroma_server_thread_pool_size
         )
@@ -542,6 +556,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def list_collections(
         self,
         request: Request,
@@ -575,6 +590,7 @@ class FastAPI(Server):
         return api_collection_models
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def count_collections(
         self,
         request: Request,
@@ -602,6 +618,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def create_collection(
         self,
         request: Request,
@@ -652,6 +669,7 @@ class FastAPI(Server):
         return api_collection_model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def get_collection(
         self,
         request: Request,
@@ -682,6 +700,7 @@ class FastAPI(Server):
         return api_collection_model
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def update_collection(
         self,
         tenant: str,
@@ -719,6 +738,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def delete_collection(
         self,
         request: Request,
@@ -744,6 +764,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.add", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def add(
         self,
         request: Request,
@@ -793,6 +814,7 @@ class FastAPI(Server):
             raise HTTPException(status_code=500, detail=str(e))
 
     @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def update(
         self,
         request: Request,
@@ -834,6 +856,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.upsert", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def upsert(
         self,
         request: Request,
@@ -878,6 +901,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.get", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def get(
         self,
         collection_id: str,
@@ -928,6 +952,7 @@ class FastAPI(Server):
         return get_result
 
     @trace_method("FastAPI.delete", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def delete(
         self,
         collection_id: str,
@@ -963,6 +988,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.count", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def count(
         self,
         request: Request,
@@ -1012,6 +1038,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def get_nearest_neighbors(
         self,
         tenant: str,
@@ -1389,6 +1416,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.list_collections_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def list_collections_v1(
         self,
         request: Request,
@@ -1427,6 +1455,7 @@ class FastAPI(Server):
         return api_collection_models
 
     @trace_method("FastAPI.count_collections_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def count_collections_v1(
         self,
         request: Request,
@@ -1459,6 +1488,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.create_collection_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def create_collection_v1(
         self,
         request: Request,
@@ -1514,6 +1544,7 @@ class FastAPI(Server):
         return api_collection_model
 
     @trace_method("FastAPI.get_collection_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def get_collection_v1(
         self,
         request: Request,
@@ -1549,6 +1580,7 @@ class FastAPI(Server):
         return api_collection_model
 
     @trace_method("FastAPI.update_collection_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def update_collection_v1(
         self, collection_id: str, request: Request, body: UpdateCollection = Body(...)
     ) -> None:
@@ -1578,6 +1610,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.delete_collection_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def delete_collection_v1(
         self,
         request: Request,
@@ -1609,6 +1642,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.add_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def add_v1(
         self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
     ) -> bool:
@@ -1650,6 +1684,7 @@ class FastAPI(Server):
             raise HTTPException(status_code=500, detail=str(e))
 
     @trace_method("FastAPI.update_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def update_v1(
         self, request: Request, collection_id: str, body: UpdateEmbedding = Body(...)
     ) -> None:
@@ -1683,6 +1718,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.upsert_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def upsert_v1(
         self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
     ) -> None:
@@ -1719,6 +1755,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.get_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def get_v1(
         self, collection_id: str, request: Request, body: GetEmbedding = Body(...)
     ) -> GetResult:
@@ -1761,6 +1798,7 @@ class FastAPI(Server):
         return get_result
 
     @trace_method("FastAPI.delete_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def delete_v1(
         self, collection_id: str, request: Request, body: DeleteEmbedding = Body(...)
     ) -> None:
@@ -1788,6 +1826,7 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.count_v1", OpenTelemetryGranularity.OPERATION)
+    @rate_limit
     async def count_v1(
         self,
         request: Request,
@@ -1834,6 +1873,7 @@ class FastAPI(Server):
     @trace_method(
         "FastAPI.get_nearest_neighbors_v1", OpenTelemetryGranularity.OPERATION
     )
+    @rate_limit
     async def get_nearest_neighbors_v1(
         self,
         collection_id: str,

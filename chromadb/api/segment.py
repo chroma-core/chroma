@@ -5,7 +5,6 @@ from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer
-from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.segment import SegmentManager
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.operator import Scan, Filter, Limit, KNN, Projection
@@ -59,18 +58,12 @@ from typing import (
     Sequence,
     Generator,
     List,
-    Any,
-    Callable,
-    TypeVar,
 )
 from overrides import override
 from uuid import UUID, uuid4
-from functools import wraps
 import time
 import logging
 import re
-
-T = TypeVar("T", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
 
@@ -96,15 +89,6 @@ def check_index_name(index_name: str) -> None:
         raise ValueError(msg)
 
 
-def rate_limit(func: T) -> T:
-    @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        self = args[0]
-        return self._rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
-
-    return wrapper  # type: ignore
-
-
 class SegmentAPI(ServerAPI):
     """API implementation utilizing the new segment-based internal architecture"""
 
@@ -128,7 +112,6 @@ class SegmentAPI(ServerAPI):
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
-        self._rate_limit_enforcer = self._system.require(RateLimitEnforcer)
 
     @override
     def heartbeat(self) -> int:
@@ -179,7 +162,6 @@ class SegmentAPI(ServerAPI):
     # causes the system to somehow convert all values to strings.
     @trace_method("SegmentAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def create_collection(
         self,
         name: str,
@@ -246,7 +228,6 @@ class SegmentAPI(ServerAPI):
         "SegmentAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
     )
     @override
-    @rate_limit
     def get_or_create_collection(
         self,
         name: str,
@@ -269,7 +250,6 @@ class SegmentAPI(ServerAPI):
     # causes the system to somehow convert all values to strings
     @trace_method("SegmentAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def get_collection(
         self,
         name: Optional[str] = None,
@@ -287,7 +267,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def list_collections(
         self,
         limit: Optional[int] = None,
@@ -301,7 +280,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def count_collections(
         self,
         tenant: str = DEFAULT_TENANT,
@@ -315,7 +293,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _modify(
         self,
         id: UUID,
@@ -345,7 +322,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def delete_collection(
         self,
         name: str,
@@ -367,7 +343,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _add(
         self,
         ids: IDs,
@@ -411,7 +386,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _update(
         self,
         collection_id: UUID,
@@ -457,7 +431,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._upsert", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _upsert(
         self,
         collection_id: UUID,
@@ -498,7 +471,6 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
-    @rate_limit
     def _get(
         self,
         collection_id: UUID,
@@ -566,7 +538,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _delete(
         self,
         collection_id: UUID,
@@ -641,7 +612,6 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
-    @rate_limit
     def _count(
         self,
         collection_id: UUID,
@@ -667,7 +637,6 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
-    @rate_limit
     def _query(
         self,
         collection_id: UUID,
@@ -729,7 +698,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _peek(
         self,
         collection_id: UUID,
