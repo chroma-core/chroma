@@ -1,10 +1,13 @@
 use std::sync::atomic::AtomicU32;
 
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
-use chroma_types::{test_segment, Chunk, LogRecord, OperationRecord, Segment, SegmentScope};
-use indicatif::ProgressIterator;
+use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
+use chroma_types::{
+    test_segment, Chunk, Collection, CollectionUuid, LogRecord, OperationRecord, Segment,
+    SegmentScope,
+};
 
-use crate::log::test::LogGenerator;
+use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
 
 use super::{
     metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter, LogMaterializer,
@@ -12,9 +15,12 @@ use super::{
 };
 
 pub struct TestSegment {
+    pub hnsw_provider: HnswIndexProvider,
     pub blockfile_provider: BlockfileProvider,
-    pub metadata: Segment,
-    pub record: Segment,
+    pub collection: Collection,
+    pub metadata_segment: Segment,
+    pub record_segment: Segment,
+    pub vector_segment: Segment,
 }
 
 impl TestSegment {
@@ -28,7 +34,7 @@ impl TestSegment {
             .expect("Should be able to materialize log.");
 
         let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&self.metadata, &self.blockfile_provider)
+            MetadataSegmentWriter::from_segment(&self.metadata_segment, &self.blockfile_provider)
                 .await
                 .expect("Should be able to initialize metadata writer.");
         metadata_writer
@@ -39,7 +45,7 @@ impl TestSegment {
             .write_to_blockfiles()
             .await
             .expect("Should be able to write to blockfile.");
-        self.metadata.file_path = metadata_writer
+        self.metadata_segment.file_path = metadata_writer
             .commit()
             .await
             .expect("Should be able to commit metadata.")
@@ -48,7 +54,7 @@ impl TestSegment {
             .expect("Should be able to flush metadata.");
 
         let record_writer =
-            RecordSegmentWriter::from_segment(&self.record, &self.blockfile_provider)
+            RecordSegmentWriter::from_segment(&self.record_segment, &self.blockfile_provider)
                 .await
                 .expect("Should be able to initiaize record writer.");
         record_writer
@@ -56,7 +62,7 @@ impl TestSegment {
             .await
             .expect("Should be able to apply materialized log.");
 
-        self.record.file_path = record_writer
+        self.record_segment.file_path = record_writer
             .commit()
             .await
             .expect("Should be able to commit metadata.")
@@ -70,7 +76,7 @@ impl TestSegment {
         G: Fn(usize) -> OperationRecord,
     {
         let ids: Vec<_> = (1..=size).collect();
-        for chunk in ids.chunks(100).progress() {
+        for chunk in ids.chunks(100) {
             self.compact_log(
                 generator.generate_chunk(chunk.iter().copied()),
                 chunk
@@ -86,10 +92,24 @@ impl TestSegment {
 
 impl Default for TestSegment {
     fn default() -> Self {
+        let collection_uuid = CollectionUuid::new();
+        let collection = Collection {
+            collection_id: collection_uuid,
+            name: "Test Collection".to_string(),
+            metadata: None,
+            dimension: Some(TEST_EMBEDDING_DIMENSION as i32),
+            tenant: "Test Tenant".to_string(),
+            database: String::new(),
+            log_position: 0,
+            version: 0,
+        };
         Self {
-            blockfile_provider: test_arrow_blockfile_provider(),
-            metadata: test_segment(SegmentScope::METADATA),
-            record: test_segment(SegmentScope::RECORD),
+            hnsw_provider: test_hnsw_index_provider(),
+            blockfile_provider: test_arrow_blockfile_provider(2 << 22),
+            collection,
+            metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
+            record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
+            vector_segment: test_segment(collection_uuid, SegmentScope::VECTOR),
         }
     }
 }

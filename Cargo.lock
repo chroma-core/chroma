@@ -6249,7 +6249,6 @@ dependencies = [
  "figment",
  "flatbuffers",
  "futures",
- "indicatif",
  "k8s-openapi",
  "kube",
  "murmur3",

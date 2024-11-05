@@ -9,7 +9,7 @@ use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
-use worker::log::test::{add_generator_0, LogGenerator};
+use worker::log::test::{upsert_generator, LogGenerator};
 use worker::segment::test::TestSegment;
 
 fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
@@ -72,33 +72,39 @@ fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
 fn bench_filter(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
     let logen = LogGenerator {
-        generator: add_generator_0,
-    };
-
-    let routine = |filter_input| async move {
-        FilterOperator::new()
-            .run(&filter_input)
-            .await
-            .expect("Filter should not fail.");
+        generator: upsert_generator,
     };
 
     for record_count in [1000, 10000, 100000] {
-        let mut compact = TestSegment::default();
-        runtime.block_on(async { compact.populate_with_generator(record_count, &logen).await });
+        let test_segment = runtime.block_on(async {
+            let mut segment = TestSegment::default();
+            segment.populate_with_generator(record_count, &logen).await;
+            segment
+        });
+
+        let filter_input = FilterInput {
+            logs: Chunk::new(Vec::new().into()),
+            blockfile_provider: test_segment.blockfile_provider,
+            metadata_segment: test_segment.metadata_segment,
+            record_segment: test_segment.record_segment,
+        };
 
         for (op, where_clause) in baseline_where_clauses() {
-            let setup = || {
-                FilterInput::new(
-                    compact.blockfile_provider.clone(),
-                    compact.record.clone(),
-                    compact.metadata.clone(),
-                    Chunk::new(Vec::new().into()),
-                    None,
-                    where_clause.clone(),
-                )
+            let filter_operator = FilterOperator {
+                query_ids: None,
+                where_clause: where_clause.clone(),
             };
+
+            let routine = |(op, input): (FilterOperator, FilterInput)| async move {
+                op.run(&input)
+                    .await
+                    .expect("FilterOperator should not fail");
+            };
+
+            let setup = || (filter_operator.clone(), filter_input.clone());
+
             bench_run(
-                format!("metadata-filtering-{}-{}", record_count, op).as_str(),
+                format!("filter-{}-{}", record_count, op).as_str(),
                 criterion,
                 &runtime,
                 setup,
