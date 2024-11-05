@@ -23,17 +23,13 @@ query_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
     storage:
-        AdmissionControlledS3:
-            s3_config:
-                bucket: "chroma-storage"
-                credentials: "Minio"
-                connect_timeout_ms: 5000
-                request_timeout_ms: 30000 # 1 minute
-                upload_part_size_bytes: 536870912 # 512MiB
-                download_part_size_bytes: 8388608 # 8MiB
-            rate_limiting_policy:
-                CountBasedPolicy:
-                    max_concurrent_requests: 15
+        object_store:
+            bucket:
+                name: "chroma-storage"
+                type: "minio"
+            upload_part_size_bytes: 536870912 # 512MiB
+            download_part_size_bytes: 8388608 # 8MiB
+            max_concurrent_requests: 15
     log:
         Grpc:
             host: "logservice.chroma"
