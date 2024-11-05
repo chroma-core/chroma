@@ -49,7 +49,7 @@ pub struct ProjectionInput {
     pub offset_ids: Vec<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ProjectionRecord {
     pub id: String,
     pub document: Option<String>,

@@ -30,13 +30,13 @@ pub struct KnnProjectionInput {
     pub record_distances: Vec<RecordDistance>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct KnnProjectionRecord {
     pub record: ProjectionRecord,
     pub distance: Option<f32>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct KnnProjectionOutput {
     pub records: Vec<KnnProjectionRecord>,
 }
