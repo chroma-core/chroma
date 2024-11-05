@@ -4,7 +4,7 @@ use super::{storage::BlockStorage, types::Delta};
 use crate::{
     arrow::{
         block::Block,
-        types::{ArrowWriteableKey, ArrowWriteableValue, MutationOrderHint},
+        types::{ArrowWriteableKey, ArrowWriteableValue},
     },
     key::CompositeKey,
 };
@@ -27,7 +27,7 @@ impl Delta for UnorderedBlockDelta {
     #[allow(clippy::extra_unused_type_parameters)]
     fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(id: Uuid) -> Self {
         UnorderedBlockDelta {
-            builder: V::get_delta_builder(MutationOrderHint::Unordered),
+            builder: V::get_delta_builder(crate::BlockfileWriterMutationOrdering::Unordered),
             id,
         }
     }

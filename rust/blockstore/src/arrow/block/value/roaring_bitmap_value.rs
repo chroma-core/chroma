@@ -4,12 +4,12 @@ use crate::{
     arrow::{
         block::delta::{
             single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, UnorderedBlockDelta, BlockStorage,
+            single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
-        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{Array, BinaryArray, BinaryBuilder},
@@ -50,7 +50,7 @@ impl ArrowWriteableValue for RoaringBitmap {
         }
     }
 
-    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> BlockStorage {
         BlockStorage::RoaringBitmap(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
@@ -92,8 +92,8 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockStorage,
+        storage: &mut BlockStorage,
     ) {
-        RoaringBitmap::add(prefix, key.into(), value, delta);
+        RoaringBitmap::add(prefix, key.into(), value, storage);
     }
 }

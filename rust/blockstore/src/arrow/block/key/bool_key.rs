@@ -35,8 +35,8 @@ impl ArrowReadableKey<'_> for bool {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut BlockStorage,
+        storage: &mut BlockStorage,
     ) {
-        V::add_to_delta(prefix, key, value, delta);
+        V::add_to_delta(prefix, key, value, storage);
     }
 }

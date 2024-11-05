@@ -599,6 +599,32 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub(crate) fn id(&self) -> Uuid {
         self.root.id
     }
+
+    /// Check if the blockfile is valid.
+    /// Validates that the sparse index is valid and that no block exceeds the max block size.
+    pub async fn is_valid(&self) -> bool {
+        if !self.root.sparse_index.is_valid() {
+            return false;
+        }
+
+        for (_, block_id) in self.root.sparse_index.data.forward.iter() {
+            match self.get_block(block_id.id).await {
+                Ok(Some(block)) => {
+                    if block.get_size() > self.block_manager.max_block_size_bytes() {
+                        return false;
+                    }
+                }
+                Ok(None) => {
+                    return false;
+                }
+                Err(_) => {
+                    return false;
+                }
+            };
+        }
+
+        true
+    }
 }
 
 #[cfg(test)]

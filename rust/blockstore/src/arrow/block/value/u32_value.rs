@@ -4,10 +4,10 @@ use crate::{
             single_column_size_tracker::SingleColumnSizeTracker,
             single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
-        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{Array, UInt32Array, UInt32Builder},
@@ -43,7 +43,7 @@ impl ArrowWriteableValue for u32 {
         }
     }
 
-    fn get_delta_builder(mutation_ordering_hint: MutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> BlockStorage {
         BlockStorage::UInt32(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
@@ -76,8 +76,8 @@ impl<'a> ArrowReadableValue<'a> for u32 {
         prefix: &str,
         key: K,
         value: Self,
-        builder: &mut BlockStorage,
+        storage: &mut BlockStorage,
     ) {
-        u32::add(prefix, key.into(), value, builder);
+        u32::add(prefix, key.into(), value, storage);
     }
 }

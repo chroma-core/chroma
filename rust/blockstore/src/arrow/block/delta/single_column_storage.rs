@@ -4,8 +4,9 @@ use super::{
     BlockKeyArrowBuilder,
 };
 use crate::{
-    arrow::types::{ArrowWriteableKey, ArrowWriteableValue, MutationOrderHint},
+    arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
+    BlockfileWriterMutationOrdering,
 };
 use arrow::util::bit_util;
 use arrow::{array::Array, datatypes::Schema};
@@ -32,12 +33,12 @@ impl<V: ArrowWriteableValue> std::fmt::Debug for Inner<V> {
 }
 
 impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumnStorage<V> {
-    pub(in crate::arrow) fn new(mutation_ordering_hint: MutationOrderHint) -> Self {
+    pub(in crate::arrow) fn new(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> Self {
         let storage = match mutation_ordering_hint {
-            MutationOrderHint::Unordered => {
+            BlockfileWriterMutationOrdering::Unordered => {
                 BuilderStorage::BTreeBuilderStorage(BTreeBuilderStorage::default())
             }
-            MutationOrderHint::Ordered => {
+            BlockfileWriterMutationOrdering::Ordered => {
                 BuilderStorage::VecBuilderStorage(VecBuilderStorage::default())
             }
         };

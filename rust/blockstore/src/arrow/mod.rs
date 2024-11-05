@@ -10,4 +10,3 @@ pub mod provider;
 pub mod root;
 mod sparse_index;
 pub mod types;
-pub use block::Block;

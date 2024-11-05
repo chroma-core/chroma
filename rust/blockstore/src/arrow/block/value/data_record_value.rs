@@ -2,12 +2,12 @@ use crate::{
     arrow::{
         block::delta::{
             data_record::DataRecordStorage, data_record_size_tracker::DataRecordSizeTracker,
-            UnorderedBlockDelta, BlockStorage,
+            BlockStorage, UnorderedBlockDelta,
         },
-        types::MutationOrderHint,
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{
@@ -65,7 +65,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         }
     }
 
-    fn get_delta_builder(_: MutationOrderHint) -> BlockStorage {
+    fn get_delta_builder(_: BlockfileWriterMutationOrdering) -> BlockStorage {
         BlockStorage::DataRecord(DataRecordStorage::new())
     }
 
@@ -247,8 +247,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockStorage,
+        storage: &mut BlockStorage,
     ) {
-        <&DataRecord>::add(prefix, key.into(), &value, delta);
+        <&DataRecord>::add(prefix, key.into(), &value, storage);
     }
 }

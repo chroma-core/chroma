@@ -5,9 +5,8 @@ mod tests {
     use std::collections::{BTreeMap, HashSet, VecDeque};
 
     use chroma_blockstore::arrow::provider::ArrowBlockfileProvider;
-    use chroma_blockstore::arrow::Block;
     use chroma_blockstore::{
-        BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
+        BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
     };
     use chroma_storage::local::LocalStorage;
     use chroma_storage::Storage;
@@ -324,7 +323,6 @@ mod tests {
 
     /// The "real" blockfile writer implementation that we compare against the reference.
     struct BlockfileWriterWrapper {
-        storage_dir: tempfile::TempDir,
         provider: ArrowBlockfileProvider,
         last_blockfile_id: Option<Uuid>,
         writer: BlockfileWriter,
@@ -357,7 +355,6 @@ mod tests {
             .unwrap();
 
             BlockfileWriterWrapper {
-                storage_dir,
                 provider,
                 last_blockfile_id: None,
                 writer,
@@ -433,20 +430,12 @@ mod tests {
                 }
             }
 
-            // Check that all blocks are under the max block size
-            let mut checked_at_least_one_block = false;
-            for file in std::fs::read_dir(state.storage_dir.path().join("block")).unwrap() {
-                let file = file.unwrap();
-                let path = file.path();
-                if path.is_file() {
-                    let block = Block::load_with_validation(path.to_str().unwrap(), Uuid::new_v4())
-                        .unwrap();
-                    assert!(block.get_size() <= ref_state.generated_max_block_size_bytes);
-                    checked_at_least_one_block = true;
+            match reader {
+                BlockfileReader::ArrowBlockfileReader(reader) => {
+                    assert!(block_on(reader.is_valid())) // check block sizes and the sparse index
                 }
+                _ => unreachable!(),
             }
-
-            assert!(checked_at_least_one_block);
         }
     }
 
