@@ -287,9 +287,6 @@ class LocalHnswSegment(VectorReader):
             # If that succeeds, update the total count
             self._total_elements_added += batch.add_count
 
-            # If that succeeds, finally the seq ID
-            self._max_seq_id = batch.max_seq_id
-
     @trace_method("LocalHnswSegment._write_records", OpenTelemetryGranularity.ALL)
     def _write_records(self, records: Sequence[LogRecord]) -> None:
         """Add a batch of embeddings to the index"""
