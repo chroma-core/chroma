@@ -134,7 +134,7 @@ pub fn bench_compaction(c: &mut Criterion) {
         .collect::<Vec<_>>();
     let prepared_corpus = Arc::new(prepared_corpus);
 
-    for num_workers in (1..4).map(|i| NumWorkersParameter { num_workers: i }) {
+    for num_workers in (1..=4).map(|i| NumWorkersParameter { num_workers: i }) {
         compaction_group.bench_function(BenchmarkId::from_parameter(num_workers), |b| {
             b.to_async(&runner).iter_batched(
                 || {
