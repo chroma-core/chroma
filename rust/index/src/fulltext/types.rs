@@ -67,7 +67,7 @@ impl FullTextIndexWriter {
         &self,
         mutations: M,
     ) -> Result<(), FullTextIndexError> {
-        let mut token_instances = self.token_instances.lock();
+        let mut token_instances = vec![];
 
         for mutation in mutations {
             match mutation {
@@ -148,6 +148,8 @@ impl FullTextIndexWriter {
                 }
             }
         }
+
+        self.token_instances.lock().append(&mut token_instances);
 
         Ok(())
     }
