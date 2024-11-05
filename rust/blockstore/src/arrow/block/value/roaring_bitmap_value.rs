@@ -1,18 +1,27 @@
+use std::sync::Arc;
+
 use crate::{
     arrow::{
-        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
+        block::delta::{
+            single_column_size_tracker::SingleColumnSizeTracker,
+            single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
+        },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
 };
 use arrow::{
-    array::{Array, BinaryArray},
+    array::{Array, BinaryArray, BinaryBuilder},
+    datatypes::Field,
     util::bit_util,
 };
 use roaring::RoaringBitmap;
 
 impl ArrowWriteableValue for RoaringBitmap {
     type ReadableValue<'referred_data> = RoaringBitmap;
+    type ArrowBuilder = BinaryBuilder;
+    type SizeTracker = SingleColumnSizeTracker;
+    type PreparedValue = Vec<u8>;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
@@ -42,6 +51,31 @@ impl ArrowWriteableValue for RoaringBitmap {
 
     fn get_delta_builder() -> BlockStorage {
         BlockStorage::RoaringBitmap(SingleColumnStorage::new())
+    }
+
+    fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
+        BinaryBuilder::with_capacity(size_tracker.get_num_items(), size_tracker.get_value_size())
+    }
+
+    fn prepare(value: Self) -> Self::PreparedValue {
+        let mut serialized = Vec::with_capacity(value.serialized_size());
+        if value.serialize_into(&mut serialized).is_err() {
+            // todo: proper error handling
+            panic!("Failed to serialize RoaringBitmap");
+        }
+
+        serialized
+    }
+
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
+        builder.append_value(value);
+    }
+
+    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
+        let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
+        let value_arr = builder.finish();
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+        (value_field, value_arr)
     }
 }
 

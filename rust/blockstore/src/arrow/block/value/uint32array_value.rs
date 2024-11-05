@@ -1,18 +1,25 @@
 use crate::{
     arrow::{
-        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
+        block::delta::{
+            single_column_size_tracker::SingleColumnSizeTracker,
+            single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
+        },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
 };
 use arrow::{
-    array::{Array, Int32Array, ListArray, UInt32Array},
+    array::{Array, Int32Array, ListArray, ListBuilder, UInt32Array, UInt32Builder},
+    datatypes::Field,
     util::bit_util,
 };
 use std::{mem::size_of, sync::Arc};
 
 impl ArrowWriteableValue for Vec<u32> {
     type ReadableValue<'referred_data> = &'referred_data [u32];
+    type ArrowBuilder = ListBuilder<UInt32Builder>;
+    type SizeTracker = SingleColumnSizeTracker;
+    type PreparedValue = Vec<u32>;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * size_of::<u32>())
@@ -42,6 +49,38 @@ impl ArrowWriteableValue for Vec<u32> {
 
     fn get_delta_builder() -> BlockStorage {
         BlockStorage::VecUInt32(SingleColumnStorage::new())
+    }
+
+    fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
+        let total_value_count = size_tracker.get_value_size() / size_of::<u32>();
+        ListBuilder::with_capacity(
+            UInt32Builder::with_capacity(total_value_count),
+            size_tracker.get_num_items(),
+        )
+    }
+
+    fn prepare(value: Self) -> Self::PreparedValue {
+        value
+    }
+
+    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
+        builder.append_value(&UInt32Array::new(value.into(), None));
+    }
+
+    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
+        let value_field = Field::new(
+            "value",
+            arrow::datatypes::DataType::List(Arc::new(Field::new(
+                "item",
+                arrow::datatypes::DataType::UInt32,
+                true,
+            ))),
+            true,
+        );
+        let value_arr = builder.finish();
+        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
+
+        (value_field, Arc::new(value_arr))
     }
 }
 
