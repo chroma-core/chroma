@@ -493,7 +493,7 @@ impl<'me> LogMaterializer<'me> {
                 Ok(())
             }
             .instrument(
-                tracing::info_span!(parent: Span::current(), "Materialization read from stroage"),
+                tracing::info_span!(parent: Span::current(), "Materialization read from storage"),
             )
             .await?;
         }

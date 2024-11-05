@@ -3,6 +3,9 @@ use chroma_benchmark::datasets::types::Record;
 use chroma_benchmark::datasets::{
     ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
 };
+use chroma_benchmark::datasets::{
+    ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
+};
 use chroma_blockstore::BlockfileWriterOptions;
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::UnboundedCacheConfig;
@@ -27,16 +30,13 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 async fn compact_log_and_get_reader<'a>(
     blockfile_provider: &BlockfileProvider,
-    corpus: &Vec<(usize, Record)>,
-) -> Result<FullTextIndexReader<'a>> {
-    let postings_blockfile_writer = blockfile_provider
-        .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
-        .await
-        .unwrap();
-    let frequencies_blockfile_writer = blockfile_provider
-        .write::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
-        .await
-        .unwrap();
+    corpus: &T,
+) -> Result<FullTextIndexReader<'a>>
+where
+    T: RecordDataset,
+{
+    let postings_blockfile_writer = blockfile_provider.create::<u32, Vec<u32>>().unwrap();
+    let frequencies_blockfile_writer = blockfile_provider.create::<u32, u32>().unwrap();
     let postings_blockfile_id = postings_blockfile_writer.id();
     let frequencies_blockfile_id = frequencies_blockfile_writer.id();
 

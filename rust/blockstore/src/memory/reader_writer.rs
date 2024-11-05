@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use super::{
     super::{BlockfileError, Key, Value},
     storage::{Readable, Storage, StorageBuilder, StorageManager, Writeable},
@@ -95,92 +97,30 @@ impl<
         }
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn get_by_prefix(
+    pub(crate) fn get_range_iter<'prefix, PrefixRange, KeyRange>(
         &'storage self,
-        prefix: &str,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        let values = V::get_by_prefix_from_storage(prefix, &self.storage);
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> Result<impl Iterator<Item = (K, V)> + 'storage, Box<dyn ChromaError>>
+    where
+        PrefixRange: RangeBounds<&'prefix str>,
+        KeyRange: RangeBounds<K>,
+    {
+        let values = V::read_range_from_storage(
+            prefix_range,
+            (
+                key_range.start_bound().map(|k| k.clone().into()),
+                key_range.end_bound().map(|k| k.clone().into()),
+            ),
+            &self.storage,
+        );
         if values.is_empty() {
             return Err(Box::new(BlockfileError::NotFoundError));
         }
-        let values = values
-            .iter()
-            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
-            .collect();
-        Ok(values)
-    }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn get_gt(
-        &'storage self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        let key = key.into();
-        let values = V::read_gt_from_storage(prefix, key, &self.storage);
-        if values.is_empty() {
-            return Err(Box::new(BlockfileError::NotFoundError));
-        }
-        let values = values
-            .iter()
-            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
-            .collect();
-        Ok(values)
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn get_lt(
-        &'storage self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        let key = key.into();
-        let values = V::read_lt_from_storage(prefix, key, &self.storage);
-        if values.is_empty() {
-            return Err(Box::new(BlockfileError::NotFoundError));
-        }
-        let values = values
-            .iter()
-            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
-            .collect();
-        Ok(values)
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn get_gte(
-        &'storage self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        let key = key.into();
-        let values = V::read_gte_from_storage(prefix, key, &self.storage);
-        if values.is_empty() {
-            return Err(Box::new(BlockfileError::NotFoundError));
-        }
-        let values = values
-            .iter()
-            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
-            .collect();
-        Ok(values)
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn get_lte(
-        &'storage self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        let key = key.into();
-        let values = V::read_lte_from_storage(prefix, key, &self.storage);
-        if values.is_empty() {
-            return Err(Box::new(BlockfileError::NotFoundError));
-        }
-        let values = values
-            .iter()
-            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value.clone()))
-            .collect();
-        Ok(values)
+        Ok(values
+            .into_iter()
+            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value)))
     }
 
     pub(crate) fn get_at_index(
@@ -210,6 +150,8 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
+
     use super::*;
     use chroma_types::{Chunk, DataRecord, LogRecord, Operation, OperationRecord};
 
@@ -369,7 +311,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<&str, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_by_prefix("prefix").unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -390,7 +333,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gt("prefix", 3);
+        let values =
+            reader.get_range_iter("prefix"..="prefix", (Bound::Excluded(3), Bound::Unbounded));
         assert!(values.is_err());
     }
 
@@ -405,7 +349,10 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gt("prefix", 0).unwrap();
+        let range_iter = reader
+            .get_range_iter("prefix"..="prefix", (Bound::Excluded(0), Bound::Unbounded))
+            .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -429,7 +376,10 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gt("prefix", 1).unwrap();
+        let range_iter = reader
+            .get_range_iter("prefix"..="prefix", (Bound::Excluded(1), Bound::Unbounded))
+            .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -450,7 +400,10 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gt("prefix", 3.0);
+        let values = reader.get_range_iter(
+            "prefix"..="prefix",
+            (Bound::Excluded(3.0), Bound::Unbounded),
+        );
         assert!(values.is_err());
     }
 
@@ -465,7 +418,13 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gt("prefix", 0.0).unwrap();
+        let range_iter = reader
+            .get_range_iter(
+                "prefix"..="prefix",
+                (Bound::Excluded(0.0), Bound::Unbounded),
+            )
+            .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -489,7 +448,13 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gt("prefix", 1.0).unwrap();
+        let range_iter = reader
+            .get_range_iter(
+                "prefix"..="prefix",
+                (Bound::Excluded(1.0), Bound::Unbounded),
+            )
+            .unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -510,7 +475,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gte("prefix", 4);
+        let values = reader.get_range_iter("prefix"..="prefix", 4..);
         assert!(values.is_err());
     }
 
@@ -525,7 +490,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gte("prefix", 1).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 1..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -549,7 +515,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gte("prefix", 2).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 2..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -570,7 +537,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gte("prefix", 3.5);
+        let values = reader.get_range_iter("prefix"..="prefix", 3.5..);
         assert!(values.is_err());
     }
 
@@ -585,7 +552,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gte("prefix", 0.5).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 0.5..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -609,7 +577,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_gte("prefix", 1.5).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", 1.5..).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -630,7 +599,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lt("prefix", 1);
+        let values = reader.get_range_iter("prefix"..="prefix", ..1);
         assert!(values.is_err());
     }
 
@@ -645,7 +614,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lt("prefix", 4).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..4).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -669,7 +639,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lt("prefix", 3).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..3).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -690,7 +661,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lt("prefix", 0.5);
+        let values = reader.get_range_iter("prefix"..="prefix", ..0.5);
         assert!(values.is_err());
     }
 
@@ -705,7 +676,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lt("prefix", 3.5).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..3.5).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -729,7 +701,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lt("prefix", 2.5).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..2.5).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -750,7 +723,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lte("prefix", 0);
+        let values = reader.get_range_iter("prefix"..="prefix", ..=0);
         assert!(values.is_err());
     }
 
@@ -765,7 +738,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lte("prefix", 3).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=3).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -789,7 +763,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lte("prefix", 2).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=2).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
@@ -810,7 +785,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lte("prefix", 0.5);
+        let values = reader.get_range_iter("prefix"..="prefix", ..=0.5);
         assert!(values.is_err());
     }
 
@@ -825,7 +800,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lte("prefix", 3.0).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=3.0).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
@@ -849,7 +825,8 @@ mod tests {
 
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let values = reader.get_lte("prefix", 2.0).unwrap();
+        let range_iter = reader.get_range_iter("prefix"..="prefix", ..=2.0).unwrap();
+        let values = range_iter.collect::<Vec<_>>();
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()

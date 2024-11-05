@@ -1,11 +1,12 @@
+use super::{BlockfileError, Key, Value};
 use crate::arrow::blockfile::ArrowBlockfileReader;
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
 use crate::key::{InvalidKeyConversion, KeyWrapper};
 use crate::memory::reader_writer::MemoryBlockfileReader;
 use crate::memory::storage::Readable;
 use chroma_error::ChromaError;
-
-use super::{BlockfileError, Key, Value};
+use futures::{Stream, StreamExt};
+use std::ops::RangeBounds;
 
 #[derive(Clone)]
 pub enum BlockfileReader<
@@ -61,57 +62,47 @@ impl<
         }
     }
 
-    pub async fn get_by_prefix(
+    pub fn get_range_stream<'prefix, PrefixRange, KeyRange>(
         &'referred_data self,
-        prefix: &str,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + 'referred_data + Send
+    where
+        PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'referred_data,
+        KeyRange: RangeBounds<K> + Clone + Send + 'referred_data,
+        K: Sync + Send,
+        V: Sync + Send,
+    {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_by_prefix(prefix),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_by_prefix(prefix).await,
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                match reader.get_range_iter(prefix_range, key_range) {
+                    Ok(r) => futures::stream::iter(r.map(Ok)).boxed(),
+                    Err(e) => futures::stream::iter(vec![Err(e)]).boxed(),
+                }
+            }
+
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_range_stream(prefix_range, key_range).boxed()
+            }
         }
     }
 
-    pub async fn get_gt(
+    pub async fn get_range<'prefix, PrefixRange, KeyRange>(
         &'referred_data self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    where
+        PrefixRange: RangeBounds<&'prefix str> + Clone,
+        KeyRange: RangeBounds<K> + Clone,
+    {
         match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gt(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gt(prefix, key).await,
-        }
-    }
-
-    pub async fn get_lt(
-        &'referred_data self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lt(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lt(prefix, key).await,
-        }
-    }
-
-    pub async fn get_gte(
-        &'referred_data self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_gte(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_gte(prefix, key).await,
-        }
-    }
-
-    pub async fn get_lte(
-        &'referred_data self,
-        prefix: &str,
-        key: K,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_lte(prefix, key),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_lte(prefix, key).await,
+            BlockfileReader::MemoryBlockfileReader(reader) => reader
+                .get_range_iter(prefix_range, key_range)
+                .map(|i| i.collect()),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_range(prefix_range, key_range).await
+            }
         }
     }
 

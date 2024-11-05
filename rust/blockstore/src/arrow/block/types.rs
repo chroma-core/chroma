@@ -1,6 +1,7 @@
-use std::cmp::Ordering::{Equal, Greater, Less};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::SeekFrom;
+use std::ops::{Bound, RangeBounds};
 
 use crate::arrow::types::{ArrowReadableKey, ArrowReadableValue};
 use arrow::array::ArrayData;
@@ -118,25 +119,35 @@ impl Block {
         delta
     }
 
-    /// Binary search the blockfile to find the partition point of the specified prefix and key.
-    /// The implementation is based on [`std::slice::partition_point`].
+    /// Binary searches this slice with a comparator function.
     ///
-    /// `(prefix, key)` serves as the search key, and it is sorted in ascending order.
-    /// The partition predicate is defined by: `|x| x < (prefix, key)`.
-    /// The partition point is the first index where the partition precidate evaluates to `false`
-    /// The code is a result of inlining this predicate in [`std::slice::partition_point`].
-    /// If the key is unspecified (i.e. `None`), we find the first index of the prefix.
+    /// The comparator function should return an order code that indicates
+    /// whether its argument is `Less`, `Equal` or `Greater` the desired
+    /// target.
+    /// If the slice is not sorted or if the comparator function does not
+    /// implement an order consistent with the sort order of the underlying
+    /// slice, the returned result is unspecified and meaningless.
     ///
-    /// [`std::slice::partition_point`]: std::slice::partition_point
+    /// If the value is found then [`Result::Ok`] is returned, containing the
+    /// index of the matching element. If there are multiple matches, then any
+    /// one of the matches could be returned. The index is chosen
+    /// deterministically, but is subject to change in future versions of Rust.
+    /// If the value is not found then [`Result::Err`] is returned, containing
+    /// the index where a matching element could be inserted while maintaining
+    /// sorted order.
+    ///
+    /// Based on std::slice::binary_search_by with minimal modifications (https://doc.rust-lang.org/src/core/slice/mod.rs.html#2770).
     #[inline]
-    fn binary_search_index<'me, K: ArrowReadableKey<'me>>(
+    fn binary_search_by<'me, K: ArrowReadableKey<'me>, F>(
         &'me self,
-        prefix: &str,
-        key: Option<&K>,
-    ) -> usize {
+        mut f: F,
+    ) -> Result<usize, usize>
+    where
+        F: FnMut((&'me str, K)) -> Ordering,
+    {
         let mut size = self.len();
         if size == 0 {
-            return 0;
+            return Err(0);
         }
 
         let prefix_array = self
@@ -158,37 +169,128 @@ impl Block {
             // SAFETY: the call is made safe by the following inconstants:
             // - `mid >= 0`: by definition
             // - `mid < size`: `mid = size / 2 + size / 4 + size / 8 ...`
-            let mut cmp = prefix_array.value(mid).cmp(prefix);
+            let prefix = prefix_array.value(mid);
+            let key = K::get(self.data.column(1), mid);
+            let cmp = f((prefix, key));
 
-            // Continue to compare the key if prefix matches
-            if let (Equal, Some(k)) = (cmp, key) {
-                cmp = K::get(self.data.column(1), mid)
-                    // Key type do not have total order because of floating point values
-                    // But in our case NaN should not be allowed so we should always have total order
-                    .partial_cmp(k)
-                    .expect("Array values should be comparable.");
-            }
+            base = if cmp == Ordering::Greater { base } else { mid };
 
-            base = if cmp == Less { mid } else { base };
+            // This is imprecise in the case where `size` is odd and the
+            // comparison returns Greater: the mid element still gets included
+            // by `size` even though it's known to be larger than the element
+            // being searched for.
+            //
+            // This is fine though: we gain more performance by keeping the
+            // loop iteration count invariant (and thus predictable) than we
+            // lose from considering one additional element.
             size -= half;
         }
 
-        // SAFETY: `base` is always in [0, size) because `base <= mid`.
-        // `base` should be the last index where the element is smaller than the target,
-        // or 0 if the first element is already larger than the target.
-        match prefix_array.value(base).cmp(prefix) {
-            Less => base + 1,
-            Equal => match key {
-                // Key type do not have total order because of floating point values
-                // But in our case NaN should not be allowed so we should always have total order
-                Some(k) => match K::get(self.data.column(1), base).partial_cmp(k) {
-                    Some(Less) => base + 1,
-                    _ => base,
-                },
-                None => base,
-            },
-            Greater => base,
+        // SAFETY: base is always in [0, size) because base <= mid.
+        let prefix = prefix_array.value(base);
+        let key = K::get(self.data.column(1), base);
+        let cmp = f((prefix, key));
+        if cmp == Ordering::Equal {
+            Ok(base)
+        } else {
+            let result = base + (cmp == Ordering::Less) as usize;
+            Err(result)
         }
+    }
+
+    /// Returns the largest index where `prefixes[index] == prefix` or None if the provided prefix does not exist in the block.
+    #[inline]
+    fn find_largest_index_of_prefix<'me, K: ArrowReadableKey<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> Option<usize> {
+        // By design, will never find an exact match (comparator never evaluates to Equal). This finds the index of the first element that is greater than the prefix. If no element is greater, it returns the length of the array.
+        let result = self
+            .binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
+                Ordering::Less => Ordering::Less,
+                Ordering::Equal => Ordering::Less,
+                Ordering::Greater => Ordering::Greater,
+            })
+            .expect_err("Never returns Ok because the comparator never evaluates to Equal.");
+
+        if result == 0 {
+            // The first element is greater than the target prefix, so the target prefix does not exist in the block. (Or the block is empty.)
+            return None;
+        }
+
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+
+        // `result` is the first index where the prefix is larger than the input (or the length of the array) so we want one element before this.
+        match prefix_array.value(result - 1).cmp(prefix) {
+            // We're at the end of the array, so the prefix does not exist in the block (all values are less than the prefix)
+            Ordering::Less => None,
+            // The prefix exists
+            Ordering::Equal => Some(result - 1),
+            // This is impossible
+            Ordering::Greater => None,
+        }
+    }
+
+    /// Returns the smallest index where `prefixes[index] == prefix` or None if the provided prefix does not exist in the block.
+    #[inline]
+    fn find_smallest_index_of_prefix<'me, K: ArrowReadableKey<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> Option<usize> {
+        let result = self
+            .binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
+                Ordering::Less => Ordering::Less,
+                Ordering::Equal => Ordering::Greater,
+                Ordering::Greater => Ordering::Greater,
+            })
+            .expect_err("Never returns Ok because the comparator never evaluates to Equal.");
+
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+
+        if result == self.len() {
+            // The target prefix is greater than all elements in the block.
+            return None;
+        }
+
+        match prefix_array.value(result).cmp(prefix) {
+            Ordering::Greater => None,
+            Ordering::Less => None,
+            Ordering::Equal => Some(result),
+        }
+    }
+
+    /// Finds the partition point of the prefix and key.
+    /// Returns the index of the first element that matches the target prefix and key. If no element matches, returns the index at which the target prefix and key could be inserted to maintain sorted order.
+    #[inline]
+    fn binary_search_prefix_key<'me, K: ArrowReadableKey<'me>>(
+        &'me self,
+        prefix: &str,
+        key: &K,
+    ) -> usize {
+        // By design, will never find an exact match (comparator never evaluates to Equal). This finds the index of the first element that matches the target prefix and key. If no element matches, it returns the index at which the target prefix and key could be inserted to maintain sorted order.
+        self.binary_search_by::<K, _>(|(p, k)| {
+            match p.cmp(prefix).then_with(|| {
+                k.partial_cmp(key)
+                    // The key type does not have a total order because of floating point values.
+                    // But in our case NaN is not allowed, so we should always have total order.
+                    .expect("Array values should be comparable.")
+            }) {
+                Ordering::Less => Ordering::Less,
+                Ordering::Equal => Ordering::Greater,
+                Ordering::Greater => Ordering::Greater,
+            }
+        })
+        .expect_err("Never returns Ok because the comparator never evaluates to Equal.")
     }
 
     #[inline]
@@ -210,34 +312,8 @@ impl Block {
                     prefix_array.value(index).cmp(prefix),
                     K::get(self.data.column(1), index).partial_cmp(key),
                 ),
-                (Equal, Some(Equal))
+                (Ordering::Equal, Some(Ordering::Equal))
             )
-    }
-
-    #[inline]
-    fn scan_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        range: impl Iterator<Item = usize>,
-    ) -> Vec<(K, V)> {
-        let prefix_array = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .expect("The prefix array should be a string arrary.");
-        let mut result = Vec::new();
-        for index in range {
-            if prefix_array.value(index) == prefix {
-                result.push((
-                    K::get(self.data.column(1), index),
-                    V::get(self.data.column(2), index),
-                ));
-            } else {
-                break;
-            }
-        }
-        result
     }
 
     /*
@@ -252,89 +328,89 @@ impl Block {
         prefix: &str,
         key: K,
     ) -> Option<V> {
-        let index = self.binary_search_index(prefix, Some(&key));
-        if self.match_prefix_key_at_index(prefix, &key, index) {
-            Some(V::get(self.data.column(2), index))
-        } else {
-            None
+        match self.binary_search_by::<K, _>(|(p, k)| {
+            p.cmp(prefix).then_with(|| {
+                k.partial_cmp(&key)
+                    // The key type does not have a total order because of floating point values.
+                    // But in our case NaN is not allowed, so we should always have total order.
+                    .expect("Array values should be comparable.")
+            })
+        }) {
+            Ok(index) => Some(V::get(self.data.column(2), index)),
+            Err(_) => None,
         }
     }
 
-    /// Get all the values for a given prefix in the block
+    /// Get all the values for a given prefix & key range in the block
     /// ### Panics
     /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_prefix<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+    /// - If at least one end of the prefix range is excluded (currently unsupported)
+    pub fn get_range<
+        'prefix,
+        'me,
+        K: ArrowReadableKey<'me>,
+        V: ArrowReadableValue<'me>,
+        PrefixRange,
+        KeyRange,
+    >(
         &'me self,
-        prefix: &str,
-    ) -> Vec<(K, V)> {
-        self.scan_prefix(
-            prefix,
-            self.binary_search_index(prefix, Option::<&K>::None)..self.len(),
-        )
-    }
-
-    /// Get all the values for a given prefix in the block where the key is greater than the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_gt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        let index = self.binary_search_index(prefix, Some(&key));
-        if self.match_prefix_key_at_index(prefix, &key, index) {
-            self.scan_prefix(prefix, index + 1..self.len())
-        } else {
-            self.scan_prefix(prefix, index..self.len())
-        }
-    }
-
-    /// Get all the values for a given prefix in the block where the key is greater than or equal to the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_gte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        self.scan_prefix(
-            prefix,
-            self.binary_search_index(prefix, Some(&key))..self.len(),
-        )
-    }
-
-    /// Get all the values for a given prefix in the block where the key is less than the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_lt<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        let mut result = self.scan_prefix(
-            prefix,
-            (0..self.binary_search_index(prefix, Some(&key))).rev(),
-        );
-        result.reverse();
-        result
-    }
-
-    /// Get all the values for a given prefix in the block where the key is less than or equal to the given key
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_lte<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        prefix: &str,
-        key: K,
-    ) -> Vec<(K, V)> {
-        let index = self.binary_search_index(prefix, Some(&key));
-        let mut result = if self.match_prefix_key_at_index(prefix, &key, index) {
-            self.scan_prefix(prefix, (0..=index).rev())
-        } else {
-            self.scan_prefix(prefix, (0..index).rev())
+        prefix_range: PrefixRange,
+        key_range: KeyRange,
+    ) -> impl Iterator<Item = (K, V)> + 'me
+    where
+        PrefixRange: RangeBounds<&'prefix str>,
+        KeyRange: RangeBounds<K>,
+    {
+        let start_index = match prefix_range.start_bound() {
+            Bound::Included(prefix) => match key_range.start_bound() {
+                Bound::Included(key) => self.binary_search_prefix_key(prefix, key),
+                Bound::Excluded(key) => {
+                    let index = self.binary_search_prefix_key(prefix, key);
+                    if self.match_prefix_key_at_index(prefix, key, index) {
+                        index + 1
+                    } else {
+                        index
+                    }
+                }
+                Bound::Unbounded => match self.find_smallest_index_of_prefix::<K>(prefix) {
+                    Some(first_index_of_prefix) => first_index_of_prefix,
+                    None => self.len(), // prefix does not exist in the block so we shouldn't return anything
+                },
+            },
+            Bound::Excluded(_) => {
+                unimplemented!("Excluded prefix range is not currently supported")
+            }
+            Bound::Unbounded => 0,
         };
-        result.reverse();
-        result
+
+        let end_index = match prefix_range.end_bound() {
+            Bound::Included(prefix) => match key_range.end_bound() {
+                Bound::Included(key) => {
+                    let index = self.binary_search_prefix_key(prefix, key);
+                    if self.match_prefix_key_at_index(prefix, key, index) {
+                        index + 1
+                    } else {
+                        index
+                    }
+                }
+                Bound::Excluded(key) => self.binary_search_prefix_key::<K>(prefix, key),
+                Bound::Unbounded => match self.find_largest_index_of_prefix::<K>(prefix) {
+                    Some(last_index_of_prefix) => last_index_of_prefix + 1, // (add 1 because end_index is exclusive below)
+                    None => start_index, // prefix does not exist in the block so we shouldn't return anything
+                },
+            },
+            Bound::Excluded(_) => {
+                unimplemented!("Excluded prefix range is not currently supported")
+            }
+            Bound::Unbounded => self.len(),
+        };
+
+        (start_index..end_index).map(move |index| {
+            (
+                K::get(self.data.column(1), index),
+                V::get(self.data.column(2), index),
+            )
+        })
     }
 
     /// Get all the values for a given prefix in the block where the key is between the given keys

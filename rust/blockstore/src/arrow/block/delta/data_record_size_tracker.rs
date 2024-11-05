@@ -86,22 +86,20 @@ impl DataRecordSizeTracker {
 
     pub fn add_value_size(
         &mut self,
-        value: &<&'static chroma_types::DataRecord<'static> as ArrowWriteableValue>::PreparedValue,
+        value: &<&chroma_types::DataRecord<'_> as ArrowWriteableValue>::PreparedValue,
     ) {
-        // todo
         let (id, embedding, metadata, document) = value;
         self.id_size += id.len();
         self.embedding_size += embedding.len() * std::mem::size_of::<f32>();
         self.metadata_size += metadata.as_ref().map(|m| m.len()).unwrap_or(0);
         self.document_size += document.as_ref().map(|d| d.len()).unwrap_or(0);
-        self.embedding_dimension = Some(embedding.len());
+        self.embedding_dimension = Some(embedding.len()); // todo: return error if embedding size has changed
     }
 
     pub fn subtract_value_size(
         &mut self,
-        value: &<&'static chroma_types::DataRecord<'static> as ArrowWriteableValue>::PreparedValue,
+        value: &<&chroma_types::DataRecord<'_> as ArrowWriteableValue>::PreparedValue,
     ) {
-        // todo
         let (id, embedding, metadata, document) = value;
         self.id_size -= id.len();
         self.embedding_size -= embedding.len() * std::mem::size_of::<f32>();

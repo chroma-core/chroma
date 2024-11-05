@@ -1,6 +1,7 @@
 use crate::fulltext::types::FullTextIndexError;
 use chroma_blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
+use futures::TryStreamExt;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -8,6 +9,7 @@ use core::ops::BitOr;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::ops::Bound;
 use std::sync::Arc;
 
 #[derive(Debug, Error)]
@@ -562,35 +564,23 @@ impl<'me> MetadataIndexReader<'me> {
     ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lt(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Uint32(k) => blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, ..*k)
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lt(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Float32(k) => blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, ..*k)
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             _ => Err(MetadataIndexError::InvalidKeyType),
@@ -604,35 +594,23 @@ impl<'me> MetadataIndexReader<'me> {
     ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_lte(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Uint32(k) => blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, ..=*k)
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_lte(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Float32(k) => blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, ..=*k)
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             _ => Err(MetadataIndexError::InvalidKeyType),
@@ -646,35 +624,29 @@ impl<'me> MetadataIndexReader<'me> {
     ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gt(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Uint32(k) => blockfile_reader
+                    .get_range_stream(
+                        metadata_key..=metadata_key,
+                        (Bound::Excluded(*k), Bound::Unbounded),
+                    )
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gt(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Float32(k) => blockfile_reader
+                    .get_range_stream(
+                        metadata_key..=metadata_key,
+                        (Bound::Excluded(*k), Bound::Unbounded),
+                    )
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             _ => Err(MetadataIndexError::InvalidKeyType),
@@ -688,35 +660,23 @@ impl<'me> MetadataIndexReader<'me> {
     ) -> Result<RoaringBitmap, MetadataIndexError> {
         match self {
             MetadataIndexReader::U32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Uint32(k) => {
-                    let read = blockfile_reader.get_gte(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Uint32(k) => blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, *k..)
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             MetadataIndexReader::F32MetadataIndexReader(blockfile_reader) => match metadata_value {
-                KeyWrapper::Float32(k) => {
-                    let read = blockfile_reader.get_gte(metadata_key, *k).await;
-                    match read {
-                        Ok(records) => {
-                            let mut result = RoaringBitmap::new();
-                            for (_, rbm) in records {
-                                result = result.bitor(&rbm);
-                            }
-                            Ok(result)
-                        }
-                        Err(e) => Err(MetadataIndexError::BlockfileError(e)),
-                    }
-                }
+                KeyWrapper::Float32(k) => blockfile_reader
+                    .get_range_stream(metadata_key..=metadata_key, *k..)
+                    .try_fold(RoaringBitmap::new(), |result, record| async move {
+                        Ok(result.bitor(&record.1))
+                    })
+                    .await
+                    .map_err(MetadataIndexError::BlockfileError),
                 _ => Err(MetadataIndexError::InvalidKeyType),
             },
             _ => Err(MetadataIndexError::InvalidKeyType),

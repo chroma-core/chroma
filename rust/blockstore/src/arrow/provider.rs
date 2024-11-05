@@ -173,7 +173,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
 }
 
 #[derive(Error, Debug)]
-pub(super) enum GetError {
+pub enum GetError {
     #[error(transparent)]
     BlockLoadError(#[from] BlockLoadError),
     #[error(transparent)]
@@ -281,7 +281,7 @@ impl BlockManager {
                     .storage
                     .get(&key)
                     .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
+                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
                     )
                     .await;
                 match bytes_res {
@@ -321,7 +321,7 @@ impl BlockManager {
                         Err(GetError::StorageGetError(e))
                     }
                 }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold")).await
+            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
         }
     }
 
@@ -334,10 +334,15 @@ impl BlockManager {
             }
         };
         let key = format!("block/{}", block.id);
+        let block_bytes_len = bytes.len();
         let res = self.storage.put_bytes(&key, bytes).await;
         match res {
             Ok(_) => {
-                tracing::info!("Block: {} written to storage", block.id);
+                tracing::info!(
+                    "Block: {} written to storage ({}B)",
+                    block.id,
+                    block_bytes_len
+                );
             }
             Err(e) => {
                 tracing::info!("Error writing block to storage {}", e);

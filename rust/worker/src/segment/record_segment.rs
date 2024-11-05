@@ -322,7 +322,9 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
         &self,
         records: Chunk<MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError> {
+        let mut count = 0u64;
         for (log_record, _) in records.iter() {
+            count += 1;
             match log_record.final_operation {
                 MaterializedLogOperation::AddNew => {
                     // Set all four.
@@ -458,6 +460,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                 MaterializedLogOperation::Initial => panic!("Invariant violation. Materialized logs should not have any logs in the initial state")
             }
         }
+        tracing::info!("Applied {} records to record segment", count,);
         Ok(())
     }
 
