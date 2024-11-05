@@ -30,25 +30,26 @@ impl ChromaError for FullTextIndexError {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum DocumentMutation<'a> {
+pub enum DocumentMutation<'text> {
     Create {
         offset_id: u32,
-        new_document: &'a str,
+        new_document: &'text str,
     },
     Update {
         offset_id: u32,
-        old_document: &'a str,
-        new_document: &'a str,
+        old_document: &'text str,
+        new_document: &'text str,
     },
     Delete {
         offset_id: u32,
-        old_document: &'a str,
+        old_document: &'text str,
     },
 }
 
 #[derive(Clone)]
 pub struct FullTextIndexWriter {
     tokenizer: NgramTokenizer,
+    /// Deletes for a given trigram/offset ID pair are represented by a `None` position on the token instance.
     token_instances: Arc<Mutex<Vec<Vec<TokenInstance>>>>,
     posting_lists_blockfile_writer: BlockfileWriter,
 }
@@ -62,8 +63,12 @@ impl FullTextIndexWriter {
         }
     }
 
-    // important: duplicate offset IDs not allowed
-    // todo: document intended usage
+    /// Processes a batch of mutations to the full-text index
+    /// This assumes that there will never be mutations with the same offset ID across all calls to `handle_batch()` for the lifetime of a `FullTextIndexWriter` struct.
+    ///
+    /// Recommended usage is running this in several threads at once, each over a chunk of mutations.
+    ///
+    /// Note that this is a blocking method and may take on the order of hundreds of milliseconds to complete (depending on the batch size) so be careful when calling this from an async context.
     pub fn handle_batch<'documents, M: IntoIterator<Item = DocumentMutation<'documents>>>(
         &self,
         mutations: M,
@@ -207,7 +212,6 @@ impl FullTextIndexWriter {
     }
 
     pub async fn commit(self) -> Result<FullTextIndexFlusher, FullTextIndexError> {
-        // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
             .commit::<u32, Vec<u32>>()
@@ -252,7 +256,7 @@ pub struct FullTextIndexReader<'me> {
 impl<'me> FullTextIndexReader<'me> {
     pub fn new(
         posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [u32]>,
-        tokenizer: NgramTokenizer, // todo
+        tokenizer: NgramTokenizer,
     ) -> Self {
         FullTextIndexReader {
             posting_lists_blockfile_reader,
@@ -371,10 +375,7 @@ impl<'me> FullTextIndexReader<'me> {
         Ok(results)
     }
 
-    #[cfg(test)] // todo
-                 // We use this to implement deletes in the Writer. A delete() is implemented
-                 // by copying all the data from the old blockfile to a new one but skipping
-                 // the deleted offset id.
+    #[cfg(test)]
     async fn get_all_results_for_token(
         &self,
         token: &str,
