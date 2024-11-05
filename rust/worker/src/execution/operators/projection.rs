@@ -15,26 +15,24 @@ use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
 #[derive(Debug)]
-pub struct HydrateMetadataResultsOperator {}
+pub struct ProjectionOperator {}
 
-impl HydrateMetadataResultsOperator {
+impl ProjectionOperator {
     pub fn new() -> Box<Self> {
-        Box::new(HydrateMetadataResultsOperator {})
+        Box::new(ProjectionOperator {})
     }
 }
 
 #[derive(Debug)]
-pub struct HydrateMetadataResultsOperatorInput {
+pub struct ProjectionInput {
     blockfile_provider: BlockfileProvider,
     record_segment_definition: Segment,
-    // Result of PullLogs
     log_record: Chunk<LogRecord>,
-    // The matching offset ids (both log and compact)
     offset_ids: RoaringBitmap,
     include_metadata: bool,
 }
 
-impl HydrateMetadataResultsOperatorInput {
+impl ProjectionInput {
     pub fn new(
         blockfile_provider: BlockfileProvider,
         record_segment_definition: Segment,
@@ -53,14 +51,14 @@ impl HydrateMetadataResultsOperatorInput {
 }
 
 #[derive(Debug)]
-pub struct HydrateMetadataResultsOperatorOutput {
+pub struct ProjectionOutput {
     pub ids: Vec<String>,
     pub metadata: Vec<Option<Metadata>>,
     pub documents: Vec<Option<String>>,
 }
 
 #[derive(Error, Debug)]
-pub enum HydrateMetadataResultsOperatorError {
+pub enum ProjectionError {
     #[error("Error creating Record Segment")]
     RecordSegmentCreation(#[from] RecordSegmentReaderCreationError),
     #[error("Error reading Record Segment")]
@@ -71,31 +69,26 @@ pub enum HydrateMetadataResultsOperatorError {
     LogMaterialization(#[from] LogMaterializerError),
 }
 
-impl ChromaError for HydrateMetadataResultsOperatorError {
+impl ChromaError for ProjectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HydrateMetadataResultsOperatorError::RecordSegmentCreation(e) => e.code(),
-            HydrateMetadataResultsOperatorError::RecordSegmentRead => ErrorCodes::Internal,
-            HydrateMetadataResultsOperatorError::MetadataConversion(e) => e.code(),
-            HydrateMetadataResultsOperatorError::LogMaterialization(e) => e.code(),
+            ProjectionError::RecordSegmentCreation(e) => e.code(),
+            ProjectionError::RecordSegmentRead => ErrorCodes::Internal,
+            ProjectionError::MetadataConversion(e) => e.code(),
+            ProjectionError::LogMaterialization(e) => e.code(),
         }
     }
 }
 
 #[async_trait]
-impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperatorOutput>
-    for HydrateMetadataResultsOperator
-{
-    type Error = HydrateMetadataResultsOperatorError;
+impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
+    type Error = ProjectionError;
 
     fn get_name(&self) -> &'static str {
-        "HydrateMetadataResultsOperator"
+        "ProjectionOperator"
     }
 
-    async fn run(
-        &self,
-        input: &HydrateMetadataResultsOperatorInput,
-    ) -> Result<HydrateMetadataResultsOperatorOutput, Self::Error> {
+    async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, Self::Error> {
         trace!(
             "[HydrateMetadataResultsOperator] segment id: {}",
             input.record_segment_definition.id.to_string()
@@ -116,9 +109,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             }
             Err(e) => {
                 tracing::error!("Error creating record segment reader {}", e);
-                Err(HydrateMetadataResultsOperatorError::RecordSegmentCreation(
-                    *e,
-                ))
+                Err(ProjectionError::RecordSegmentCreation(*e))
             }
         }?;
 
@@ -134,7 +125,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             .await
             .map_err(|e| {
                 tracing::error!("Error materializing log: {}", e);
-                HydrateMetadataResultsOperatorError::LogMaterialization(e)
+                ProjectionError::LogMaterialization(e)
             })?;
 
         // Create a hash map that maps an offset id to the corresponding log
@@ -175,7 +166,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                             .await
                             .map_err(|e| {
                                 tracing::error!("Error reading record segment: {}", e);
-                                HydrateMetadataResultsOperatorError::RecordSegmentRead
+                                ProjectionError::RecordSegmentRead
                             })?
                             .to_string();
                         let mut rec_meta = None;
@@ -183,7 +174,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                         if input.include_metadata {
                             let record = reader.get_data_for_offset_id(oid).await.map_err(|e| {
                                 tracing::error!("Error reading Record Segment: {}", e);
-                                HydrateMetadataResultsOperatorError::RecordSegmentRead
+                                ProjectionError::RecordSegmentRead
                             })?;
                             rec_meta = record.metadata;
                             rec_doc = record.document.map(str::to_string);
@@ -191,7 +182,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
                         (rec_id, rec_meta, rec_doc)
                     } else {
                         tracing::error!("Error reading record segment.");
-                        return Err(HydrateMetadataResultsOperatorError::RecordSegmentRead);
+                        return Err(ProjectionError::RecordSegmentRead);
                     }
                 }
             };
@@ -200,7 +191,7 @@ impl Operator<HydrateMetadataResultsOperatorInput, HydrateMetadataResultsOperato
             documents.push(doc);
         }
 
-        Ok(HydrateMetadataResultsOperatorOutput {
+        Ok(ProjectionOutput {
             ids,
             metadata,
             documents,
@@ -213,9 +204,7 @@ mod test {
     use crate::{
         execution::{
             operator::Operator,
-            operators::hydrate_metadata_results::{
-                HydrateMetadataResultsOperator, HydrateMetadataResultsOperatorInput,
-            },
+            operators::projection::{ProjectionInput, ProjectionOperator},
         },
         segment::{
             metadata_segment::MetadataSegmentWriter,
@@ -400,8 +389,8 @@ mod test {
             },
         ];
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let op = HydrateMetadataResultsOperator::new();
-        let input = HydrateMetadataResultsOperatorInput::new(
+        let op = ProjectionOperator::new();
+        let input = ProjectionInput::new(
             blockfile_provider,
             record_segment,
             data,

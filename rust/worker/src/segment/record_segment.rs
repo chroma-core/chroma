@@ -5,7 +5,7 @@ use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
-use roaring::RoaringBitmap;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::sync::atomic::AtomicU32;
@@ -820,27 +820,50 @@ impl RecordSegmentReader<'_> {
         Ok(data)
     }
 
-    /// Returns all offset_ids in the record segment sorted.
-    pub(crate) async fn get_all_offset_ids(&self) -> Result<RoaringBitmap, Box<dyn ChromaError>> {
-        let offset_id_count = self.count().await?;
-        let mut collected_offset_ids = RoaringBitmap::new();
-        for i in 0..offset_id_count {
-            let record = self.id_to_user_id.get_at_index(i).await;
-            match record {
-                Ok((_, offset_id, _)) => {
-                    collected_offset_ids.insert(offset_id);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "[GetAllData] Error getting offset id for index {}: {}",
-                        i,
-                        e
-                    );
-                    return Err(e);
-                }
+    pub(crate) async fn get_offset_id_at_index(
+        &self,
+        index: usize,
+    ) -> Result<u32, Box<dyn ChromaError>> {
+        match self.id_to_user_id.get_at_index(index).await {
+            Ok((_, oid, _)) => Ok(oid),
+            Err(e) => {
+                tracing::error!(
+                    "[GetAllData] Error getting offset id for index {}: {}",
+                    index,
+                    e
+                );
+                Err(e)
             }
         }
-        Ok(collected_offset_ids)
+    }
+
+    // Find the rank of the given offset id in the record segment
+    // The implemention is based on std binary search
+    pub(crate) async fn get_offset_id_rank(
+        &self,
+        target_oid: u32,
+    ) -> Result<usize, Box<dyn ChromaError>> {
+        let mut size = self.count().await?;
+        if size == 0 {
+            return Ok(0);
+        }
+        let mut base = 0;
+        while size > 1 {
+            let half = size / 2;
+            let mid = base + half;
+
+            let cmp = self.get_offset_id_at_index(mid).await?.cmp(&target_oid);
+            base = if cmp == Ordering::Greater { base } else { mid };
+            size -= half;
+        }
+
+        Ok(
+            match self.get_offset_id_at_index(base).await?.cmp(&target_oid) {
+                Ordering::Equal => base,
+                Ordering::Less => base + 1,
+                Ordering::Greater => base,
+            },
+        )
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {

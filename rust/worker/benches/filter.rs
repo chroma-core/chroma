@@ -8,9 +8,7 @@ use chroma_types::{
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
-use worker::execution::operators::metadata_filtering::{
-    MetadataFilteringInput, MetadataFilteringOperator,
-};
+use worker::execution::operators::filter::{FilterInput, FilterOperator};
 use worker::log::test::{add_generator_0, LogGenerator};
 use worker::segment::test::TestSegment;
 
@@ -71,17 +69,17 @@ fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
     .collect()
 }
 
-fn bench_metadata_filtering(criterion: &mut Criterion) {
+fn bench_filter(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
     let logen = LogGenerator {
         generator: add_generator_0,
     };
 
-    let routine = |metadata_filter_input| async move {
-        MetadataFilteringOperator::new()
-            .run(&metadata_filter_input)
+    let routine = |filter_input| async move {
+        FilterOperator::new()
+            .run(&filter_input)
             .await
-            .expect("Metadata filtering should not fail.");
+            .expect("Filter should not fail.");
     };
 
     for record_count in [1000, 10000, 100000] {
@@ -90,15 +88,13 @@ fn bench_metadata_filtering(criterion: &mut Criterion) {
 
         for (op, where_clause) in baseline_where_clauses() {
             let setup = || {
-                MetadataFilteringInput::new(
+                FilterInput::new(
                     compact.blockfile_provider.clone(),
                     compact.record.clone(),
                     compact.metadata.clone(),
                     Chunk::new(Vec::new().into()),
                     None,
                     where_clause.clone(),
-                    None,
-                    None,
                 )
             };
             bench_run(
@@ -112,5 +108,5 @@ fn bench_metadata_filtering(criterion: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_metadata_filtering);
+criterion_group!(benches, bench_filter);
 criterion_main!(benches);
