@@ -444,7 +444,7 @@ def test_delete_add_after_persist(settings: Settings) -> None:
 
 
 def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_ids(
-    _caplog: pytest.LogCaptureFixture, settings: Settings
+    caplog: pytest.LogCaptureFixture, settings: Settings
 ) -> None:
     # NOTE(hammadb) this test was autogenerate by hypothesis and added here to ensure that the test is run
     # in the future. It tests a case where the max seq id was incorrect in response to the same
