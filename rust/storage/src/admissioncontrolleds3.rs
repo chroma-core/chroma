@@ -1,12 +1,12 @@
+use crate::StorageConfigError;
 use crate::{
     config::{RateLimitingConfig, StorageConfig},
-    s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
-    stream::ByteStreamItem,
+    s3::{S3GetError, S3PutError, S3Storage},
 };
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::{future::Shared, stream, FutureExt, Stream, StreamExt};
+use futures::{future::Shared, stream, FutureExt, StreamExt};
 use parking_lot::Mutex;
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
@@ -73,28 +73,6 @@ impl AdmissionControlledS3Storage {
             storage,
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
-        }
-    }
-
-    // TODO: Remove this once the upstream consumers switch to non-streaming APIs.
-    pub async fn get_stream(
-        &self,
-        key: &str,
-    ) -> Result<
-        Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
-        AdmissionControlledS3StorageError,
-    > {
-        match self
-            .storage
-            .get_stream(key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
-            .await
-        {
-            Ok(res) => Ok(res),
-            Err(e) => {
-                tracing::error!("Error reading from storage: {}", e);
-                Err(AdmissionControlledS3StorageError::S3GetError(e))
-            }
         }
     }
 
