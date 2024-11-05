@@ -13,6 +13,7 @@ use futures::{StreamExt, TryStreamExt};
 use std::sync::Arc;
 mod dataset_utilities;
 use dataset_utilities::{get_record_dataset, get_record_query_dataset_pair};
+use rayon::prelude::*;
 use tantivy::tokenizer::NgramTokenizer;
 
 #[cfg(not(target_env = "msvc"))]
@@ -41,7 +42,7 @@ impl From<NumWorkersParameter> for usize {
 
 async fn compact_log_and_get_reader<'a>(
     blockfile_provider: &BlockfileProvider,
-    chunked_mutations: Vec<Vec<DocumentMutation<'a>>>,
+    mut chunked_mutations: Vec<Vec<DocumentMutation<'a>>>,
 ) -> Result<FullTextIndexReader<'a>> {
     let postings_blockfile_writer = blockfile_provider
         .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
@@ -53,19 +54,8 @@ async fn compact_log_and_get_reader<'a>(
 
     let mut full_text_index_writer = FullTextIndexWriter::new(postings_blockfile_writer, tokenizer);
 
-    std::thread::scope(|s| {
-        let mut threads = Vec::new();
-        for chunk in chunked_mutations {
-            let full_text_index_writer = full_text_index_writer.clone();
-            let thread = s.spawn(move || {
-                full_text_index_writer.handle_batch(chunk).unwrap();
-            });
-            threads.push(thread);
-        }
-
-        for thread in threads {
-            thread.join().unwrap();
-        }
+    chunked_mutations.par_drain(..).for_each(|chunk| {
+        full_text_index_writer.handle_batch(chunk).unwrap();
     });
 
     full_text_index_writer.write_to_blockfiles().await.unwrap();
