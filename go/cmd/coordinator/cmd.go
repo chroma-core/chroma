@@ -43,8 +43,8 @@ func init() {
 
 	// Soft deletes
 	Cmd.Flags().BoolVar(&conf.SoftDeleteEnabled, "soft-delete-enabled", false, "Enable soft deletes")
-	Cmd.Flags().DurationVar(&conf.SoftDeleteCleanupInterval, "soft-delete-cleanup-interval-secs", 10*time.Second, "Soft delete cleanup interval in seconds")
-	Cmd.Flags().DurationVar(&conf.SoftDeleteMaxAge, "soft-delete-max-age-secs", 3600*time.Second, "Soft delete max age in seconds")
+	Cmd.Flags().DurationVar(&conf.SoftDeleteCleanupInterval, "soft-delete-cleanup-interval", 1*time.Minute, "Soft delete cleanup interval")
+	Cmd.Flags().DurationVar(&conf.SoftDeleteMaxAge, "soft-delete-max-age", 24*time.Hour, "Soft delete max age")
 	Cmd.Flags().UintVar(&conf.SoftDeleteCleanupBatchSize, "soft-delete-cleanup-batch-size", 10, "Soft delete cleanup batch size")
 
 	// Memberlist

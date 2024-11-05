@@ -29,9 +29,12 @@ func (suite *CleanupTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
-		SystemCatalogProvider: "database",
-		SoftDeleteEnabled:     true,
-		Testing:               true}, grpcutils.Default, suite.db)
+		SystemCatalogProvider:      "database",
+		SoftDeleteEnabled:          true,
+		SoftDeleteCleanupInterval:  1 * time.Second,
+		SoftDeleteMaxAge:           0,
+		SoftDeleteCleanupBatchSize: 10,
+		Testing:                    true}, grpcutils.Default, suite.db)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
@@ -74,9 +77,8 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	suite.NoError(err)
 	suite.Equal(2, len(softDeletedCollections))
 
-	// Create cleaner with short grace period for testing
-	cleaner := NewSoftDeleteCleaner(suite.s.coordinator, 1, 0, 10)
-	cleaner.Start()
+	// Start the cleaner.
+	suite.s.softDeleteCleaner.Start()
 
 	// Wait for cleanup cycle
 	time.Sleep(2 * time.Second)
@@ -86,7 +88,8 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	suite.NoError(err)
 	suite.Equal(0, len(softDeletedCollections))
 
-	cleaner.Stop()
+	// Stop the cleaner.
+	suite.s.softDeleteCleaner.Stop()
 }
 
 func TestCleanupTestSuite(t *testing.T) {
