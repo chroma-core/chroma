@@ -92,17 +92,16 @@ impl FetchSegmentOperator {
     }
     async fn get_segment(&self, scope: SegmentScope) -> Result<Segment, FetchSegmentError> {
         let segment_type = match scope {
-            SegmentScope::VECTOR => SegmentType::HnswDistributed,
             SegmentScope::METADATA => SegmentType::BlockfileMetadata,
             SegmentScope::RECORD => SegmentType::BlockfileRecord,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
+            SegmentScope::VECTOR => SegmentType::HnswDistributed,
         };
-        // TODO: Add segment uuid
         let segment_id = match scope {
-            SegmentScope::VECTOR => self.vector_uuid,
             SegmentScope::METADATA => self.metadata_uuid,
             SegmentScope::RECORD => self.record_uuid,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
+            SegmentScope::VECTOR => self.vector_uuid,
         };
         self.sysdb
             .clone()
