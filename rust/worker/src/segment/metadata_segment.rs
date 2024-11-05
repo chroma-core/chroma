@@ -571,7 +571,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
             .as_ref()
             .unwrap()
             .handle_batch(full_text_writer_batch)
-            .unwrap(); // todo
+            .map_err(ApplyMaterializedLogError::FullTextIndex)?;
 
         for record in records.iter() {
             count += 1;

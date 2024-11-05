@@ -1,9 +1,16 @@
+/// A token instance is a unique value containing a trigram, an offset ID, and optionally a position within a document.
+/// These three attributes are packed into a single u128 value:
+/// - The trigram is a 63-bit value, packed into the top 64 bits.
+/// - The offset ID is a 32-bit value, packed into the next 32 bits.
+/// - The position is a 32-bit value, packed into the bottom 32 bits. The highest bit is used as a flag to indicate whether the position is present (meaning that the maximum position value is 2^31, not 2^32).
+///
+/// It is laid out like this to make it trivial to sort a list of token instances by trigram, offset ID, and then position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TokenInstance(u128);
 
 // Unicode characters only use 21 bits, so we can encode a trigram in 21 * 3 = 63 bits (a u64).
 #[inline(always)]
-pub(super) fn pack_trigram(s: &str) -> u64 {
+fn pack_trigram(s: &str) -> u64 {
     let mut u = 0u64;
     for (i, c) in s.chars().take(3).enumerate() {
         let shift = (2 - i) * 21;
@@ -37,7 +44,7 @@ fn encode_utf8_unchecked(c: u32, buf: &mut [u8]) -> usize {
 }
 
 #[inline(always)]
-pub(super) fn unpack_trigram(u: u64) -> String {
+fn unpack_trigram(u: u64) -> String {
     let c0 = ((u >> 42) & 0x1F_FFFF) as u32;
     let c1 = ((u >> 21) & 0x1F_FFFF) as u32;
     let c2 = (u & 0x1F_FFFF) as u32;
@@ -111,19 +118,6 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    impl Arbitrary for TokenInstance {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            ("\\PC{3}", 0..u32::MAX, proptest::option::of(0..u32::MAX))
-                .prop_map(|(token, offset_id, position)| {
-                    TokenInstance::encode(&token, offset_id, position)
-                })
-                .boxed()
-        }
-    }
-
     proptest! {
       #[test]
       fn test_pack_unpack_trigram(token in "\\PC{3}", offset_id in 0..u32::MAX, position in proptest::option::of((0..u32::MAX).prop_map(|v| v >> 1))) {
@@ -142,9 +136,9 @@ mod tests {
         let encoded1 = TokenInstance::encode(&token, offset_id, position1);
         let encoded2 = TokenInstance::encode(&token, offset_id, position2);
 
-        assert_eq!(encoded1.omit_position(), encoded2.omit_position());
-        assert_eq!(encoded1.omit_position().get_token(), encoded1.get_token());
-        assert_eq!(encoded1.omit_position().get_offset_id(), encoded1.get_offset_id());
+        assert_eq!(encoded1.omit_position(), encoded2.omit_position(), "Omitting position should make two token instances equal");
+        assert_eq!(encoded1.omit_position().get_token(), encoded1.get_token(), "Omitting position should not change the token");
+        assert_eq!(encoded1.omit_position().get_offset_id(), encoded1.get_offset_id(), "Omitting position should not change the offset ID");
       }
     }
 }
