@@ -3,7 +3,6 @@ use chroma_types::{Chunk, SignedRoaringBitmap};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
-use worker::execution::operators::fetch_segment::FetchSegmentOutput;
 use worker::execution::operators::limit::{LimitInput, LimitOperator};
 use worker::log::test::{upsert_generator, LogGenerator};
 use worker::segment::test::TestSegment;
