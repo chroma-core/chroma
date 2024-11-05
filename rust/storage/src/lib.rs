@@ -6,6 +6,7 @@ use admissioncontrolleds3::AdmissionControlledS3StorageError;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 
+pub mod admission_controller;
 pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
