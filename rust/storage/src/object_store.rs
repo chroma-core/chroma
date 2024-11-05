@@ -1,8 +1,9 @@
+use std::ops::Range;
 use std::sync::Arc;
 
 use chroma_error::ChromaError;
 use object_store::path::Path;
-use object_store::{GetOptions, ObjectStore as ObjectStoreTrait, PutOptions};
+use object_store::{GetOptions, GetRange, ObjectStore as ObjectStoreTrait, PutOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::Mutex;
 
@@ -76,15 +77,37 @@ impl ObjectStore {
     }
 
     pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
-        // TODO(rescrv, NOCOMMIT): Implement parallel get for object store
-        Ok(self
-            .object_store
-            .get_opts(&Path::from(key), GetOptions::default())
-            .await?
-            .bytes()
-            .await?
-            .to_vec()
-            .into())
+        let meta = self.object_store.head(&Path::from(key)).await?;
+        let file_size = meta.size;
+        let mut pieces = vec![];
+        let mut output_buffer: Vec<u8> = vec![0; file_size];
+        let mut output_slices = output_buffer
+            .chunks_mut(
+                self.download_part_size_bytes
+                    .try_into()
+                    .expect("u64 should fit usize"),
+            )
+            .collect::<Vec<_>>();
+        for (idx, output_slice) in output_slices.iter_mut().enumerate() {
+            let start = idx as u64 * self.download_part_size_bytes;
+            let limit = start + output_slice.len() as u64;
+            let start = start.try_into().expect("u64 should fit usize");
+            let limit = limit.try_into().expect("u64 should fit usize");
+            let options = GetOptions {
+                range: Some(GetRange::Bounded(Range { start, end: limit })),
+                ..Default::default()
+            };
+            let object_store = Arc::clone(&self.object_store);
+            let path = Path::from(key.clone()).to_owned();
+            let fut = async move { object_store.get_opts(&path, options).await };
+            pieces.push(fut);
+        }
+        for piece in futures::future::join_all(pieces).await {
+            if let Err(err) = piece {
+                return Err(err.into());
+            }
+        }
+        Ok(Arc::new(output_buffer))
     }
 
     pub async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
@@ -145,6 +168,12 @@ impl ObjectStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usize_u64() {
+        // We assume this and will panic if not true, so test it.
+        assert_eq!(u64::MAX as usize as u64, usize::MAX as u64);
+    }
 
     fn get_object_store() -> ObjectStore {
         ObjectStore {
