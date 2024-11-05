@@ -119,10 +119,11 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	return
 }
 
-func (s *collectionDb) GetSoftDeletedCollections(tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(nil, nil, tenantID, databaseName, &limit, nil, true)
+func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
+	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, true)
 }
 
+// NOTE: This is the only method to do a hard delete of a single collection.
 func (s *collectionDb) DeleteCollectionByID(collectionID string) (int, error) {
 	var collections []dbmodel.Collection
 	err := s.db.Clauses(clause.Returning{}).Where("id = ?", collectionID).Delete(&collections).Error
@@ -225,7 +226,7 @@ func (s *collectionDb) CheckCollectionIsSoftDeleted(collectionID string, tenantI
 	err := query.First(&collection).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, common.ErrCollectionNotFound
+			return false, nil
 		}
 		return false, err
 	}

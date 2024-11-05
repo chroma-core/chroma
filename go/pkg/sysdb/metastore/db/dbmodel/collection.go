@@ -35,7 +35,7 @@ type CollectionAndMetadata struct {
 type ICollectionDb interface {
 	GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
 	DeleteCollectionByID(collectionID string) (int, error)
-	GetSoftDeletedCollections(tenantID string, databaseName string, limit int32) ([]*CollectionAndMetadata, error)
+	GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*CollectionAndMetadata, error)
 	Insert(in *Collection) error
 	Update(in *Collection) error
 	DeleteAll() error

@@ -332,24 +332,44 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 	log.Info("hard deleting collection", zap.Any("deleteCollection", deleteCollection))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
-		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
+
+		collectionIDStr := collectionID.String()
+		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetSoftDeletedCollections(&collectionIDStr, deleteCollection.TenantID, deleteCollection.DatabaseName, 1)
 		if err != nil {
+			log.Error("error getting soft deleted collection during hard delete", zap.Error(err))
 			return err
 		}
+		wasSoftDeletedEarlier := len(collectionAndMetadata) != 0
+
+		if !wasSoftDeletedEarlier {
+			// Check if collection is being hard delete without being soft-deleted earlier.
+			// Delete it anyways.
+			collectionAndMetadata, err = tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
+			if err != nil {
+				log.Error("error getting collection during hard delete", zap.Error(err))
+				return err
+			}
+		}
+
 		if len(collectionAndMetadata) == 0 {
 			return common.ErrCollectionDeleteNonExistingCollection
 		}
 
+		// Collection exists, hence hard delete it.
 		collectionDeletedCount, err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
 		if err != nil {
+			log.Error("error deleting collection during hard delete", zap.Error(err))
 			return err
 		}
 		collectionMetadataDeletedCount, err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
 		if err != nil {
+			log.Error("error deleting collection metadata during hard delete", zap.Error(err))
 			return err
 		}
-		log.Info("collection hard deleted", zap.Any("collection", collectionAndMetadata), zap.Int("collectionDeletedCount", collectionDeletedCount), zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
-
+		log.Info("collection hard deleted", zap.Any("collection", collectionAndMetadata),
+			zap.Int("collectionDeletedCount", collectionDeletedCount),
+			zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount),
+			zap.Bool("wasSoftDeletedEarlier", wasSoftDeletedEarlier))
 		return nil
 	})
 }
@@ -381,8 +401,8 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 	})
 }
 
-func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
-	collections, err := tc.metaDomain.CollectionDb(ctx).GetSoftDeletedCollections(tenantID, databaseName, limit)
+func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, collectionID *string, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
+	collections, err := tc.metaDomain.CollectionDb(ctx).GetSoftDeletedCollections(collectionID, tenantID, databaseName, limit)
 	if err != nil {
 		return nil, err
 	}
