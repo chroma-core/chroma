@@ -1022,6 +1022,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "biometrics"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22a50124c9be28b92ff57aa4f0d14744de4053b253d3d451b7bc08f989dba6a4"
+dependencies = [
+ "sig_fig_histogram",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1344,6 +1353,7 @@ dependencies = [
  "rand",
  "rand_xorshift",
  "serde",
+ "sync42",
  "tempfile",
  "thiserror",
  "tokio",
@@ -5009,6 +5019,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sig_fig_histogram"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43ca5e12dae79261e4e745bb9ef1f4d4c6006ced143f5a0449f5a548c69cfee2"
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5151,6 +5167,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "sync42"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f142b8e692a4cc7d1988d8280c5507f5e43a198b4f774aa2b5660632906e212"
+dependencies = [
+ "biometrics",
 ]
 
 [[package]]
