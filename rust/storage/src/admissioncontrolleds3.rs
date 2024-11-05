@@ -199,7 +199,10 @@ impl AdmissionControlledS3Storage {
             let mut requests = self.outstanding_requests.lock();
             let maybe_inflight = requests.get(&key).cloned();
             future_to_await = match maybe_inflight {
-                Some(fut) => fut,
+                Some(fut) => {
+                    tracing::info!("[AdmissionControlledS3] Found inflight request to s3 for key: {}. Deduping", key);
+                    fut
+                }
                 None => {
                     let get_parallel_storage_future = AdmissionControlledS3Storage::parallel_fetch(
                         self.storage.clone(),

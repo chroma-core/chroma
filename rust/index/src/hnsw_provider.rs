@@ -225,7 +225,7 @@ impl HnswIndexProvider {
         buf: Arc<Vec<u8>>,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
         // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().await;
+        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for write to local disk")).await;
         let file_handle = tokio::fs::File::create(&file_path).await;
         let mut file_handle = match file_handle {
             Ok(file) => file,
@@ -259,29 +259,35 @@ impl HnswIndexProvider {
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
         // Fetch the files from storage and put them in the index storage path.
         for file in FILES.iter() {
-            let key = self.format_key(source_id, file);
-            tracing::info!("Loading hnsw index file: {}", key);
-            let bytes_res = self.storage.get_parallel(&key).await;
-            let bytes_read;
-            let buf = match bytes_res {
-                Ok(buf) => {
-                    bytes_read = buf.len();
-                    buf
-                }
-                Err(e) => {
-                    tracing::error!("Failed to load hnsw index file from storage: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
-                }
-            };
+            let s3_fetch_span =
+                tracing::trace_span!(parent: Span::current(), "Read bytes from s3", file = file);
+            let buf = s3_fetch_span
+                .in_scope(|| async {
+                    let key = self.format_key(source_id, file);
+                    tracing::info!("Loading hnsw index file: {} into directory", key);
+                    let bytes_res = self.storage.get_parallel(&key).await;
+                    let bytes_read;
+                    let buf = match bytes_res {
+                        Ok(buf) => {
+                            bytes_read = buf.len();
+                            buf
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to load hnsw index file from storage: {}", e);
+                            return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
+                        }
+                    };
+                    tracing::info!(
+                        "Fetched {} bytes from s3 for storage key {:?}",
+                        bytes_read,
+                        key,
+                    );
+                    Ok(buf)
+                })
+                .await?;
             let file_path = index_storage_path.join(file);
-            self.copy_bytes_to_local_file(&file_path, buf).instrument(tracing::info_span!(parent: Span::current(), "hnsw provider copy bytes to local file", file = file)).await?;
-            tracing::info!(
-                "Copied {} bytes from storage key: {} to file: {}",
-                bytes_read,
-                key,
-                file_path.to_str().unwrap()
-            );
-            tracing::info!("Loaded hnsw index file: {}", file);
+            let bytes_read = buf.len();
+            self.copy_bytes_to_local_file(&file_path, buf).instrument(tracing::info_span!(parent: Span::current(), "hnsw provider copy bytes to local file", file = file, bytes = bytes_read)).await?;
         }
         Ok(())
     }
