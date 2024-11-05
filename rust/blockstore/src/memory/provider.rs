@@ -6,7 +6,8 @@ use crate::{
     arrow::types::{ArrowReadableKey, ArrowReadableValue},
     key::{InvalidKeyConversion, KeyWrapper},
     provider::{CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, Key, Value,
+    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions, Key,
+    Value,
 };
 
 /// A BlockFileProvider that creates HashMapBlockfiles (in-memory blockfiles used for testing).
@@ -41,7 +42,18 @@ impl MemoryBlockfileProvider {
         Ok(BlockfileReader::<K, V>::MemoryBlockfileReader(reader))
     }
 
-    pub(crate) fn create(&self) -> Result<BlockfileWriter, Box<CreateError>> {
+    pub(crate) fn write(
+        &self,
+        options: BlockfileWriterOptions,
+    ) -> Result<BlockfileWriter, Box<CreateError>> {
+        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unordered {
+            unimplemented!();
+        }
+
+        if options.fork_from.is_some() {
+            unimplemented!();
+        }
+
         let writer: MemoryBlockfileWriter =
             MemoryBlockfileWriter::new(self.storage_manager.clone());
         Ok(BlockfileWriter::MemoryBlockfileWriter(writer))
@@ -49,10 +61,6 @@ impl MemoryBlockfileProvider {
 
     pub(crate) fn clear(&self) {
         self.storage_manager.clear();
-    }
-
-    pub(crate) fn fork(&self, _id: &uuid::Uuid) -> Result<BlockfileWriter, Box<CreateError>> {
-        todo!();
     }
 }
 

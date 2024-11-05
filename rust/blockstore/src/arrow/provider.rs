@@ -9,7 +9,8 @@ use crate::{
     key::KeyWrapper,
     memory::storage::Readable,
     provider::{CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, Key, Value,
+    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions, Key,
+    Value,
 };
 use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
@@ -61,46 +62,52 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub fn create<
+    pub async fn write<
         'new,
         K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
-        V: Value + crate::memory::storage::Writeable + ArrowWriteableValue + 'new,
+        V: Value + ArrowWriteableValue + 'new,
     >(
         &self,
+        options: BlockfileWriterOptions,
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
-        // Create a new blockfile and return a writer
-        let new_id = Uuid::new_v4();
-        let file = ArrowBlockfileWriter::new::<K, V>(
-            new_id,
-            self.block_manager.clone(),
-            self.root_manager.clone(),
-        );
-        Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unordered {
+            unimplemented!();
+        }
+
+        if let Some(fork_from) = options.fork_from {
+            tracing::info!("Forking blockfile from {:?}", fork_from);
+            let new_id = Uuid::new_v4();
+            let new_root = self
+                .root_manager
+                .fork::<K>(&fork_from, new_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error forking root: {:?}", e);
+                    Box::new(CreateError::Other(Box::new(e)))
+                })?;
+            let file = ArrowBlockfileWriter::from_root(
+                new_id,
+                self.block_manager.clone(),
+                self.root_manager.clone(),
+                new_root,
+            );
+            Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+        } else {
+            // Create a new blockfile and return a writer
+            let new_id = Uuid::new_v4();
+            let file = ArrowBlockfileWriter::new::<K, V>(
+                new_id,
+                self.block_manager.clone(),
+                self.root_manager.clone(),
+            );
+            Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+        }
     }
 
     pub async fn clear(&self) -> Result<(), CacheError> {
         self.block_manager.block_cache.clear().await?;
         self.root_manager.cache.clear().await?;
         Ok(())
-    }
-
-    pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
-        &self,
-        id: &uuid::Uuid,
-    ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
-        tracing::info!("Forking blockfile from {:?}", id);
-        let new_id = Uuid::new_v4();
-        let new_root = self.root_manager.fork::<K>(id, new_id).await.map_err(|e| {
-            tracing::error!("Error forking root: {:?}", e);
-            Box::new(CreateError::Other(Box::new(e)))
-        })?;
-        let file = ArrowBlockfileWriter::from_root(
-            new_id,
-            self.block_manager.clone(),
-            self.root_manager.clone(),
-            new_root,
-        );
-        Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 }
 
