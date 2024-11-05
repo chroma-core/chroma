@@ -15,5 +15,8 @@ pub(super) mod write_segments;
 pub mod fetch_log;
 pub mod fetch_segment;
 pub mod filter;
+pub mod knn;
+pub mod knn_hnsw;
+pub mod knn_log;
 pub mod limit;
 pub mod projection;
