@@ -212,6 +212,7 @@ class LocalHnswSegment(VectorReader):
             max_elements=DEFAULT_CAPACITY,
             ef_construction=self._params.construction_ef,
             M=self._params.M,
+            random_seed=self._params.random_seed,
         )
         index.set_ef(self._params.search_ef)
         index.set_num_threads(self._params.num_threads)

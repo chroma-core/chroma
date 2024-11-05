@@ -225,6 +225,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 max_elements=DEFAULT_CAPACITY,
                 ef_construction=self._params.construction_ef,
                 M=self._params.M,
+                random_seed=self._params.random_seed,
                 is_persistent_index=True,
                 persistence_location=self._get_storage_folder(),
             )
