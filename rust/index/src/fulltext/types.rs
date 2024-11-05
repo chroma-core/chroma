@@ -2,6 +2,7 @@ use super::util::TokenInstance;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashSet;
@@ -48,7 +49,7 @@ pub enum DocumentMutation<'a> {
 #[derive(Clone)]
 pub struct FullTextIndexWriter {
     tokenizer: NgramTokenizer,
-    token_instances: Arc<Mutex<Vec<TokenInstance>>>,
+    token_instances: Arc<Mutex<Vec<Vec<TokenInstance>>>>,
     posting_lists_blockfile_writer: BlockfileWriter,
 }
 
@@ -149,7 +150,8 @@ impl FullTextIndexWriter {
             }
         }
 
-        self.token_instances.lock().append(&mut token_instances);
+        token_instances.sort_unstable();
+        self.token_instances.lock().push(token_instances);
 
         Ok(())
     }
@@ -158,10 +160,9 @@ impl FullTextIndexWriter {
         let mut last_key = TokenInstance::MAX;
         let mut posting_list: Vec<u32> = vec![];
 
-        let mut token_instances = std::mem::take(&mut *self.token_instances.lock());
-        token_instances.sort_unstable(); // todo: should this happen in separate thread?
+        let token_instances = std::mem::take(&mut *self.token_instances.lock());
 
-        for encoded_instance in token_instances {
+        for encoded_instance in token_instances.into_iter().kmerge() {
             match encoded_instance.get_position() {
                 Some(offset) => {
                     let this_key = encoded_instance.omit_position();
@@ -185,7 +186,7 @@ impl FullTextIndexWriter {
                     self.posting_lists_blockfile_writer
                         .delete::<u32, Vec<u32>>(
                             &encoded_instance.get_token(),
-                            encoded_instance.get_offset_id(), // todo: rename
+                            encoded_instance.get_offset_id(),
                         )
                         .await
                         .unwrap();
