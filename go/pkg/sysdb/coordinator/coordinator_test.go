@@ -19,18 +19,6 @@ import (
 	"pgregory.net/rapid"
 )
 
-// Global list of tests to run
-var runTheseTests = map[string]bool{
-	"TestCreateGetDeleteCollections":  true,
-	"TestUpdateCollections":           true,
-	"TestGetOrCreateCollectionsTwice": true,
-	"TestCreateUpdateWithDatabase":    true,
-	"TestGetMultipleWithDatabase":     true,
-	"TestCreateGetDeleteTenants":      true,
-	"TestCreateGetDeleteSegments":     true,
-	"TestUpdateSegment":               true,
-}
-
 type APIsTestSuite struct {
 	suite.Suite
 	db                *gorm.DB
@@ -62,7 +50,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.db)
+	c, err := NewCoordinator(ctx, suite.db, SoftDelete)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -88,20 +76,12 @@ func (suite *APIsTestSuite) TearDownTest() {
 	suite.NoError(err)
 }
 
-// Add this helper method to APIsTestSuite
-func (suite *APIsTestSuite) shouldRunTest(testName string) bool {
-	if len(runTheseTests) == 0 {
-		return true // Run all tests if list is empty
-	}
-	return runTheseTests[testName]
-}
-
 // TODO: This is not complete yet. We need to add more tests for the other APIs.
 // We will deprecate the example based tests once we have enough tests here.
 func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db)
+	c, err := NewCoordinator(ctx, db, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -154,7 +134,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db)
+	c, err := NewCoordinator(ctx, db, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -278,10 +258,6 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 // Test does not check for soft delete and hard delete scenarios, but checks that
 // the APIs are working as expected. i.e. Get does not return deleted collections.
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
-	if !suite.shouldRunTest("TestCreateGetDeleteCollections") {
-		suite.T().Skip("Skipping test as it's not in the runTheseTests list")
-		return
-	}
 	ctx := context.Background()
 	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
@@ -366,10 +342,6 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 }
 
 func (suite *APIsTestSuite) TestUpdateCollections() {
-	if !suite.shouldRunTest("TestUpdateCollections") {
-		suite.T().Skip("Skipping test as it's not in the runTheseTests list")
-		return
-	}
 	ctx := context.Background()
 	coll := &model.Collection{
 		Name:         suite.sampleCollections[0].Name,
@@ -421,10 +393,6 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 }
 
 func (suite *APIsTestSuite) TestGetOrCreateCollectionsTwice() {
-	if !suite.shouldRunTest("TestGetOrCreateCollectionsTwice") {
-		suite.T().Skip("Skipping test as it's not in the runTheseTests list")
-		return
-	}
 	// GetOrCreateCollection already existing collection returns false for created
 	ctx := context.Background()
 	coll := suite.sampleCollections[0]
@@ -764,10 +732,6 @@ func SampleSegments(sampleCollections []*model.Collection) []*model.Segment {
 }
 
 func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
-	if !suite.shouldRunTest("TestCreateGetDeleteSegments") {
-		suite.T().Skip("Skipping test as it's not in the runTheseTests list")
-		return
-	}
 	ctx := context.Background()
 	c := suite.coordinator
 
@@ -880,10 +844,6 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 }
 
 func (suite *APIsTestSuite) TestUpdateSegment() {
-	if !suite.shouldRunTest("TestUpdateSegment") {
-		suite.T().Skip("Skipping test as it's not in the runTheseTests list")
-		return
-	}
 	metadata := model.NewSegmentMetadata[model.SegmentMetadataValueType]()
 	metadata.Set("test_str", &model.SegmentMetadataValueStringType{Value: "str1"})
 	metadata.Set("test_int", &model.SegmentMetadataValueInt64Type{Value: 1})
@@ -987,7 +947,7 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	ctx := context.Background()
 
 	// Test Hard Delete scenario
-	DefaultDeleteMode = HardDelete
+	suite.coordinator.deleteMode = HardDelete
 	// Create test collection
 	testCollection2 := &model.CreateCollection{
 		ID:           types.NewUniqueID(),
@@ -1020,7 +980,7 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.Empty(softDeletedResults)
 
 	// Test Soft Delete scenario
-	DefaultDeleteMode = SoftDelete
+	suite.coordinator.deleteMode = SoftDelete
 	// Create a test collection
 	testCollection := &model.CreateCollection{
 		ID:           types.NewUniqueID(),

@@ -18,12 +18,12 @@ type SoftDeleteCleaner struct {
 	limitPerCheck      int
 }
 
-func NewSoftDeleteCleaner(coordinator coordinator.Coordinator, checkFreqSeconds int, gracePeriodSeconds int) *SoftDeleteCleaner {
+func NewSoftDeleteCleaner(coordinator coordinator.Coordinator, checkFreqSeconds int, gracePeriodSeconds int, limitPerCheck int) *SoftDeleteCleaner {
 	return &SoftDeleteCleaner{
 		coordinator:        coordinator,
 		checkFreqSeconds:   checkFreqSeconds,
 		gracePeriodSeconds: gracePeriodSeconds,
-		limitPerCheck:      10,
+		limitPerCheck:      limitPerCheck,
 	}
 }
 

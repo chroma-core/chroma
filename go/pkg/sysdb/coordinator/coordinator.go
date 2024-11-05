@@ -24,22 +24,19 @@ const (
 	HardDelete
 )
 
-var (
-	// DefaultDeleteMode is the default mode for collection deletion operations
-	DefaultDeleteMode = SoftDelete
-)
-
 // Coordinator is the top level component.
 // Currently, it only has the system catalog related APIs and will be extended to
 // support other functionalities such as membership managed and propagation.
 type Coordinator struct {
-	ctx     context.Context
-	catalog Catalog
+	ctx        context.Context
+	catalog    Catalog
+	deleteMode DeleteMode
 }
 
-func NewCoordinator(ctx context.Context, db *gorm.DB) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, db *gorm.DB, deleteMode DeleteMode) (*Coordinator, error) {
 	s := &Coordinator{
-		ctx: ctx,
+		ctx:        ctx,
+		deleteMode: deleteMode,
 	}
 
 	// catalog
@@ -103,7 +100,7 @@ func (s *Coordinator) GetSoftDeletedCollections(ctx context.Context, collectionI
 }
 
 func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
-	if DefaultDeleteMode == SoftDelete {
+	if s.deleteMode == SoftDelete {
 		return s.catalog.DeleteCollection(ctx, deleteCollection, true)
 	}
 	return s.catalog.DeleteCollection(ctx, deleteCollection, false)
