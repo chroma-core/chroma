@@ -72,6 +72,65 @@ type GetOutput = ProjectionOutput;
 
 type GetResult = Result<GetOutput, GetError>;
 
+/// The `GetOrchestrator` chains a sequence of operators in sequence to evaluate
+/// a `<collection>.get(...)` query from the user
+///
+/// # Pipeline
+///                       ┌────────────┐
+///                       │            │
+///           ┌───────────┤  on_start  ├────────────────┐
+///           │           │            │                │
+///           │           └────────────┘                │
+///           │                                         │
+///           ▼                                         ▼
+///  ┌────────────────────┐            ┌────────────────────────┐
+///  │                    │            │                        │
+///  │  FetchLogOperator  │            │  FetchSegmentOperator  │
+///  │                    │            │                        │
+///  └────────┬───────────┘            └────────────────┬───────┘
+///           │                                         │
+///           │                                         │
+///           │     ┌─────────────────────────────┐     │
+///           │     │                             │     │
+///           └────►│  try_start_filter_operator  │◄────┘
+///                 │                             │
+///                 └────────────┬────────────────┘
+///                              │
+///                              ▼
+///                    ┌───────────────────┐
+///                    │                   │
+///                    │   FilterOperator  │
+///                    │                   │
+///                    └─────────┬─────────┘
+///                              │
+///                              ▼
+///                     ┌─────────────────┐
+///                     │                 │
+///                     │  LimitOperator  │
+///                     │                 │
+///                     └────────┬────────┘
+///                              │
+///                              ▼
+///                   ┌──────────────────────┐
+///                   │                      │
+///                   │  ProjectionOperator  │
+///                   │                      │
+///                   └──────────┬───────────┘
+///                              │
+///                              ▼
+///                     ┌──────────────────┐
+///                     │                  │
+///                     │  result_channel  │
+///                     │                  │
+///                     └──────────────────┘
+///
+/// # State tracking
+/// As suggested by the pipeline diagram above, the orchestrator only need to
+/// keep track of the outputs from `FetchLogOperator` and `FetchSegmentOperator`.
+/// The orchestrator invokes `try_start_filter_operator` when it receives output
+/// from either operators, and if both outputs are present it composes the input
+/// for `FilterOperator` and proceeds with execution. The outputs of other
+/// operators are directly forwarded without being tracked by the orchestrator.
 #[derive(Debug)]
 pub struct GetOrchestrator {
     // Orchestrator parameters
@@ -97,6 +156,7 @@ pub struct GetOrchestrator {
 }
 
 impl GetOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -140,6 +200,7 @@ impl GetOrchestrator {
         terminate_with_error(self.result_channel.take(), get_err, ctx);
     }
 
+    /// Try to start the filter operator once both `FetchLogOperator` and `FetchSegmentOperator` completes
     async fn try_start_filter_operator(&mut self, ctx: &ComponentContext<Self>) {
         if let (Some(logs), Some(segments)) = (
             self.fetch_log_output.as_ref(),
@@ -177,12 +238,14 @@ impl Component for GetOrchestrator {
         let segment_task = wrap(Box::new(self.fetch_segment.clone()), (), ctx.receiver());
         if let Err(err) = self.dispatcher.send(log_task, Some(Span::current())).await {
             self.terminate_with_error(ctx, err);
+            return;
         } else if let Err(err) = self
             .dispatcher
             .send(segment_task, Some(Span::current()))
             .await
         {
             self.terminate_with_error(ctx, err);
+            return;
         }
     }
 }
