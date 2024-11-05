@@ -37,6 +37,7 @@ tempfile = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
 chroma-benchmark = { workspace = true }
+proptest = { workspace = true }
 indicatif = "0.17.8"
 anyhow = "1.0.89"
 

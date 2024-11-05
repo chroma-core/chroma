@@ -1314,6 +1314,7 @@ dependencies = [
  "indicatif",
  "itertools 0.13.0",
  "parking_lot",
+ "proptest",
  "rand",
  "rayon",
  "roaring",
