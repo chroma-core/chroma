@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -292,12 +293,8 @@ pub enum ApplyMaterializedLogError {
     BlockfileUpdate,
     #[error("Allocation error")]
     Allocation,
-    #[error("FTS Document add error")]
-    FTSDocumentAdd,
-    #[error("FTS Document delete error")]
-    FTSDocumentDelete,
-    #[error("FTS Document update error")]
-    FTSDocumentUpdate,
+    #[error("Error writing to the full text index: {0}")]
+    FullTextIndex(#[from] FullTextIndexError),
     #[error("Error writing to hnsw index")]
     HnswIndex(#[from] Box<dyn ChromaError>),
 }
@@ -309,9 +306,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::BlockfileDelete => ErrorCodes::Internal,
             ApplyMaterializedLogError::BlockfileUpdate => ErrorCodes::Internal,
             ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
-            ApplyMaterializedLogError::FTSDocumentAdd => ErrorCodes::Internal,
-            ApplyMaterializedLogError::FTSDocumentDelete => ErrorCodes::Internal,
-            ApplyMaterializedLogError::FTSDocumentUpdate => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
         }
     }

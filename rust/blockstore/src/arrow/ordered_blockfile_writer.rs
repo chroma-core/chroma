@@ -129,10 +129,6 @@ impl ArrowOrderedBlockfileWriter {
     pub(crate) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
-        // let mut inner = Arc::into_inner(self.inner)
-        //     .expect("There should be no other strong references to the completed block deltas")
-        //     .into_inner();
-
         let mut inner = std::mem::take(&mut *self.inner.lock().await);
 
         Self::complete_current_delta::<K, V>(&mut inner);
