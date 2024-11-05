@@ -47,6 +47,12 @@ type Config struct {
 	CompactionServiceMemberlistName string
 	CompactionServicePodLabel       string
 
+	// Config for soft deletes.
+	SoftDeleteEnabled          bool
+	SoftDeleteCleanupInterval  time.Duration
+	SoftDeleteMaxAge           time.Duration
+	SoftDeleteCleanupBatchSize uint
+
 	// Config for testing
 	Testing bool
 }
@@ -84,12 +90,19 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		healthServer: health.NewServer(),
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, db)
+	var deleteMode coordinator.DeleteMode
+	if config.SoftDeleteEnabled {
+		deleteMode = coordinator.SoftDelete
+	} else {
+		deleteMode = coordinator.HardDelete
+	}
+
+	coordinator, err := coordinator.NewCoordinator(ctx, db, deleteMode)
 	if err != nil {
 		return nil, err
 	}
 	s.coordinator = *coordinator
-	s.softDeleteCleaner = NewSoftDeleteCleaner(*coordinator, 60, 3600)
+	s.softDeleteCleaner = NewSoftDeleteCleaner(*coordinator, int(config.SoftDeleteCleanupInterval.Seconds()), int(config.SoftDeleteMaxAge.Seconds()), int(config.SoftDeleteCleanupBatchSize))
 	if !config.Testing {
 		namespace := config.KubernetesNamespace
 		// Create memberlist manager for query service
