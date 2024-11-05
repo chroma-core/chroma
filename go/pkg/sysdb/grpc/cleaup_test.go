@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	// Create 2 test collections
 	collections := make([]string, 2)
 	for i := 0; i < 2; i++ {
-		collectionName := "cleanup_test_collection_" + string(i)
+		collectionName := "cleanup_test_collection_" + strconv.Itoa(i)
 		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 		suite.NoError(err)
 		collections[i] = collectionID
@@ -61,17 +62,16 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 
 	// Soft delete both collections
 	for _, collectionID := range collections {
-		err := suite.s.coordinator.SoftDeleteCollection(context.Background(), &model.DeleteCollection{
-			ID: types.UniqueID(collectionID),
+		err := suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+			ID: types.MustParse(collectionID),
 		})
 		suite.NoError(err)
 	}
 
 	// Verify collections are soft deleted
-	softDeletedCollections, timestamps, err := suite.s.coordinator.GetSoftDeletedCollections(context.Background(), "", "", 10)
+	softDeletedCollections, err := suite.s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", 10)
 	suite.NoError(err)
 	suite.Equal(2, len(softDeletedCollections))
-	suite.Equal(2, len(timestamps))
 
 	// Create cleaner with short grace period for testing
 	cleaner := NewSoftDeleteCleaner(suite.s.coordinator, 1, 0)
@@ -81,10 +81,9 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	time.Sleep(2 * time.Second)
 
 	// Verify collections are permanently deleted
-	softDeletedCollections, timestamps, err = suite.s.coordinator.GetSoftDeletedCollections(context.Background(), "", "", 10)
+	softDeletedCollections, err = suite.s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", 10)
 	suite.NoError(err)
 	suite.Equal(0, len(softDeletedCollections))
-	suite.Equal(0, len(timestamps))
 
 	cleaner.Stop()
 }

@@ -37,14 +37,17 @@ func (s *SoftDeleteCleaner) run() {
 	s.ticker = time.NewTicker(time.Duration(s.checkFreqSeconds) * time.Second)
 	// Delete only the collections that are older than 1 hour.
 	for range s.ticker.C {
-		collections, err := s.coordinator.GetSoftDeletedCollections(context.Background(), "", "", int32(s.limitPerCheck))
+		collections, err := s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", int32(s.limitPerCheck))
 		if err != nil {
 			log.Error("Error while getting soft deleted collections", zap.Error(err))
 			continue
 		}
 		numDeleted := 0
 		for _, collection := range collections {
-			if time.Since(time.Unix(collection.UpdatedAt, 0)) > time.Duration(s.gracePeriodSeconds)*time.Second {
+			timeSinceDelete := time.Since(time.Unix(collection.UpdatedAt, 0))
+			log.Info("Found soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete))
+			if timeSinceDelete > time.Duration(s.gracePeriodSeconds) {
+				log.Info("Deleting soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete))
 				err := s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
 					ID: collection.ID,
 				})

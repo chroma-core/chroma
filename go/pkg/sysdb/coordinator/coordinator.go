@@ -24,7 +24,7 @@ const (
 	HardDelete
 )
 
-const (
+var (
 	// DefaultDeleteMode is the default mode for collection deletion operations
 	DefaultDeleteMode = SoftDelete
 )
@@ -106,8 +106,8 @@ func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.Uni
 	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
 }
 
-func (s *Coordinator) GetSoftDeletedCollections(ctx context.Context, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
-	return s.catalog.GetSoftDeletedCollections(ctx, tenantID, databaseName, limit)
+func (s *Coordinator) GetSoftDeletedCollections(ctx context.Context, collectionID *string, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
+	return s.catalog.GetSoftDeletedCollections(ctx, collectionID, tenantID, databaseName, limit)
 }
 
 func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
