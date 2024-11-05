@@ -11,19 +11,19 @@ import (
 )
 
 type SoftDeleteCleaner struct {
-	coordinator        coordinator.Coordinator
-	ticker             *time.Ticker
-	checkFreqSeconds   int
-	gracePeriodSeconds int
-	limitPerCheck      int
+	coordinator     coordinator.Coordinator
+	ticker          *time.Ticker
+	cleanupInterval time.Duration
+	maxAge          time.Duration
+	limitPerCheck   uint
 }
 
-func NewSoftDeleteCleaner(coordinator coordinator.Coordinator, checkFreqSeconds int, gracePeriodSeconds int, limitPerCheck int) *SoftDeleteCleaner {
+func NewSoftDeleteCleaner(coordinator coordinator.Coordinator, cleanupInterval time.Duration, maxAge time.Duration, limitPerCheck uint) *SoftDeleteCleaner {
 	return &SoftDeleteCleaner{
-		coordinator:        coordinator,
-		checkFreqSeconds:   checkFreqSeconds,
-		gracePeriodSeconds: gracePeriodSeconds,
-		limitPerCheck:      limitPerCheck,
+		coordinator:     coordinator,
+		cleanupInterval: cleanupInterval,
+		maxAge:          maxAge,
+		limitPerCheck:   limitPerCheck,
 	}
 }
 
@@ -33,11 +33,12 @@ func (s *SoftDeleteCleaner) Start() error {
 }
 
 func (s *SoftDeleteCleaner) run() {
-	// Periodically check every 10 seconds for soft deleted collections and delete them.
-	s.ticker = time.NewTicker(time.Duration(s.checkFreqSeconds) * time.Second)
-	// Delete only the collections that are older than 1 hour.
+	// Periodically check for soft deleted collections and delete them.
+	s.ticker = time.NewTicker(s.cleanupInterval)
+	// Delete only the collections that are older than the max age.
 	for range s.ticker.C {
 		collections, err := s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", int32(s.limitPerCheck))
+		log.Info("Fetched soft deleted collections", zap.Int("num_collections", len(collections)))
 		if err != nil {
 			log.Error("Error while getting soft deleted collections", zap.Error(err))
 			continue
@@ -46,7 +47,7 @@ func (s *SoftDeleteCleaner) run() {
 		for _, collection := range collections {
 			timeSinceDelete := time.Since(time.Unix(collection.UpdatedAt, 0))
 			log.Info("Found soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete))
-			if timeSinceDelete > time.Duration(s.gracePeriodSeconds) {
+			if timeSinceDelete > s.maxAge {
 				log.Info("Deleting soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete))
 				err := s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
 					ID: collection.ID,
@@ -58,7 +59,7 @@ func (s *SoftDeleteCleaner) run() {
 				}
 			}
 		}
-		log.Info("Deleted soft deleted collections", zap.Int("numDeleted", numDeleted), zap.Duration("duration", time.Since(time.Now())))
+		log.Info("Deleted soft deleted collections", zap.Int("numDeleted", numDeleted))
 	}
 }
 

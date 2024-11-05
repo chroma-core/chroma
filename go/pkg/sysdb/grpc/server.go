@@ -102,7 +102,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		return nil, err
 	}
 	s.coordinator = *coordinator
-	s.softDeleteCleaner = NewSoftDeleteCleaner(*coordinator, int(config.SoftDeleteCleanupInterval.Seconds()), int(config.SoftDeleteMaxAge.Seconds()), int(config.SoftDeleteCleanupBatchSize))
+	s.softDeleteCleaner = NewSoftDeleteCleaner(*coordinator, config.SoftDeleteCleanupInterval, config.SoftDeleteMaxAge, config.SoftDeleteCleanupBatchSize)
 	if !config.Testing {
 		namespace := config.KubernetesNamespace
 		// Create memberlist manager for query service
