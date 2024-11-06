@@ -342,7 +342,6 @@ mod tests {
     use crate::sysdb::test_sysdb::TestSysDb;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
-    use chroma_storage::local::LocalStorage;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -357,7 +356,7 @@ mod tests {
             _ => panic!("Expected InMemoryLog"),
         };
         let tmpdir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
 
         let collection_uuid_1 =
             CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();

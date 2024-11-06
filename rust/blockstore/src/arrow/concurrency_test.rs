@@ -5,7 +5,7 @@ mod tests {
         BlockfileWriterOptions,
     };
     use chroma_cache::new_cache_for_test;
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::Storage;
     use rand::Rng;
     use shuttle::{future, thread};
 
@@ -13,8 +13,7 @@ mod tests {
     fn test_blockfile_shuttle() {
         shuttle::check_random(
             || {
-                let tmp_dir = tempfile::tempdir().unwrap();
-                let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+                let storage = Storage::new_test_storage();
                 // NOTE(rescrv):  I chose to use non-persistent caches here to maximize chance of a
                 // race condition outside the cache.
                 let block_cache = new_cache_for_test();

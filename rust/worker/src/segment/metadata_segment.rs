@@ -1242,7 +1242,7 @@ mod test {
         provider::BlockfileProvider,
     };
     use chroma_cache::new_cache_for_test;
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::Storage;
     use chroma_types::{
         Chunk, CollectionUuid, DirectDocumentComparison, DirectWhereComparison, LogRecord,
         MetadataValue, Operation, OperationRecord, PrimitiveOperator, UpdateMetadataValue, Where,
@@ -1253,8 +1253,7 @@ mod test {
 
     #[tokio::test]
     async fn empty_blocks() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(
@@ -1545,8 +1544,7 @@ mod test {
 
     #[tokio::test]
     async fn metadata_update_same_key_different_type() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(
@@ -1801,8 +1799,7 @@ mod test {
 
     #[tokio::test]
     async fn metadata_deletes() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(
@@ -2026,8 +2023,7 @@ mod test {
 
     #[tokio::test]
     async fn document_updates() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let arrow_blockfile_provider = ArrowBlockfileProvider::new(

@@ -4,7 +4,6 @@
 mod tests {
     use std::collections::BTreeMap;
 
-    use chroma_storage::local::LocalStorage;
     use chroma_storage::Storage;
     use futures::executor::block_on;
     use futures::TryStreamExt;
@@ -112,8 +111,7 @@ mod tests {
         fn init_test(
             ref_state: &<Self::Reference as proptest_state_machine::ReferenceStateMachine>::State,
         ) -> Self::SystemUnderTest {
-            let tmp_dir = tempfile::tempdir().unwrap();
-            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            let storage = Storage::new_test_storage();
             let block_cache = new_cache_for_test();
             let sparse_index_cache = new_cache_for_test();
             let provider = ArrowBlockfileProvider::new(

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use self::config::StorageConfig;
 use self::s3::S3GetError;
 use self::stream::ByteStreamItem;
@@ -14,6 +12,7 @@ pub mod s3;
 pub mod stream;
 use futures::Stream;
 use local::LocalStorage;
+use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
 use thiserror::Error;
 
@@ -62,6 +61,24 @@ impl ChromaError for PutError {
 }
 
 impl Storage {
+    pub fn new_test_storage() -> Self {
+        Storage::Local(LocalStorage::new(
+            TempDir::new()
+                .expect("Should be able to create a temporary directory.")
+                .into_path()
+                .to_str()
+                .expect("Should be able to convert temporary directory path to string"),
+        ))
+    }
+
+    pub fn new_test_storage_at<P: AsRef<Path>>(path: P) -> Self {
+        Storage::Local(LocalStorage::new(
+            path.as_ref()
+                .to_str()
+                .expect("Should be able to convert path to string"),
+        ))
+    }
+
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
         match self {
             Storage::S3(s3) => {

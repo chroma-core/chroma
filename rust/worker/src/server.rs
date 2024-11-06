@@ -680,7 +680,7 @@ mod tests {
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     #[cfg(debug_assertions)]
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::Storage;
     #[cfg(debug_assertions)]
     use tempfile::tempdir;
 
@@ -690,7 +690,7 @@ mod tests {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let hnsw_index_cache = new_non_persistent_cache_for_test();
