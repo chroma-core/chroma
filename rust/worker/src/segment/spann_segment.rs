@@ -61,7 +61,6 @@ impl SpannSegmentWriter {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
-        // Load HNSW index.
         let distance_function = match distance_function_from_segment(segment) {
             Ok(distance_function) => distance_function,
             Err(e) => {
@@ -102,7 +101,6 @@ impl SpannSegmentWriter {
             },
             None => None,
         };
-        // Fork the posting list map.
         let posting_list_id = match segment.file_path.get(POSTING_LIST_PATH) {
             Some(posting_list_path) => match posting_list_path.first() {
                 Some(posting_list_id) => {
@@ -118,7 +116,6 @@ impl SpannSegmentWriter {
                     return Err(SpannSegmentWriterError::PostingListInvalidFilePath);
                 }
             },
-            // Create a new index.
             None => None,
         };
 
