@@ -8,7 +8,7 @@ use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
 use crate::{
-    execution::operator::{Operator, OperatorType},
+    execution::operator::Operator,
     segment::{
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
         LogMaterializer, LogMaterializerError,
@@ -88,10 +88,6 @@ impl ChromaError for ProjectionError {
 #[async_trait]
 impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
     type Error = ProjectionError;
-
-    fn get_type(&self) -> OperatorType {
-        OperatorType::IO
-    }
 
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
         trace!("[{}]: {:?}", self.get_name(), input);
