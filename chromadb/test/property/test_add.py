@@ -305,11 +305,29 @@ from uuid import UUID
 
 def test_repro(client: ClientAPI) -> None:
     test_add_small(
-           client=client,
-           collection=strategies.Collection(name='A00', metadata={'hnsw:construction_ef': 128, 'hnsw:search_ef': 128, 'hnsw:M': 128, 'hnsw:space': 'cosine'}, embedding_function=hashing_embedding_function(dim=2, dtype=np.float16), id=UUID('6f46a425-2d28-4ecb-870e-a4344559a037'), dimension=2, dtype=np.float16, known_metadata_keys={}, known_document_keywords=[], has_documents=True, has_embeddings=False),
-           record_set={'ids': ['0', '00'],
-            'embeddings': None,
-            'metadatas': [None, None],
-            'documents': ['0', '. Zę4\U00098d7c O']},
-           should_compact=False,  # or any other generated value
-       )
+        client=client,
+        collection=strategies.Collection(
+            name="A00",
+            metadata={
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+                "hnsw:space": "cosine",
+            },
+            embedding_function=hashing_embedding_function(dim=2, dtype=np.float16),
+            id=UUID("6f46a425-2d28-4ecb-870e-a4344559a037"),
+            dimension=2,
+            dtype=np.float16,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=True,
+            has_embeddings=False,
+        ),
+        record_set={
+            "ids": ["0", "00"],
+            "embeddings": None,
+            "metadatas": [None, None],
+            "documents": ["0", ". Zę4\U00098d7c O"],
+        },
+        should_compact=False,  # or any other generated value
+    )
