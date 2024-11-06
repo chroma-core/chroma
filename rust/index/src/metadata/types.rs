@@ -687,40 +687,55 @@ impl<'me> MetadataIndexReader<'me> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use chroma_blockstore::provider::BlockfileProvider;
+    use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 
     #[tokio::test]
     async fn test_new_string_writer() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<&str, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let _writer = MetadataIndexWriter::new_string(blockfile_writer, None);
     }
 
     #[tokio::test]
     async fn test_new_u32_writer() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let _writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
     }
 
     #[tokio::test]
     async fn test_new_f32_writer() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let _writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
     }
 
     #[tokio::test]
     async fn test_new_bool_writer() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<bool, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let _writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
     }
 
     #[tokio::test]
     async fn test_new_string_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<&str, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_string(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
@@ -737,7 +752,10 @@ mod test {
     #[tokio::test]
     async fn test_new_u32_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
@@ -754,7 +772,10 @@ mod test {
     #[tokio::test]
     async fn test_new_f32_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
@@ -771,7 +792,10 @@ mod test {
     #[tokio::test]
     async fn test_new_bool_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<bool, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut md_writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
         md_writer.write_to_blockfile().await.unwrap();
@@ -788,7 +812,10 @@ mod test {
     #[tokio::test]
     async fn test_string_metadata_index_set_get() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<&str, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_string(blockfile_writer, None);
         writer.set("key", "value", 1).await.unwrap();
@@ -809,7 +836,10 @@ mod test {
     #[tokio::test]
     async fn test_u32_metadata_index_set_get() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         writer.set("key", 1, 1).await.unwrap();
@@ -830,7 +860,10 @@ mod test {
     #[tokio::test]
     async fn test_f32_metadata_index_set_get() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         writer.set("key", 1.0, 1).await.unwrap();
@@ -851,7 +884,10 @@ mod test {
     #[tokio::test]
     async fn test_bool_value_metadata_index_set_get() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<bool, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
         writer.set("key", true, 1).await.unwrap();
@@ -872,7 +908,10 @@ mod test {
     #[tokio::test]
     async fn test_string_metadata_multiple_keys() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<&str, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_string(blockfile_writer, None);
         writer.set("key1", "value", 1).await.unwrap();
@@ -901,7 +940,10 @@ mod test {
     #[tokio::test]
     async fn test_u32_metadata_multiple_keys() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         writer.set("key1", 1, 1).await.unwrap();
@@ -930,7 +972,10 @@ mod test {
     #[tokio::test]
     async fn test_f32_metadata_multiple_keys() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         writer.set("key1", 1.0, 1).await.unwrap();
@@ -959,7 +1004,10 @@ mod test {
     #[tokio::test]
     async fn test_bool_metadata_multiple_keys() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<bool, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_bool(blockfile_writer, None);
         writer.set("key1", true, 1).await.unwrap();
@@ -988,7 +1036,10 @@ mod test {
     #[tokio::test]
     async fn test_u32_metadata_lt_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         writer.set("key1", 1, 1).await.unwrap();
@@ -1021,7 +1072,10 @@ mod test {
     #[tokio::test]
     async fn test_u32_value_metadata_lte_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         writer.set("key1", 1, 1).await.unwrap();
@@ -1055,7 +1109,10 @@ mod test {
     #[tokio::test]
     async fn test_u32_value_metadata_gt_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         writer.set("key1", 1, 1).await.unwrap();
@@ -1088,7 +1145,10 @@ mod test {
     #[tokio::test]
     async fn test_u32_value_metadata_gte_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<u32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_u32(blockfile_writer, None);
         writer.set("key1", 1, 1).await.unwrap();
@@ -1122,7 +1182,10 @@ mod test {
     #[tokio::test]
     async fn test_f32_metadata_lt_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         writer.set("key1", 1.0, 1).await.unwrap();
@@ -1156,7 +1219,10 @@ mod test {
     #[tokio::test]
     async fn test_f32_metadata_lte_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         writer.set("key1", 1.0, 1).await.unwrap();
@@ -1191,7 +1257,10 @@ mod test {
     #[tokio::test]
     async fn test_f32_metadata_gt_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         writer.set("key1", 1.0, 1).await.unwrap();
@@ -1224,7 +1293,10 @@ mod test {
     #[tokio::test]
     async fn test_f32_metadata_gte_operator() {
         let provider = BlockfileProvider::new_memory();
-        let blockfile_writer = provider.create::<f32, RoaringBitmap>().await.unwrap();
+        let blockfile_writer = provider
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let writer_id = blockfile_writer.id();
         let mut writer = MetadataIndexWriter::new_f32(blockfile_writer, None);
         writer.set("key1", 1.0, 1).await.unwrap();

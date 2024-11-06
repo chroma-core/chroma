@@ -100,45 +100,6 @@ impl BlockfileProvider {
         };
         Ok(())
     }
-
-    // todo: deprecate
-    pub async fn create<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
-        &self,
-    ) -> Result<BlockfileWriter, Box<CreateError>> {
-        match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => {
-                provider.write(BlockfileWriterOptions::default())
-            }
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider
-                    .write::<K, V>(BlockfileWriterOptions::default())
-                    .await
-            }
-        }
-    }
-
-    // todo: deprecate
-    pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
-        &self,
-        id: &uuid::Uuid,
-    ) -> Result<BlockfileWriter, Box<CreateError>> {
-        match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => {
-                provider.write(BlockfileWriterOptions {
-                    fork_from: Some(*id),
-                    ..Default::default()
-                })
-            }
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider
-                    .write::<K, V>(BlockfileWriterOptions {
-                        fork_from: Some(*id),
-                        ..Default::default()
-                    })
-                    .await
-            }
-        }
-    }
 }
 
 // =================== Configurable ===================
