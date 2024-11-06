@@ -1,6 +1,6 @@
 use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
-use chroma_types::DataRecord;
+use chroma_types::{DataRecord, SpannPostingList};
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
 use std::{
@@ -582,6 +582,16 @@ impl Writeable for &DataRecord<'_> {
                 prefix: prefix.to_string(),
                 key,
             });
+    }
+}
+
+impl Writeable for &SpannPostingList<'_> {
+    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
+        todo!()
+    }
+
+    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+        todo!()
     }
 }
 

@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
+use arrow::error;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriter};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::SpannPostingList;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -26,6 +28,8 @@ pub enum SpannIndexWriterConstructionError {
     HnswIndexConstructionError,
     #[error("Blockfile reader construction error")]
     BlockfileReaderConstructionError,
+    #[error("Blockfile writer construction error")]
+    BlockfileWriterConstructionError,
 }
 
 impl ChromaError for SpannIndexWriterConstructionError {
@@ -33,11 +37,26 @@ impl ChromaError for SpannIndexWriterConstructionError {
         match self {
             Self::HnswIndexConstructionError => ErrorCodes::Internal,
             Self::BlockfileReaderConstructionError => ErrorCodes::Internal,
+            Self::BlockfileWriterConstructionError => ErrorCodes::Internal,
         }
     }
 }
 
 impl SpannIndexWriter {
+    pub fn new(
+        hnsw_index: HnswIndexRef,
+        hnsw_provider: HnswIndexProvider,
+        posting_list_writer: BlockfileWriter,
+        versions_map: HashMap<u32, u32>,
+    ) -> Self {
+        SpannIndexWriter {
+            hnsw_index,
+            hnsw_provider,
+            posting_list_writer,
+            versions_map,
+        }
+    }
+
     pub async fn hnsw_index_from_id(
         hnsw_provider: &HnswIndexProvider,
         id: &Uuid,
@@ -95,5 +114,27 @@ impl SpannIndexWriter {
             versions_map.insert(*key, *value);
         });
         Ok(versions_map)
+    }
+
+    pub async fn fork_postings_list(
+        blockfile_id: &Uuid,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<BlockfileWriter, SpannIndexWriterConstructionError> {
+        match blockfile_provider
+            .fork::<u32, &SpannPostingList<'_>>(blockfile_id)
+            .await
+        {
+            Ok(writer) => Ok(writer),
+            Err(_) => Err(SpannIndexWriterConstructionError::BlockfileWriterConstructionError),
+        }
+    }
+
+    pub async fn create_posting_list(
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<BlockfileWriter, SpannIndexWriterConstructionError> {
+        match blockfile_provider.create::<u32, &SpannPostingList<'_>>() {
+            Ok(writer) => Ok(writer),
+            Err(_) => Err(SpannIndexWriterConstructionError::BlockfileWriterConstructionError),
+        }
     }
 }
