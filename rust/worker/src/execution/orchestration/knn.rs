@@ -33,8 +33,10 @@ use crate::{
 /// When used together, they carry out the evaluation of a `<collection>.query(...)` query
 /// for the user. We breakdown the evaluation into two parts because a `<collection>.query(...)`
 /// is inherently multiple queries sharing the same filter criteria. Thus we first evaluate
-/// the filter criteria with `KnnFilterOrchestrator`, and then duplicate the result for each of
-/// the query embedding provided by the user.
+/// the filter criteria with `KnnFilterOrchestrator`. Then we spawn a `KnnOrchestrator` for each
+/// of the embedding together with a copy of the result from `KnnFilterOrchestrator`, run these
+/// orchestrators in parallel, and join them in the end.
+///
 ///
 /// # Pipeline
 ///                                                           │
