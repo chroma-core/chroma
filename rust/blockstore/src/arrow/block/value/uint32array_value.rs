@@ -65,7 +65,10 @@ impl ArrowWriteableValue for Vec<u32> {
     }
 
     fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
-        builder.append_value(&UInt32Array::new(value.into(), None));
+        for v in value {
+            builder.values().append_value(v);
+        }
+        builder.append(true);
     }
 
     fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
