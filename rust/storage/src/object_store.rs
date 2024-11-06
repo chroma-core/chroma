@@ -98,7 +98,7 @@ impl ObjectStore {
                 ..Default::default()
             };
             let object_store = Arc::clone(&self.object_store);
-            let path = Path::from(key.clone()).to_owned();
+            let path = Path::from(key).to_owned();
             let fut = async move { object_store.get_opts(&path, options).await };
             pieces.push(fut);
         }
