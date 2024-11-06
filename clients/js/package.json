@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chroma-core/chroma.git",
+    "url": "git+https://github.com/chroma-core/chroma.git",
     "directory": "clients/js"
   },
   "devDependencies": {
