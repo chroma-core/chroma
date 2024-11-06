@@ -21,4 +21,5 @@ pub mod knn_log;
 pub mod knn_merge;
 pub mod knn_projection;
 pub mod limit;
+pub mod prefetch_record;
 pub mod projection;

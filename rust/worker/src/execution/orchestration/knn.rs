@@ -23,6 +23,10 @@ use crate::{
             knn_projection::{
                 KnnProjectionError, KnnProjectionInput, KnnProjectionOperator, KnnProjectionOutput,
             },
+            prefetch_record::{
+                PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator,
+                PrefetchRecordOutput,
+            },
         },
         orchestration::common::terminate_with_error,
     },
@@ -39,6 +43,7 @@ use crate::{
 ///
 ///
 /// # Pipeline
+/// ```text
 ///                                                           │
 ///                                                           │
 ///                                                           │
@@ -141,6 +146,7 @@ use crate::{
 ///                                                            │
 ///                                                            │
 ///                                                            ▼
+/// ```
 ///
 /// # State tracking
 /// Similar to the `GetOrchestrator`, the `KnnFilterOrchestrator` need to keep track of the outputs from
@@ -647,7 +653,31 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         let output = message
             .into_inner()
             .expect("KnnMergeOperator should not fail");
-        let task = wrap(
+
+        // Prefetch records before projection
+        let prefetch_task = wrap(
+            Box::new(PrefetchRecordOperator {}),
+            PrefetchRecordInput {
+                logs: self.knn_filter_output.logs.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                record_segment: self.knn_filter_output.segments.record_segment.clone(),
+                offset_ids: output
+                    .record_distances
+                    .iter()
+                    .map(|record| record.offset_id)
+                    .collect(),
+            },
+            ctx.receiver(),
+        );
+        if let Err(err) = self
+            .dispatcher
+            .send(prefetch_task, Some(Span::current()))
+            .await
+        {
+            self.terminate_with_error(ctx, err);
+        }
+
+        let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
             KnnProjectionInput {
                 logs: self.knn_filter_output.logs.clone(),
@@ -657,9 +687,26 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             },
             ctx.receiver(),
         );
-        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+        if let Err(err) = self
+            .dispatcher
+            .send(projection_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_error(ctx, err);
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for KnnOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _message: TaskResult<PrefetchRecordOutput, PrefetchRecordError>,
+        _ctx: &ComponentContext<Self>,
+    ) {
+        // The output and error from `PrefetchRecordOperator` are ignored
     }
 }
 

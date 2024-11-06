@@ -90,12 +90,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
             offset_ids: input
                 .record_distances
                 .iter()
-                .map(
-                    |RecordDistance {
-                         offset_id,
-                         measure: _,
-                     }| *offset_id,
-                )
+                .map(|record| record.offset_id)
                 .collect(),
         };
 
