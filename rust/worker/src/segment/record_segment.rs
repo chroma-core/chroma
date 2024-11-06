@@ -660,7 +660,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let max_offset_id_bf_reader = match max_offset_id_bf_uuid {
-                    Some(bf_uuid) => match blockfile_provider.open::<&str, u32>(&bf_uuid).await {
+                    Some(bf_uuid) => match blockfile_provider.read::<&str, u32>(&bf_uuid).await {
                         Ok(max_offset_id_bf_reader) => Some(max_offset_id_bf_reader),
                         Err(_) => None,
                     },
@@ -675,7 +675,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let user_id_to_id = match blockfile_provider
-                    .open::<&str, u32>(&Uuid::parse_str(user_id_to_id_bf_id).unwrap())
+                    .read::<&str, u32>(&Uuid::parse_str(user_id_to_id_bf_id).unwrap())
                     .await
                 {
                     Ok(user_id_to_id) => user_id_to_id,
@@ -687,7 +687,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let id_to_user_id = match blockfile_provider
-                    .open::<u32, &str>(&Uuid::parse_str(id_to_user_id_bf_id).unwrap())
+                    .read::<u32, &str>(&Uuid::parse_str(id_to_user_id_bf_id).unwrap())
                     .await
                 {
                     Ok(id_to_user_id) => id_to_user_id,
@@ -699,7 +699,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let id_to_data = match blockfile_provider
-                    .open::<u32, DataRecord>(&Uuid::parse_str(id_to_data_bf_id).unwrap())
+                    .read::<u32, DataRecord>(&Uuid::parse_str(id_to_data_bf_id).unwrap())
                     .await
                 {
                     Ok(id_to_data) => id_to_data,

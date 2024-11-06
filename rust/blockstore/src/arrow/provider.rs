@@ -45,7 +45,7 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub async fn open<
+    pub async fn read<
         'new,
         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,

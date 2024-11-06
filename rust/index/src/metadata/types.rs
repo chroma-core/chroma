@@ -728,7 +728,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<&str, RoaringBitmap>(&writer_id)
+            .read::<&str, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_string(blockfile_reader);
@@ -745,7 +745,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -762,7 +762,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -779,7 +779,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<bool, RoaringBitmap>(&writer_id)
+            .read::<bool, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_bool(blockfile_reader);
@@ -797,7 +797,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<&str, RoaringBitmap>(&writer_id)
+            .read::<&str, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_string(blockfile_reader);
@@ -818,7 +818,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -839,7 +839,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -860,7 +860,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<bool, RoaringBitmap>(&writer_id)
+            .read::<bool, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_bool(blockfile_reader);
@@ -884,7 +884,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<&str, RoaringBitmap>(&writer_id)
+            .read::<&str, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_string(blockfile_reader);
@@ -913,7 +913,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -942,7 +942,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -971,7 +971,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<bool, RoaringBitmap>(&writer_id)
+            .read::<bool, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_bool(blockfile_reader);
@@ -1001,7 +1001,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1034,7 +1034,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1068,7 +1068,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1101,7 +1101,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1135,7 +1135,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -1169,7 +1169,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -1204,7 +1204,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -1237,7 +1237,7 @@ mod test {
         flusher.flush().await.unwrap();
 
         let blockfile_reader = provider
-            .open::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(&writer_id)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);

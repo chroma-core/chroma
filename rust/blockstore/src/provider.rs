@@ -60,7 +60,7 @@ impl BlockfileProvider {
         ))
     }
 
-    pub async fn open<
+    pub async fn read<
         'new,
         K: Key
             + Into<KeyWrapper>
@@ -74,8 +74,8 @@ impl BlockfileProvider {
         id: &uuid::Uuid,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.open::<K, V>(id),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.open::<K, V>(id).await,
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.read::<K, V>(id),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.read::<K, V>(id).await,
         }
     }
 

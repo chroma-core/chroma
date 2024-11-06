@@ -59,11 +59,11 @@ where
     flusher.flush().await.unwrap();
 
     let postings_blockfile_reader = blockfile_provider
-        .open::<u32, &[u32]>(&postings_blockfile_id)
+        .read::<u32, &[u32]>(&postings_blockfile_id)
         .await
         .unwrap();
     let frequencies_blockfile_reader = blockfile_provider
-        .open::<u32, u32>(&frequencies_blockfile_id)
+        .read::<u32, u32>(&frequencies_blockfile_id)
         .await
         .unwrap();
 
