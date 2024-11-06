@@ -22,7 +22,7 @@ where
     type Error;
     // It would have been nice to do this with a default trait for result
     // but that's not stable in rust yet.
-    async fn run(&self, input: &I) -> Result<O, Self::Error>;
+    async fn run(&self, input: I) -> Result<O, Self::Error>;
     fn get_name(&self) -> &'static str {
         type_name::<Self>()
     }
@@ -87,7 +87,7 @@ where
     Output: Send + Sync + Debug,
 {
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
-    input: Input,
+    input: Option<Input>,
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
     task_id: Uuid,
 }
@@ -100,7 +100,7 @@ pub(crate) type TaskMessage = Box<dyn TaskWrapper>;
 #[async_trait]
 pub(crate) trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
-    async fn run(&self);
+    async fn run(&mut self);
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
 }
@@ -119,8 +119,9 @@ where
         self.operator.get_name()
     }
 
-    async fn run(&self) {
-        let result = AssertUnwindSafe(self.operator.run(&self.input))
+    async fn run(&mut self) {
+        let input = self.input.take().expect("Task input was taken");
+        let result = AssertUnwindSafe(self.operator.run(input))
             .catch_unwind()
             .await;
 
@@ -211,7 +212,7 @@ where
     let id = Uuid::new_v4();
     Box::new(Task {
         operator,
-        input,
+        input: Some(input),
         reply_channel,
         task_id: id,
     })

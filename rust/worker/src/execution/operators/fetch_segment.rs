@@ -127,7 +127,7 @@ impl Operator<FetchSegmentInput, FetchSegmentOutput> for FetchSegmentOperator {
         OperatorType::IO
     }
 
-    async fn run(&self, _: &FetchSegmentInput) -> Result<FetchSegmentOutput, FetchSegmentError> {
+    async fn run(&self, _: FetchSegmentInput) -> Result<FetchSegmentOutput, FetchSegmentError> {
         trace!("[{}]: {:?}", self.get_name(), self);
 
         Ok(FetchSegmentOutput {

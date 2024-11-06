@@ -79,7 +79,7 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
 
     async fn run(
         &self,
-        input: &MergeKnnResultsOperatorInput,
+        input: MergeKnnResultsOperatorInput,
     ) -> Result<MergeKnnResultsOperatorOutput, Self::Error> {
         let (result_user_ids, result_distances, result_vectors) =
             match RecordSegmentReader::from_segment(

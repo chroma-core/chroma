@@ -193,7 +193,7 @@ impl<'me> SeekScanner<'me> {
 impl Operator<LimitInput, LimitOutput> for LimitOperator {
     type Error = LimitError;
 
-    async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
+    async fn run(&self, input: LimitInput) -> Result<LimitOutput, LimitError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(

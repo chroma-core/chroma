@@ -105,7 +105,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         "WriteSegmentsOperator"
     }
 
-    async fn run(&self, input: &WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
+    async fn run(&self, mut input: WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
         tracing::debug!("Materializing N Records: {:?}", input.chunk.len());
         // Prepare for log materialization.
         let record_segment_reader: Option<RecordSegmentReader>;

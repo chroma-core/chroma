@@ -56,7 +56,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
         "FlushS3Operator"
     }
 
-    async fn run(&self, input: &FlushS3Input) -> Result<FlushS3Output, Self::Error> {
+    async fn run(&self, input: FlushS3Input) -> Result<FlushS3Output, Self::Error> {
         // TODO: Ideally we shouldn't even have to make an explicit call to
         // write_to_blockfiles since it is not the workflow for other segments
         // and is exclusive to metadata segment. We should figure out a way

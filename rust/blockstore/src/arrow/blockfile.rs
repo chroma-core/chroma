@@ -667,7 +667,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -707,7 +707,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = blockfile_provider
+            let mut writer = blockfile_provider
                 .write::<&str, u32>(BlockfileWriterOptions::default())
                 .await
                 .unwrap();
@@ -774,7 +774,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = blockfile_provider
+            let mut writer = blockfile_provider
                 .write::<&str, u32>(BlockfileWriterOptions::default())
                 .await
                 .unwrap();
@@ -931,7 +931,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -971,7 +971,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1008,7 +1008,7 @@ mod tests {
         }
 
         // Add 5 new entries to the first block
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
             .await
             .unwrap();
@@ -1043,7 +1043,7 @@ mod tests {
         }
 
         // Add 1200 more entries, causing splits
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
             .await
             .unwrap();
@@ -1088,7 +1088,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1134,7 +1134,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1174,7 +1174,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = provider
+        let mut writer = provider
             .write::<f32, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1211,7 +1211,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1261,7 +1261,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<u32, u32>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1298,7 +1298,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, &DataRecord>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1353,7 +1353,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1393,7 +1393,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1419,7 +1419,7 @@ mod tests {
             assert_eq!(value, format!("{:04}", i));
         }
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new().fork(id))
             .await
             .unwrap();
@@ -1463,7 +1463,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1505,7 +1505,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
@@ -1526,7 +1526,7 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
             .await
             .expect("BlockfileWriter fork unsuccessful");
@@ -1559,7 +1559,7 @@ mod tests {
             assert_eq!(value, [i]);
         }
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
             .await
             .expect("BlockfileWriter fork unsuccessful");
@@ -1601,7 +1601,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, u32>(BlockfileWriterOptions::default())
             .await
             .unwrap();

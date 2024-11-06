@@ -56,7 +56,7 @@ impl Component for WorkerThread {
 impl Handler<TaskMessage> for WorkerThread {
     type Result = ();
 
-    async fn handle(&mut self, task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
+    async fn handle(&mut self, mut task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
         let child_span =
             trace_span!(parent: Span::current(), "Task execution", name = task.get_name());
         task.run().instrument(child_span).await;

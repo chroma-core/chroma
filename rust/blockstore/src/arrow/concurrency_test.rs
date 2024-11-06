@@ -41,7 +41,7 @@ mod tests {
                 for i in 0..t {
                     let range_start = i * n / t;
                     let range_end = (i + 1) * n / t;
-                    let writer = writer.clone();
+                    let mut writer = writer.clone();
                     let handle = thread::spawn(move || {
                         for j in range_start..range_end {
                             let key_string = format!("key{}", j);

@@ -61,7 +61,7 @@ impl ChromaError for KnnLogError {
 impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
     type Error = KnnLogError;
 
-    async fn run(&self, input: &KnnLogInput) -> Result<KnnLogOutput, KnnLogError> {
+    async fn run(&self, input: KnnLogInput) -> Result<KnnLogOutput, KnnLogError> {
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,

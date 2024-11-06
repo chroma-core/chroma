@@ -68,7 +68,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
         OperatorType::IO
     }
 
-    async fn run(&self, _: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
+    async fn run(&self, _: FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
         trace!("[{}]: {:?}", self.get_name(), self);
 
         let mut fetched = Vec::new();

@@ -18,10 +18,7 @@ use chroma_error::ErrorCodes;
 use itertools::Itertools;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
 use uuid::Uuid;
 
 // The end key is exclusive, if the end key is None, then the block/delta is open-ended
@@ -39,12 +36,11 @@ struct Inner {
     completed_block_deltas: Vec<OrderedBlockDelta>,
 }
 
-#[derive(Clone)]
 pub struct ArrowOrderedBlockfileWriter {
     block_manager: BlockManager,
     root_manager: RootManager,
     root: RootWriter,
-    inner: Arc<Mutex<Inner>>,
+    inner: Inner,
     id: Uuid,
 }
 
@@ -77,11 +73,11 @@ impl ArrowOrderedBlockfileWriter {
             root_manager,
             root: root_writer,
             id,
-            inner: Arc::new(Mutex::new(Inner {
+            inner: Inner {
                 current_block_delta: Some((initial_block, None)),
                 completed_block_deltas: Vec::new(),
                 remaining_block_stack: VecDeque::new(),
-            })),
+            },
         }
     }
 
@@ -118,23 +114,21 @@ impl ArrowOrderedBlockfileWriter {
             root_manager,
             root: new_root,
             id,
-            inner: Arc::new(Mutex::new(Inner {
+            inner: Inner {
                 current_block_delta: None,
                 completed_block_deltas: Vec::new(),
                 remaining_block_stack,
-            })),
+            },
         }
     }
 
     pub(crate) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
-        let mut inner = std::mem::take(&mut *self.inner.lock().await);
-
-        Self::complete_current_delta::<K, V>(&mut inner);
+        self.complete_current_delta::<K, V>();
 
         let mut split_block_deltas = Vec::new();
-        for delta in inner.completed_block_deltas.drain(..) {
+        for delta in self.inner.completed_block_deltas.drain(..) {
             // Don't we split on-mutation (.set() calls)?
             // Yes, but that is only a performance optimization. For correctness, we must also split on commit. Why?
             //
@@ -203,20 +197,19 @@ impl ArrowOrderedBlockfileWriter {
         Ok(flusher)
     }
 
-    fn complete_current_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(inner: &mut Inner) {
-        if let Some((mut delta, _)) = inner.current_block_delta.take() {
+    fn complete_current_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(&mut self) {
+        if let Some((mut delta, _)) = self.inner.current_block_delta.take() {
             delta.copy_to_end::<K, V>();
-            inner.completed_block_deltas.push(delta);
+            self.inner.completed_block_deltas.push(delta);
         }
     }
 
     async fn swap_current_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
-        inner: &mut Inner,
+        &mut self,
         new_delta_block_id: &Uuid,
         new_delta_end_key: Option<CompositeKey>,
     ) -> Result<(), Box<dyn ChromaError>> {
-        Self::complete_current_delta::<K, V>(inner);
+        self.complete_current_delta::<K, V>();
 
         let new_delta = self
             .block_manager
@@ -228,49 +221,46 @@ impl ArrowOrderedBlockfileWriter {
             .sparse_index
             .replace_block(*new_delta_block_id, new_delta.id);
 
-        inner.current_block_delta = Some((new_delta, new_delta_end_key));
+        self.inner.current_block_delta = Some((new_delta, new_delta_end_key));
 
         Ok(())
     }
 
     async fn advance_current_delta_and_get_inner<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
+        &mut self,
         prefix: &str,
         key: &K,
-    ) -> Result<MutexGuard<'_, Inner>, Box<dyn ChromaError>> {
-        let mut inner = self.inner.lock().await;
-
-        if let Some((_, end_key)) = inner.current_block_delta.as_ref() {
+    ) -> Result<(), Box<dyn ChromaError>> {
+        if let Some((_, end_key)) = self.inner.current_block_delta.as_ref() {
             if let Some(end_key) = end_key {
                 if prefix < end_key.prefix.as_str()
                     || (prefix == end_key.prefix.as_str() && key.clone().into() < end_key.key)
                 // todo: avoid cloning key
                 {
                     // Provided prefix/key pair is less than the current delta's end key, so there's nothing to do
-                    return Ok(inner);
+                    return Ok(());
                 }
             } else {
                 // Open-ended delta
-                return Ok(inner);
+                return Ok(());
             }
         }
 
         // Find the next block to rewrite
         loop {
-            match inner.remaining_block_stack.pop_front() {
+            match self.inner.remaining_block_stack.pop_front() {
                 Some((block_id, Some(end_key))) => {
                     if prefix < end_key.prefix.as_str()
                         || (prefix == end_key.prefix.as_str() && key.clone().into() < end_key.key)
                     // todo: avoid cloning key
                     {
-                        self.swap_current_delta::<K, V>(&mut inner, &block_id, Some(end_key))
+                        self.swap_current_delta::<K, V>(&block_id, Some(end_key))
                             .await?;
                         break;
                     }
                 }
                 Some((block_id, None)) => {
-                    self.swap_current_delta::<K, V>(&mut inner, &block_id, None)
-                        .await?;
+                    self.swap_current_delta::<K, V>(&block_id, None).await?;
                     break;
                 }
                 None => {
@@ -279,27 +269,27 @@ impl ArrowOrderedBlockfileWriter {
             }
         }
 
-        Ok(inner)
+        Ok(())
     }
 
     pub(crate) async fn set<'a, K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
+        &mut self,
         prefix: &str,
         key: K,
         value: V,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let inner = &mut self
-            .advance_current_delta_and_get_inner::<K, V>(prefix, &key)
+        self.advance_current_delta_and_get_inner::<K, V>(prefix, &key)
             .await?;
         let current_materialized_delta_size = {
-            let delta = &mut inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
+            let delta = &mut self.inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
             delta.add(prefix, key, value);
             delta.get_size::<K, V>()
         };
 
         let max_block_size_bytes = self.block_manager.max_block_size_bytes();
         if current_materialized_delta_size > max_block_size_bytes {
-            let (mut current_delta, current_end_key) = inner
+            let (mut current_delta, current_end_key) = self
+                .inner
                 .current_block_delta
                 .take()
                 .expect("We already checked above that there is a current delta");
@@ -315,22 +305,21 @@ impl ArrowOrderedBlockfileWriter {
                 )
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
-            inner.completed_block_deltas.push(current_delta);
-            inner.current_block_delta = Some((new_delta, current_end_key));
+            self.inner.completed_block_deltas.push(current_delta);
+            self.inner.current_block_delta = Some((new_delta, current_end_key));
         }
 
         Ok(())
     }
 
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &self,
+        &mut self,
         prefix: &str,
         key: K,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let inner = &mut self
-            .advance_current_delta_and_get_inner::<K, V>(prefix, &key)
+        self.advance_current_delta_and_get_inner::<K, V>(prefix, &key)
             .await?;
-        let delta = &mut inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
+        let delta = &mut self.inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
         delta.skip::<K, V>(prefix, key);
         Ok(())
     }
@@ -342,9 +331,6 @@ impl ArrowOrderedBlockfileWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Arc;
-
     use crate::arrow::block::delta::types::Delta;
     use crate::arrow::block::delta::OrderedBlockDelta;
     use crate::arrow::block::Block;
@@ -360,7 +346,7 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use rand::seq::IteratorRandom;
-    use tokio::sync::Mutex;
+    use std::collections::VecDeque;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -375,7 +361,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
             .await
             .unwrap();
@@ -415,7 +401,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
             .await
             .unwrap();
@@ -455,7 +441,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
             .await
             .unwrap();
@@ -492,7 +478,7 @@ mod tests {
         }
 
         // Add 5 new entries to the first block
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1).ordered_mutations())
             .await
             .unwrap();
@@ -526,7 +512,7 @@ mod tests {
         }
 
         // Add 1200 more entries, causing splits
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2).ordered_mutations())
             .await
             .unwrap();
@@ -573,7 +559,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new().ordered_mutations())
             .await
             .unwrap();
@@ -613,7 +599,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new().ordered_mutations())
             .await
             .unwrap();
@@ -638,7 +624,7 @@ mod tests {
             assert_eq!(value, format!("{:04}", i));
         }
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new().fork(id).ordered_mutations())
             .await
             .unwrap();
@@ -683,7 +669,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
             .await
             .unwrap();
@@ -699,7 +685,7 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1).ordered_mutations())
             .await
             .expect("BlockfileWriter fork unsuccessful");
@@ -732,7 +718,7 @@ mod tests {
             assert_eq!(value, [i]);
         }
 
-        let writer = blockfile_provider
+        let mut writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2).ordered_mutations())
             .await
             .expect("BlockfileWriter fork unsuccessful");
@@ -776,16 +762,16 @@ mod tests {
         let file_id = Uuid::new_v4();
         let root_writer = RootWriter::new(Version::V1, file_id, sparse_index);
 
-        let writer = ArrowOrderedBlockfileWriter {
+        let mut writer = ArrowOrderedBlockfileWriter {
             block_manager,
             root_manager: root_manager.clone(),
             root: root_writer,
             id: Uuid::new_v4(),
-            inner: Arc::new(Mutex::new(Inner {
+            inner: Inner {
                 remaining_block_stack: VecDeque::new(),
                 current_block_delta: Some((initial_block, None)),
                 completed_block_deltas: Vec::new(),
-            })),
+            },
         };
 
         let n = 2000;
@@ -904,7 +890,7 @@ mod tests {
             .await
             .unwrap();
         let second_write_id = writer.id();
-        let writer = match writer {
+        let mut writer = match writer {
             BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => writer,
             _ => panic!("Unexpected writer type"),
         };

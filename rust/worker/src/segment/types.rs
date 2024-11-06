@@ -778,7 +778,7 @@ impl<'me> LogMaterializer<'me> {
 #[allow(async_fn_in_trait)]
 pub trait SegmentWriter<'a> {
     async fn apply_materialized_log_chunk(
-        &self,
+        &mut self,
         records: Chunk<MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError>;
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;

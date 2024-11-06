@@ -116,10 +116,7 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         "HnswKnnOperator"
     }
 
-    async fn run(
-        &self,
-        input: &HnswKnnOperatorInput,
-    ) -> Result<HnswKnnOperatorOutput, Self::Error> {
+    async fn run(&self, input: HnswKnnOperatorInput) -> Result<HnswKnnOperatorOutput, Self::Error> {
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,

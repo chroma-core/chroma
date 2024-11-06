@@ -54,7 +54,7 @@ impl ChromaError for KnnHnswError {
 impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
     type Error = KnnHnswError;
 
-    async fn run(&self, input: &KnnHnswInput) -> Result<KnnHnswOutput, KnnHnswError> {
+    async fn run(&self, input: KnnHnswInput) -> Result<KnnHnswOutput, KnnHnswError> {
         let (allowed, disallowed) = match &input.compact_offset_ids {
             SignedRoaringBitmap::Include(rbm) if rbm.is_empty() => {
                 return Ok(KnnHnswOutput {
