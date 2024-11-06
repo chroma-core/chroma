@@ -1,6 +1,8 @@
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::{DistanceFunction, DistanceFunctionError};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_types::MetadataValue;
 use thiserror::Error;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tonic::async_trait;
@@ -31,6 +33,8 @@ use crate::{
 pub enum KnnError {
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
+    #[error("Error instantiating distance function: {0}")]
+    DistanceFunction(#[from] DistanceFunctionError),
     #[error("Empty collection")]
     EmptyCollection,
     #[error("Error running Fetch Log Operator: {0}")]
@@ -59,6 +63,7 @@ impl ChromaError for KnnError {
     fn code(&self) -> ErrorCodes {
         match self {
             KnnError::Channel(e) => e.code(),
+            KnnError::DistanceFunction(e) => e.code(),
             KnnError::EmptyCollection => ErrorCodes::Internal,
             KnnError::FetchLog(e) => e.code(),
             KnnError::FetchSegment(e) => e.code(),
@@ -245,11 +250,7 @@ impl Handler<TaskResult<FetchSegmentOutput, FetchSegmentError>> for KnnFilterOrc
         // If dimension is not set and segment is uninitialized,  we assume
         // this is a query on empty collection, so we return early here
         if output.collection.dimension.is_none() && output.vector_segment.file_path.is_empty() {
-            if let Some(chan) = self.result_channel.take() {
-                if chan.send(Err(KnnError::EmptyCollection)).is_err() {
-                    tracing::error!("Error sending empty result");
-                };
-            }
+            self.terminate_with_error(ctx, KnnError::EmptyCollection);
             return;
         }
 
@@ -399,14 +400,35 @@ impl Component for KnnOrchestrator {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+        let space = match self
+            .knn_filter_output
+            .segments
+            .vector_segment
+            .metadata
+            .as_ref()
+        {
+            Some(metadata) => match metadata.get("hnsw:space") {
+                Some(MetadataValue::Str(space)) => space,
+                _ => "l2",
+            },
+            None => "l2",
+        };
+        let metric = match DistanceFunction::try_from(space) {
+            Ok(metric) => metric,
+            Err(e) => {
+                self.terminate_with_error(ctx, e);
+                return;
+            }
+        };
+
         let knn_log_task = wrap(
             Box::new(self.knn.clone()),
             KnnLogInput {
                 logs: self.knn_filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.knn_filter_output.segments.record_segment.clone(),
-                vector_segment: self.knn_filter_output.segments.vector_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
+                metric: metric.clone(),
             },
             ctx.receiver(),
         );
@@ -419,31 +441,36 @@ impl Component for KnnOrchestrator {
             return;
         }
 
-        if let Some(dimension) = self.knn_filter_output.segments.collection.dimension {
-            let knn_segment_task = wrap(
-                Box::new(self.knn.clone()),
-                KnnHnswInput {
-                    hnsw_provider: self.hnsw_provider.clone(),
-                    hnsw_segment: self.knn_filter_output.segments.vector_segment.clone(),
-                    collection_dimension: dimension as u32,
-                    compact_offset_ids: self
-                        .knn_filter_output
-                        .filter_output
-                        .compact_offset_ids
-                        .clone(),
-                },
-                ctx.receiver(),
-            );
-
-            if let Err(err) = self
-                .dispatcher
-                .send(knn_segment_task, Some(Span::current()))
-                .await
-            {
-                self.terminate_with_error(ctx, err);
+        let collection_dimension = match self.knn_filter_output.segments.collection.dimension {
+            Some(dimension) => dimension as u32,
+            None => {
+                self.terminate_with_error(ctx, KnnError::NoCollectionDimension);
+                return;
             }
-        } else {
-            self.terminate_with_error(ctx, KnnError::NoCollectionDimension)
+        };
+
+        let knn_segment_task = wrap(
+            Box::new(self.knn.clone()),
+            KnnHnswInput {
+                hnsw_provider: self.hnsw_provider.clone(),
+                hnsw_segment: self.knn_filter_output.segments.vector_segment.clone(),
+                collection_dimension,
+                compact_offset_ids: self
+                    .knn_filter_output
+                    .filter_output
+                    .compact_offset_ids
+                    .clone(),
+                metric,
+            },
+            ctx.receiver(),
+        );
+
+        if let Err(err) = self
+            .dispatcher
+            .send(knn_segment_task, Some(Span::current()))
+            .await
+        {
+            self.terminate_with_error(ctx, err);
         }
     }
 }
