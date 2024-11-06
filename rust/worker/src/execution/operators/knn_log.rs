@@ -26,7 +26,7 @@ pub struct KnnLogInput {
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub log_offset_ids: SignedRoaringBitmap,
-    pub metric: DistanceFunction,
+    pub distance_function: DistanceFunction,
 }
 
 #[derive(Debug)]
@@ -76,7 +76,7 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
         let logs = materializer.materialize().await?;
 
         let target_vector;
-        let target_embedding = if let DistanceFunction::Cosine = input.metric {
+        let target_embedding = if let DistanceFunction::Cosine = input.distance_function {
             target_vector = normalize(&self.embedding);
             &target_vector
         } else {
@@ -94,7 +94,7 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
                 SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(log.offset_id),
             } {
                 let log_vector;
-                let log_embedding = if let DistanceFunction::Cosine = input.metric {
+                let log_embedding = if let DistanceFunction::Cosine = input.distance_function {
                     log_vector = normalize(log.merged_embeddings());
                     &log_vector
                 } else {
@@ -103,7 +103,9 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
 
                 let distance = RecordDistance {
                     offset_id: log.offset_id,
-                    measure: input.metric.distance(target_embedding, log_embedding),
+                    measure: input
+                        .distance_function
+                        .distance(target_embedding, log_embedding),
                 };
                 if max_heap.len() < self.fetch as usize {
                     max_heap.push(distance);
@@ -148,7 +150,7 @@ mod tests {
             logs: generator.generate_chunk(1..=100),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
-            metric,
+            distance_function: metric,
             log_offset_ids,
         }
     }
@@ -167,7 +169,7 @@ mod tests {
             .logs
             .iter()
             .map(|(log, _)| {
-                knn_log_input.metric.distance(
+                knn_log_input.distance_function.distance(
                     log.record
                         .embedding
                         .as_ref()
@@ -206,7 +208,7 @@ mod tests {
             .logs
             .iter()
             .map(|(log, _)| {
-                knn_log_input.metric.distance(
+                knn_log_input.distance_function.distance(
                     log.record
                         .embedding
                         .as_ref()
@@ -248,7 +250,7 @@ mod tests {
             .iter()
             .filter_map(|(log, _)| {
                 (log.log_offset % 2 != 0).then_some(
-                    knn_log_input.metric.distance(
+                    knn_log_input.distance_function.distance(
                         &normalize(
                             log.record
                                 .embedding

@@ -80,10 +80,6 @@ impl ChromaError for KnnProjectionError {
 impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator {
     type Error = KnnProjectionError;
 
-    fn get_type(&self) -> OperatorType {
-        OperatorType::IO
-    }
-
     async fn run(
         &self,
         input: &KnnProjectionInput,

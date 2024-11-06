@@ -20,7 +20,7 @@ pub struct KnnHnswInput {
     pub hnsw_segment: Segment,
     pub collection_dimension: u32,
     pub compact_offset_ids: SignedRoaringBitmap,
-    pub metric: DistanceFunction,
+    pub distance_function: DistanceFunction,
 }
 
 #[derive(Debug)]
@@ -67,7 +67,7 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
         };
 
         let embedding_vector;
-        let embedding = if let DistanceFunction::Cosine = input.metric {
+        let embedding = if let DistanceFunction::Cosine = input.distance_function {
             embedding_vector = normalize(&self.embedding);
             &embedding_vector
         } else {

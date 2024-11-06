@@ -168,8 +168,6 @@ pub enum KnnError {
     KnnLog(#[from] KnnLogError),
     #[error("Error running Knn Hnsw Operator: {0}")]
     KnnHnsw(#[from] KnnHnswError),
-    #[error("Error running Knn Merge Operator: {0}")]
-    KnnMerge(#[from] KnnMergeError),
     #[error("Error running Knn Projection Operator: {0}")]
     KnnProjection(#[from] KnnProjectionError),
     #[error("Error inspecting collection dimension")]
@@ -191,7 +189,6 @@ impl ChromaError for KnnError {
             KnnError::Filter(e) => e.code(),
             KnnError::KnnLog(e) => e.code(),
             KnnError::KnnHnsw(e) => e.code(),
-            KnnError::KnnMerge(e) => e.code(),
             KnnError::KnnProjection(e) => e.code(),
             KnnError::NoCollectionDimension => ErrorCodes::InvalidArgument,
             KnnError::Panic(_) => ErrorCodes::Aborted,
@@ -498,8 +495,8 @@ impl KnnOrchestrator {
             let task = wrap(
                 Box::new(self.merge.clone()),
                 KnnMergeInput {
-                    log_distances: log_distances.clone(),
-                    segment_distances: segment_distances.clone(),
+                    first_distances: log_distances.clone(),
+                    second_distances: segment_distances.clone(),
                 },
                 ctx.receiver(),
             );
@@ -534,10 +531,10 @@ impl Component for KnnOrchestrator {
             },
             None => "l2",
         };
-        let metric = match DistanceFunction::try_from(space) {
-            Ok(metric) => metric,
-            Err(e) => {
-                self.terminate_with_error(ctx, e);
+        let distance_function = match DistanceFunction::try_from(space) {
+            Ok(func) => func,
+            Err(err) => {
+                self.terminate_with_error(ctx, err);
                 return;
             }
         };
@@ -549,7 +546,7 @@ impl Component for KnnOrchestrator {
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.knn_filter_output.segments.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                metric: metric.clone(),
+                distance_function: distance_function.clone(),
             },
             ctx.receiver(),
         );
@@ -581,7 +578,7 @@ impl Component for KnnOrchestrator {
                     .filter_output
                     .compact_offset_ids
                     .clone(),
-                metric,
+                distance_function,
             },
             ctx.receiver(),
         );
@@ -647,13 +644,9 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         message: TaskResult<KnnMergeOutput, KnnMergeError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
-        };
+        let output = message
+            .into_inner()
+            .expect("KnnMergeOperator should not fail");
         let task = wrap(
             Box::new(self.knn_projection.clone()),
             KnnProjectionInput {

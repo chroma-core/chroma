@@ -1,22 +1,21 @@
-use chroma_error::{ChromaError, ErrorCodes};
-use thiserror::Error;
 use tonic::async_trait;
 
 use crate::execution::operator::Operator;
 
 use super::knn::RecordDistance;
 
-/// The `KnnMergeOperator` selects the records nearest to target according to provided distance meansure
+/// The `KnnMergeOperator` selects the records nearest to target from the two vectors of records
+/// which are both sorted by distance in ascending order
 ///
 /// # Parameters
 /// - `fetch`: The total number of records to fetch
 ///
 /// # Inputs
-/// - `log_distances`: The nearest records in the log, sorted by distance in ascending order
-/// - `segment_distances`: The nearest records in the compact segment, sorted by distance in ascending order
+/// - `first_distances`: The first vector of records, sorted by distance in ascending order
+/// - `second_distances`: The second vector of records, sorted by distance in ascending order
 ///
 /// # Outputs
-/// - `record_distances`: The nearest records, sorted by distance in ascending order
+/// - `record_distances`: The nearest records in either vectors, sorted by distance in ascending order
 ///
 /// # Usage
 /// It can be used to merge the nearest results from the log and the vector segment
@@ -27,8 +26,8 @@ pub struct KnnMergeOperator {
 
 #[derive(Debug)]
 pub struct KnnMergeInput {
-    pub log_distances: Vec<RecordDistance>,
-    pub segment_distances: Vec<RecordDistance>,
+    pub first_distances: Vec<RecordDistance>,
+    pub second_distances: Vec<RecordDistance>,
 }
 
 #[derive(Debug)]
@@ -36,19 +35,7 @@ pub struct KnnMergeOutput {
     pub record_distances: Vec<RecordDistance>,
 }
 
-#[derive(Error, Debug)]
-pub enum KnnMergeError {
-    #[error("Error converting incomplete input")]
-    IncompleteInput,
-}
-
-impl ChromaError for KnnMergeError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            KnnMergeError::IncompleteInput => ErrorCodes::InvalidArgument,
-        }
-    }
-}
+pub type KnnMergeError = ();
 
 #[async_trait]
 impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
@@ -56,32 +43,32 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
 
     async fn run(&self, input: &KnnMergeInput) -> Result<KnnMergeOutput, KnnMergeError> {
         let mut fetch = self.fetch;
-        let mut log_index = 0;
-        let mut segment_index = 0;
+        let mut first_index = 0;
+        let mut second_index = 0;
 
         let mut merged_distance = Vec::new();
 
         while fetch > 0 {
-            let log_dist = input.log_distances.get(log_index);
-            let segment_dist = input.segment_distances.get(segment_index);
+            let first_dist = input.first_distances.get(first_index);
+            let second_dist = input.second_distances.get(second_index);
 
-            match (log_dist, segment_dist) {
-                (Some(ldist), Some(sdist)) => {
-                    if ldist.measure < sdist.measure {
-                        merged_distance.push(ldist.clone());
-                        log_index += 1;
+            match (first_dist, second_dist) {
+                (Some(fdist), Some(sdist)) => {
+                    if fdist.measure < sdist.measure {
+                        merged_distance.push(fdist.clone());
+                        first_index += 1;
                     } else {
                         merged_distance.push(sdist.clone());
-                        segment_index += 1;
+                        second_index += 1;
                     }
                 }
                 (None, Some(dist)) => {
                     merged_distance.push(dist.clone());
-                    segment_index += 1;
+                    second_index += 1;
                 }
                 (Some(dist), None) => {
                     merged_distance.push(dist.clone());
-                    log_index += 1;
+                    first_index += 1;
                 }
                 _ => break,
             }
@@ -105,11 +92,11 @@ mod tests {
 
     /// The unit tests for `KnnMergeOperator` uses the following test data
     /// It generates records where the distance to target is the same as value of offset
-    /// - Log: 4, 8, ..., 100
-    /// - Compacted: 1, 3, ..., 99
+    /// - First: 4, 8, ..., 100
+    /// - Second: 1, 3, ..., 99
     fn setup_knn_merge_input() -> KnnMergeInput {
         KnnMergeInput {
-            log_distances: (1..=100)
+            first_distances: (1..=100)
                 .filter_map(|offset_id| {
                     (offset_id % 4 == 0).then_some(RecordDistance {
                         offset_id,
@@ -117,7 +104,7 @@ mod tests {
                     })
                 })
                 .collect(),
-            segment_distances: (1..=100)
+            second_distances: (1..=100)
                 .filter_map(|offset_id| {
                     (offset_id % 2 != 0).then_some(RecordDistance {
                         offset_id,

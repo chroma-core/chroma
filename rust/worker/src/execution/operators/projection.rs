@@ -115,7 +115,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
-        let oid_to_log_record: HashMap<_, _> = materialized_logs
+        let offset_id_to_log_record: HashMap<_, _> = materialized_logs
             .iter()
             .flat_map(|(log, _)| {
                 offset_id_set
@@ -127,7 +127,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
         let mut records = Vec::with_capacity(input.offset_ids.len());
 
         for offset_id in &input.offset_ids {
-            let record = match oid_to_log_record.get(offset_id) {
+            let record = match offset_id_to_log_record.get(offset_id) {
                 // The offset id is in the log
                 Some(&log) => ProjectionRecord {
                     id: log.merged_user_id().to_string(),
