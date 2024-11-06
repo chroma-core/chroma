@@ -15,7 +15,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup
-        uses: ./.github/actions/rust
+        uses: Wandalen/wretry.action@v3.7.0
+        with:
+          action: ./.github/actions/rust
       - name: Build
         run: cargo build --verbose
       - name: Test
@@ -31,7 +33,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup
-        uses: ./.github/actions/rust
+        uses: Wandalen/wretry.action@v3.7.0
+        with:
+          action: ./.github/actions/rust
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
       - name: Run tests
