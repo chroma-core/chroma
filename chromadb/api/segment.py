@@ -790,6 +790,7 @@ class SegmentAPI(ServerAPI):
             if update:
                 id = collection.id
                 self._sysdb.update_collection(id=id, dimension=dim)
+                collection["dimension"] = dim
         elif collection["dimension"] != dim:
             raise InvalidDimensionException(
                 f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
