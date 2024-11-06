@@ -23,6 +23,7 @@ use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_types::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+    RequestVersionContext,
 };
 use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
@@ -124,6 +125,7 @@ impl WorkerServer {
         });
 
         server.await?;
+
         Ok(())
     }
 
@@ -751,9 +753,18 @@ mod tests {
     #[cfg(debug_assertions)]
     use tempfile::tempdir;
 
-    #[tokio::test]
-    #[cfg(debug_assertions)]
-    async fn gracefully_handles_panics() {
+    use chroma_types::{Collection, Segment, SegmentScope, SegmentType};
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    use std::sync::LazyLock;
+
+    const COLLECTION_UUID: &str = "00000000-0000-0000-0000-000000000001";
+    const SEGMENT_UUID: &str = "00000000-0000-0000-0000-000000000003";
+    const INVALID_UUID: &str = "00000000";
+
+    fn run_server() -> String {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
@@ -762,7 +773,8 @@ mod tests {
         let sparse_index_cache = new_cache_for_test();
         let hnsw_index_cache = new_non_persistent_cache_for_test();
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
-        let port = random_port::PortPicker::new().pick().unwrap();
+        let port = random_port::PortPicker::new().random(true).pick().unwrap();
+
         let mut server = WorkerServer {
             dispatcher: None,
             system: None,
@@ -787,16 +799,20 @@ mod tests {
         let dispatcher = dispatcher::Dispatcher::new(4, 10, 10);
         let dispatcher_handle = system.start_component(dispatcher);
 
-        server.set_system(system.clone());
+        server.set_system(system);
         server.set_dispatcher(dispatcher_handle);
 
-        tokio::spawn(async move {
+        let _ = tokio::spawn(async move {
             let _ = crate::server::WorkerServer::run(server).await;
         });
 
-        let mut client = DebugClient::connect(format!("http://localhost:{}", port))
-            .await
-            .unwrap();
+        format!("http://localhost:{}", port)
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn gracefully_handles_panics() {
+        let mut client = DebugClient::connect(run_server()).await.unwrap();
 
         // Test response when handler panics
         let err_response = client.trigger_panic(Request::new(())).await.unwrap_err();
@@ -805,5 +821,193 @@ mod tests {
         // The server should still work, even after a panic was thrown
         let response = client.get_info(Request::new(())).await;
         assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn validate_get_vectors_request() {
+        use chroma_proto::vector_reader_client::VectorReaderClient as Client;
+        use chroma_types::chroma_proto::GetVectorsRequest as Request;
+
+        let mut reader = Client::connect(run_server()).await.unwrap();
+
+        let first_request = Request {
+            ids: vec![],
+            segment_id: SEGMENT_UUID.to_string(),
+            collection_id: COLLECTION_UUID.to_string(),
+            version_context: Some(RequestVersionContext {
+                collection_version: 0,
+                log_position: 0,
+            }),
+        };
+        // segment or collection not found
+        let request = first_request.clone();
+        let response = reader.get_vectors(request).await;
+        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+
+        // invalid collection uuid
+        let mut request = first_request.clone();
+        request.collection_id = INVALID_UUID.into();
+        let response = reader.get_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Collection UUID"));
+
+        // invalid segment uuid
+        let mut request = first_request.clone();
+        request.segment_id = INVALID_UUID.into();
+        let response = reader.get_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Segment UUID"));
+
+        // invalid version context
+        let mut request = first_request.clone();
+        request.version_context = None;
+        let response = reader.get_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("context"));
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn validate_query_vectors_request() {
+        use chroma_proto::vector_reader_client::VectorReaderClient as Client;
+        use chroma_types::chroma_proto::QueryVectorsRequest as Request;
+        use chroma_types::chroma_proto::Vector;
+
+        let mut reader = Client::connect(run_server()).await.unwrap();
+
+        let floats: Vec<f32> = vec![1.0, 2.0];
+
+        let first_request = Request {
+            vectors: vec![Vector {
+                vector: to_byte_slice(&floats).into(),
+                encoding: chroma_proto::ScalarEncoding::Float32 as i32,
+                dimension: 2,
+            }],
+            k: 1,
+            collection_id: COLLECTION_UUID.to_string(),
+            segment_id: SEGMENT_UUID.into(),
+            version_context: Some(RequestVersionContext {
+                collection_version: 0,
+                log_position: 0,
+            }),
+            ..Default::default()
+        };
+        let response = reader.query_vectors(first_request.clone()).await;
+
+        assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+
+        // invalid collection uuid
+        let mut request = first_request.clone();
+        request.collection_id = INVALID_UUID.into();
+        let response = reader.query_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Collection UUID"));
+
+        // invalid segment uuid
+        let mut request = first_request.clone();
+        request.segment_id = INVALID_UUID.into();
+        let response = reader.query_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Segment UUID"));
+
+        // invalid version context
+        let mut request = first_request.clone();
+        request.version_context = None;
+        let response = reader.query_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("context"));
+
+        // invalid vector
+        let mut request = first_request.clone();
+        request.vectors = vec![Vector {
+            dimension: 1,
+            vector: vec![0],
+            encoding: 0,
+        }];
+
+        let response = reader.query_vectors(request).await;
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(err.message().contains("vector"));
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn validate_query_metadata_request() {
+        use chroma_proto::metadata_reader_client::MetadataReaderClient as Client;
+        use chroma_types::chroma_proto::QueryMetadataRequest as Request;
+
+        let mut reader = Client::connect(run_server()).await.unwrap();
+
+        let first_request = Request {
+            collection_id: COLLECTION_UUID.to_string(),
+            segment_id: SEGMENT_UUID.into(),
+            version_context: Some(RequestVersionContext {
+                collection_version: 0,
+                log_position: 0,
+            }),
+            ..Default::default()
+        };
+
+        // segment or collection
+        let response = reader.query_metadata(first_request.clone()).await;
+        assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+
+        // invalid collection uuid
+        let mut request = first_request.clone();
+        request.collection_id = INVALID_UUID.into();
+        let response = reader.query_metadata(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Collection UUID"));
+
+        // invalid segment uuid
+        let mut request = first_request.clone();
+        request.segment_id = INVALID_UUID.into();
+        let response = reader.query_metadata(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Segment UUID"));
+
+        // invalid version context
+        let mut request = first_request.clone();
+        request.version_context = None;
+        let response = reader.query_metadata(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("context"));
+    }
+
+    fn to_byte_slice<T>(v: &[T]) -> &[u8] {
+        let raw_ptr = v.as_ptr() as *const u8;
+        unsafe { std::slice::from_raw_parts(raw_ptr, std::mem::size_of_val(v)) }
     }
 }
