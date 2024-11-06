@@ -10,6 +10,7 @@ pub mod admission_controller;
 pub mod admissioncontrolleds3;
 pub mod caching;
 pub mod config;
+pub mod evicting;
 pub mod local;
 pub mod object_store;
 pub mod s3;
