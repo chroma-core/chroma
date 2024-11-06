@@ -8,6 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 
 pub mod admission_controller;
 pub mod admissioncontrolleds3;
+pub mod caching;
 pub mod config;
 pub mod local;
 pub mod object_store;
