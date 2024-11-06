@@ -29,6 +29,125 @@ use crate::{
     system::{ChannelError, Component, ComponentContext, ComponentHandle, Handler, System},
 };
 
+/// The `knn` module contains two orchestrator: `KnnFilterOrchestrator` and `KnnOrchestrator`.
+/// When used together, they carry out the evaluation of a `<collection>.query(...)` query
+/// for the user. We breakdown the evaluation into two parts because a `<collection>.query(...)`
+/// is inherently multiple queries sharing the same filter criteria. Thus we first evaluate
+/// the filter criteria with `KnnFilterOrchestrator`, and then duplicate the result for each of
+/// the query embedding provided by the user.
+///
+/// # Pipeline
+///                                                           │
+///                                                           │
+///                                                           │
+///                            ┌────────────────────────────  │  ───────────────────────────────┐
+///                            │                              ▼                                 │
+///                            │                       ┌────────────┐    KnnFilterOrchestrator  │
+///                            │                       │            │                           │
+///                            │           ┌───────────┤  on_start  ├────────────────┐          │
+///                            │           │           │            │                │          │
+///                            │           │           └────────────┘                │          │
+///                            │           │                                         │          │
+///                            │           ▼                                         ▼          │
+///                            │  ┌────────────────────┐            ┌────────────────────────┐  │
+///                            │  │                    │            │                        │  │
+///                            │  │  FetchLogOperator  │            │  FetchSegmentOperator  │  │
+///                            │  │                    │            │                        │  │
+///                            │  └────────┬───────────┘            └────────────────┬───────┘  │
+///                            │           │                                         │          │
+///                            │           │                                         │          │
+///                            │           │     ┌─────────────────────────────┐     │          │
+///                            │           │     │                             │     │          │
+///                            │           └────►│  try_start_filter_operator  │◄────┘          │
+///                            │                 │                             │                │
+///                            │                 └────────────┬────────────────┘                │
+///                            │                              │                                 │
+///                            │                              ▼                                 │
+///                            │                    ┌───────────────────┐                       │
+///                            │                    │                   │                       │
+///                            │                    │   FilterOperator  │                       │
+///                            │                    │                   │                       │
+///                            │                    └─────────┬─────────┘                       │
+///                            │                              │                                 │
+///                            │                              ▼                                 │
+///                            │                     ┌──────────────────┐                       │
+///                            │                     │                  │                       │
+///                            │                     │  result_channel  │                       │
+///                            │                     │                  │                       │
+///                            │                     └────────┬─────────┘                       │
+///                            │                              │                                 │
+///                            └────────────────────────────  │  ───────────────────────────────┘
+///                                                           │
+///                                                           │
+///                                                           │
+///                        ┌──────────────────────────────────┴─────────────────────────────────────┐
+///                        │                                                                        │
+///                        │                    ... One branch per embedding ...                    │
+///                        │                                                                        │
+/// ┌────────────────────  │  ─────────────────────┐                         ┌────────────────────  │  ─────────────────────┐
+/// │                      ▼                       │                         │                      ▼                       │
+/// │               ┌────────────┐ KnnOrchestrator │                         │               ┌────────────┐ KnnOrchestrator │
+/// │               │            │                 │                         │               │            │                 │
+/// │           ┌───┤  on_start  ├────┐            │           ...           │           ┌───┤  on_start  ├────┐            │
+/// │           │   │            │    │            │                         │           │   │            │    │            │
+/// │           │   └────────────┘    │            │                         │           │   └────────────┘    │            │
+/// │           │                     │            │                         │           │                     │            │
+/// │           ▼                     ▼            │                         │           ▼                     ▼            │
+/// │  ┌──────────────────┐ ┌───────────────────┐  │                         │  ┌──────────────────┐ ┌───────────────────┐  │
+/// │  │                  │ │                   │  │                         │  │                  │ │                   │  │
+/// │  │  KnnLogOperator  │ │  KnnHnswOperator  │  │           ...           │  │  KnnLogOperator  │ │  KnnHnswOperator  │  │
+/// │  │                  │ │                   │  │                         │  │                  │ │                   │  │
+/// │  └────────┬─────────┘ └─────────┬─────────┘  │                         │  └────────┬─────────┘ └─────────┬─────────┘  │
+/// │           │                     │            │                         │           │                     │            │
+/// │           ▼                     ▼            │                         │           ▼                     ▼            │
+/// │      ┌────────────────────────────────┐      │                         │      ┌────────────────────────────────┐      │
+/// │      │                                │      │                         │      │                                │      │
+/// │      │  try_start_knn_merge_operator  │      │           ...           │      │  try_start_knn_merge_operator  │      │
+/// │      │                                │      │                         │      │                                │      │
+/// │      └───────────────┬────────────────┘      │                         │      └───────────────┬────────────────┘      │
+/// │                      │                       │                         │                      │                       │
+/// │                      ▼                       │                         │                      ▼                       │
+/// │           ┌─────────────────────┐            │                         │           ┌─────────────────────┐            │
+/// │           │                     │            │                         │           │                     │            │
+/// │           │  KnnMergeOperator   │            │           ...           │           │  KnnMergeOperator   │            │
+/// │           │                     │            │                         │           │                     │            │
+/// │           └──────────┬──────────┘            │                         │           └──────────┬──────────┘            │
+/// │                      │                       │                         │                      │                       │
+/// │                      ▼                       │                         │                      ▼                       │
+/// │         ┌─────────────────────────┐          │                         │         ┌─────────────────────────┐          │
+/// │         │                         │          │                         │         │                         │          │
+/// │         │  KnnProjectionOperator  │          │           ...           │         │  KnnProjectionOperator  │          │
+/// │         │                         │          │                         │         │                         │          │
+/// │         └────────────┬────────────┘          │                         │         └────────────┬────────────┘          │
+/// │                      │                       │                         │                      │                       │
+/// │                      ▼                       │                         │                      ▼                       │
+/// │             ┌──────────────────┐             │                         │             ┌──────────────────┐             │
+/// │             │                  │             │                         │             │                  │             │
+/// │             │  result_channel  │             │           ...           │             │  result_channel  │             │
+/// │             │                  │             │                         │             │                  │             │
+/// │             └────────┬─────────┘             │                         │             └────────┬─────────┘             │
+/// │                      │                       │                         │                      │                       │
+/// └────────────────────  │  ─────────────────────┘                         └────────────────────  │  ─────────────────────┘
+///                        │                                                                        │
+///                        │                                                                        │
+///                        │                                                                        │
+///                        │                           ┌────────────────┐                           │
+///                        │                           │                │                           │
+///                        └──────────────────────────►│  try_join_all  │◄──────────────────────────┘
+///                                                    │                │
+///                                                    └───────┬────────┘
+///                                                            │
+///                                                            │
+///                                                            ▼
+///
+/// # State tracking
+/// Similar to the `GetOrchestrator`, the `KnnFilterOrchestrator` need to keep track of the outputs from
+/// `FetchLogOperator` and `FetchSegmentOperator`. For `KnnOrchestrator`, it needs to track the outputs from
+/// `KnnLogOperator` and `KnnHnswOperator`. It invokes `try_start_knn_merge_operator` when it receives outputs
+/// from either operators, and if both outputs are present it composes the input for `KnnMergeOperator` and
+/// proceeds with execution. The outputs of other operators are directly forwarded without being tracked
+/// by the orchestrator.
+
 #[derive(Error, Debug)]
 pub enum KnnError {
     #[error("Error sending message through channel: {0}")]
