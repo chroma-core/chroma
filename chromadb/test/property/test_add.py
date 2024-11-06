@@ -37,7 +37,7 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 #         fast=hypothesis.settings(max_examples=200),
 #     ),
 # )
-def test_add_small(
+def help_test_add_small(
     client: ClientAPI,
     collection: strategies.Collection,
     record_set: strategies.RecordSet,
@@ -304,7 +304,7 @@ from uuid import UUID
 
 
 def test_repro(client: ClientAPI) -> None:
-    test_add_small(
+    help_test_add_small(
         client=client,
         collection=strategies.Collection(
             name="A00",
