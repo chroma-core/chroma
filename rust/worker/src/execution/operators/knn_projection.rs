@@ -5,10 +5,7 @@ use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
 
-use crate::execution::{
-    operator::{Operator, OperatorType},
-    operators::projection::ProjectionInput,
-};
+use crate::execution::{operator::Operator, operators::projection::ProjectionInput};
 
 use super::{
     fetch_log::FetchLogOutput,
