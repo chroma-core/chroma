@@ -27,20 +27,14 @@ pub enum SpannSegmentWriterError {
     DistanceFunctionNotFound,
     #[error("Hnsw index id parsing error")]
     IndexIdParsingError,
-    #[error("HNSW index creation error")]
-    HnswIndexCreationError,
     #[error("Hnsw Invalid file path")]
     HnswInvalidFilePath,
     #[error("Version map Invalid file path")]
     VersionMapInvalidFilePath,
-    #[error("Failure in loading the versions map")]
-    VersionMapLoadError,
-    #[error("Failure in forking the posting list")]
-    PostingListForkError,
     #[error("Postings list invalid file path")]
     PostingListInvalidFilePath,
-    #[error("Posting list creation error")]
-    PostingListCreationError,
+    #[error("Spann index creation error")]
+    SpannIndexWriterConstructionError,
 }
 
 impl ChromaError for SpannSegmentWriterError {
@@ -48,14 +42,11 @@ impl ChromaError for SpannSegmentWriterError {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
             Self::IndexIdParsingError => ErrorCodes::Internal,
-            Self::HnswIndexCreationError => ErrorCodes::Internal,
             Self::DistanceFunctionNotFound => ErrorCodes::Internal,
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
-            Self::VersionMapLoadError => ErrorCodes::Internal,
-            Self::PostingListForkError => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
-            Self::PostingListCreationError => ErrorCodes::Internal,
+            Self::SpannIndexWriterConstructionError => ErrorCodes::Internal,
         }
     }
 }
@@ -64,14 +55,20 @@ impl SpannSegmentWriter {
     pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
-        hnsw_provider: HnswIndexProvider,
+        hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
         // Load HNSW index.
-        let hnsw_index = match segment.file_path.get(HNSW_PATH) {
+        let distance_function = match distance_function_from_segment(segment) {
+            Ok(distance_function) => distance_function,
+            Err(e) => {
+                return Err(SpannSegmentWriterError::DistanceFunctionNotFound);
+            }
+        };
+        let (hnsw_id, hnsw_params) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
                     let index_uuid = match Uuid::parse_str(index_id) {
@@ -80,62 +77,16 @@ impl SpannSegmentWriter {
                             return Err(SpannSegmentWriterError::IndexIdParsingError);
                         }
                     };
-                    let distance_function = match distance_function_from_segment(segment) {
-                        Ok(distance_function) => distance_function,
-                        Err(e) => {
-                            return Err(SpannSegmentWriterError::DistanceFunctionNotFound);
-                        }
-                    };
-                    match SpannIndexWriter::hnsw_index_from_id(
-                        &hnsw_provider,
-                        &index_uuid,
-                        &segment.collection,
-                        distance_function,
-                        dimensionality,
-                    )
-                    .await
-                    {
-                        Ok(index) => index,
-                        Err(_) => {
-                            return Err(SpannSegmentWriterError::HnswIndexCreationError);
-                        }
-                    }
+                    (Some(index_uuid), Some(hnsw_params_from_segment(segment)))
                 }
                 None => {
                     return Err(SpannSegmentWriterError::HnswInvalidFilePath);
                 }
             },
-            // Create a new index.
-            None => {
-                let hnsw_params = hnsw_params_from_segment(segment);
-
-                let distance_function = match distance_function_from_segment(segment) {
-                    Ok(distance_function) => distance_function,
-                    Err(e) => {
-                        return Err(SpannSegmentWriterError::DistanceFunctionNotFound);
-                    }
-                };
-
-                match SpannIndexWriter::create_hnsw_index(
-                    &hnsw_provider,
-                    &segment.collection,
-                    distance_function,
-                    dimensionality,
-                    hnsw_params,
-                )
-                .await
-                {
-                    Ok(index) => index,
-                    Err(_) => {
-                        return Err(SpannSegmentWriterError::HnswIndexCreationError);
-                    }
-                }
-            }
+            None => (None, None),
         };
-        // Load version map. Empty if file path is not set.
-        let mut version_map = HashMap::new();
-        if let Some(version_map_path) = segment.file_path.get(VERSION_MAP_PATH) {
-            version_map = match version_map_path.first() {
+        let versions_map_id = match segment.file_path.get(VERSION_MAP_PATH) {
+            Some(version_map_path) => match version_map_path.first() {
                 Some(version_map_id) => {
                     let version_map_uuid = match Uuid::parse_str(version_map_id) {
                         Ok(uuid) => uuid,
@@ -143,22 +94,16 @@ impl SpannSegmentWriter {
                             return Err(SpannSegmentWriterError::IndexIdParsingError);
                         }
                     };
-                    match SpannIndexWriter::load_versions_map(&version_map_uuid, blockfile_provider)
-                        .await
-                    {
-                        Ok(index) => index,
-                        Err(_) => {
-                            return Err(SpannSegmentWriterError::VersionMapLoadError);
-                        }
-                    }
+                    Some(version_map_uuid)
                 }
                 None => {
                     return Err(SpannSegmentWriterError::VersionMapInvalidFilePath);
                 }
-            }
-        }
+            },
+            None => None,
+        };
         // Fork the posting list map.
-        let posting_list_writer = match segment.file_path.get(POSTING_LIST_PATH) {
+        let posting_list_id = match segment.file_path.get(POSTING_LIST_PATH) {
             Some(posting_list_path) => match posting_list_path.first() {
                 Some(posting_list_id) => {
                     let posting_list_uuid = match Uuid::parse_str(posting_list_id) {
@@ -167,33 +112,34 @@ impl SpannSegmentWriter {
                             return Err(SpannSegmentWriterError::IndexIdParsingError);
                         }
                     };
-                    match SpannIndexWriter::fork_postings_list(
-                        &posting_list_uuid,
-                        blockfile_provider,
-                    )
-                    .await
-                    {
-                        Ok(writer) => writer,
-                        Err(_) => {
-                            return Err(SpannSegmentWriterError::PostingListForkError);
-                        }
-                    }
+                    Some(posting_list_uuid)
                 }
                 None => {
                     return Err(SpannSegmentWriterError::PostingListInvalidFilePath);
                 }
             },
             // Create a new index.
-            None => match SpannIndexWriter::create_posting_list(blockfile_provider).await {
-                Ok(writer) => writer,
-                Err(_) => {
-                    return Err(SpannSegmentWriterError::PostingListCreationError);
-                }
-            },
+            None => None,
         };
 
-        let index_writer =
-            SpannIndexWriter::new(hnsw_index, hnsw_provider, posting_list_writer, version_map);
+        let index_writer = match SpannIndexWriter::from_id(
+            hnsw_provider,
+            hnsw_id.as_ref(),
+            versions_map_id.as_ref(),
+            posting_list_id.as_ref(),
+            hnsw_params,
+            &segment.collection,
+            distance_function,
+            dimensionality,
+            blockfile_provider,
+        )
+        .await
+        {
+            Ok(index_writer) => index_writer,
+            Err(_) => {
+                return Err(SpannSegmentWriterError::SpannIndexWriterConstructionError);
+            }
+        };
 
         Ok(SpannSegmentWriter {
             index: index_writer,

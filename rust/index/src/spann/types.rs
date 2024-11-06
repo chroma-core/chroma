@@ -57,7 +57,7 @@ impl SpannIndexWriter {
         }
     }
 
-    pub async fn hnsw_index_from_id(
+    async fn hnsw_index_from_id(
         hnsw_provider: &HnswIndexProvider,
         id: &Uuid,
         collection_id: &Uuid,
@@ -73,7 +73,7 @@ impl SpannIndexWriter {
         }
     }
 
-    pub async fn create_hnsw_index(
+    async fn create_hnsw_index(
         hnsw_provider: &HnswIndexProvider,
         collection_id: &Uuid,
         distance_function: DistanceFunction,
@@ -96,7 +96,7 @@ impl SpannIndexWriter {
         }
     }
 
-    pub async fn load_versions_map(
+    async fn load_versions_map(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<HashMap<u32, u32>, SpannIndexWriterConstructionError> {
@@ -116,7 +116,7 @@ impl SpannIndexWriter {
         Ok(versions_map)
     }
 
-    pub async fn fork_postings_list(
+    async fn fork_postings_list(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterConstructionError> {
@@ -129,12 +129,69 @@ impl SpannIndexWriter {
         }
     }
 
-    pub async fn create_posting_list(
+    async fn create_posting_list(
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterConstructionError> {
         match blockfile_provider.create::<u32, &SpannPostingList<'_>>() {
             Ok(writer) => Ok(writer),
             Err(_) => Err(SpannIndexWriterConstructionError::BlockfileWriterConstructionError),
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn from_id(
+        hnsw_provider: &HnswIndexProvider,
+        hnsw_id: Option<&Uuid>,
+        versions_map_id: Option<&Uuid>,
+        posting_list_id: Option<&Uuid>,
+        hnsw_params: Option<HnswIndexParams>,
+        collection_id: &Uuid,
+        distance_function: DistanceFunction,
+        dimensionality: usize,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<Self, SpannIndexWriterConstructionError> {
+        // Create the HNSW index.
+        let hnsw_index = match hnsw_id {
+            Some(hnsw_id) => {
+                Self::hnsw_index_from_id(
+                    hnsw_provider,
+                    hnsw_id,
+                    collection_id,
+                    distance_function,
+                    dimensionality,
+                )
+                .await?
+            }
+            None => {
+                Self::create_hnsw_index(
+                    hnsw_provider,
+                    collection_id,
+                    distance_function,
+                    dimensionality,
+                    hnsw_params.unwrap(), // Safe since caller should always provide this.
+                )
+                .await?
+            }
+        };
+        // Load the versions map.
+        let versions_map = match versions_map_id {
+            Some(versions_map_id) => {
+                Self::load_versions_map(versions_map_id, blockfile_provider).await?
+            }
+            None => HashMap::new(),
+        };
+        // Fork the posting list writer.
+        let posting_list_writer = match posting_list_id {
+            Some(posting_list_id) => {
+                Self::fork_postings_list(posting_list_id, blockfile_provider).await?
+            }
+            None => Self::create_posting_list(blockfile_provider).await?,
+        };
+        Ok(Self::new(
+            hnsw_index,
+            hnsw_provider.clone(),
+            posting_list_writer,
+            versions_map,
+        ))
     }
 }
