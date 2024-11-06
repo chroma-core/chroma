@@ -1,11 +1,17 @@
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter, IndexUuid};
-use chroma_types::{Segment, SegmentScope, SegmentType, SegmentUuid};
+use chroma_index::IndexUuid;
+use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
+use chroma_types::SegmentUuid;
+use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::utils::{distance_function_from_segment, hnsw_params_from_segment};
+use super::{
+    record_segment::ApplyMaterializedLogError,
+    utils::{distance_function_from_segment, hnsw_params_from_segment},
+    MaterializedLogRecord, SegmentFlusher, SegmentWriter,
+};
 
 #[allow(dead_code)]
 const HNSW_PATH: &str = "hnsw_path";
@@ -152,5 +158,36 @@ impl SpannSegmentWriter {
             index: index_writer,
             id: segment.id,
         })
+    }
+
+    async fn add(&self, record: &MaterializedLogRecord<'_>) {
+        // Initialize the record with a version.
+        self.index.add_new_record_to_versions_map(record.offset_id);
+        self.index
+            .add_new_record_to_postings_list(record.offset_id, record.merged_embeddings());
+    }
+}
+
+impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
+    async fn apply_materialized_log_chunk(
+        &self,
+        records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        for (record, idx) in records.iter() {
+            match record.final_operation {
+                MaterializedLogOperation::AddNew => {
+                    self.add(record).await;
+                }
+                // TODO(Sanket): Implement other operations.
+                _ => {
+                    todo!()
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+        todo!()
     }
 }
