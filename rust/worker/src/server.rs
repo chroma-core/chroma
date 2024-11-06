@@ -571,6 +571,44 @@ impl WorkerServer {
         let response = chroma_proto::QueryMetadataResponse { records: output };
         Ok(Response::new(response))
     }
+
+    fn collection_uuid(segment_id: &str) -> Result<Uuid, Status> {
+        Self::parse_uuid(segment_id, "Invalid Collection UUID")
+    }
+
+    fn segment_uuid(segment_id: &str) -> Result<Uuid, Status> {
+        Self::parse_uuid(segment_id, "Invalid Segment UUID")
+    }
+
+    fn parse_uuid(uuid: &str, error_msg: &str) -> Result<Uuid, Status> {
+        let uuid = Uuid::parse_str(uuid)
+            .map_err(|_| Status::invalid_argument(format!("{}: {}", error_msg, uuid)))?;
+
+        Ok(uuid)
+    }
+
+    fn version_context(ctx: &Option<RequestVersionContext>) -> Result<(u32, u64), Status> {
+        let ctx = ctx
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("No version context provided"))?;
+        Ok((ctx.collection_version, ctx.log_position))
+    }
+
+    fn clone_dispatcher(&self) -> Result<ComponentHandle<Dispatcher>, Status> {
+        let dispatcher = self
+            .dispatcher
+            .as_ref()
+            .ok_or_else(|| Status::internal("No dispatcher found"))?;
+        Ok(dispatcher.clone())
+    }
+
+    fn clone_system(&self) -> Result<System, Status> {
+        let system = self
+            .system
+            .as_ref()
+            .ok_or_else(|| Status::internal("No system found"))?;
+        Ok(system.clone())
+    }
 }
 
 #[tonic::async_trait]
@@ -752,13 +790,6 @@ mod tests {
     use chroma_storage::{local::LocalStorage, Storage};
     #[cfg(debug_assertions)]
     use tempfile::tempdir;
-
-    use chroma_types::{Collection, Segment, SegmentScope, SegmentType};
-    use std::collections::HashMap;
-    use std::str::FromStr;
-    use uuid::Uuid;
-
-    use std::sync::LazyLock;
 
     const COLLECTION_UUID: &str = "00000000-0000-0000-0000-000000000001";
     const SEGMENT_UUID: &str = "00000000-0000-0000-0000-000000000003";
