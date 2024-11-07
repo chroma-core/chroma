@@ -3,6 +3,7 @@ import multiprocessing
 from typing import Optional, Sequence, List, Tuple
 import numpy as np
 from chromadb.api.types import URI, DataLoader, Image, URIs
+from chromadb.errors import InvalidArgumentError
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -12,7 +13,7 @@ class ImageLoader(DataLoader[List[Optional[Image]]]):
             self._PILImage = importlib.import_module("PIL.Image")
             self._max_workers = max_workers
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
