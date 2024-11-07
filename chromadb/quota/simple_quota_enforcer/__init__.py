@@ -1,5 +1,5 @@
 from overrides import override
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, Dict
 
 from chromadb.quota import QuotaEnforcer
 from chromadb.config import System
@@ -16,5 +16,9 @@ class SimpleQuotaEnforcer(QuotaEnforcer):
         super().__init__(system)
 
     @override
-    def enforce(self) -> None:
+    def set_context(self, context: Dict[str, Any]) -> None:
+        pass
+
+    @override
+    def enforce(self, action: str, tenant: str, **kwargs: Dict[str, Any]) -> None:
         pass

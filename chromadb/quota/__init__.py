@@ -1,4 +1,6 @@
 from abc import abstractmethod
+from typing import Dict, Any
+
 from chromadb.config import Component, System
 
 
@@ -11,7 +13,14 @@ class QuotaEnforcer(Component):
         super().__init__(system)
 
     @abstractmethod
-    def enforce(self) -> None:
+    def set_context(self, context: Dict[str, Any]) -> None:
+        """
+        Sets the context for a given request.
+        """
+        pass
+
+    @abstractmethod
+    def enforce(self, action: str, tenant: str, **kwargs: Dict[str, Any]) -> None:
         """
         Enforces a quota.
         """
