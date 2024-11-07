@@ -44,7 +44,10 @@ use chroma_types::{Chunk, Collection, CollectionUuid, LogRecord, Segment, Vector
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    cmp::min,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 use tracing::{trace, Span};
 use uuid::Uuid;
@@ -473,9 +476,10 @@ impl HnswQueryOrchestrator {
         let brute_force_result = self.brute_force_results.remove(&query_vector_index);
 
         tracing::info!(
-            "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids",
+            "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids, hnsw ids: {:?}...",
             brute_force_result.as_ref().map_or(0, |x| x.user_ids.len()),
-            hnsw_result_offset_ids.len()
+            hnsw_result_offset_ids.len(),
+            &hnsw_result_offset_ids[0..min(5, hnsw_result_offset_ids.len() - 1)],
         );
 
         let operator = Box::new(MergeKnnResultsOperator {});
