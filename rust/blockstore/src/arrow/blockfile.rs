@@ -635,7 +635,7 @@ mod tests {
     };
     use crate::{BlockfileReader, BlockfileWriter, BlockfileWriterOptions};
     use chroma_cache::new_cache_for_test;
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::Storage;
     use chroma_types::{DataRecord, MetadataValue};
     use futures::{StreamExt, TryStreamExt};
     use parking_lot::Mutex;
@@ -650,8 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_count() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -690,8 +689,7 @@ mod tests {
 
     fn test_prefix(num_keys: u32, prefix_for_query: u32) {
         Runtime::new().unwrap().block_on(async {
-            let tmp_dir = tempfile::tempdir().unwrap();
-            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            let storage = Storage::new_test_storage();
             let block_cache = new_cache_for_test();
             let sparse_index_cache = new_cache_for_test();
             let blockfile_provider = ArrowBlockfileProvider::new(
@@ -757,8 +755,7 @@ mod tests {
 
     fn blockfile_comparisons(operation: ComparisonOperation, num_keys: u32, query_key: u32) {
         Runtime::new().unwrap().block_on(async {
-            let tmp_dir = tempfile::tempdir().unwrap();
-            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            let storage = Storage::new_test_storage();
             let block_cache = new_cache_for_test();
             let sparse_index_cache = new_cache_for_test();
             let blockfile_provider = ArrowBlockfileProvider::new(
@@ -914,8 +911,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockfile() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -954,8 +950,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_splitting() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1071,8 +1066,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_splitting_boundary() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1116,8 +1110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_string_value() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1156,8 +1149,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_float_key() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let provider = ArrowBlockfileProvider::new(
@@ -1193,8 +1185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_roaring_bitmap_value() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1243,8 +1234,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_uint_key_val() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1280,8 +1270,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_record_val() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1335,8 +1324,7 @@ mod tests {
     #[tokio::test]
     async fn test_large_split_value() {
         // Tests the case where a value is larger than half the block size
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1376,8 +1364,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1446,8 +1433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_at_index() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1488,8 +1474,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_first_block_removal() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1583,8 +1568,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_to_same_key_many_times() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let blockfile_provider = ArrowBlockfileProvider::new(
@@ -1617,8 +1601,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_v1_to_v1_1_migration_all_new() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
@@ -1672,8 +1655,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_v1_to_v1_1_migration_partially_new() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);

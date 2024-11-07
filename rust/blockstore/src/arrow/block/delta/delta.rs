@@ -139,7 +139,7 @@ mod test {
     use crate::arrow::{block::Block, config::TEST_MAX_BLOCK_SIZE_BYTES, provider::BlockManager};
     #[cfg(test)]
     use chroma_cache::new_cache_for_test;
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::Storage;
     use chroma_types::{DataRecord, MetadataValue};
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
@@ -164,7 +164,7 @@ mod test {
     async fn test_sizing_int_arr_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
-        let storage = Storage::Local(LocalStorage::new(path));
+        let storage = Storage::new_test_storage();
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, Vec<u32>>();
@@ -206,7 +206,7 @@ mod test {
     async fn test_sizing_string_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, String>();
@@ -267,7 +267,7 @@ mod test {
     async fn test_sizing_float_key() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
-        let storage = Storage::Local(LocalStorage::new(path));
+        let storage = Storage::new_test_storage();
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<f32, String>();
@@ -306,7 +306,7 @@ mod test {
     async fn test_sizing_roaring_bitmap_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
-        let storage = Storage::Local(LocalStorage::new(path));
+        let storage = Storage::new_test_storage();
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<&str, RoaringBitmap>();
@@ -342,7 +342,7 @@ mod test {
     async fn test_data_record() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
-        let storage = Storage::Local(LocalStorage::new(path));
+        let storage = Storage::new_test_storage();
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let ids = ["embedding_id_2", "embedding_id_0", "embedding_id_1"];
@@ -406,7 +406,7 @@ mod test {
     async fn test_sizing_uint_key_string_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
-        let storage = Storage::Local(LocalStorage::new(path));
+        let storage = Storage::new_test_storage();
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<u32, String>();
@@ -434,7 +434,7 @@ mod test {
     async fn test_sizing_uint_key_val() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage = Storage::new_test_storage();
         let cache = new_cache_for_test();
         let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
         let delta = block_manager.create::<u32, u32>();
