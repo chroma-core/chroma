@@ -40,5 +40,5 @@ proptest-state-machine = { workspace = true }
 bincode = { workspace = true }
 
 [[bench]]
-name = "writer"
+name = "blockfile_writer"
 harness = false

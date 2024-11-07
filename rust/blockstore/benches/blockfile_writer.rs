@@ -221,8 +221,8 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
     }
 }
 
-// todo: this should be a parameter
-const BLOCK_SIZE: usize = 1024 * 256; // 256KB
+// todo: maybe this should be a parameter
+const BLOCK_SIZE: usize = 1024 * 1024 * 8; // 8MB
 
 /// This benchmark compares the performance of UnorderedBlockfileWriter and OrderedBlockfileWriter across various use-cases.
 pub fn benchmark(c: &mut Criterion) {
