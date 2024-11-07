@@ -46,6 +46,7 @@ from chromadb.errors import (
     RateLimitError,
     QuotaError,
 )
+from chromadb.quota import QuotaEnforcer
 from chromadb.server import Server
 from chromadb.server.fastapi.types import (
     AddEmbedding,
@@ -180,6 +181,7 @@ class FastAPI(Server):
         self._capacity_limiter = CapacityLimiter(
             settings.chroma_server_thread_pool_size
         )
+        self._quota_enforcer = self._system.require(QuotaEnforcer)
         self._system.start()
 
         self._app.middleware("http")(check_http_version_middleware)
@@ -374,6 +376,12 @@ class FastAPI(Server):
     async def version(self) -> str:
         return self._api.get_version()
 
+    def _set_request_context(self, request: Request) -> None:
+        """
+        Set context about the request on any components that might need it.
+        """
+        self._quota_enforcer.set_context(context={"request": request})
+
     @trace_method(
         "auth_request",
         OpenTelemetryGranularity.OPERATION,
@@ -458,6 +466,8 @@ class FastAPI(Server):
                 db.name,
                 None,
             )
+
+            self._set_request_context(request=request)
 
             return self._api.create_database(db.name, tenant)
 
@@ -550,20 +560,28 @@ class FastAPI(Server):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[CollectionModel]:
-        self.auth_request(
-            request.headers,
-            AuthzAction.LIST_COLLECTIONS,
-            tenant,
-            database_name,
-            None,
-        )
+        def process_list_collections(
+            limit: Optional[int], offset: Optional[int], tenant: str, database_name: str
+        ) -> Sequence[CollectionModel]:
+            self.auth_request(
+                request.headers,
+                AuthzAction.LIST_COLLECTIONS,
+                tenant,
+                database_name,
+                None,
+            )
 
-        add_attributes_to_current_span({"tenant": tenant})
+            self._set_request_context(request=request)
+
+            add_attributes_to_current_span({"tenant": tenant})
+            return self._api.list_collections(
+                tenant=tenant, database=database_name, limit=limit, offset=offset
+            )
 
         api_collection_models = cast(
             Sequence[CollectionModel],
             await to_thread.run_sync(
-                self._api.list_collections,
+                process_list_collections,
                 limit,
                 offset,
                 tenant,
@@ -626,6 +644,8 @@ class FastAPI(Server):
                 database,
                 create.name,
             )
+
+            self._set_request_context(request=request)
 
             add_attributes_to_current_span({"tenant": tenant})
 
@@ -701,6 +721,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
@@ -763,6 +784,7 @@ class FastAPI(Server):
                     database_name,
                     collection_id,
                 )
+                self._set_request_context(request=request)
                 add_attributes_to_current_span({"tenant": tenant})
                 return self._api._add(
                     collection_id=_uuid(collection_id),
@@ -811,6 +833,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._update(
@@ -852,6 +875,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._upsert(
@@ -895,6 +919,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._get(
                 collection_id=_uuid(collection_id),
@@ -945,6 +970,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._delete(
                 collection_id=_uuid(collection_id),
@@ -1030,6 +1056,7 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._query(
