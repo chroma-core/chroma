@@ -91,7 +91,7 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
 
     async fn run(
         &self,
-        input: &GetVectorsOperatorInput,
+        input: GetVectorsOperatorInput,
     ) -> Result<GetVectorsOperatorOutput, Self::Error> {
         let mut output_vectors = HashMap::new();
 

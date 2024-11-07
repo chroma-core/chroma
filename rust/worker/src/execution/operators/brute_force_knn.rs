@@ -118,7 +118,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
 
     async fn run(
         &self,
-        input: &BruteForceKnnOperatorInput,
+        input: BruteForceKnnOperatorInput,
     ) -> Result<BruteForceKnnOperatorOutput, Self::Error> {
         // Materialize the log records
         let record_segment_reader = match RecordSegmentReader::from_segment(

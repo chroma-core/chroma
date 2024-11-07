@@ -57,7 +57,7 @@ pub enum RecordSegmentWriterCreationError {
 
 impl RecordSegmentWriter {
     async fn construct_and_set_data_record<'a>(
-        &self,
+        &mut self,
         mat_record: &MaterializedLogRecord<'a>,
         user_id: &str,
         offset_id: u32,
@@ -79,7 +79,7 @@ impl RecordSegmentWriter {
         };
         match self
             .id_to_data
-            .as_ref()
+            .as_mut()
             .unwrap()
             .set("", offset_id, &data_record)
             .await
@@ -314,7 +314,7 @@ impl ChromaError for ApplyMaterializedLogError {
 
 impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
     async fn apply_materialized_log_chunk(
-        &self,
+        &mut self,
         records: Chunk<MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         let mut count = 0u64;
@@ -326,7 +326,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Set user id to offset id.
                     match self
                         .user_id_to_id
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .set::<&str, u32>("", log_record.user_id.unwrap(), log_record.offset_id)
                         .await
@@ -339,7 +339,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Set offset id to user id.
                     match self
                         .id_to_user_id
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .set::<u32, String>("", log_record.offset_id, log_record.user_id.unwrap().to_string())
                         .await
@@ -366,7 +366,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Set max offset id.
                     match self
                         .max_offset_id
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .set("", MAX_OFFSET_ID, log_record.offset_id)
                         .await
@@ -383,7 +383,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // semantics so we'll delete and insert.
                     match self
                         .id_to_data
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .delete::<u32, &DataRecord>("", log_record.offset_id)
                         .await
@@ -412,7 +412,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Delete user id to offset id.
                     match self
                         .user_id_to_id
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .delete::<&str, u32>("", log_record.data_record.as_ref().unwrap().id)
                         .await
@@ -426,7 +426,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Delete offset id to user id.
                     match self
                         .id_to_user_id
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .delete::<u32, String>("", log_record.offset_id)
                         .await
@@ -440,7 +440,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Delete data record.
                     match self
                         .id_to_data
-                        .as_ref()
+                        .as_mut()
                         .unwrap()
                         .delete::<u32, &DataRecord>("", log_record.offset_id)
                         .await

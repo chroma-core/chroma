@@ -69,10 +69,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         "CountRecordsOperator"
     }
 
-    async fn run(
-        &self,
-        input: &CountRecordsInput,
-    ) -> Result<CountRecordsOutput, CountRecordsError> {
+    async fn run(&self, input: CountRecordsInput) -> Result<CountRecordsOutput, CountRecordsError> {
         let segment_reader = RecordSegmentReader::from_segment(
             &input.record_segment_definition,
             &input.blockfile_provider,

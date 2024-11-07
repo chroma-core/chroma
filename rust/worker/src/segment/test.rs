@@ -53,7 +53,7 @@ impl TestSegment {
             .await
             .expect("Should be able to flush metadata.");
 
-        let record_writer =
+        let mut record_writer =
             RecordSegmentWriter::from_segment(&self.record_segment, &self.blockfile_provider)
                 .await
                 .expect("Should be able to initiaize record writer.");

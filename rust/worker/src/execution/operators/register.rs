@@ -102,7 +102,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         "RegisterOperator"
     }
 
-    async fn run(&self, input: &RegisterInput) -> Result<RegisterOutput, RegisterError> {
+    async fn run(&self, input: RegisterInput) -> Result<RegisterOutput, RegisterError> {
         let mut sysdb = input.sysdb.clone();
         let mut log = input.log.clone();
         let result = sysdb

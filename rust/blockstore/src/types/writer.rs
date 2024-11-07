@@ -7,11 +7,26 @@ use crate::memory::reader_writer::MemoryBlockfileWriter;
 use crate::memory::storage::Writeable;
 use chroma_error::ChromaError;
 
-#[derive(Clone)]
 pub enum BlockfileWriter {
     MemoryBlockfileWriter(MemoryBlockfileWriter),
     ArrowOrderedBlockfileWriter(ArrowOrderedBlockfileWriter),
     ArrowUnorderedBlockfileWriter(ArrowUnorderedBlockfileWriter),
+}
+
+impl Clone for BlockfileWriter {
+    fn clone(&self) -> Self {
+        match self {
+            BlockfileWriter::MemoryBlockfileWriter(writer) => {
+                BlockfileWriter::MemoryBlockfileWriter(writer.clone())
+            }
+            BlockfileWriter::ArrowOrderedBlockfileWriter(_) => {
+                panic!("Cannot clone ArrowOrderedBlockfileWriter") // todo
+            }
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
+                BlockfileWriter::ArrowUnorderedBlockfileWriter(writer.clone())
+            }
+        }
+    }
 }
 
 impl BlockfileWriter {
@@ -45,7 +60,7 @@ impl BlockfileWriter {
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
-        &self,
+        &mut self,
         prefix: &str,
         key: K,
         value: V,
@@ -65,7 +80,7 @@ impl BlockfileWriter {
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
-        &self,
+        &mut self,
         prefix: &str,
         key: K,
     ) -> Result<(), Box<dyn ChromaError>> {

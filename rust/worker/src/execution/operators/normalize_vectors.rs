@@ -35,7 +35,7 @@ impl Operator<NormalizeVectorOperatorInput, NormalizeVectorOperatorOutput>
 
     async fn run(
         &self,
-        input: &NormalizeVectorOperatorInput,
+        input: NormalizeVectorOperatorInput,
     ) -> Result<NormalizeVectorOperatorOutput, Self::Error> {
         // TODO: this should not have to reallocate the vectors. We can optimize this later.
         let mut normalized_vectors = Vec::with_capacity(input.vectors.len());

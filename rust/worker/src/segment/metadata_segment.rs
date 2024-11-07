@@ -512,7 +512,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 
 impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
     async fn apply_materialized_log_chunk(
-        &self,
+        &mut self,
         records: Chunk<MaterializedLogRecord<'log_records>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         let mut count = 0u64;

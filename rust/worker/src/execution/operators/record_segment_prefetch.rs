@@ -71,7 +71,7 @@ impl Operator<RecordSegmentPrefetchIoInput, RecordSegmentPrefetchIoOutput>
 
     async fn run(
         &self,
-        input: &RecordSegmentPrefetchIoInput,
+        input: RecordSegmentPrefetchIoInput,
     ) -> Result<RecordSegmentPrefetchIoOutput, Self::Error> {
         match &input.keys {
             Keys::OffsetIdToDataKeys(keys) => {

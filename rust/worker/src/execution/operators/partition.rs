@@ -123,7 +123,7 @@ impl Operator<PartitionInput, PartitionOutput> for PartitionOperator {
         "PartitionOperator"
     }
 
-    async fn run(&self, input: &PartitionInput) -> Result<PartitionOutput, PartitionError> {
+    async fn run(&self, input: PartitionInput) -> Result<PartitionOutput, PartitionError> {
         let records = &input.records;
         let partition_size = self.determine_partition_size(records.len(), input.max_partition_size);
         let deduped_records = self.partition(records, partition_size);
