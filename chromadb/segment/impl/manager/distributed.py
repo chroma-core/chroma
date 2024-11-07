@@ -9,6 +9,7 @@ from chromadb.segment import (
 )
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
+from chromadb.errors import InvalidArgumentError
 from overrides import override
 from chromadb.segment.distributed import SegmentDirectory
 from chromadb.telemetry.opentelemetry import (
@@ -88,7 +89,7 @@ class DistributedSegmentManager(SegmentManager):
         elif type == VectorReader:
             scope = SegmentScope.VECTOR
         else:
-            raise ValueError(f"Invalid segment type: {type}")
+            raise InvalidArgumentError(f"Invalid segment type: {type}")
 
         if scope not in self._segment_cache[collection_id]:
             segments = self._sysdb.get_segments(collection=collection_id, scope=scope)

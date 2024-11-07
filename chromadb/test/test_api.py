@@ -3,7 +3,10 @@ import traceback
 import httpx
 
 import chromadb
-from chromadb.errors import ChromaError
+from chromadb.errors import (
+    ChromaError,
+    InvalidArgumentError
+)
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
@@ -709,7 +712,7 @@ bad_metadata_records = {
 def test_metadata_validation_add(client):
     client.reset()
     collection = client.create_collection("test_metadata_validation")
-    with pytest.raises(ValueError, match="metadata"):
+    with pytest.raises(InvalidArgumentError, match="metadata"):
         collection.add(**bad_metadata_records)
 
 
@@ -717,21 +720,21 @@ def test_metadata_validation_update(client):
     client.reset()
     collection = client.create_collection("test_metadata_validation")
     collection.add(**metadata_records)
-    with pytest.raises(ValueError, match="metadata"):
+    with pytest.raises(InvalidArgumentError, match="metadata"):
         collection.update(ids=["id1"], metadatas={"value": {"nested": "5"}})
 
 
 def test_where_validation_get(client):
     client.reset()
     collection = client.create_collection("test_where_validation")
-    with pytest.raises(ValueError, match="where"):
+    with pytest.raises(InvalidArgumentError, match="where"):
         collection.get(where={"value": {"nested": "5"}})
 
 
 def test_where_validation_query(client):
     client.reset()
     collection = client.create_collection("test_where_validation")
-    with pytest.raises(ValueError, match="where"):
+    with pytest.raises(InvalidArgumentError, match="where"):
         collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
 
 
@@ -799,39 +802,39 @@ def test_where_valid_operators(client):
     client.reset()
     collection = client.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where={"int_value": {"$invalid": 2}})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where={"int_value": {"$lt": "2"}})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where={"int_value": {"$lt": 2, "$gt": 1}})
 
     # Test invalid $and, $or
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where={"$and": {"int_value": {"$lt": 2}}})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(
             where={"int_value": {"$lt": 2}, "$or": {"int_value": {"$gt": 1}}}
         )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(
             where={"$gt": [{"int_value": {"$lt": 2}}, {"int_value": {"$gt": 1}}]}
         )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where={"$or": [{"int_value": {"$lt": 2}}]})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where={"$or": []})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where={"a": {"$contains": "test"}})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(
             where={
                 "$or": [
@@ -882,31 +885,31 @@ def test_query_document_valid_operators(client):
     client.reset()
     collection = client.create_collection("test_where_valid_operators")
     collection.add(**operator_records)
-    with pytest.raises(ValueError, match="where document"):
+    with pytest.raises(InvalidArgumentError, match="where document"):
         collection.get(where_document={"$lt": {"$nested": 2}})
 
-    with pytest.raises(ValueError, match="where document"):
+    with pytest.raises(InvalidArgumentError, match="where document"):
         collection.query(query_embeddings=[0, 0, 0], where_document={"$contains": 2})
 
-    with pytest.raises(ValueError, match="where document"):
+    with pytest.raises(InvalidArgumentError, match="where document"):
         collection.get(where_document={"$contains": []})
 
     # Test invalid $and, $or
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where_document={"$and": {"$unsupported": "doc"}})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(
             where_document={"$or": [{"$unsupported": "doc"}, {"$unsupported": "doc"}]}
         )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where_document={"$or": [{"$contains": "doc"}]})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(where_document={"$or": []})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection.get(
             where_document={
                 "$or": [{"$and": [{"$contains": "doc"}]}, {"$contains": "doc"}]
@@ -1174,10 +1177,10 @@ def test_get_include(client):
     assert items["ids"][0] == "id1"
     assert items["included"] == []
 
-    with pytest.raises(ValueError, match="include"):
+    with pytest.raises(InvalidArgumentError, match="include"):
         items = collection.get(include=["metadatas", "undefined"])
 
-    with pytest.raises(ValueError, match="include"):
+    with pytest.raises(InvalidArgumentError, match="include"):
         items = collection.get(include=None)
 
 
@@ -1206,17 +1209,17 @@ def test_invalid_id(client):
     client.reset()
     collection = client.create_collection("test_invalid_id")
     # Add with non-string id
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         collection.add(embeddings=[0, 0, 0], ids=[1], metadatas=[{}])
     assert "ID" in str(e.value)
 
     # Get with non-list id
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         collection.get(ids=1)
     assert "ID" in str(e.value)
 
     # Delete with malformed ids
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         collection.delete(ids=["valid", 0])
     assert "ID" in str(e.value)
 
@@ -1440,14 +1443,14 @@ def test_invalid_n_results_param(client):
     )
     assert exc.type == TypeError
 
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(InvalidArgumentError) as exc:
         collection.query(
             query_embeddings=[[1.1, 2.3, 3.2]],
             n_results="one",
             include=["embeddings", "documents", "metadatas", "distances"],
         )
     assert "int" in str(exc.value)
-    assert exc.type == ValueError
+    assert exc.type == InvalidArgumentError
 
 
 initial_records = {
@@ -1548,12 +1551,12 @@ def test_invalid_embeddings(client):
         "embeddings": [["0", "0", "0"], ["1.2", "2.24", "3.2"]],
         "ids": ["id1", "id2"],
     }
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         collection.add(**invalid_records)
     assert "embedding" in str(e.value)
 
     # Query with invalid embeddings
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         collection.query(
             query_embeddings=[["1.1", "2.3", "3.2"]],
             n_results=1,
@@ -1565,7 +1568,7 @@ def test_invalid_embeddings(client):
         "embeddings": [[[0], [0], [0]], [[1.2], [2.24], [3.2]]],
         "ids": ["id1", "id2"],
     }
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         collection.update(**invalid_records)
     assert "embedding" in str(e.value)
 
@@ -1574,7 +1577,7 @@ def test_invalid_embeddings(client):
         "embeddings": [[[1.1, 2.3, 3.2]], [[1.2, 2.24, 3.2]]],
         "ids": ["id1", "id2"],
     }
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         collection.upsert(**invalid_records)
     assert "embedding" in str(e.value)
 
@@ -1616,7 +1619,7 @@ def test_ssl_self_signed_without_ssl_verify(client_ssl):
         pytest.skip("Skipping test for integration test")
     client_ssl.heartbeat()
     _port = client_ssl._server._settings.chroma_server_http_port
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         chromadb.HttpClient(ssl=True, port=_port)
     stack_trace = traceback.format_exception(
         type(e.value), e.value, e.value.__traceback__

@@ -7,6 +7,7 @@ import onnxruntime
 import pytest
 from hypothesis import given, settings
 
+from chromadb.errors import InvalidArgumentError
 from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
     ONNXMiniLM_L6_V2,
     _verify_sha256,
@@ -28,7 +29,7 @@ def unique_by(x: Hashable) -> Hashable:
     )
 )
 def test_unavailable_provider_multiple(providers: List[str]) -> None:
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         ef = ONNXMiniLM_L6_V2(preferred_providers=providers)
         ef(["test"])
     assert "Preferred providers must be subset of available providers" in str(e.value)
@@ -62,7 +63,7 @@ def test_warning_no_providers_supplied() -> None:
     ).filter(lambda x: len(x) > len(set(x)))
 )
 def test_provider_repeating(providers: List[str]) -> None:
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         ef = ONNXMiniLM_L6_V2(preferred_providers=providers)
         ef(["test"])
     assert "Preferred providers must be unique" in str(e.value)
@@ -71,7 +72,7 @@ def test_provider_repeating(providers: List[str]) -> None:
 def test_invalid_sha256() -> None:
     ef = ONNXMiniLM_L6_V2()
     shutil.rmtree(ef.DOWNLOAD_PATH)  # clean up any existing models
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         ef._MODEL_SHA256 = "invalid"
         ef(["test"])
     assert "does not match expected SHA256 hash" in str(e.value)

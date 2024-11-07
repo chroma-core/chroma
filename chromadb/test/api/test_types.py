@@ -1,6 +1,7 @@
 import pytest
 from typing import List, cast
 from chromadb.api.types import EmbeddingFunction, Documents, Image, Document, Embeddings
+from chromadb.errors import InvalidArgumentError
 import numpy as np
 
 
@@ -40,6 +41,6 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
             return cast(Embeddings, invalid_embedding)
 
     ef = TestEmbeddingFunction()
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         ef(random_documents())
-    assert e.type is ValueError
+    assert e.type is InvalidArgumentError

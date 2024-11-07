@@ -29,6 +29,7 @@ import chromadb.server.fastapi
 from chromadb.api import ClientAPI, ServerAPI, BaseAPI
 from chromadb.config import Settings, System
 from chromadb.db.mixins import embeddings_queue
+from chromadb.errors import InvalidArgumentError
 from chromadb.ingest import Producer
 from chromadb.types import SeqId, OperationRecord
 from chromadb.api.client import Client as ClientCreator, AdminClient
@@ -42,7 +43,7 @@ VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
 
 if CURRENT_PRESET not in VALID_PRESETS:
-    raise ValueError(
+    raise InvalidArgumentError(
         f"Invalid property testing preset: {CURRENT_PRESET}. Must be one of {VALID_PRESETS}."
     )
 
