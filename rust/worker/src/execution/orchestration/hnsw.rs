@@ -479,7 +479,7 @@ impl HnswQueryOrchestrator {
             "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids, hnsw ids: {:?}...",
             brute_force_result.as_ref().map_or(0, |x| x.user_ids.len()),
             hnsw_result_offset_ids.len(),
-            &hnsw_result_offset_ids[0..min(5, hnsw_result_offset_ids.len() - 1)],
+            &hnsw_result_offset_ids,
         );
 
         let operator = Box::new(MergeKnnResultsOperator {});
