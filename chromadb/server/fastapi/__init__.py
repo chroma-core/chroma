@@ -143,6 +143,10 @@ def validate_model(model: Type[D], data: Any) -> D:  # type: ignore
         return model.parse_obj(data)  # pydantic 1.x
 
 
+def pod_name() -> Optional[str]:
+    return os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")
+
+
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
     # A simple subclass of fastapi's APIRouter which treats URLs with a
     # trailing "/" the same as URLs without. Docs will only contain URLs
@@ -455,9 +459,7 @@ class FastAPI(Server):
         tenant: str,
         body: CreateDatabase = Body(...),
     ) -> None:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
@@ -491,9 +493,7 @@ class FastAPI(Server):
         database_name: str,
         tenant: str,
     ) -> Database:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         self.auth_request(
             request.headers,
             AuthzAction.GET_DATABASE,
@@ -516,9 +516,7 @@ class FastAPI(Server):
     async def create_tenant(
         self, request: Request, body: CreateTenant = Body(...)
     ) -> None:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
@@ -546,9 +544,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
     ) -> Tenant:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         self.auth_request(
             request.headers,
             AuthzAction.GET_TENANT,
@@ -575,9 +571,7 @@ class FastAPI(Server):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[CollectionModel]:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_list_collections(
             limit: Optional[int], offset: Optional[int], tenant: str, database_name: str
@@ -618,9 +612,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> int:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         self.auth_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
@@ -649,9 +641,7 @@ class FastAPI(Server):
         database_name: str,
         body: CreateCollection = Body(...),
     ) -> CollectionModel:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
@@ -705,9 +695,7 @@ class FastAPI(Server):
         database_name: str,
         collection_name: str,
     ) -> CollectionModel:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         self.auth_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
@@ -739,9 +727,7 @@ class FastAPI(Server):
         request: Request,
         body: UpdateCollection = Body(...),
     ) -> None:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
@@ -780,9 +766,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> None:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         self.auth_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
@@ -809,9 +793,7 @@ class FastAPI(Server):
         collection_id: str,
         body: AddEmbedding = Body(...),
     ) -> bool:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         try:
 
             def process_add(request: Request, raw_body: bytes) -> bool:
@@ -862,9 +844,7 @@ class FastAPI(Server):
         collection_id: str,
         body: UpdateEmbedding = Body(...),
     ) -> None:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
@@ -908,9 +888,7 @@ class FastAPI(Server):
         collection_id: str,
         body: AddEmbedding = Body(...),
     ) -> None:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
@@ -957,9 +935,7 @@ class FastAPI(Server):
         request: Request,
         body: GetEmbedding = Body(...),
     ) -> GetResult:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
@@ -1012,9 +988,7 @@ class FastAPI(Server):
         request: Request,
         body: DeleteEmbedding = Body(...),
     ) -> None:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
@@ -1051,9 +1025,7 @@ class FastAPI(Server):
         database_name: str,
         collection_id: str,
     ) -> int:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         self.auth_request(
             request.headers,
             AuthzAction.COUNT,
@@ -1079,9 +1051,7 @@ class FastAPI(Server):
         self,
         request: Request,
     ) -> bool:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
         self.auth_request(
             request.headers,
             AuthzAction.RESET,
@@ -1107,9 +1077,7 @@ class FastAPI(Server):
         request: Request,
         body: QueryEmbedding = Body(...),
     ) -> QueryResult:
-        add_attributes_to_current_span(
-            {"pod_name": os.environ.get("CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID")}
-        )
+        add_attributes_to_current_span({"pod_name": pod_name()})
 
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
