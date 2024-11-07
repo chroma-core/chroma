@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType};
+use chroma_types::{
+    Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid,
+};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -27,7 +29,7 @@ pub struct RecordSegmentWriter {
     // TODO: for now we store the max offset ID in a separate blockfile, this is not ideal
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
-    pub(crate) id: Uuid,
+    pub(crate) id: SegmentUuid,
 }
 
 impl Debug for RecordSegmentWriter {

@@ -429,6 +429,7 @@ pub mod test {
     use crate::utils;
     use chroma_distance::DistanceFunction;
     use chroma_types::CollectionUuid;
+    use chroma_types::SegmentUuid;
     use rand::seq::IteratorRandom;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
@@ -828,7 +829,7 @@ pub mod test {
     #[test]
     fn parameter_defaults() {
         let segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(HashMap::new()),
@@ -852,7 +853,7 @@ pub mod test {
         metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10_i64));
 
         let segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(metadata),

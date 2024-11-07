@@ -343,11 +343,11 @@ mod tests {
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_storage::local::LocalStorage;
+    use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::str::FromStr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_compaction_manager() {
@@ -437,7 +437,7 @@ mod tests {
         }
 
         let collection_1_record_segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: collection_uuid_1,
@@ -446,7 +446,7 @@ mod tests {
         };
 
         let collection_2_record_segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: collection_uuid_2,
@@ -455,7 +455,7 @@ mod tests {
         };
 
         let collection_1_hnsw_segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             collection: collection_uuid_1,
@@ -464,7 +464,7 @@ mod tests {
         };
 
         let collection_2_hnsw_segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             collection: collection_uuid_2,
@@ -473,7 +473,7 @@ mod tests {
         };
 
         let collection_1_metadata_segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: collection_uuid_1,
@@ -482,7 +482,7 @@ mod tests {
         };
 
         let collection_2_metadata_segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: collection_uuid_2,

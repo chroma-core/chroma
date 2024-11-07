@@ -614,7 +614,7 @@ mod tests {
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::SegmentType;
+    use chroma_types::{SegmentType, SegmentUuid};
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -630,7 +630,7 @@ mod tests {
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, rx);
         let segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid::new(),
             r#type: SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             collection: CollectionUuid(Uuid::new_v4()),

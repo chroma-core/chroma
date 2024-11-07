@@ -1,9 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType};
+use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType, SegmentUuid};
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
-use uuid::Uuid;
 
 use crate::{
     execution::operator::{Operator, OperatorType},
@@ -32,9 +31,9 @@ pub struct FetchSegmentOperator {
     pub collection_uuid: CollectionUuid,
     pub collection_version: u32,
     // TODO: Enforce segments uuid
-    pub metadata_uuid: Option<Uuid>,
-    pub record_uuid: Option<Uuid>,
-    pub vector_uuid: Option<Uuid>,
+    pub metadata_uuid: Option<SegmentUuid>,
+    pub record_uuid: Option<SegmentUuid>,
+    pub vector_uuid: Option<SegmentUuid>,
 }
 
 type FetchSegmentInput = ();

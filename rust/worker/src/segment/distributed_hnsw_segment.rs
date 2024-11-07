@@ -10,7 +10,7 @@ use chroma_index::{
     HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig, IndexConfigFromSegmentError,
     IndexUuid,
 };
-use chroma_types::{MaterializedLogOperation, Segment};
+use chroma_types::{MaterializedLogOperation, Segment, SegmentUuid};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -22,7 +22,7 @@ const HNSW_INDEX: &str = "hnsw_index";
 pub(crate) struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
-    pub(crate) id: Uuid,
+    pub(crate) id: SegmentUuid,
 }
 
 impl Debug for DistributedHNSWSegmentWriter {
@@ -72,7 +72,7 @@ impl DistributedHNSWSegmentWriter {
     pub(crate) fn new(
         index: HnswIndexRef,
         hnsw_index_provider: HnswIndexProvider,
-        id: Uuid,
+        id: SegmentUuid,
     ) -> Self {
         DistributedHNSWSegmentWriter {
             index,
@@ -257,7 +257,7 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegmentReader {
     index: HnswIndexRef,
-    pub(crate) id: Uuid,
+    pub(crate) id: SegmentUuid,
 }
 
 impl Debug for DistributedHNSWSegmentReader {
@@ -269,7 +269,7 @@ impl Debug for DistributedHNSWSegmentReader {
 }
 
 impl DistributedHNSWSegmentReader {
-    fn new(index: HnswIndexRef, id: Uuid) -> Self {
+    fn new(index: HnswIndexRef, id: SegmentUuid) -> Self {
         DistributedHNSWSegmentReader { index, id }
     }
 

@@ -806,11 +806,10 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        CollectionUuid, DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator, Where,
-        WhereComparison,
+        CollectionUuid, DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator,
+        SegmentUuid, Where, WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_materializer_add_delete_upsert() {
@@ -827,7 +826,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -836,7 +835,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1120,7 +1119,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1129,7 +1128,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1405,7 +1404,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1414,7 +1413,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1709,7 +1708,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
