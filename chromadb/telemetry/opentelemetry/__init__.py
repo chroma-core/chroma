@@ -128,9 +128,7 @@ def trace_method(
             @wraps(f)
             async def async_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
                 global tracer, granularity
-                add_attributes_to_current_span(
-                    {"pod_name": os.environ.get("HOSTNAME", "<unset>")}
-                )
+                add_attributes_to_current_span({"pod_name": os.environ.get("HOSTNAME")})
                 if trace_granularity < granularity:
                     return await f(*args, **kwargs)
                 if not tracer:
@@ -144,9 +142,7 @@ def trace_method(
             @wraps(f)
             def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
                 global tracer, granularity
-                add_attributes_to_current_span(
-                    {"pod_name": os.environ.get("HOSTNAME", "<unset>")}
-                )
+                add_attributes_to_current_span({"pod_name": os.environ.get("HOSTNAME")})
                 if trace_granularity < granularity:
                     return f(*args, **kwargs)
                 if not tracer:
