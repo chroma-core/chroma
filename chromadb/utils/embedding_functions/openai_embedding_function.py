@@ -116,7 +116,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             ).data
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(embeddings, key=lambda e: e.index)
+            sorted_embeddings = sorted(
+                embeddings, key=lambda e: e.index  # type: ignore
+            )
 
             # Return just the embeddings
             return cast(Embeddings, [result.embedding for result in sorted_embeddings])
@@ -131,7 +133,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 ]
 
             # Sort resulting embeddings by index
-            sorted_embeddings = sorted(embeddings, key=lambda e: e["index"])
+            sorted_embeddings = sorted(
+                embeddings, key=lambda e: e["index"]  # type: ignore
+            )
 
             # Return just the embeddings
             return cast(
