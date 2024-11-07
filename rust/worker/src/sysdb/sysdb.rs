@@ -218,7 +218,7 @@ impl GrpcSysDb {
             .client
             .get_segments(chroma_proto::GetSegmentsRequest {
                 // TODO: modularize
-                id: id.map(|uuid| uuid.0.into()),
+                id: id.as_ref().map(ToString::to_string),
                 r#type,
                 scope: scope.map(|x| x as i32),
                 collection: collection.to_string(),
