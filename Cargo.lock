@@ -1023,7 +1023,9 @@ dependencies = [
 
 [[package]]
 name = "biometrics"
-version = "0.9.0"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d497470bfb1e5ade63ac03cd2871ed7ef7c7cc8657ee43b1469e4988e1bafc97"
 dependencies = [
  "sig_fig_histogram",
 ]
@@ -5024,6 +5026,8 @@ dependencies = [
 [[package]]
 name = "sig_fig_histogram"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43ca5e12dae79261e4e745bb9ef1f4d4c6006ced143f5a0449f5a548c69cfee2"
 
 [[package]]
 name = "signal-hook-registry"
@@ -5172,7 +5176,9 @@ dependencies = [
 
 [[package]]
 name = "sync42"
-version = "0.11.0"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89b13d9260de381373a792e01e070de9106315639c38f95b13cd4f93da33e0c6"
 dependencies = [
  "biometrics",
 ]
