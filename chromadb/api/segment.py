@@ -140,7 +140,10 @@ class SegmentAPI(ServerAPI):
         if len(name) < 3:
             raise ValueError("Database name must be at least 3 characters long")
 
-        self._quota_enforcer.enforce(action="create_database", **locals())
+        self._quota_enforcer.enforce(
+            action="create_database",
+            **{k: v for k, v in locals().items() if k != "self"},
+        )
 
         self._sysdb.create_database(
             id=uuid4(),
@@ -197,7 +200,10 @@ class SegmentAPI(ServerAPI):
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
 
-        self._quota_enforcer.enforce(action="create_collection", **locals())
+        self._quota_enforcer.enforce(
+            action="create_collection",
+            **{k: v for k, v in locals().items() if k != "self"},
+        )
 
         id = uuid4()
 
@@ -299,7 +305,10 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
-        self._quota_enforcer.enforce(action="list_collections", **locals())
+        self._quota_enforcer.enforce(
+            action="list_collections",
+            **{k: v for k, v in locals().items() if k != "self"},
+        )
 
         return self._sysdb.get_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
@@ -340,7 +349,10 @@ class SegmentAPI(ServerAPI):
         # Ensure the collection exists
         _ = self._get_collection(id)
 
-        self._quota_enforcer.enforce(action="update_collection", **locals())
+        self._quota_enforcer.enforce(
+            action="update_collection",
+            **{k: v for k, v in locals().items() if k != "self"},
+        )
 
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
@@ -405,7 +417,9 @@ class SegmentAPI(ServerAPI):
         )
         self._validate_embedding_record_set(coll, records_to_submit)
 
-        self._quota_enforcer.enforce(action="add", **locals())
+        self._quota_enforcer.enforce(
+            action="add", **{k: v for k, v in locals().items() if k != "self"}
+        )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
@@ -452,7 +466,9 @@ class SegmentAPI(ServerAPI):
         )
         self._validate_embedding_record_set(coll, records_to_submit)
 
-        self._quota_enforcer.enforce(action="update", **locals())
+        self._quota_enforcer.enforce(
+            action="update", **{k: v for k, v in locals().items() if k != "self"}
+        )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
@@ -501,7 +517,9 @@ class SegmentAPI(ServerAPI):
         )
         self._validate_embedding_record_set(coll, records_to_submit)
 
-        self._quota_enforcer.enforce(action="upsert", **locals())
+        self._quota_enforcer.enforce(
+            action="upsert", **{k: v for k, v in locals().items() if k != "self"}
+        )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
@@ -547,7 +565,9 @@ class SegmentAPI(ServerAPI):
         if where_document is not None:
             validate_where_document(where_document)
 
-        self._quota_enforcer.enforce(action="get", **locals())
+        self._quota_enforcer.enforce(
+            action="get", **{k: v for k, v in locals().items() if k != "self"}
+        )
 
         if sort is not None:
             raise NotImplementedError("Sorting is not yet supported")
@@ -629,7 +649,9 @@ class SegmentAPI(ServerAPI):
 
         coll = self._get_collection(collection_id)
 
-        self._quota_enforcer.enforce(action="delete", **locals())
+        self._quota_enforcer.enforce(
+            action="delete", **{k: v for k, v in locals().items() if k != "self"}
+        )
 
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
@@ -734,7 +756,9 @@ class SegmentAPI(ServerAPI):
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
 
-        self._quota_enforcer.enforce(action="query", **locals())
+        self._quota_enforcer.enforce(
+            action="query", **{k: v for k, v in locals().items() if k != "self"}
+        )
 
         return self._executor.knn(
             KNNPlan(
