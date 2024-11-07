@@ -1,3 +1,4 @@
+use chroma_types::SegmentUuid;
 use chroma_types::{
     Collection, CollectionUuid, FlushCompactionResponse, Segment, SegmentFlushInfo, SegmentScope,
     SegmentType, Tenant,
@@ -5,7 +6,6 @@ use chroma_types::{
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetCollectionsError;
@@ -20,7 +20,7 @@ pub(crate) struct TestSysDb {
 #[derive(Debug)]
 struct Inner {
     collections: HashMap<CollectionUuid, Collection>,
-    segments: HashMap<Uuid, Segment>,
+    segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
 }
 
@@ -86,7 +86,7 @@ impl TestSysDb {
 
     fn filter_segments(
         segment: &Segment,
-        id: Option<Uuid>,
+        id: Option<SegmentUuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
         collection: CollectionUuid,
@@ -134,7 +134,7 @@ impl TestSysDb {
 
     pub(crate) async fn get_segments(
         &mut self,
-        id: Option<Uuid>,
+        id: Option<SegmentUuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
         collection: CollectionUuid,

@@ -12,7 +12,7 @@ use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Collection, CollectionUuid, Segment, SegmentType};
+use chroma_types::{Collection, CollectionUuid, Segment, SegmentType, SegmentUuid};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
@@ -218,7 +218,12 @@ impl CountQueryOrchestrator {
         collection_id: &CollectionUuid,
     ) -> Result<Segment, Box<dyn ChromaError>> {
         let segments = sysdb
-            .get_segments(Some(*metadata_segment_id), None, None, *collection_id)
+            .get_segments(
+                Some(SegmentUuid(*metadata_segment_id)),
+                None,
+                None,
+                *collection_id,
+            )
             .await;
         let segment = match segments {
             Ok(segments) => {

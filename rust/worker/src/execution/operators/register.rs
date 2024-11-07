@@ -141,10 +141,9 @@ mod tests {
     use super::*;
     use crate::log::log::InMemoryLog;
     use crate::sysdb::test_sysdb::TestSysDb;
-    use chroma_types::{Collection, Segment, SegmentScope, SegmentType};
+    use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
     use std::collections::HashMap;
     use std::str::FromStr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_register_operator() {
@@ -189,7 +188,7 @@ mod tests {
 
         let mut file_path_1 = HashMap::new();
         file_path_1.insert("hnsw".to_string(), vec!["path_1".to_string()]);
-        let segment_id_1 = Uuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
+        let segment_id_1 = SegmentUuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
 
         let segment_1 = Segment {
             id: segment_id_1,
@@ -202,7 +201,7 @@ mod tests {
 
         let mut file_path_2 = HashMap::new();
         file_path_2.insert("hnsw".to_string(), vec!["path_2".to_string()]);
-        let segment_id_2 = Uuid::from_str("00000000-0000-0000-0000-000000000004").unwrap();
+        let segment_id_2 = SegmentUuid::from_str("00000000-0000-0000-0000-000000000004").unwrap();
         let segment_2 = Segment {
             id: segment_id_2,
             r#type: SegmentType::HnswDistributed,

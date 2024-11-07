@@ -27,7 +27,7 @@ use chroma_types::chroma_proto::{
 use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
-use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, Where};
+use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, SegmentUuid, Where};
 use futures::future::try_join_all;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
@@ -211,7 +211,7 @@ impl WorkerServer {
                 collection_version,
                 metadata_uuid: None,
                 record_uuid: None,
-                vector_uuid: Some(segment_uuid),
+                vector_uuid: Some(SegmentUuid(segment_uuid)),
             },
             FilterOperator {
                 query_ids: (!request.allowed_ids.is_empty()).then_some(request.allowed_ids),
@@ -512,7 +512,7 @@ impl WorkerServer {
             FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),
                 vector_uuid: None,
-                metadata_uuid: Some(segment_uuid),
+                metadata_uuid: Some(SegmentUuid(segment_uuid)),
                 record_uuid: None,
                 collection_uuid,
                 collection_version,

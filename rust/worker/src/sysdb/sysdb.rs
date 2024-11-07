@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
-use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError};
+use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid};
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
@@ -18,7 +18,6 @@ use tonic::service::interceptor;
 use tonic::transport::Endpoint;
 use tonic::Request;
 use tonic::Status;
-use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SysDb {
@@ -49,7 +48,7 @@ impl SysDb {
 
     pub(crate) async fn get_segments(
         &mut self,
-        id: Option<Uuid>,
+        id: Option<SegmentUuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
         collection: CollectionUuid,
@@ -210,7 +209,7 @@ impl GrpcSysDb {
 
     async fn get_segments(
         &mut self,
-        id: Option<Uuid>,
+        id: Option<SegmentUuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
         collection: CollectionUuid,
@@ -219,7 +218,7 @@ impl GrpcSysDb {
             .client
             .get_segments(chroma_proto::GetSegmentsRequest {
                 // TODO: modularize
-                id: id.map(String::from),
+                id: id.map(|uuid| uuid.0.into()),
                 r#type,
                 scope: scope.map(|x| x as i32),
                 collection: collection.to_string(),

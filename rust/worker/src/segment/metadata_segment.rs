@@ -15,7 +15,7 @@ use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
 use chroma_index::utils::merge_sorted_vecs_conjunction;
-use chroma_types::{Chunk, MaterializedLogOperation, MetadataValue, Segment, Where};
+use chroma_types::{Chunk, MaterializedLogOperation, MetadataValue, Segment, SegmentUuid, Where};
 use chroma_types::{SegmentType, SignedRoaringBitmap};
 use core::panic;
 use futures::future::BoxFuture;
@@ -41,7 +41,7 @@ pub struct MetadataSegmentWriter<'me> {
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
-    pub(crate) id: Uuid,
+    pub(crate) id: SegmentUuid,
 }
 
 impl Debug for MetadataSegmentWriter<'_> {
@@ -1245,11 +1245,10 @@ mod test {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, CollectionUuid, DirectDocumentComparison, DirectWhereComparison, LogRecord,
-        MetadataValue, Operation, OperationRecord, PrimitiveOperator, UpdateMetadataValue, Where,
-        WhereComparison,
+        MetadataValue, Operation, OperationRecord, PrimitiveOperator, SegmentUuid,
+        UpdateMetadataValue, Where, WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn empty_blocks() {
@@ -1266,7 +1265,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1275,7 +1274,7 @@ mod test {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1558,7 +1557,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1567,7 +1566,7 @@ mod test {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1814,7 +1813,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1823,7 +1822,7 @@ mod test {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -2039,7 +2038,7 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -2048,7 +2047,7 @@ mod test {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")

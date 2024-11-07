@@ -4,9 +4,36 @@ use super::{
 };
 use crate::chroma_proto;
 use chroma_error::{ChromaError, ErrorCodes};
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
+
+/// SegmentUuid is a wrapper around Uuid to provide a type for the segment id.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct SegmentUuid(pub Uuid);
+
+impl SegmentUuid {
+    pub fn new() -> Self {
+        SegmentUuid(Uuid::new_v4())
+    }
+}
+
+impl FromStr for SegmentUuid {
+    type Err = SegmentConversionError;
+
+    fn from_str(s: &str) -> Result<Self, SegmentConversionError> {
+        match Uuid::parse_str(s) {
+            Ok(uuid) => Ok(SegmentUuid(uuid)),
+            Err(_) => Err(SegmentConversionError::InvalidUuid),
+        }
+    }
+}
+
+impl std::fmt::Display for SegmentUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SegmentType {
@@ -45,7 +72,7 @@ impl TryFrom<&str> for SegmentType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Segment {
-    pub id: Uuid,
+    pub id: SegmentUuid,
     pub r#type: SegmentType,
     pub scope: SegmentScope,
     pub collection: CollectionUuid,
@@ -82,7 +109,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
     fn try_from(proto_segment: chroma_proto::Segment) -> Result<Self, Self::Error> {
         let mut proto_segment = proto_segment;
 
-        let segment_uuid = match Uuid::try_parse(&proto_segment.id) {
+        let segment_uuid = match SegmentUuid::from_str(&proto_segment.id) {
             Ok(uuid) => uuid,
             Err(_) => return Err(SegmentConversionError::InvalidUuid),
         };
@@ -139,7 +166,7 @@ pub fn test_segment(collection_uuid: CollectionUuid, scope: SegmentScope) -> Seg
         SegmentScope::SQLITE => unimplemented!("Sqlite segment is not implemented"),
     };
     Segment {
-        id: Uuid::new_v4(),
+        id: SegmentUuid::new(),
         r#type,
         scope,
         collection: collection_uuid,
@@ -174,7 +201,7 @@ mod tests {
             file_paths: HashMap::new(),
         };
         let converted_segment: Segment = proto_segment.try_into().unwrap();
-        assert_eq!(converted_segment.id, Uuid::nil());
+        assert_eq!(converted_segment.id, SegmentUuid(Uuid::nil()));
         assert_eq!(converted_segment.r#type, SegmentType::HnswDistributed);
         assert_eq!(converted_segment.scope, SegmentScope::VECTOR);
         assert_eq!(converted_segment.collection, CollectionUuid(Uuid::nil()));
