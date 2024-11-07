@@ -1,4 +1,5 @@
 import asyncio
+import os
 from functools import wraps
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Sequence, Union, TypeVar
@@ -127,6 +128,7 @@ def trace_method(
             @wraps(f)
             async def async_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
                 global tracer, granularity
+                add_attributes_to_current_span({"pod_name": os.environ.get("HOSTNAME")})
                 if trace_granularity < granularity:
                     return await f(*args, **kwargs)
                 if not tracer:
@@ -140,6 +142,7 @@ def trace_method(
             @wraps(f)
             def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
                 global tracer, granularity
+                add_attributes_to_current_span({"pod_name": os.environ.get("HOSTNAME")})
                 if trace_granularity < granularity:
                     return f(*args, **kwargs)
                 if not tracer:
