@@ -1297,7 +1297,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
- "async-channel",
  "async-trait",
  "cc",
  "chroma-benchmark",
