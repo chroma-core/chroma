@@ -237,7 +237,9 @@ mod tests {
     async fn test_complex_cosine() {
         let knn_log_input = setup_knn_log_input(
             DistanceFunction::Cosine,
-            SignedRoaringBitmap::Exclude((0..100).filter(|offset_id| offset_id % 2 == 0).collect()),
+            SignedRoaringBitmap::Exclude(
+                (1..=100).filter(|offset_id| offset_id % 2 == 0).collect(),
+            ),
         );
 
         let knn_operator = KnnOperator {
@@ -275,6 +277,6 @@ mod tests {
             .record_distances
             .iter()
             .zip(brute_force_distances)
-            .all(|(record, distance)| record.measure == distance));
+            .all(|(record, distance)| { record.measure == distance }));
     }
 }
