@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
-use self::config::StorageConfig;
-use self::s3::S3GetError;
-use admissioncontrolleds3::AdmissionControlledS3StorageError;
+use local::LocalStorage;
+use tempfile::TempDir;
+use thiserror::Error;
+
+use ::object_store::ObjectStore;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 
@@ -12,12 +14,14 @@ pub mod caching;
 pub mod config;
 pub mod evicting;
 pub mod local;
+pub mod non_destructive;
 pub mod object_store;
 pub mod s3;
 pub mod stream;
-use local::LocalStorage;
-use tempfile::TempDir;
-use thiserror::Error;
+
+use admissioncontrolleds3::AdmissionControlledS3StorageError;
+use config::StorageConfig;
+use s3::S3GetError;
 
 #[derive(Clone)]
 pub enum Storage {
@@ -235,4 +239,30 @@ pub fn test_storage() -> Storage {
             .to_str()
             .expect("Should be able to convert temporary directory path to string"),
     ))
+}
+
+/// This trait is for advertising capabilities of an object store so that we can write safe(r)
+/// code.
+///
+/// Specifically, I want to advertise whether an object store supports the `delete` call.  Delete
+/// is destructive.  Delete is a for loop, even more so.  And delete in a for loop over list is the
+/// fastest way I know of to delete data one round trip at a time.
+///
+/// To that end:  I'd like to make it so that object stores that wrap other object stores (like the
+/// evicting object store does) will make sure that there is at least one object store that does
+/// not implement delete.
+pub trait SafeObjectStore: ObjectStore {
+    fn supports_delete(&self) -> bool;
+}
+
+impl SafeObjectStore for ::object_store::memory::InMemory {
+    fn supports_delete(&self) -> bool {
+        true
+    }
+}
+
+impl SafeObjectStore for ::object_store::local::LocalFileSystem {
+    fn supports_delete(&self) -> bool {
+        true
+    }
 }

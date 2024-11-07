@@ -21,6 +21,8 @@ use sync42::state_hash_table::{Key, StateHashTable, Value};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 
+use super::SafeObjectStore;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DedupeKey {
     path: Path,
@@ -47,13 +49,15 @@ impl From<DedupeKey> for DedupeValue {
 
 #[derive(Clone)]
 pub struct CachingObjectStore {
-    cache: Arc<dyn ObjectStore>,
-    backing: Arc<dyn ObjectStore>,
+    cache: Arc<dyn SafeObjectStore>,
+    backing: Arc<dyn SafeObjectStore>,
     dedupe: Arc<StateHashTable<DedupeKey, DedupeValue>>,
 }
 
 impl CachingObjectStore {
-    pub fn new<C: ObjectStore, B: ObjectStore>(cache: C, backing: B) -> Self {
+    pub fn new<C: SafeObjectStore, B: SafeObjectStore>(cache: C, backing: B) -> Self {
+        assert!(cache.supports_delete());
+        assert!(!backing.supports_delete());
         Self {
             cache: Arc::new(cache),
             backing: Arc::new(backing),
@@ -177,11 +181,8 @@ impl ObjectStore for CachingObjectStore {
         }
     }
 
-    async fn delete(&self, location: &Path) -> Result<()> {
-        if let Err(err) = self.cache.delete(location).await {
-            tracing::error!("failed to delete from cache: {}", err);
-        }
-        self.backing.delete(location).await
+    async fn delete(&self, _: &Path) -> Result<()> {
+        Err(object_store::Error::NotImplemented)
     }
 
     fn list(&self, prefix: Option<&Path>) -> BoxStream<'_, Result<ObjectMeta>> {
@@ -201,17 +202,26 @@ impl ObjectStore for CachingObjectStore {
     }
 }
 
+impl SafeObjectStore for CachingObjectStore {
+    fn supports_delete(&self) -> bool {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use object_store::path::Path;
-    use object_store::ObjectStore;
+    use object_store::{ObjectStore, PutMode};
 
     use super::CachingObjectStore;
+
+    use crate::non_destructive::NonDestructiveObjectStore;
+    use crate::SafeObjectStore;
 
     #[tokio::test]
     async fn empty() {
         let cache = object_store::memory::InMemory::new();
-        let backing = object_store::memory::InMemory::new();
+        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
         let cached = CachingObjectStore::new(cache, backing);
         assert!(cached
             .get_opts(&Path::from("test"), Default::default())
@@ -222,10 +232,14 @@ mod tests {
     #[tokio::test]
     async fn insert() {
         let cache = object_store::memory::InMemory::new();
-        let backing = object_store::memory::InMemory::new();
+        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
         let cached = CachingObjectStore::new(cache, backing);
         assert!(cached
-            .put_opts(&Path::from("test"), "hello 42".into(), Default::default(),)
+            .put_opts(
+                &Path::from("test"),
+                "hello 42".into(),
+                PutMode::Create.into()
+            )
             .await
             .is_ok());
 
@@ -244,11 +258,15 @@ mod tests {
     #[tokio::test]
     async fn not_in_cache_but_populates() {
         let cache = object_store::memory::InMemory::new();
-        let backing = object_store::memory::InMemory::new();
+        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
         let cached = CachingObjectStore::new(cache, backing);
         assert!(cached
             .backing
-            .put_opts(&Path::from("test"), "hello 42".into(), Default::default(),)
+            .put_opts(
+                &Path::from("test"),
+                "hello 42".into(),
+                PutMode::Create.into()
+            )
             .await
             .is_ok());
 
@@ -283,11 +301,15 @@ mod tests {
     #[tokio::test]
     async fn in_cache_only_still_serves() {
         let cache = object_store::memory::InMemory::new();
-        let backing = object_store::memory::InMemory::new();
+        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
         let cached = CachingObjectStore::new(cache, backing);
         assert!(cached
             .cache
-            .put_opts(&Path::from("test"), "hello 42".into(), Default::default(),)
+            .put_opts(
+                &Path::from("test"),
+                "hello 42".into(),
+                PutMode::Create.into()
+            )
             .await
             .is_ok());
 
@@ -323,5 +345,31 @@ mod tests {
             .get_opts(&Path::from("test"), Default::default())
             .await
             .is_err());
+    }
+
+    // This test verifies invariants necessary to prevent false successes in caching_cannot_delete.
+    #[test]
+    fn caching_cannot_delete_aux() {
+        let backing = object_store::memory::InMemory::new();
+        assert!(backing.supports_delete());
+    }
+
+    #[test]
+    #[should_panic]
+    fn caching_cannot_delete() {
+        let cache = object_store::memory::InMemory::new();
+        // Use a destructive store and it will panic.
+        let backing = object_store::memory::InMemory::new();
+        if backing.supports_delete() {
+            let _cached = CachingObjectStore::new(cache, backing);
+        }
+    }
+
+    #[tokio::test]
+    async fn caching_impls_safe() {
+        let cache = object_store::memory::InMemory::new();
+        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
+        let cached = CachingObjectStore::new(cache, backing);
+        assert!(!cached.supports_delete());
     }
 }
