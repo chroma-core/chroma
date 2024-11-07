@@ -26,6 +26,19 @@ impl PartialOrd for RecordDistance {
     }
 }
 
+/// The `KnnOperator` searches for the nearest neighbours of the specified embedding
+///
+/// # Parameters
+/// - `embedding`: The target embedding to search around
+/// - `fetch`: The number of records to fetch around the target
+///
+/// # Implementation
+/// `KnnOperator` has multiple implementations for the `Operator<I, O>` trait:
+/// - `Operator<KnnLogInput, KnnLogOutput>`: Searches the nearest embeddings in the materialized log
+/// - `Operator<KnnHnswInput, KnnHnswOutput>`: Searches the nearest embeddings in the HNSW index
+///
+/// # Usage
+/// It can be used to derive the range of offset ids that should be used by the next operator
 #[derive(Clone, Debug)]
 pub struct KnnOperator {
     pub embedding: Vec<f32>,

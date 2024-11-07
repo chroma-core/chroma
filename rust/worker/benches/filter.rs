@@ -42,7 +42,7 @@ fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
         (
             "$gt-large",
             Where::DirectWhereComparison(DirectWhereComparison {
-                key: "val".to_string(),
+                key: "id".to_string(),
                 comparison: Primitive(GreaterThan, Int(0)),
             }),
         ),
@@ -52,12 +52,12 @@ fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
                 operator: And,
                 children: vec![
                     Where::DirectWhereComparison(DirectWhereComparison {
-                        key: "modulo_11".to_string(),
-                        comparison: Primitive(NotEqual, Int(6)),
+                        key: "is_even".to_string(),
+                        comparison: Primitive(NotEqual, Bool(false)),
                     }),
                     Where::DirectWhereComparison(DirectWhereComparison {
-                        key: "modulo_2".to_string(),
-                        comparison: Primitive(Equal, Int(0)),
+                        key: "modulo_3".to_string(),
+                        comparison: Primitive(Equal, Int(1)),
                     }),
                 ],
             }),

@@ -1,14 +1,17 @@
+use std::iter::once;
+
 use crate::config::QueryServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operators::fetch_log::FetchLogOperator;
 use crate::execution::operators::fetch_segment::FetchSegmentOperator;
 use crate::execution::operators::filter::FilterOperator;
+use crate::execution::operators::knn::KnnOperator;
+use crate::execution::operators::knn_projection::KnnProjectionOperator;
 use crate::execution::operators::limit::LimitOperator;
 use crate::execution::operators::projection::ProjectionOperator;
 use crate::execution::orchestration::get::GetOrchestrator;
-use crate::execution::orchestration::{
-    CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
-};
+use crate::execution::orchestration::knn::{KnnError, KnnFilterOrchestrator, KnnOrchestrator};
+use crate::execution::orchestration::{CountQueryOrchestrator, GetVectorsOrchestrator};
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{ComponentHandle, System};
@@ -18,7 +21,6 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_index::IndexUuid;
 use chroma_types::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
@@ -26,6 +28,7 @@ use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
 use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, Where};
+use futures::future::try_join_all;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -182,31 +185,95 @@ impl WorkerServer {
             }
         };
 
-        let result = match self.system {
-            Some(ref system) => {
-                let orchestrator = HnswQueryOrchestrator::new(
-                    // TODO: Should not have to clone query vectors here
-                    system.clone(),
-                    query_vectors.clone(),
-                    request.k,
-                    request.allowed_ids,
-                    request.include_embeddings,
-                    segment_uuid,
-                    collection_uuid,
-                    self.log.clone(),
-                    self.sysdb.clone(),
-                    self.hnsw_index_provider.clone(),
-                    self.blockfile_provider.clone(),
-                    dispatcher,
-                    collection_version,
-                    log_position,
-                );
-                orchestrator.run().await
-            }
+        let system = match self.system {
+            Some(ref system) => system,
             None => {
+                tracing::error!("No system found");
                 return Err(Status::internal("No system found"));
             }
         };
+
+        let knn_filter_orchestrator = KnnFilterOrchestrator::new(
+            self.blockfile_provider.clone(),
+            dispatcher.clone(),
+            // TODO: Load the configuration for this
+            1000,
+            FetchLogOperator {
+                log_client: self.log.clone(),
+                batch_size: 100,
+                start_log_offset_id: log_position as u32 + 1,
+                maximum_fetch_count: None,
+                collection_uuid,
+            },
+            FetchSegmentOperator {
+                sysdb: self.sysdb.clone(),
+                collection_uuid,
+                collection_version,
+                metadata_uuid: None,
+                record_uuid: None,
+                vector_uuid: Some(segment_uuid),
+            },
+            FilterOperator {
+                query_ids: (!request.allowed_ids.is_empty()).then_some(request.allowed_ids),
+                where_clause: None,
+            },
+        );
+
+        let knn_filter_output = match knn_filter_orchestrator.run(system.clone()).await {
+            Ok(output) => output,
+            Err(KnnError::EmptyCollection) => {
+                return Ok(Response::new(chroma_proto::QueryVectorsResponse {
+                    results: once(chroma_proto::VectorQueryResults {
+                        results: Vec::new(),
+                    })
+                    .cycle()
+                    .take(query_vectors.len())
+                    .collect(),
+                }));
+            }
+            Err(e) => {
+                tracing::error!("Error running orchestrator: {}", e);
+                return Err(Status::new(
+                    e.code().into(),
+                    format!("Error running orchestrator: {}", e),
+                ));
+            }
+        };
+
+        let embedding_dim = query_vectors[0].len();
+
+        let knn_orchestrators: Vec<_> = query_vectors
+            .into_iter()
+            .map(|embedding| {
+                KnnOrchestrator::new(
+                    self.blockfile_provider.clone(),
+                    dispatcher.clone(),
+                    self.hnsw_index_provider.clone(),
+                    // TODO: Load the configuration for this
+                    1000,
+                    knn_filter_output.clone(),
+                    KnnOperator {
+                        embedding,
+                        fetch: request.k as u32,
+                    },
+                    KnnProjectionOperator {
+                        projection: ProjectionOperator {
+                            document: false,
+                            embedding: request.include_embeddings,
+                            metadata: false,
+                        },
+                        distance: true,
+                    },
+                )
+            })
+            .collect();
+
+        let result = try_join_all(
+            knn_orchestrators
+                .into_iter()
+                .map(|knn| knn.run(system.clone())),
+        )
+        .await;
 
         let result = match result {
             Ok(result) => result,
@@ -221,15 +288,15 @@ impl WorkerServer {
 
         for result_set in result {
             let mut proto_results = Vec::new();
-            for query_result in result_set {
+            for query_result in result_set.records {
                 let proto_result = chroma_proto::VectorQueryResult {
-                    id: query_result.id,
-                    distance: query_result.distance,
-                    vector: match query_result.vector {
+                    id: query_result.record.id,
+                    distance: query_result
+                        .distance
+                        .expect("The distance should be present"),
+                    vector: match query_result.record.embedding {
                         Some(vector) => {
-                            match (vector, ScalarEncoding::FLOAT32, query_vectors[0].len())
-                                .try_into()
-                            {
+                            match (vector, ScalarEncoding::FLOAT32, embedding_dim).try_into() {
                                 Ok(proto_vector) => Some(proto_vector),
                                 Err(e) => {
                                     return Err(Status::internal(format!(
@@ -445,7 +512,7 @@ impl WorkerServer {
             FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),
                 vector_uuid: None,
-                metadata_uuid: Some(IndexUuid(segment_uuid)),
+                metadata_uuid: Some(segment_uuid),
                 record_uuid: None,
                 collection_uuid,
                 collection_version,

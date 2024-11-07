@@ -1,7 +1,7 @@
-use chroma_distance::{normalize, DistanceFunction, DistanceFunctionError};
+use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::{Collection, MetadataValue, Segment, SignedRoaringBitmap};
+use chroma_types::{Segment, SignedRoaringBitmap};
 use thiserror::Error;
 use tonic::async_trait;
 
@@ -17,9 +17,10 @@ use super::knn::{KnnOperator, RecordDistance};
 #[derive(Debug)]
 pub struct KnnHnswInput {
     pub hnsw_provider: HnswIndexProvider,
-    pub collection: Collection,
     pub hnsw_segment: Segment,
+    pub collection_dimension: u32,
     pub compact_offset_ids: SignedRoaringBitmap,
+    pub distance_function: DistanceFunction,
 }
 
 #[derive(Debug)]
@@ -29,23 +30,17 @@ pub struct KnnHnswOutput {
 
 #[derive(Error, Debug)]
 pub enum KnnHnswError {
-    #[error("Error instantiating distance function: {0}")]
-    DistanceFunction(#[from] DistanceFunctionError),
     #[error("Error querying hnsw index: {0}")]
     HnswIndex(#[from] Box<dyn ChromaError>),
     #[error("Error creating hnsw segment reader: {0}")]
     HnswReader(#[from] DistributedHNSWSegmentFromSegmentError),
-    #[error("Error resolving collection dimension")]
-    NoCollectionDimension,
 }
 
 impl ChromaError for KnnHnswError {
     fn code(&self) -> ErrorCodes {
         match self {
-            KnnHnswError::DistanceFunction(e) => e.code(),
             KnnHnswError::HnswReader(e) => e.code(),
             KnnHnswError::HnswIndex(e) => e.code(),
-            KnnHnswError::NoCollectionDimension => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -71,16 +66,8 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
             ),
         };
 
-        let space = match input.hnsw_segment.metadata.as_ref() {
-            Some(metadata) => match metadata.get("hnsw:space") {
-                Some(MetadataValue::Str(space)) => space,
-                _ => "l2",
-            },
-            None => "l2",
-        };
-        let metric = DistanceFunction::try_from(space)?;
         let embedding_vector;
-        let embedding = if let DistanceFunction::Cosine = metric {
+        let embedding = if let DistanceFunction::Cosine = input.distance_function {
             embedding_vector = normalize(&self.embedding);
             &embedding_vector
         } else {
@@ -89,10 +76,7 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
 
         match DistributedHNSWSegmentReader::from_segment(
             &input.hnsw_segment,
-            input
-                .collection
-                .dimension
-                .ok_or(KnnHnswError::NoCollectionDimension)? as usize,
+            input.collection_dimension as usize,
             input.hnsw_provider.clone(),
         )
         .await
