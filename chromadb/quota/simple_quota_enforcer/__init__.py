@@ -20,5 +20,5 @@ class SimpleQuotaEnforcer(QuotaEnforcer):
         pass
 
     @override
-    def enforce(self, action: str, tenant: str, **kwargs: Dict[str, Any]) -> None:
+    def enforce(self, action: str, **kwargs: Dict[str, Any]) -> None:
         pass

@@ -20,7 +20,7 @@ class QuotaEnforcer(Component):
         pass
 
     @abstractmethod
-    def enforce(self, action: str, tenant: str, **kwargs: Dict[str, Any]) -> None:
+    def enforce(self, action: str, **kwargs: Dict[str, Any]) -> None:
         """
         Enforces a quota.
         """
