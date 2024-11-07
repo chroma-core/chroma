@@ -1,6 +1,8 @@
 use super::stream::ByteStream;
 use super::stream::ByteStreamItem;
-use super::{config::StorageConfig, s3::StorageConfigError};
+use crate::config::StorageConfig;
+use crate::config::StorageConfigKind;
+use crate::s3::StorageConfigError;
 use crate::GetError;
 use async_trait::async_trait;
 use chroma_config::Configurable;
@@ -105,8 +107,8 @@ impl LocalStorage {
 #[async_trait]
 impl Configurable<StorageConfig> for LocalStorage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &config {
-            StorageConfig::Local(local_config) => {
+        match &config.kind {
+            StorageConfigKind::Local(local_config) => {
                 let storage = LocalStorage::new(&local_config.root);
                 Ok(storage)
             }

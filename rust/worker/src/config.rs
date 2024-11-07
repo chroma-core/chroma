@@ -136,6 +136,8 @@ pub(crate) struct CompactionServiceConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use figment::Jail;
     use serial_test::serial;
@@ -742,15 +744,15 @@ mod tests {
                 "compaction-service-0"
             );
             assert_eq!(config.compaction_service.my_port, 50051);
-            match &config.compaction_service.storage {
-                chroma_storage::config::StorageConfig::S3(s) => {
+            match &config.compaction_service.storage.kind {
+                chroma_storage::config::StorageConfigKind::S3(s) => {
                     assert_eq!(s.bucket, "buckets!");
                     assert_eq!(
                         s.credentials,
                         chroma_storage::config::S3CredentialsConfig::AWS
                     );
-                    assert_eq!(s.connect_timeout_ms, 5000);
-                    assert_eq!(s.request_timeout_ms, 1000);
+                    assert_eq!(s.connect_timeout, Duration::from_millis(5000));
+                    assert_eq!(s.request_timeout, Duration::from_millis(1000));
                     assert_eq!(s.upload_part_size_bytes, 1024 * 1024 * 8);
                     assert_eq!(s.download_part_size_bytes, 1024 * 1024 * 8);
                 }

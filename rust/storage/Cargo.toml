@@ -24,6 +24,7 @@ parking_lot = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
+serde_with = "3.11.0"
 
 [dev-dependencies]
 "rand" = { workspace = true}

@@ -8,9 +8,11 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
-use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
+use crate::config::S3StorageConfig;
+use crate::config::StorageConfig;
+use crate::config::StorageConfigKind;
 use crate::GetError;
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
@@ -35,7 +37,6 @@ use futures::StreamExt;
 use std::clone::Clone;
 use std::ops::Range;
 use std::sync::Arc;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
@@ -80,20 +81,6 @@ impl ChromaError for S3GetError {
 }
 
 impl S3Storage {
-    fn new(
-        bucket: &str,
-        client: aws_sdk_s3::Client,
-        upload_part_size_bytes: usize,
-        download_part_size_bytes: usize,
-    ) -> S3Storage {
-        S3Storage {
-            bucket: bucket.to_string(),
-            client,
-            upload_part_size_bytes,
-            download_part_size_bytes,
-        }
-    }
-
     pub(super) async fn create_bucket(&self) -> Result<(), String> {
         // Creates a public bucket with default settings in the region.
         // This should only be used for testing and in production
@@ -504,71 +491,76 @@ impl ChromaError for StorageConfigError {
 }
 
 #[async_trait]
+impl Configurable<S3StorageConfig> for S3Storage {
+    async fn try_from_config(s3_config: &S3StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+        let client = match s3_config.credentials {
+            super::config::S3CredentialsConfig::Minio => {
+                // Set up credentials assuming minio is running locally
+                let cred = aws_sdk_s3::config::Credentials::new(
+                    "minio",
+                    "minio123",
+                    None,
+                    None,
+                    "loaded-from-env",
+                );
+
+                let timeout_config_builder = TimeoutConfigBuilder::default()
+                    .connect_timeout(s3_config.connect_timeout)
+                    .read_timeout(s3_config.request_timeout);
+                let retry_config = RetryConfig::standard();
+
+                // Set up s3 client
+                let config = aws_sdk_s3::config::Builder::new()
+                    .endpoint_url("http://localhost:9000".to_string()) // todo
+                    .credentials_provider(cred)
+                    .behavior_version_latest()
+                    .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                    .force_path_style(true)
+                    .timeout_config(timeout_config_builder.build())
+                    .retry_config(retry_config)
+                    .build();
+                aws_sdk_s3::Client::from_conf(config)
+            }
+            super::config::S3CredentialsConfig::AWS => {
+                let config = aws_config::load_from_env().await;
+                let timeout_config_builder = TimeoutConfigBuilder::default()
+                    .connect_timeout(s3_config.connect_timeout)
+                    .read_timeout(s3_config.request_timeout);
+                let retry_config = RetryConfig::standard();
+                let config = config
+                    .to_builder()
+                    .timeout_config(timeout_config_builder.build())
+                    .retry_config(retry_config)
+                    .build();
+                aws_sdk_s3::Client::new(&config)
+            }
+        };
+        let storage = S3Storage {
+            bucket: s3_config.bucket.clone(),
+            client,
+            upload_part_size_bytes: s3_config.upload_part_size_bytes,
+            download_part_size_bytes: s3_config.download_part_size_bytes,
+        };
+        // for minio we create the bucket since it is only used for testing
+
+        if let super::config::S3CredentialsConfig::Minio = s3_config.credentials {
+            let res = storage.create_bucket().await;
+            match res {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(Box::new(StorageConfigError::FailedToCreateBucket(e)));
+                }
+            }
+        }
+        Ok(storage)
+    }
+}
+
+#[async_trait]
 impl Configurable<StorageConfig> for S3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &config {
-            StorageConfig::S3(s3_config) => {
-                let client = match &s3_config.credentials {
-                    super::config::S3CredentialsConfig::Minio => {
-                        // Set up credentials assuming minio is running locally
-                        let cred = aws_sdk_s3::config::Credentials::new(
-                            "minio",
-                            "minio123",
-                            None,
-                            None,
-                            "loaded-from-env",
-                        );
-
-                        let timeout_config_builder = TimeoutConfigBuilder::default()
-                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
-                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
-                        let retry_config = RetryConfig::standard();
-
-                        // Set up s3 client
-                        let config = aws_sdk_s3::config::Builder::new()
-                            .endpoint_url("http://minio.chroma:9000".to_string())
-                            .credentials_provider(cred)
-                            .behavior_version_latest()
-                            .region(aws_sdk_s3::config::Region::new("us-east-1"))
-                            .force_path_style(true)
-                            .timeout_config(timeout_config_builder.build())
-                            .retry_config(retry_config)
-                            .build();
-                        aws_sdk_s3::Client::from_conf(config)
-                    }
-                    super::config::S3CredentialsConfig::AWS => {
-                        let config = aws_config::load_from_env().await;
-                        let timeout_config_builder = TimeoutConfigBuilder::default()
-                            .connect_timeout(Duration::from_millis(s3_config.connect_timeout_ms))
-                            .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
-                        let retry_config = RetryConfig::standard();
-                        let config = config
-                            .to_builder()
-                            .timeout_config(timeout_config_builder.build())
-                            .retry_config(retry_config)
-                            .build();
-                        aws_sdk_s3::Client::new(&config)
-                    }
-                };
-                let storage = S3Storage::new(
-                    &s3_config.bucket,
-                    client,
-                    s3_config.upload_part_size_bytes,
-                    s3_config.download_part_size_bytes,
-                );
-                // for minio we create the bucket since it is only used for testing
-
-                if let super::config::S3CredentialsConfig::Minio = &s3_config.credentials {
-                    let res = storage.create_bucket().await;
-                    match res {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return Err(Box::new(StorageConfigError::FailedToCreateBucket(e)));
-                        }
-                    }
-                }
-                Ok(storage)
-            }
+        match &config.kind {
+            StorageConfigKind::S3(s3_config) => S3Storage::try_from_config(s3_config).await,
             _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
     }

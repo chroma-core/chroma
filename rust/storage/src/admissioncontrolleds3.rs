@@ -1,5 +1,5 @@
 use crate::{
-    config::{RateLimitingConfig, StorageConfig},
+    config::{RateLimitingConfig, StorageConfig, StorageConfigKind},
     s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
     stream::ByteStreamItem,
 };
@@ -272,11 +272,9 @@ impl AdmissionControlledS3Storage {
 #[async_trait]
 impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &config {
-            StorageConfig::AdmissionControlledS3(nacconfig) => {
-                let s3_storage =
-                    S3Storage::try_from_config(&StorageConfig::S3(nacconfig.s3_config.clone()))
-                        .await?;
+        match &config.kind {
+            StorageConfigKind::AdmissionControlledS3(nacconfig) => {
+                let s3_storage = S3Storage::try_from_config(&nacconfig.s3_config).await?;
                 let policy =
                     RateLimitPolicy::try_from_config(&nacconfig.rate_limiting_policy).await?;
                 return Ok(Self::new(s3_storage, policy));
