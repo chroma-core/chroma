@@ -18,7 +18,10 @@ from chromadb.auth import (
     AuthError,
 )
 from chromadb.config import System
-from chromadb.errors import ChromaAuthError
+from chromadb.errors import (
+    ChromaAuthError,
+    InvalidArgumentError
+)
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -84,14 +87,14 @@ class BasicAuthenticationServerProvider(ServerAuthenticationProvider):
                 and len(_raw_creds) != 2
                 or not all(_raw_creds)
             ):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Invalid htpasswd credentials found: {_raw_creds}. "
                     "Lines must be exactly <username>:<bcrypt passwd>."
                 )
             username = _raw_creds[0]
             password = _raw_creds[1]
             if username in self._creds:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "Duplicate username found in "
                     "[chroma_server_authn_credentials]. "
                     "Usernames must be unique."

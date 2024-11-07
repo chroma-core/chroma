@@ -7,6 +7,7 @@ from chromadb.types import (
     Vector,
     ScalarEncoding,
 )
+from chromadb.errors import InvalidArgumentError
 from chromadb.config import Component
 from uuid import UUID
 import numpy as np
@@ -20,7 +21,7 @@ def encode_vector(vector: Vector, encoding: ScalarEncoding) -> bytes:
     elif encoding == ScalarEncoding.INT32:
         return np.array(vector, dtype=np.int32).tobytes()
     else:
-        raise ValueError(f"Unsupported encoding: {encoding.value}")
+        raise InvalidArgumentError(f"Unsupported encoding: {encoding.value}")
 
 
 def decode_vector(vector: bytes, encoding: ScalarEncoding) -> Vector:
@@ -31,7 +32,7 @@ def decode_vector(vector: bytes, encoding: ScalarEncoding) -> Vector:
     elif encoding == ScalarEncoding.INT32:
         return np.frombuffer(vector, dtype=np.float32)
     else:
-        raise ValueError(f"Unsupported encoding: {encoding.value}")
+        raise InvalidArgumentError(f"Unsupported encoding: {encoding.value}")
 
 
 class Producer(Component):

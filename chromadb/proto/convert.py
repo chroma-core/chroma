@@ -19,6 +19,7 @@ from chromadb.types import (
     VectorEmbeddingRecord,
     VectorQueryResult,
 )
+from chromadb.errors import InvalidArgumentError
 import numpy as np
 from numpy.typing import NDArray
 
@@ -32,7 +33,7 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> proto.Vector:
         as_bytes = np.array(vector, dtype=np.int32).tobytes()
         proto_encoding = proto.ScalarEncoding.INT32
     else:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Unknown encoding {encoding}, expected one of {ScalarEncoding.FLOAT32} \
             or {ScalarEncoding.INT32}"
         )
@@ -50,7 +51,7 @@ def from_proto_vector(vector: proto.Vector) -> Tuple[Embedding, ScalarEncoding]:
         as_array = np.frombuffer(vector.vector, dtype=np.int32)
         out_encoding = ScalarEncoding.INT32
     else:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Unknown encoding {encoding}, expected one of \
             {proto.ScalarEncoding.FLOAT32} or {proto.ScalarEncoding.INT32}"
         )
@@ -102,7 +103,7 @@ def _from_proto_metadata_handle_none(
         elif is_update:
             out_metadata[key] = None
         else:
-            raise ValueError(f"Metadata key {key} value cannot be None")
+            raise InvalidArgumentError(f"Metadata key {key} value cannot be None")
     return out_metadata
 
 
@@ -193,7 +194,7 @@ def to_proto_metadata_update_value(
     elif value is None:
         return proto.UpdateMetadataValue()
     else:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Unknown metadata value type {type(value)}, expected one of str, int, \
             float, or None"
         )
@@ -244,7 +245,7 @@ def to_proto_operation(operation: Operation) -> proto.Operation:
     elif operation == Operation.DELETE:
         return proto.Operation.DELETE
     else:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Unknown operation {operation}, expected one of {Operation.ADD}, \
             {Operation.UPDATE}, {Operation.UPDATE}, or {Operation.DELETE}"
         )

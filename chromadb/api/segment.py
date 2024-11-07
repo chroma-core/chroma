@@ -22,6 +22,7 @@ from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
 from chromadb.errors import (
     InvalidDimensionException,
+    InvalidArgumentError,
     InvalidCollectionException,
     VersionMismatchError,
 )
@@ -87,13 +88,13 @@ def check_index_name(index_name: str) -> None:
         f"got {index_name}"
     )
     if len(index_name) < 3 or len(index_name) > 63:
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     if not re.match("^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$", index_name):
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     if ".." in index_name:
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     if re.match("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", index_name):
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
 
 
 def rate_limit(func: T) -> T:
@@ -138,7 +139,7 @@ class SegmentAPI(ServerAPI):
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
         if len(name) < 3:
-            raise ValueError("Database name must be at least 3 characters long")
+            raise InvalidArgumentError("Database name must be at least 3 characters long")
 
         self._sysdb.create_database(
             id=uuid4(),
@@ -155,7 +156,7 @@ class SegmentAPI(ServerAPI):
     @override
     def create_tenant(self, name: str) -> None:
         if len(name) < 3:
-            raise ValueError("Tenant name must be at least 3 characters long")
+            raise InvalidArgumentError("Tenant name must be at least 3 characters long")
 
         self._sysdb.create_tenant(
             name=name,
@@ -363,7 +364,7 @@ class SegmentAPI(ServerAPI):
             for s in self._manager.delete_segments(existing[0].id):
                 self._sysdb.delete_segment(existing[0].id, s)
         else:
-            raise ValueError(f"Collection {name} does not exist.")
+            raise InvalidArgumentError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
@@ -599,7 +600,7 @@ class SegmentAPI(ServerAPI):
                 or (where_document is not None and len(where_document) == 0)
             )
         ):
-            raise ValueError(
+            raise InvalidArgumentError(
                 """
                 You must provide either ids, where, or where_document to delete. If
                 you want to delete all data in a collection you can delete the

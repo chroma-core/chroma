@@ -143,17 +143,17 @@ class GrpcMetadataSegment(MetadataReader):
         if where is None:
             return response
         if len(where) != 1:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Expected where to have exactly one operator, got {where}"
             )
 
         for key, value in where.items():
             if not isinstance(key, str):
-                raise ValueError(f"Expected where key to be a str, got {key}")
+                raise InvalidArgumentError(f"Expected where key to be a str, got {key}")
 
             if key == "$and" or key == "$or":
                 if not isinstance(value, list):
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Expected where value for $and or $or to be a list of where expressions, got {value}"
                     )
                 children: pb.WhereChildren = pb.WhereChildren(
@@ -196,20 +196,20 @@ class GrpcMetadataSegment(MetadataReader):
                     sdc.generic_comparator = pb.GenericComparator.EQ
                     dc.single_double_operand.CopyFrom(sdc)
                 else:
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Expected where value to be a string, int, or float, got {value}"
                     )
             else:
                 for operator, operand in value.items():
                     if operator in ["$in", "$nin"]:
                         if not isinstance(operand, list):
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where value for $in or $nin to be a list of values, got {value}"
                             )
                         if len(operand) == 0 or not all(
                             isinstance(x, type(operand[0])) for x in operand
                         ):
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where operand value to be a non-empty list, and all values to be of the same type "
                                 f"got {operand}"
                             )
@@ -243,7 +243,7 @@ class GrpcMetadataSegment(MetadataReader):
                             dlo.list_operator = list_operator
                             dc.double_list_operand.CopyFrom(dlo)
                         else:
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where operand value to be a list of strings, ints, or floats, got {operand}"
                             )
                     elif operator in ["$eq", "$ne", "$gt", "$lt", "$gte", "$lte"]:
@@ -256,7 +256,7 @@ class GrpcMetadataSegment(MetadataReader):
                             elif operator == "$ne":
                                 ssc.comparator = pb.GenericComparator.NE
                             else:
-                                raise ValueError(
+                                raise InvalidArgumentError(
                                     f"Expected where operator to be $eq or $ne, got {operator}"
                                 )
                             dc.single_string_operand.CopyFrom(ssc)
@@ -268,7 +268,7 @@ class GrpcMetadataSegment(MetadataReader):
                             elif operator == "$ne":
                                 sbc.comparator = pb.GenericComparator.NE
                             else:
-                                raise ValueError(
+                                raise InvalidArgumentError(
                                     f"Expected where operator to be $eq or $ne, got {operator}"
                                 )
                             dc.single_bool_operand.CopyFrom(sbc)
@@ -288,7 +288,7 @@ class GrpcMetadataSegment(MetadataReader):
                             elif operator == "$lte":
                                 sic.number_comparator = pb.NumberComparator.LTE
                             else:
-                                raise ValueError(
+                                raise InvalidArgumentError(
                                     f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
                                 )
                             dc.single_int_operand.CopyFrom(sic)
@@ -308,12 +308,12 @@ class GrpcMetadataSegment(MetadataReader):
                             elif operator == "$lte":
                                 sfc.number_comparator = pb.NumberComparator.LTE
                             else:
-                                raise ValueError(
+                                raise InvalidArgumentError(
                                     f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
                                 )
                             dc.single_double_operand.CopyFrom(sfc)
                         else:
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where operand value to be a string, int, or float, got {operand}"
                             )
                     else:
@@ -331,7 +331,7 @@ class GrpcMetadataSegment(MetadataReader):
         if where_document is None:
             return response
         if len(where_document) != 1:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Expected where_document to have exactly one operator, got {where_document}"
             )
 
@@ -339,7 +339,7 @@ class GrpcMetadataSegment(MetadataReader):
             if operator == "$and" or operator == "$or":
                 # Nested "$and" or "$or" expression.
                 if not isinstance(operand, list):
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Expected where_document value for $and or $or to be a list of where_document expressions, got {operand}"
                     )
                 children: pb.WhereDocumentChildren = pb.WhereDocumentChildren(
@@ -355,7 +355,7 @@ class GrpcMetadataSegment(MetadataReader):
                 # Direct "$contains" or "$not_contains" comparison to a single
                 # value.
                 if not isinstance(operand, str):
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Expected where_document operand to be a string, got {operand}"
                     )
                 dwd = pb.DirectWhereDocument()
@@ -365,7 +365,7 @@ class GrpcMetadataSegment(MetadataReader):
                 elif operator == "$not_contains":
                     dwd.operator = pb.WhereDocumentOperator.NOT_CONTAINS
                 else:
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Expected where_document operator to be one of $contains, $not_contains, got {operator}"
                     )
                 response.direct.CopyFrom(dwd)
@@ -387,7 +387,7 @@ class GrpcMetadataSegment(MetadataReader):
             elif value.HasField("float_value"):
                 translated_metadata[key] = value.float_value
             else:
-                raise ValueError(f"Unknown metadata value type: {value}")
+                raise InvalidArgumentError(f"Unknown metadata value type: {value}")
 
         mer = MetadataEmbeddingRecord(id=record.id, metadata=translated_metadata)
 

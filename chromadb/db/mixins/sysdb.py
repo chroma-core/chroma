@@ -9,6 +9,7 @@ from chromadb.api.configuration import (
     CollectionConfigurationInternal,
     ConfigurationParameter,
     HNSWConfigurationInternal,
+    InvalidArgumentError,
     InvalidConfigurationError,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
@@ -198,7 +199,7 @@ class SqlSysDB(SqlDB, SysDB):
         database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         if id is None and not get_or_create:
-            raise ValueError("id must be specified if get_or_create is False")
+            raise InvalidArgumentError("id must be specified if get_or_create is False")
 
         add_attributes_to_current_span(
             {
@@ -362,7 +363,7 @@ class SqlSysDB(SqlDB, SysDB):
         """Get collections by name, embedding function and/or metadata"""
 
         if name is not None and (tenant is None or database is None):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
             )
 
@@ -759,7 +760,7 @@ class SqlSysDB(SqlDB, SysDB):
         try:
             config_json = json.loads(json_str)
         except json.JSONDecodeError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Unable to decode configuration from JSON string: {json_str}"
             )
 

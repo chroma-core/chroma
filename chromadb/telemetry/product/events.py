@@ -1,7 +1,7 @@
 import os
 from typing import cast, ClassVar
+from chromadb.errors import InvalidArgumentError
 from chromadb.telemetry.product import ProductTelemetryEvent
-
 
 class ClientStartEvent(ProductTelemetryEvent):
     def __init__(self) -> None:
@@ -70,7 +70,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
 
     def batch(self, other: "ProductTelemetryEvent") -> "CollectionAddEvent":
         if not self.batch_key == other.batch_key:
-            raise ValueError("Cannot batch events")
+            raise InvalidArgumentError("Cannot batch events")
         other = cast(CollectionAddEvent, other)
         total_amount = self.add_amount + other.add_amount
         return CollectionAddEvent(
@@ -118,7 +118,7 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
 
     def batch(self, other: "ProductTelemetryEvent") -> "CollectionUpdateEvent":
         if not self.batch_key == other.batch_key:
-            raise ValueError("Cannot batch events")
+            raise InvalidArgumentError("Cannot batch events")
         other = cast(CollectionUpdateEvent, other)
         total_amount = self.update_amount + other.update_amount
         return CollectionUpdateEvent(
@@ -176,7 +176,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
 
     def batch(self, other: "ProductTelemetryEvent") -> "CollectionQueryEvent":
         if not self.batch_key == other.batch_key:
-            raise ValueError("Cannot batch events")
+            raise InvalidArgumentError("Cannot batch events")
         other = cast(CollectionQueryEvent, other)
         total_amount = self.query_amount + other.query_amount
         return CollectionQueryEvent(
@@ -228,7 +228,7 @@ class CollectionGetEvent(ProductTelemetryEvent):
 
     def batch(self, other: "ProductTelemetryEvent") -> "CollectionGetEvent":
         if not self.batch_key == other.batch_key:
-            raise ValueError("Cannot batch events")
+            raise InvalidArgumentError("Cannot batch events")
         other = cast(CollectionGetEvent, other)
         total_amount = self.ids_count + other.ids_count
         return CollectionGetEvent(

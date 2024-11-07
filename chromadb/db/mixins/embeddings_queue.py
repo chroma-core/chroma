@@ -5,7 +5,10 @@ from chromadb.api.configuration import (
     EmbeddingsQueueConfigurationInternal,
 )
 from chromadb.db.base import SqlDB, ParameterValue, get_sql
-from chromadb.errors import BatchSizeExceededError
+from chromadb.errors import (
+    BatchSizeExceededError,
+    InvalidArgumentError
+)
 from chromadb.ingest import (
     Producer,
     Consumer,
@@ -410,7 +413,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
         if not isinstance(start, int) or not isinstance(end, int):
             raise TypeError("SeqIDs must be integers for sql-based EmbeddingsDB")
         if start >= end:
-            raise ValueError(f"Invalid SeqID range: {start} to {end}")
+            raise InvalidArgumentError(f"Invalid SeqID range: {start} to {end}")
         return start, end
 
     @trace_method("SqlEmbeddingsQueue._next_seq_id", OpenTelemetryGranularity.ALL)

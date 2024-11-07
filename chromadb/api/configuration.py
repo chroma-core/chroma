@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import json
 from overrides import override
+from chromadb.errors import InvalidArgumentError
 from typing import (
     Any,
     ClassVar,
@@ -26,7 +27,7 @@ class StaticParameterError(Exception):
     pass
 
 
-class InvalidConfigurationError(ValueError):
+class InvalidConfigurationError(InvalidArgumentError):
     """Represents an error that occurs when a configuration is invalid."""
 
     pass
@@ -102,23 +103,23 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
         if parameters is not None:
             for parameter in parameters:
                 if parameter.name not in self.definitions:
-                    raise ValueError(f"Invalid parameter name: {parameter.name}")
+                    raise InvalidArgumentError(f"Invalid parameter name: {parameter.name}")
 
                 definition = self.definitions[parameter.name]
                 # Handle the case where we have a recursive configuration definition
                 if isinstance(parameter.value, dict):
                     child_type = globals().get(parameter.value.get("_type", None))
                     if child_type is None:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             f"Invalid configuration type: {parameter.value}"
                         )
                     parameter.value = child_type.from_json(parameter.value)
                 if not isinstance(parameter.value, type(definition.default_value)):
-                    raise ValueError(f"Invalid parameter value: {parameter.value}")
+                    raise InvalidArgumentError(f"Invalid parameter value: {parameter.value}")
 
                 parameter_validator = definition.validator
                 if not parameter_validator(parameter.value):
-                    raise ValueError(f"Invalid parameter value: {parameter.value}")
+                    raise InvalidArgumentError(f"Invalid parameter value: {parameter.value}")
                 self.parameter_map[parameter.name] = parameter
         # Apply the defaults for any missing parameters
         for name, definition in self.definitions.items():
@@ -152,7 +153,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
     def get_parameter(self, name: str) -> ConfigurationParameter:
         """Returns the parameter with the given name, or except if it doesn't exist."""
         if name not in self.parameter_map:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Invalid parameter name: {name} for configuration {self.__class__.__name__}"
             )
         param_value = cast(ConfigurationParameter, self.parameter_map.get(name))
@@ -161,13 +162,13 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
     def set_parameter(self, name: str, value: Union[str, int, float, bool]) -> None:
         """Sets the parameter with the given name to the given value."""
         if name not in self.definitions:
-            raise ValueError(f"Invalid parameter name: {name}")
+            raise InvalidArgumentError(f"Invalid parameter name: {name}")
         definition = self.definitions[name]
         parameter = self.parameter_map[name]
         if definition.is_static:
             raise StaticParameterError(f"Cannot set static parameter: {name}")
         if not definition.validator(value):
-            raise ValueError(f"Invalid value for parameter {name}: {value}")
+            raise InvalidArgumentError(f"Invalid value for parameter {name}: {value}")
         parameter.value = value
 
     @override
@@ -182,7 +183,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
         try:
             config_json = json.loads(json_str)
         except json.JSONDecodeError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Unable to decode configuration from JSON string: {json_str}"
             )
         return cls.from_json(config_json)
@@ -205,7 +206,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Returns a configuration from the given JSON string."""
         if cls.__name__ != json_map.get("_type", None):
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Trying to instantiate configuration of type {cls.__name__} from JSON with type {json_map['_type']}"
             )
         parameters = []
@@ -308,7 +309,7 @@ class HNSWConfigurationInternal(ConfigurationInternal):
         parameters = []
         for name, value in params.items():
             if name not in old_to_new:
-                raise ValueError(f"Invalid legacy HNSW parameter name: {name}")
+                raise InvalidArgumentError(f"Invalid legacy HNSW parameter name: {name}")
             parameters.append(
                 ConfigurationParameter(name=old_to_new[name], value=value)
             )

@@ -5,7 +5,12 @@ from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
-from chromadb.errors import NotFoundError, UniqueConstraintError, InternalError
+from chromadb.errors import (
+    NotFoundError, 
+    UniqueConstraintError, 
+    InternalError,
+    InvalidArgumentError
+)
 from chromadb.proto.convert import (
     from_proto_collection,
     from_proto_segment,
@@ -326,7 +331,7 @@ class GrpcSysDB(SysDB):
                 )
             if name is not None:
                 if tenant is None and database is None:
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
                     )
                 request = GetCollectionsRequest(
