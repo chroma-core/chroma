@@ -145,15 +145,10 @@ impl WorkerServer {
         let segment_uuid = to_segment_uuid(&request.segment_id)?;
         let collection_uuid = to_collection_uuid(&request.collection_id)?;
         let (collection_version, log_position) = get_version_context(&request.version_context)?;
+        let system = self.clone_system()?;
+        let dispatcher = self.clone_dispatcher()?;
 
-        // empty query vectors empty result set
-        if request.vectors.len() < 1 {
-            return Ok(Response::new(chroma_proto::QueryVectorsResponse {
-                results: Vec::new(),
-            }));
-        }
-
-        let mut query_vectors = Vec::with_capacity(request.vectors.len()); // assume same lengths
+        let mut query_vectors = Vec::with_capacity(request.vectors.len());
         for proto_query_vector in request.vectors {
             let (query_vector, _encoding) = proto_query_vector
                 .try_into()
@@ -161,31 +156,6 @@ impl WorkerServer {
 
             query_vectors.push(query_vector);
         }
-        let query_vector_len = query_vectors[0].len();
-        let orchestrator = HnswQueryOrchestrator::new(
-            self.clone_system()?,
-            query_vectors,
-            request.k,
-            request.allowed_ids,
-            request.include_embeddings,
-            segment_uuid,
-            collection_uuid,
-            self.log.clone(),
-            self.sysdb.clone(),
-            self.hnsw_index_provider.clone(),
-            self.blockfile_provider.clone(),
-            self.clone_dispatcher()?,
-            collection_version,
-            log_position,
-        );
-
-        let system = match self.system {
-            Some(ref system) => system,
-            None => {
-                tracing::error!("No system found");
-                return Err(Status::internal("No system found"));
-            }
-        };
 
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -267,9 +237,8 @@ impl WorkerServer {
                 .into_iter()
                 .map(|knn| knn.run(system.clone())),
         )
-        .await;
-
-        let result = orchestrator.run().await.map_err(|e| {
+        .await
+        .map_err(|e| {
             tracing::error!("Error running orchestrator: {}", e);
             Status::new(
                 e.code().into(),
@@ -654,7 +623,7 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
 }
 
 fn to_collection_uuid(uuid: &str) -> Result<CollectionUuid, Status> {
-    parse_uuid(uuid, "Invalid Collection UUID").map(|uuid| CollectionUuid(uuid))
+    parse_uuid(uuid, "Invalid Collection UUID").map(CollectionUuid)
 }
 
 fn to_segment_uuid(segment_id: &str) -> Result<Uuid, Status> {
