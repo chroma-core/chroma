@@ -411,7 +411,7 @@ mod tests {
             let ref_last_commit = ref_state.last_commit.as_ref().unwrap();
             let last_blockfile_id = state.last_blockfile_id.unwrap();
 
-            let reader = block_on(state.provider.open::<&str, &str>(&last_blockfile_id)).unwrap();
+            let reader = block_on(state.provider.read::<&str, &str>(&last_blockfile_id)).unwrap();
 
             // Check count
             assert_eq!(block_on(reader.count()).unwrap(), ref_last_commit.len());
