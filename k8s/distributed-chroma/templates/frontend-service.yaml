@@ -51,10 +51,6 @@ spec:
               {{ .Values.frontendService.logServiceHost }}
             - name: CHROMA_LOGSERVICE_PORT
               {{ .Values.frontendService.logServicePort }}
-            - name: CHROMA_FRONTEND_SERVICE__MY_MEMBER_ID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
 {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
       {{if .Values.frontendService.tolerations}}
       tolerations:
