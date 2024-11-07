@@ -11,6 +11,7 @@ pub mod admissioncontrolleds3;
 pub mod caching;
 pub mod config;
 pub mod evicting;
+pub mod latency;
 pub mod local;
 pub mod object_store;
 pub mod s3;
