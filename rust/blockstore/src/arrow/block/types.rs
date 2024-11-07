@@ -136,7 +136,12 @@ impl Block {
     /// the index where a matching element could be inserted while maintaining
     /// sorted order.
     ///
-    /// Based on std::slice::binary_search_by with minimal modifications (https://doc.rust-lang.org/src/core/slice/mod.rs.html#2770).
+    // The implementation is a binary search based on [`std::slice::binary_search_by`]
+    //
+    // [`std::slice::binary_search_by`]: https://github.com/rust-lang/rust/blob/705cfe0e966399e061d64dd3661bfbc57553ed87/library/core/src/slice/mod.rs#L2731-L2827
+    // Retrieval timestamp: Nov 1, 2024
+    // Source commit hash: a0215d8e46aab41219dea0bb1cbaaf97dafe2f89
+    // Source license: Apache-2.0 or MIT
     #[inline]
     fn binary_search_by<'me, K: ArrowReadableKey<'me>, F>(
         &'me self,
