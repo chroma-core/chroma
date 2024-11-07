@@ -44,10 +44,7 @@ use chroma_types::{Chunk, Collection, CollectionUuid, LogRecord, Segment, Vector
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::{
-    cmp::min,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, Span};
 use uuid::Uuid;
