@@ -32,8 +32,13 @@ chroma-cache = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 bincode = { workspace = true }
+
+[[bench]]
+name = "blockfile_writer"
+harness = false
