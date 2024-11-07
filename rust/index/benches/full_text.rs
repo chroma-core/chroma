@@ -4,7 +4,9 @@ use anyhow::Result;
 use chroma_benchmark::datasets::{
     ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
 };
-use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
+use chroma_blockstore::{
+    arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider, BlockfileWriterOptions,
+};
 use chroma_cache::UnboundedCacheConfig;
 use chroma_index::fulltext::{
     tokenizer::TantivyChromaTokenizer,
@@ -25,8 +27,14 @@ async fn compact_log_and_get_reader<'a, T>(
 where
     T: RecordDataset,
 {
-    let postings_blockfile_writer = blockfile_provider.create::<u32, Vec<u32>>().await.unwrap();
-    let frequencies_blockfile_writer = blockfile_provider.create::<u32, u32>().await.unwrap();
+    let postings_blockfile_writer = blockfile_provider
+        .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+        .await
+        .unwrap();
+    let frequencies_blockfile_writer = blockfile_provider
+        .write::<u32, u32>(BlockfileWriterOptions::default())
+        .await
+        .unwrap();
     let postings_blockfile_id = postings_blockfile_writer.id();
     let frequencies_blockfile_id = frequencies_blockfile_writer.id();
 
@@ -59,11 +67,11 @@ where
     flusher.flush().await.unwrap();
 
     let postings_blockfile_reader = blockfile_provider
-        .open::<u32, &[u32]>(&postings_blockfile_id)
+        .read::<u32, &[u32]>(&postings_blockfile_id)
         .await
         .unwrap();
     let frequencies_blockfile_reader = blockfile_provider
-        .open::<u32, u32>(&frequencies_blockfile_id)
+        .read::<u32, u32>(&frequencies_blockfile_id)
         .await
         .unwrap();
 

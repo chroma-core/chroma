@@ -2,7 +2,9 @@ use super::types::{MaterializedLogRecord, SegmentWriter};
 use super::SegmentFlusher;
 use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
-use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use chroma_blockstore::{
+    BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid,
@@ -102,173 +104,189 @@ impl RecordSegmentWriter {
             return Err(RecordSegmentWriterCreationError::InvalidSegmentType);
         }
 
-        let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id) =
-            match segment.file_path.len() {
-                0 => {
-                    tracing::debug!("No files found, creating new blockfiles for record segment");
-                    let user_id_to_id = match blockfile_provider.create::<&str, u32>().await {
-                        Ok(user_id_to_id) => user_id_to_id,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
-                    let id_to_user_id = match blockfile_provider.create::<u32, String>().await {
-                        Ok(id_to_user_id) => id_to_user_id,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
-                    let id_to_data = match blockfile_provider.create::<u32, &DataRecord>().await {
-                        Ok(id_to_data) => id_to_data,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
-                    let max_offset_id = match blockfile_provider.create::<&str, u32>().await {
-                        Ok(max_offset_id) => max_offset_id,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
+        let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id) = match segment
+            .file_path
+            .len()
+        {
+            0 => {
+                tracing::debug!("No files found, creating new blockfiles for record segment");
+                let user_id_to_id = match blockfile_provider
+                    .write::<&str, u32>(BlockfileWriterOptions::default())
+                    .await
+                {
+                    Ok(user_id_to_id) => user_id_to_id,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+                let id_to_user_id = match blockfile_provider
+                    .write::<u32, String>(BlockfileWriterOptions::default())
+                    .await
+                {
+                    Ok(id_to_user_id) => id_to_user_id,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+                let id_to_data = match blockfile_provider
+                    .write::<u32, &DataRecord>(BlockfileWriterOptions::default())
+                    .await
+                {
+                    Ok(id_to_data) => id_to_data,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+                let max_offset_id = match blockfile_provider
+                    .write::<&str, u32>(BlockfileWriterOptions::default())
+                    .await
+                {
+                    Ok(max_offset_id) => max_offset_id,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
 
-                    (user_id_to_id, id_to_user_id, id_to_data, max_offset_id)
-                }
-                4 => {
-                    tracing::debug!("Found files, loading blockfiles for record segment");
-                    let user_id_to_id_bf_id = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
-                        Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.first() {
-                            Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,
-                            None => {
-                                return Err(RecordSegmentWriterCreationError::MissingFile(
-                                    USER_ID_TO_OFFSET_ID.to_string(),
-                                ))
-                            }
-                        },
+                (user_id_to_id, id_to_user_id, id_to_data, max_offset_id)
+            }
+            4 => {
+                tracing::debug!("Found files, loading blockfiles for record segment");
+                let user_id_to_id_bf_id = match segment.file_path.get(USER_ID_TO_OFFSET_ID) {
+                    Some(user_id_to_id_bf_id) => match user_id_to_id_bf_id.first() {
+                        Some(user_id_to_id_bf_id) => user_id_to_id_bf_id,
                         None => {
                             return Err(RecordSegmentWriterCreationError::MissingFile(
                                 USER_ID_TO_OFFSET_ID.to_string(),
                             ))
                         }
-                    };
-                    let id_to_user_id_bf_id = match segment.file_path.get(OFFSET_ID_TO_USER_ID) {
-                        Some(id_to_user_id_bf_id) => match id_to_user_id_bf_id.first() {
-                            Some(id_to_user_id_bf_id) => id_to_user_id_bf_id,
-                            None => {
-                                return Err(RecordSegmentWriterCreationError::MissingFile(
-                                    OFFSET_ID_TO_USER_ID.to_string(),
-                                ))
-                            }
-                        },
+                    },
+                    None => {
+                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                            USER_ID_TO_OFFSET_ID.to_string(),
+                        ))
+                    }
+                };
+                let id_to_user_id_bf_id = match segment.file_path.get(OFFSET_ID_TO_USER_ID) {
+                    Some(id_to_user_id_bf_id) => match id_to_user_id_bf_id.first() {
+                        Some(id_to_user_id_bf_id) => id_to_user_id_bf_id,
                         None => {
                             return Err(RecordSegmentWriterCreationError::MissingFile(
                                 OFFSET_ID_TO_USER_ID.to_string(),
                             ))
                         }
-                    };
-                    let id_to_data_bf_id = match segment.file_path.get(OFFSET_ID_TO_DATA) {
-                        Some(id_to_data_bf_id) => match id_to_data_bf_id.first() {
-                            Some(id_to_data_bf_id) => id_to_data_bf_id,
-                            None => {
-                                return Err(RecordSegmentWriterCreationError::MissingFile(
-                                    OFFSET_ID_TO_DATA.to_string(),
-                                ))
-                            }
-                        },
+                    },
+                    None => {
+                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                            OFFSET_ID_TO_USER_ID.to_string(),
+                        ))
+                    }
+                };
+                let id_to_data_bf_id = match segment.file_path.get(OFFSET_ID_TO_DATA) {
+                    Some(id_to_data_bf_id) => match id_to_data_bf_id.first() {
+                        Some(id_to_data_bf_id) => id_to_data_bf_id,
                         None => {
                             return Err(RecordSegmentWriterCreationError::MissingFile(
                                 OFFSET_ID_TO_DATA.to_string(),
                             ))
                         }
-                    };
-                    let max_offset_id_bf_id = match segment.file_path.get(MAX_OFFSET_ID) {
-                        Some(max_offset_id_file_id) => match max_offset_id_file_id.first() {
-                            Some(max_offset_id_file_id) => max_offset_id_file_id,
-                            None => {
-                                return Err(RecordSegmentWriterCreationError::MissingFile(
-                                    MAX_OFFSET_ID.to_string(),
-                                ))
-                            }
-                        },
+                    },
+                    None => {
+                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                            OFFSET_ID_TO_DATA.to_string(),
+                        ))
+                    }
+                };
+                let max_offset_id_bf_id = match segment.file_path.get(MAX_OFFSET_ID) {
+                    Some(max_offset_id_file_id) => match max_offset_id_file_id.first() {
+                        Some(max_offset_id_file_id) => max_offset_id_file_id,
                         None => {
                             return Err(RecordSegmentWriterCreationError::MissingFile(
                                 MAX_OFFSET_ID.to_string(),
                             ))
                         }
-                    };
+                    },
+                    None => {
+                        return Err(RecordSegmentWriterCreationError::MissingFile(
+                            MAX_OFFSET_ID.to_string(),
+                        ))
+                    }
+                };
 
-                    let user_id_to_bf_uuid = match Uuid::parse_str(user_id_to_id_bf_id) {
-                        Ok(user_id_to_bf_uuid) => user_id_to_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                USER_ID_TO_OFFSET_ID.to_string(),
-                            ))
-                        }
-                    };
-                    let id_to_user_id_bf_uuid = match Uuid::parse_str(id_to_user_id_bf_id) {
-                        Ok(id_to_user_id_bf_uuid) => id_to_user_id_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                OFFSET_ID_TO_USER_ID.to_string(),
-                            ))
-                        }
-                    };
-                    let id_to_data_bf_uuid = match Uuid::parse_str(id_to_data_bf_id) {
-                        Ok(id_to_data_bf_uuid) => id_to_data_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                OFFSET_ID_TO_DATA.to_string(),
-                            ))
-                        }
-                    };
-                    let max_offset_id_bf_uuid = match Uuid::parse_str(max_offset_id_bf_id) {
-                        Ok(max_offset_id_bf_uuid) => max_offset_id_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                MAX_OFFSET_ID.to_string(),
-                            ))
-                        }
-                    };
+                let user_id_to_bf_uuid = match Uuid::parse_str(user_id_to_id_bf_id) {
+                    Ok(user_id_to_bf_uuid) => user_id_to_bf_uuid,
+                    Err(_) => {
+                        return Err(RecordSegmentWriterCreationError::InvalidUuid(
+                            USER_ID_TO_OFFSET_ID.to_string(),
+                        ))
+                    }
+                };
+                let id_to_user_id_bf_uuid = match Uuid::parse_str(id_to_user_id_bf_id) {
+                    Ok(id_to_user_id_bf_uuid) => id_to_user_id_bf_uuid,
+                    Err(_) => {
+                        return Err(RecordSegmentWriterCreationError::InvalidUuid(
+                            OFFSET_ID_TO_USER_ID.to_string(),
+                        ))
+                    }
+                };
+                let id_to_data_bf_uuid = match Uuid::parse_str(id_to_data_bf_id) {
+                    Ok(id_to_data_bf_uuid) => id_to_data_bf_uuid,
+                    Err(_) => {
+                        return Err(RecordSegmentWriterCreationError::InvalidUuid(
+                            OFFSET_ID_TO_DATA.to_string(),
+                        ))
+                    }
+                };
+                let max_offset_id_bf_uuid = match Uuid::parse_str(max_offset_id_bf_id) {
+                    Ok(max_offset_id_bf_uuid) => max_offset_id_bf_uuid,
+                    Err(_) => {
+                        return Err(RecordSegmentWriterCreationError::InvalidUuid(
+                            MAX_OFFSET_ID.to_string(),
+                        ))
+                    }
+                };
 
-                    let user_id_to_id = match blockfile_provider
-                        .fork::<&str, u32>(&user_id_to_bf_uuid)
-                        .await
-                    {
-                        Ok(user_id_to_id) => user_id_to_id,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
-                    let id_to_user_id = match blockfile_provider
-                        .fork::<u32, String>(&id_to_user_id_bf_uuid)
-                        .await
-                    {
-                        Ok(id_to_user_id) => id_to_user_id,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
-                    let id_to_data = match blockfile_provider
-                        .fork::<u32, &DataRecord>(&id_to_data_bf_uuid)
-                        .await
-                    {
-                        Ok(id_to_data) => id_to_data,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
-                    let max_offset_id_bf = match blockfile_provider
-                        .fork::<&str, u32>(&max_offset_id_bf_uuid)
-                        .await
-                    {
-                        Ok(max_offset_id) => max_offset_id,
-                        Err(e) => {
-                            return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
-                        }
-                    };
-                    (user_id_to_id, id_to_user_id, id_to_data, max_offset_id_bf)
-                }
-                _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
-            };
+                let user_id_to_id = match blockfile_provider
+                    .write::<&str, u32>(BlockfileWriterOptions::new().fork(user_id_to_bf_uuid))
+                    .await
+                {
+                    Ok(user_id_to_id) => user_id_to_id,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+                let id_to_user_id = match blockfile_provider
+                    .write::<u32, String>(BlockfileWriterOptions::new().fork(id_to_user_id_bf_uuid))
+                    .await
+                {
+                    Ok(id_to_user_id) => id_to_user_id,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+                let id_to_data = match blockfile_provider
+                    .write::<u32, &DataRecord>(
+                        BlockfileWriterOptions::new().fork(id_to_data_bf_uuid),
+                    )
+                    .await
+                {
+                    Ok(id_to_data) => id_to_data,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+                let max_offset_id_bf = match blockfile_provider
+                    .write::<&str, u32>(BlockfileWriterOptions::new().fork(max_offset_id_bf_uuid))
+                    .await
+                {
+                    Ok(max_offset_id) => max_offset_id,
+                    Err(e) => {
+                        return Err(RecordSegmentWriterCreationError::BlockfileCreateError(e))
+                    }
+                };
+                (user_id_to_id, id_to_user_id, id_to_data, max_offset_id_bf)
+            }
+            _ => return Err(RecordSegmentWriterCreationError::IncorrectNumberOfFiles),
+        };
 
         Ok(RecordSegmentWriter {
             user_id_to_id: Some(user_id_to_id),
@@ -662,7 +680,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let max_offset_id_bf_reader = match max_offset_id_bf_uuid {
-                    Some(bf_uuid) => match blockfile_provider.open::<&str, u32>(&bf_uuid).await {
+                    Some(bf_uuid) => match blockfile_provider.read::<&str, u32>(&bf_uuid).await {
                         Ok(max_offset_id_bf_reader) => Some(max_offset_id_bf_reader),
                         Err(_) => None,
                     },
@@ -677,7 +695,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let user_id_to_id = match blockfile_provider
-                    .open::<&str, u32>(&Uuid::parse_str(user_id_to_id_bf_id).unwrap())
+                    .read::<&str, u32>(&Uuid::parse_str(user_id_to_id_bf_id).unwrap())
                     .await
                 {
                     Ok(user_id_to_id) => user_id_to_id,
@@ -689,7 +707,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let id_to_user_id = match blockfile_provider
-                    .open::<u32, &str>(&Uuid::parse_str(id_to_user_id_bf_id).unwrap())
+                    .read::<u32, &str>(&Uuid::parse_str(id_to_user_id_bf_id).unwrap())
                     .await
                 {
                     Ok(id_to_user_id) => id_to_user_id,
@@ -701,7 +719,7 @@ impl RecordSegmentReader<'_> {
                 };
 
                 let id_to_data = match blockfile_provider
-                    .open::<u32, DataRecord>(&Uuid::parse_str(id_to_data_bf_id).unwrap())
+                    .read::<u32, DataRecord>(&Uuid::parse_str(id_to_data_bf_id).unwrap())
                     .await
                 {
                     Ok(id_to_data) => id_to_data,

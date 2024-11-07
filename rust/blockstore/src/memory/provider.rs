@@ -26,7 +26,7 @@ impl MemoryBlockfileProvider {
         }
     }
 
-    pub(crate) fn open<
+    pub(crate) fn read<
         'new,
         K: Key
             + Into<KeyWrapper>

@@ -67,7 +67,7 @@ mod tests {
                 });
 
                 let reader = future::block_on(async {
-                    blockfile_provider.open::<&str, u32>(&id).await.unwrap()
+                    blockfile_provider.read::<&str, u32>(&id).await.unwrap()
                 });
                 // Read the data back
                 for i in 0..n {

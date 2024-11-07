@@ -544,14 +544,20 @@ impl<'me> FullTextIndexReader<'me> {
 mod tests {
     use super::*;
     use crate::fulltext::tokenizer::TantivyChromaTokenizer;
-    use chroma_blockstore::provider::BlockfileProvider;
+    use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
     use tantivy::tokenizer::NgramTokenizer;
 
     #[tokio::test]
     async fn test_new_writer() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
             NgramTokenizer::new(1, 1, false).unwrap(),
         ));
@@ -562,8 +568,14 @@ mod tests {
     #[tokio::test]
     async fn test_new_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let freq_blockfile_id = freq_blockfile_writer.id();
         let pl_blockfile_id = pl_blockfile_writer.id();
 
@@ -576,9 +588,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -590,8 +602,14 @@ mod tests {
     #[tokio::test]
     async fn test_index_and_search_single_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -605,9 +623,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -629,8 +647,14 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_query() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -644,9 +668,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -662,8 +686,14 @@ mod tests {
     #[tokio::test]
     async fn test_query_of_repeating_character() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -678,9 +708,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -696,8 +726,14 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -711,9 +747,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -729,8 +765,14 @@ mod tests {
     #[tokio::test]
     async fn test_search_absent_token() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -744,9 +786,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -762,8 +804,14 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_candidates_within_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -781,9 +829,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -802,8 +850,14 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_simple_documents() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -818,9 +872,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -839,8 +893,14 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_complex_documents() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -857,9 +917,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -884,8 +944,14 @@ mod tests {
     #[tokio::test]
     async fn test_index_multiple_character_repeating() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -906,9 +972,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -930,8 +996,14 @@ mod tests {
     #[tokio::test]
     async fn test_index_special_characters() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -950,9 +1022,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -974,8 +1046,14 @@ mod tests {
     #[tokio::test]
     async fn test_get_frequencies_for_token() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -993,9 +1071,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -1017,8 +1095,14 @@ mod tests {
     #[tokio::test]
     async fn test_get_all_results_for_token() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1036,9 +1120,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -1060,8 +1144,14 @@ mod tests {
     #[tokio::test]
     async fn test_update_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1083,9 +1173,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(
@@ -1104,8 +1194,14 @@ mod tests {
     #[tokio::test]
     async fn test_delete_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let freq_blockfile_writer = provider
+            .write::<u32, String>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
         let freq_blockfile_id = freq_blockfile_writer.id();
 
@@ -1124,9 +1220,9 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
+        let freq_blockfile_reader = provider.read::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
         let tokenizer = Box::new(TantivyChromaTokenizer::new(

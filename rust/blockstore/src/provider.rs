@@ -60,7 +60,7 @@ impl BlockfileProvider {
         ))
     }
 
-    pub async fn open<
+    pub async fn read<
         'new,
         K: Key
             + Into<KeyWrapper>
@@ -74,8 +74,8 @@ impl BlockfileProvider {
         id: &uuid::Uuid,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.open::<K, V>(id),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.open::<K, V>(id).await,
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.read::<K, V>(id),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.read::<K, V>(id).await,
         }
     }
 
@@ -99,45 +99,6 @@ impl BlockfileProvider {
             }
         };
         Ok(())
-    }
-
-    // todo: deprecate
-    pub async fn create<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
-        &self,
-    ) -> Result<BlockfileWriter, Box<CreateError>> {
-        match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => {
-                provider.write(BlockfileWriterOptions::default())
-            }
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider
-                    .write::<K, V>(BlockfileWriterOptions::default())
-                    .await
-            }
-        }
-    }
-
-    // todo: deprecate
-    pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
-        &self,
-        id: &uuid::Uuid,
-    ) -> Result<BlockfileWriter, Box<CreateError>> {
-        match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => {
-                provider.write(BlockfileWriterOptions {
-                    fork_from: Some(*id),
-                    ..Default::default()
-                })
-            }
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider
-                    .write::<K, V>(BlockfileWriterOptions {
-                        fork_from: Some(*id),
-                        ..Default::default()
-                    })
-                    .await
-            }
-        }
     }
 }
 
