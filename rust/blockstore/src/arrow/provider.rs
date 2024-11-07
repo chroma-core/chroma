@@ -1,7 +1,8 @@
 use super::{
-    block::{delta::BlockDelta, Block, BlockLoadError},
-    blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
+    block::{delta::types::Delta, Block, BlockLoadError},
+    blockfile::{ArrowBlockfileReader, ArrowUnorderedBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
+    ordered_blockfile_writer::ArrowOrderedBlockfileWriter,
     root::{FromBytesError, RootReader, RootWriter},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
@@ -70,10 +71,6 @@ impl ArrowBlockfileProvider {
         &self,
         options: BlockfileWriterOptions,
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
-        if options.mutation_ordering != BlockfileWriterMutationOrdering::Unordered {
-            unimplemented!();
-        }
-
         if let Some(fork_from) = options.fork_from {
             tracing::info!("Forking blockfile from {:?}", fork_from);
             let new_id = Uuid::new_v4();
@@ -85,22 +82,50 @@ impl ArrowBlockfileProvider {
                     tracing::error!("Error forking root: {:?}", e);
                     Box::new(CreateError::Other(Box::new(e)))
                 })?;
-            let file = ArrowBlockfileWriter::from_root(
-                new_id,
-                self.block_manager.clone(),
-                self.root_manager.clone(),
-                new_root,
-            );
-            Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+
+            match options.mutation_ordering {
+                BlockfileWriterMutationOrdering::Ordered => {
+                    let file = ArrowOrderedBlockfileWriter::from_root(
+                        new_id,
+                        self.block_manager.clone(),
+                        self.root_manager.clone(),
+                        new_root,
+                    );
+
+                    Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
+                }
+                BlockfileWriterMutationOrdering::Unordered => {
+                    let file = ArrowUnorderedBlockfileWriter::from_root(
+                        new_id,
+                        self.block_manager.clone(),
+                        self.root_manager.clone(),
+                        new_root,
+                    );
+                    Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
+                }
+            }
         } else {
-            // Create a new blockfile and return a writer
             let new_id = Uuid::new_v4();
-            let file = ArrowBlockfileWriter::new::<K, V>(
-                new_id,
-                self.block_manager.clone(),
-                self.root_manager.clone(),
-            );
-            Ok(BlockfileWriter::ArrowBlockfileWriter(file))
+
+            match options.mutation_ordering {
+                BlockfileWriterMutationOrdering::Ordered => {
+                    let file = ArrowOrderedBlockfileWriter::new::<K, V>(
+                        new_id,
+                        self.block_manager.clone(),
+                        self.root_manager.clone(),
+                    );
+
+                    Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
+                }
+                BlockfileWriterMutationOrdering::Unordered => {
+                    let file = ArrowUnorderedBlockfileWriter::new::<K, V>(
+                        new_id,
+                        self.block_manager.clone(),
+                        self.root_manager.clone(),
+                    );
+                    Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
+                }
+            }
         }
     }
 
@@ -210,15 +235,15 @@ impl BlockManager {
         }
     }
 
-    pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> BlockDelta {
+    pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(&self) -> D {
         let new_block_id = Uuid::new_v4();
-        BlockDelta::new::<K, V>(new_block_id)
+        D::new::<K, V>(new_block_id)
     }
 
-    pub(super) async fn fork<KeyWrite: ArrowWriteableKey, ValueWrite: ArrowWriteableValue>(
+    pub(super) async fn fork<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(
         &self,
         block_id: &Uuid,
-    ) -> Result<BlockDelta, ForkError> {
+    ) -> Result<D, ForkError> {
         let block = self.get(block_id).await;
         let block = match block {
             Ok(Some(block)) => block,
@@ -230,28 +255,14 @@ impl BlockManager {
             }
         };
         let new_block_id = Uuid::new_v4();
-        let delta = BlockDelta::new::<KeyWrite, ValueWrite>(new_block_id);
-        let populated_delta = self.fork_lifetime_scope::<KeyWrite, ValueWrite>(&block, delta);
-        Ok(populated_delta)
-    }
-
-    fn fork_lifetime_scope<'new, KeyWrite, ValueWrite>(
-        &self,
-        block: &'new Block,
-        delta: BlockDelta,
-    ) -> BlockDelta
-    where
-        KeyWrite: ArrowWriteableKey,
-        ValueWrite: ArrowWriteableValue,
-    {
-        block.to_block_delta::<KeyWrite::ReadableKey<'new>, ValueWrite::ReadableValue<'new>>(delta)
+        Ok(Delta::fork_block::<K, V>(new_block_id, &block))
     }
 
     pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
-        delta: BlockDelta,
+        delta: impl Delta,
     ) -> Block {
-        let delta_id = delta.id;
+        let delta_id = delta.id();
         let record_batch = delta.finish::<K, V>(None);
         Block::from_record_batch(delta_id, record_batch)
     }

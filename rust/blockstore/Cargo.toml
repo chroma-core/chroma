@@ -23,6 +23,7 @@ prost-types = { workspace = true }
 tokio = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
+itertools = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }

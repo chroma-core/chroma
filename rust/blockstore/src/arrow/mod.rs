@@ -4,6 +4,8 @@ pub(crate) mod blockfile;
 mod concurrency_test;
 pub mod config;
 pub(crate) mod flusher;
+mod migrations;
+pub(crate) mod ordered_blockfile_writer;
 pub mod provider;
 pub mod root;
 mod sparse_index;

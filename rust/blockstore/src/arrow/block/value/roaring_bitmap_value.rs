@@ -4,11 +4,12 @@ use crate::{
     arrow::{
         block::delta::{
             single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
+            single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{Array, BinaryArray, BinaryBuilder},
@@ -31,8 +32,8 @@ impl ArrowWriteableValue for RoaringBitmap {
         0 // We don't support None values for RoaringBitmap
     }
 
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        match &delta.builder {
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
+        match &delta {
             BlockStorage::RoaringBitmap(builder) => {
                 builder.add(prefix, key, value);
             }
@@ -40,7 +41,7 @@ impl ArrowWriteableValue for RoaringBitmap {
         }
     }
 
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
         match &delta.builder {
             BlockStorage::RoaringBitmap(builder) => {
                 builder.delete(prefix, key);
@@ -49,8 +50,8 @@ impl ArrowWriteableValue for RoaringBitmap {
         }
     }
 
-    fn get_delta_builder() -> BlockStorage {
-        BlockStorage::RoaringBitmap(SingleColumnStorage::new())
+    fn get_delta_builder(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> BlockStorage {
+        BlockStorage::RoaringBitmap(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
@@ -91,8 +92,8 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockDelta,
+        storage: &mut BlockStorage,
     ) {
-        delta.add(prefix, key, value);
+        RoaringBitmap::add(prefix, key.into(), value, storage);
     }
 }
