@@ -7,46 +7,46 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class Operation(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     ADD: _ClassVar[Operation]
     UPDATE: _ClassVar[Operation]
     UPSERT: _ClassVar[Operation]
     DELETE: _ClassVar[Operation]
 
 class ScalarEncoding(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     FLOAT32: _ClassVar[ScalarEncoding]
     INT32: _ClassVar[ScalarEncoding]
 
 class SegmentScope(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     VECTOR: _ClassVar[SegmentScope]
     METADATA: _ClassVar[SegmentScope]
     RECORD: _ClassVar[SegmentScope]
     SQLITE: _ClassVar[SegmentScope]
 
 class WhereDocumentOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     CONTAINS: _ClassVar[WhereDocumentOperator]
     NOT_CONTAINS: _ClassVar[WhereDocumentOperator]
 
 class BooleanOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     AND: _ClassVar[BooleanOperator]
     OR: _ClassVar[BooleanOperator]
 
 class ListOperator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     IN: _ClassVar[ListOperator]
     NIN: _ClassVar[ListOperator]
 
 class GenericComparator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     EQ: _ClassVar[GenericComparator]
     NE: _ClassVar[GenericComparator]
 
 class NumberComparator(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = []
+    __slots__ = ()
     GT: _ClassVar[NumberComparator]
     GTE: _ClassVar[NumberComparator]
     LT: _ClassVar[NumberComparator]
@@ -75,7 +75,7 @@ LT: NumberComparator
 LTE: NumberComparator
 
 class Vector(_message.Message):
-    __slots__ = ["dimension", "vector", "encoding"]
+    __slots__ = ("dimension", "vector", "encoding")
     DIMENSION_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     ENCODING_FIELD_NUMBER: _ClassVar[int]
@@ -85,15 +85,15 @@ class Vector(_message.Message):
     def __init__(self, dimension: _Optional[int] = ..., vector: _Optional[bytes] = ..., encoding: _Optional[_Union[ScalarEncoding, str]] = ...) -> None: ...
 
 class FilePaths(_message.Message):
-    __slots__ = ["paths"]
+    __slots__ = ("paths",)
     PATHS_FIELD_NUMBER: _ClassVar[int]
     paths: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Segment(_message.Message):
-    __slots__ = ["id", "type", "scope", "collection", "metadata", "file_paths"]
+    __slots__ = ("id", "type", "scope", "collection", "metadata", "file_paths")
     class FilePathsEntry(_message.Message):
-        __slots__ = ["key", "value"]
+        __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
         key: str
@@ -114,7 +114,7 @@ class Segment(_message.Message):
     def __init__(self, id: _Optional[str] = ..., type: _Optional[str] = ..., scope: _Optional[_Union[SegmentScope, str]] = ..., collection: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., file_paths: _Optional[_Mapping[str, FilePaths]] = ...) -> None: ...
 
 class Collection(_message.Message):
-    __slots__ = ["id", "name", "configuration_json_str", "metadata", "dimension", "tenant", "database", "log_position", "version"]
+    __slots__ = ("id", "name", "configuration_json_str", "metadata", "dimension", "tenant", "database", "log_position", "version")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONFIGURATION_JSON_STR_FIELD_NUMBER: _ClassVar[int]
@@ -136,7 +136,7 @@ class Collection(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., configuration_json_str: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., dimension: _Optional[int] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., log_position: _Optional[int] = ..., version: _Optional[int] = ...) -> None: ...
 
 class Database(_message.Message):
-    __slots__ = ["id", "name", "tenant"]
+    __slots__ = ("id", "name", "tenant")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
@@ -146,13 +146,13 @@ class Database(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., tenant: _Optional[str] = ...) -> None: ...
 
 class Tenant(_message.Message):
-    __slots__ = ["name"]
+    __slots__ = ("name",)
     NAME_FIELD_NUMBER: _ClassVar[int]
     name: str
     def __init__(self, name: _Optional[str] = ...) -> None: ...
 
 class UpdateMetadataValue(_message.Message):
-    __slots__ = ["string_value", "int_value", "float_value", "bool_value"]
+    __slots__ = ("string_value", "int_value", "float_value", "bool_value")
     STRING_VALUE_FIELD_NUMBER: _ClassVar[int]
     INT_VALUE_FIELD_NUMBER: _ClassVar[int]
     FLOAT_VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -164,9 +164,9 @@ class UpdateMetadataValue(_message.Message):
     def __init__(self, string_value: _Optional[str] = ..., int_value: _Optional[int] = ..., float_value: _Optional[float] = ..., bool_value: bool = ...) -> None: ...
 
 class UpdateMetadata(_message.Message):
-    __slots__ = ["metadata"]
+    __slots__ = ("metadata",)
     class MetadataEntry(_message.Message):
-        __slots__ = ["key", "value"]
+        __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
         key: str
@@ -177,7 +177,7 @@ class UpdateMetadata(_message.Message):
     def __init__(self, metadata: _Optional[_Mapping[str, UpdateMetadataValue]] = ...) -> None: ...
 
 class OperationRecord(_message.Message):
-    __slots__ = ["id", "vector", "metadata", "operation"]
+    __slots__ = ("id", "vector", "metadata", "operation")
     ID_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
@@ -189,7 +189,7 @@ class OperationRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ..., operation: _Optional[_Union[Operation, str]] = ...) -> None: ...
 
 class RequestVersionContext(_message.Message):
-    __slots__ = ["collection_version", "log_position"]
+    __slots__ = ("collection_version", "log_position")
     COLLECTION_VERSION_FIELD_NUMBER: _ClassVar[int]
     LOG_POSITION_FIELD_NUMBER: _ClassVar[int]
     collection_version: int
@@ -197,7 +197,7 @@ class RequestVersionContext(_message.Message):
     def __init__(self, collection_version: _Optional[int] = ..., log_position: _Optional[int] = ...) -> None: ...
 
 class CountRecordsRequest(_message.Message):
-    __slots__ = ["segment_id", "collection_id", "version_context"]
+    __slots__ = ("segment_id", "collection_id", "version_context")
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     VERSION_CONTEXT_FIELD_NUMBER: _ClassVar[int]
@@ -207,13 +207,13 @@ class CountRecordsRequest(_message.Message):
     def __init__(self, segment_id: _Optional[str] = ..., collection_id: _Optional[str] = ..., version_context: _Optional[_Union[RequestVersionContext, _Mapping]] = ...) -> None: ...
 
 class CountRecordsResponse(_message.Message):
-    __slots__ = ["count"]
+    __slots__ = ("count",)
     COUNT_FIELD_NUMBER: _ClassVar[int]
     count: int
     def __init__(self, count: _Optional[int] = ...) -> None: ...
 
 class QueryMetadataRequest(_message.Message):
-    __slots__ = ["segment_id", "where", "where_document", "ids", "limit", "offset", "collection_id", "include_metadata", "version_context"]
+    __slots__ = ("segment_id", "where", "where_document", "ids", "limit", "offset", "collection_id", "include_metadata", "version_context")
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     WHERE_FIELD_NUMBER: _ClassVar[int]
     WHERE_DOCUMENT_FIELD_NUMBER: _ClassVar[int]
@@ -235,13 +235,13 @@ class QueryMetadataRequest(_message.Message):
     def __init__(self, segment_id: _Optional[str] = ..., where: _Optional[_Union[Where, _Mapping]] = ..., where_document: _Optional[_Union[WhereDocument, _Mapping]] = ..., ids: _Optional[_Union[UserIds, _Mapping]] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., collection_id: _Optional[str] = ..., include_metadata: bool = ..., version_context: _Optional[_Union[RequestVersionContext, _Mapping]] = ...) -> None: ...
 
 class QueryMetadataResponse(_message.Message):
-    __slots__ = ["records"]
+    __slots__ = ("records",)
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     records: _containers.RepeatedCompositeFieldContainer[MetadataEmbeddingRecord]
     def __init__(self, records: _Optional[_Iterable[_Union[MetadataEmbeddingRecord, _Mapping]]] = ...) -> None: ...
 
 class MetadataEmbeddingRecord(_message.Message):
-    __slots__ = ["id", "metadata"]
+    __slots__ = ("id", "metadata")
     ID_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     id: str
@@ -249,13 +249,13 @@ class MetadataEmbeddingRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., metadata: _Optional[_Union[UpdateMetadata, _Mapping]] = ...) -> None: ...
 
 class UserIds(_message.Message):
-    __slots__ = ["ids"]
+    __slots__ = ("ids",)
     IDS_FIELD_NUMBER: _ClassVar[int]
     ids: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class WhereDocument(_message.Message):
-    __slots__ = ["direct", "children"]
+    __slots__ = ("direct", "children")
     DIRECT_FIELD_NUMBER: _ClassVar[int]
     CHILDREN_FIELD_NUMBER: _ClassVar[int]
     direct: DirectWhereDocument
@@ -263,7 +263,7 @@ class WhereDocument(_message.Message):
     def __init__(self, direct: _Optional[_Union[DirectWhereDocument, _Mapping]] = ..., children: _Optional[_Union[WhereDocumentChildren, _Mapping]] = ...) -> None: ...
 
 class DirectWhereDocument(_message.Message):
-    __slots__ = ["document", "operator"]
+    __slots__ = ("document", "operator")
     DOCUMENT_FIELD_NUMBER: _ClassVar[int]
     OPERATOR_FIELD_NUMBER: _ClassVar[int]
     document: str
@@ -271,7 +271,7 @@ class DirectWhereDocument(_message.Message):
     def __init__(self, document: _Optional[str] = ..., operator: _Optional[_Union[WhereDocumentOperator, str]] = ...) -> None: ...
 
 class WhereDocumentChildren(_message.Message):
-    __slots__ = ["children", "operator"]
+    __slots__ = ("children", "operator")
     CHILDREN_FIELD_NUMBER: _ClassVar[int]
     OPERATOR_FIELD_NUMBER: _ClassVar[int]
     children: _containers.RepeatedCompositeFieldContainer[WhereDocument]
@@ -279,7 +279,7 @@ class WhereDocumentChildren(_message.Message):
     def __init__(self, children: _Optional[_Iterable[_Union[WhereDocument, _Mapping]]] = ..., operator: _Optional[_Union[BooleanOperator, str]] = ...) -> None: ...
 
 class Where(_message.Message):
-    __slots__ = ["direct_comparison", "children"]
+    __slots__ = ("direct_comparison", "children")
     DIRECT_COMPARISON_FIELD_NUMBER: _ClassVar[int]
     CHILDREN_FIELD_NUMBER: _ClassVar[int]
     direct_comparison: DirectComparison
@@ -287,7 +287,7 @@ class Where(_message.Message):
     def __init__(self, direct_comparison: _Optional[_Union[DirectComparison, _Mapping]] = ..., children: _Optional[_Union[WhereChildren, _Mapping]] = ...) -> None: ...
 
 class DirectComparison(_message.Message):
-    __slots__ = ["key", "single_string_operand", "string_list_operand", "single_int_operand", "int_list_operand", "single_double_operand", "double_list_operand", "bool_list_operand", "single_bool_operand"]
+    __slots__ = ("key", "single_string_operand", "string_list_operand", "single_int_operand", "int_list_operand", "single_double_operand", "double_list_operand", "bool_list_operand", "single_bool_operand")
     KEY_FIELD_NUMBER: _ClassVar[int]
     SINGLE_STRING_OPERAND_FIELD_NUMBER: _ClassVar[int]
     STRING_LIST_OPERAND_FIELD_NUMBER: _ClassVar[int]
@@ -309,7 +309,7 @@ class DirectComparison(_message.Message):
     def __init__(self, key: _Optional[str] = ..., single_string_operand: _Optional[_Union[SingleStringComparison, _Mapping]] = ..., string_list_operand: _Optional[_Union[StringListComparison, _Mapping]] = ..., single_int_operand: _Optional[_Union[SingleIntComparison, _Mapping]] = ..., int_list_operand: _Optional[_Union[IntListComparison, _Mapping]] = ..., single_double_operand: _Optional[_Union[SingleDoubleComparison, _Mapping]] = ..., double_list_operand: _Optional[_Union[DoubleListComparison, _Mapping]] = ..., bool_list_operand: _Optional[_Union[BoolListComparison, _Mapping]] = ..., single_bool_operand: _Optional[_Union[SingleBoolComparison, _Mapping]] = ...) -> None: ...
 
 class WhereChildren(_message.Message):
-    __slots__ = ["children", "operator"]
+    __slots__ = ("children", "operator")
     CHILDREN_FIELD_NUMBER: _ClassVar[int]
     OPERATOR_FIELD_NUMBER: _ClassVar[int]
     children: _containers.RepeatedCompositeFieldContainer[Where]
@@ -317,7 +317,7 @@ class WhereChildren(_message.Message):
     def __init__(self, children: _Optional[_Iterable[_Union[Where, _Mapping]]] = ..., operator: _Optional[_Union[BooleanOperator, str]] = ...) -> None: ...
 
 class StringListComparison(_message.Message):
-    __slots__ = ["values", "list_operator"]
+    __slots__ = ("values", "list_operator")
     VALUES_FIELD_NUMBER: _ClassVar[int]
     LIST_OPERATOR_FIELD_NUMBER: _ClassVar[int]
     values: _containers.RepeatedScalarFieldContainer[str]
@@ -325,7 +325,7 @@ class StringListComparison(_message.Message):
     def __init__(self, values: _Optional[_Iterable[str]] = ..., list_operator: _Optional[_Union[ListOperator, str]] = ...) -> None: ...
 
 class SingleStringComparison(_message.Message):
-    __slots__ = ["value", "comparator"]
+    __slots__ = ("value", "comparator")
     VALUE_FIELD_NUMBER: _ClassVar[int]
     COMPARATOR_FIELD_NUMBER: _ClassVar[int]
     value: str
@@ -333,7 +333,7 @@ class SingleStringComparison(_message.Message):
     def __init__(self, value: _Optional[str] = ..., comparator: _Optional[_Union[GenericComparator, str]] = ...) -> None: ...
 
 class SingleBoolComparison(_message.Message):
-    __slots__ = ["value", "comparator"]
+    __slots__ = ("value", "comparator")
     VALUE_FIELD_NUMBER: _ClassVar[int]
     COMPARATOR_FIELD_NUMBER: _ClassVar[int]
     value: bool
@@ -341,7 +341,7 @@ class SingleBoolComparison(_message.Message):
     def __init__(self, value: bool = ..., comparator: _Optional[_Union[GenericComparator, str]] = ...) -> None: ...
 
 class IntListComparison(_message.Message):
-    __slots__ = ["values", "list_operator"]
+    __slots__ = ("values", "list_operator")
     VALUES_FIELD_NUMBER: _ClassVar[int]
     LIST_OPERATOR_FIELD_NUMBER: _ClassVar[int]
     values: _containers.RepeatedScalarFieldContainer[int]
@@ -349,7 +349,7 @@ class IntListComparison(_message.Message):
     def __init__(self, values: _Optional[_Iterable[int]] = ..., list_operator: _Optional[_Union[ListOperator, str]] = ...) -> None: ...
 
 class SingleIntComparison(_message.Message):
-    __slots__ = ["value", "generic_comparator", "number_comparator"]
+    __slots__ = ("value", "generic_comparator", "number_comparator")
     VALUE_FIELD_NUMBER: _ClassVar[int]
     GENERIC_COMPARATOR_FIELD_NUMBER: _ClassVar[int]
     NUMBER_COMPARATOR_FIELD_NUMBER: _ClassVar[int]
@@ -359,7 +359,7 @@ class SingleIntComparison(_message.Message):
     def __init__(self, value: _Optional[int] = ..., generic_comparator: _Optional[_Union[GenericComparator, str]] = ..., number_comparator: _Optional[_Union[NumberComparator, str]] = ...) -> None: ...
 
 class DoubleListComparison(_message.Message):
-    __slots__ = ["values", "list_operator"]
+    __slots__ = ("values", "list_operator")
     VALUES_FIELD_NUMBER: _ClassVar[int]
     LIST_OPERATOR_FIELD_NUMBER: _ClassVar[int]
     values: _containers.RepeatedScalarFieldContainer[float]
@@ -367,7 +367,7 @@ class DoubleListComparison(_message.Message):
     def __init__(self, values: _Optional[_Iterable[float]] = ..., list_operator: _Optional[_Union[ListOperator, str]] = ...) -> None: ...
 
 class BoolListComparison(_message.Message):
-    __slots__ = ["values", "list_operator"]
+    __slots__ = ("values", "list_operator")
     VALUES_FIELD_NUMBER: _ClassVar[int]
     LIST_OPERATOR_FIELD_NUMBER: _ClassVar[int]
     values: _containers.RepeatedScalarFieldContainer[bool]
@@ -375,7 +375,7 @@ class BoolListComparison(_message.Message):
     def __init__(self, values: _Optional[_Iterable[bool]] = ..., list_operator: _Optional[_Union[ListOperator, str]] = ...) -> None: ...
 
 class SingleDoubleComparison(_message.Message):
-    __slots__ = ["value", "generic_comparator", "number_comparator"]
+    __slots__ = ("value", "generic_comparator", "number_comparator")
     VALUE_FIELD_NUMBER: _ClassVar[int]
     GENERIC_COMPARATOR_FIELD_NUMBER: _ClassVar[int]
     NUMBER_COMPARATOR_FIELD_NUMBER: _ClassVar[int]
@@ -385,7 +385,7 @@ class SingleDoubleComparison(_message.Message):
     def __init__(self, value: _Optional[float] = ..., generic_comparator: _Optional[_Union[GenericComparator, str]] = ..., number_comparator: _Optional[_Union[NumberComparator, str]] = ...) -> None: ...
 
 class GetVectorsRequest(_message.Message):
-    __slots__ = ["ids", "segment_id", "collection_id", "version_context"]
+    __slots__ = ("ids", "segment_id", "collection_id", "version_context")
     IDS_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_ID_FIELD_NUMBER: _ClassVar[int]
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -397,13 +397,13 @@ class GetVectorsRequest(_message.Message):
     def __init__(self, ids: _Optional[_Iterable[str]] = ..., segment_id: _Optional[str] = ..., collection_id: _Optional[str] = ..., version_context: _Optional[_Union[RequestVersionContext, _Mapping]] = ...) -> None: ...
 
 class GetVectorsResponse(_message.Message):
-    __slots__ = ["records"]
+    __slots__ = ("records",)
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     records: _containers.RepeatedCompositeFieldContainer[VectorEmbeddingRecord]
     def __init__(self, records: _Optional[_Iterable[_Union[VectorEmbeddingRecord, _Mapping]]] = ...) -> None: ...
 
 class VectorEmbeddingRecord(_message.Message):
-    __slots__ = ["id", "vector"]
+    __slots__ = ("id", "vector")
     ID_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
     id: str
@@ -411,7 +411,7 @@ class VectorEmbeddingRecord(_message.Message):
     def __init__(self, id: _Optional[str] = ..., vector: _Optional[_Union[Vector, _Mapping]] = ...) -> None: ...
 
 class QueryVectorsRequest(_message.Message):
-    __slots__ = ["vectors", "k", "allowed_ids", "include_embeddings", "segment_id", "collection_id", "version_context"]
+    __slots__ = ("vectors", "k", "allowed_ids", "include_embeddings", "segment_id", "collection_id", "version_context")
     VECTORS_FIELD_NUMBER: _ClassVar[int]
     K_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_IDS_FIELD_NUMBER: _ClassVar[int]
@@ -429,19 +429,19 @@ class QueryVectorsRequest(_message.Message):
     def __init__(self, vectors: _Optional[_Iterable[_Union[Vector, _Mapping]]] = ..., k: _Optional[int] = ..., allowed_ids: _Optional[_Iterable[str]] = ..., include_embeddings: bool = ..., segment_id: _Optional[str] = ..., collection_id: _Optional[str] = ..., version_context: _Optional[_Union[RequestVersionContext, _Mapping]] = ...) -> None: ...
 
 class QueryVectorsResponse(_message.Message):
-    __slots__ = ["results"]
+    __slots__ = ("results",)
     RESULTS_FIELD_NUMBER: _ClassVar[int]
     results: _containers.RepeatedCompositeFieldContainer[VectorQueryResults]
     def __init__(self, results: _Optional[_Iterable[_Union[VectorQueryResults, _Mapping]]] = ...) -> None: ...
 
 class VectorQueryResults(_message.Message):
-    __slots__ = ["results"]
+    __slots__ = ("results",)
     RESULTS_FIELD_NUMBER: _ClassVar[int]
     results: _containers.RepeatedCompositeFieldContainer[VectorQueryResult]
     def __init__(self, results: _Optional[_Iterable[_Union[VectorQueryResult, _Mapping]]] = ...) -> None: ...
 
 class VectorQueryResult(_message.Message):
-    __slots__ = ["id", "distance", "vector"]
+    __slots__ = ("id", "distance", "vector")
     ID_FIELD_NUMBER: _ClassVar[int]
     DISTANCE_FIELD_NUMBER: _ClassVar[int]
     VECTOR_FIELD_NUMBER: _ClassVar[int]
