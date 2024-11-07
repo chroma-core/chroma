@@ -4,7 +4,7 @@ from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
-from chromadb.quota import QuotaEnforcer
+from chromadb.quota import QuotaEnforcer, Action
 from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.segment import SegmentManager
 from chromadb.execution.executor.abstract import Executor
@@ -141,8 +141,9 @@ class SegmentAPI(ServerAPI):
             raise ValueError("Database name must be at least 3 characters long")
 
         self._quota_enforcer.enforce(
-            action="create_database",
-            **{k: v for k, v in locals().items() if k != "self"},
+            action=Action.CREATE_DATABASE,
+            tenant=tenant,
+            name=name,
         )
 
         self._sysdb.create_database(
@@ -201,8 +202,10 @@ class SegmentAPI(ServerAPI):
         check_index_name(name)
 
         self._quota_enforcer.enforce(
-            action="create_collection",
-            **{k: v for k, v in locals().items() if k != "self"},
+            action=Action.CREATE_COLLECTION,
+            tenant=tenant,
+            name=name,
+            metadata=metadata,
         )
 
         id = uuid4()
@@ -306,8 +309,9 @@ class SegmentAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
         self._quota_enforcer.enforce(
-            action="list_collections",
-            **{k: v for k, v in locals().items() if k != "self"},
+            action=Action.LIST_COLLECTIONS,
+            tenant=tenant,
+            limit=limit,
         )
 
         return self._sysdb.get_collections(
@@ -350,8 +354,10 @@ class SegmentAPI(ServerAPI):
         _ = self._get_collection(id)
 
         self._quota_enforcer.enforce(
-            action="update_collection",
-            **{k: v for k, v in locals().items() if k != "self"},
+            action=Action.UPDATE_COLLECTION,
+            tenant=tenant,
+            name=new_name,
+            metadata=new_metadata,
         )
 
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
@@ -418,7 +424,13 @@ class SegmentAPI(ServerAPI):
         self._validate_embedding_record_set(coll, records_to_submit)
 
         self._quota_enforcer.enforce(
-            action="add", **{k: v for k, v in locals().items() if k != "self"}
+            action=Action.ADD,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -467,7 +479,13 @@ class SegmentAPI(ServerAPI):
         self._validate_embedding_record_set(coll, records_to_submit)
 
         self._quota_enforcer.enforce(
-            action="update", **{k: v for k, v in locals().items() if k != "self"}
+            action=Action.UPDATE,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -518,7 +536,13 @@ class SegmentAPI(ServerAPI):
         self._validate_embedding_record_set(coll, records_to_submit)
 
         self._quota_enforcer.enforce(
-            action="upsert", **{k: v for k, v in locals().items() if k != "self"}
+            action=Action.UPSERT,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -566,7 +590,12 @@ class SegmentAPI(ServerAPI):
             validate_where_document(where_document)
 
         self._quota_enforcer.enforce(
-            action="get", **{k: v for k, v in locals().items() if k != "self"}
+            action=Action.GET,
+            tenant=tenant,
+            ids=ids,
+            where=where,
+            where_document=where_document,
+            limit=limit,
         )
 
         if sort is not None:
@@ -650,7 +679,11 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
 
         self._quota_enforcer.enforce(
-            action="delete", **{k: v for k, v in locals().items() if k != "self"}
+            action=Action.DELETE,
+            tenant=tenant,
+            ids=ids,
+            where=where,
+            where_document=where_document,
         )
 
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
@@ -757,7 +790,12 @@ class SegmentAPI(ServerAPI):
             self._validate_dimension(coll, len(embedding), update=False)
 
         self._quota_enforcer.enforce(
-            action="query", **{k: v for k, v in locals().items() if k != "self"}
+            action=Action.QUERY,
+            tenant=tenant,
+            where=where,
+            where_document=where_document,
+            query_embeddings=query_embeddings,
+            n_results=n_results,
         )
 
         return self._executor.knn(

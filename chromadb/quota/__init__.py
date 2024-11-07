@@ -1,7 +1,31 @@
 from abc import abstractmethod
-from typing import Dict, Any
+from enum import Enum
+from typing import Dict, Any, Optional
 
+from chromadb.api.types import (
+    Embeddings,
+    Metadatas,
+    Documents,
+    URIs,
+    IDs,
+    CollectionMetadata,
+    Where,
+    WhereDocument,
+)
 from chromadb.config import Component, System
+
+
+class Action(str, Enum):
+    CREATE_DATABASE = "create_database"
+    CREATE_COLLECTION = "create_collection"
+    LIST_COLLECTIONS = "list_collections"
+    UPDATE_COLLECTION = "update_collection"
+    ADD = "add"
+    GET = "get"
+    DELETE = "delete"
+    UPDATE = "update"
+    UPSERT = "upsert"
+    QUERY = "query"
 
 
 class QuotaEnforcer(Component):
@@ -20,7 +44,25 @@ class QuotaEnforcer(Component):
         pass
 
     @abstractmethod
-    def enforce(self, action: str, **kwargs: Dict[str, Any]) -> None:
+    def enforce(
+        self,
+        action: Action,
+        tenant: str,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        embeddings: Optional[Embeddings] = None,
+        uris: Optional[URIs] = None,
+        ids: Optional[IDs] = None,
+        name: Optional[str] = None,
+        new_name: Optional[str] = None,
+        metadata: Optional[CollectionMetadata] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+        limit: Optional[int] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        n_results: Optional[int] = None,
+        query_embeddings: Optional[Embeddings] = None,
+    ) -> None:
         """
         Enforces a quota.
         """
