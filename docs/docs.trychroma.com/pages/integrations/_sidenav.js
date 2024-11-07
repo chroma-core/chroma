@@ -18,6 +18,7 @@ export const items = [
       links: [
         { href: '/integrations/langchain', children: 'Langchain' },
         { href: '/integrations/llamaindex', children: 'LlamaIndex' },
+        { href: '/integrations/honeyhive', children: 'HoneyHive' },
         { href: '/integrations/braintrust', children: 'Braintrust' },
         { href: '/integrations/haystack', children: 'Haystack' },
         { href: '/integrations/openllmetry', children: 'OpenLLMetry' },
