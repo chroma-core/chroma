@@ -146,23 +146,25 @@ impl WorkerServer {
         let collection_uuid = to_collection_uuid(&request.collection_id)?;
         let (collection_version, log_position) = get_version_context(&request.version_context)?;
 
-        let mut proto_results_for_all = Vec::new();
-
-        let mut query_vectors = Vec::new();
-        for proto_query_vector in request.vectors {
-            let (query_vector, _encoding) = match proto_query_vector.try_into() {
-                Ok((vector, encoding)) => (vector, encoding),
-                Err(e) => {
-                    return Err(Status::internal(format!("Error converting vector: {}", e)));
-                }
-            };
-            query_vectors.push(query_vector);
+        // empty query vectors empty result set
+        if request.vectors.len() < 1 {
+            return Ok(Response::new(chroma_proto::QueryVectorsResponse {
+                results: Vec::new(),
+            }));
         }
 
+        let mut query_vectors = Vec::with_capacity(request.vectors.len()); // assume same lengths
+        for proto_query_vector in request.vectors {
+            let (query_vector, _encoding) = proto_query_vector
+                .try_into()
+                .map_err(|e| Status::internal(format!("Error converting vector: {}", e)))?;
+
+            query_vectors.push(query_vector);
+        }
+        let query_vector_len = query_vectors[0].len();
         let orchestrator = HnswQueryOrchestrator::new(
-            // TODO: Should not have to clone query vectors here
             self.clone_system()?,
-            query_vectors.clone(),
+            query_vectors,
             request.k,
             request.allowed_ids,
             request.include_embeddings,
@@ -275,8 +277,9 @@ impl WorkerServer {
             )
         })?;
 
+        let mut proto_results_for_all = Vec::with_capacity(result.len());
         for result_set in result {
-            let mut proto_results = Vec::new();
+            let mut proto_results = Vec::with_capacity(result_set.records.len());
             for query_result in result_set.records {
                 let proto_result = chroma_proto::VectorQueryResult {
                     id: query_result.record.id,
@@ -333,7 +336,7 @@ impl WorkerServer {
             collection_version,
             log_position,
         );
-        let mut result = orchestrator.run().await.map_err(|e| {
+        let result = orchestrator.run().await.map_err(|e| {
             tracing::error!("Error running orchestrator: {}", e);
             Status::new(
                 e.code().into(),
@@ -341,11 +344,8 @@ impl WorkerServer {
             )
         })?;
 
-        let mut output = Vec::new();
-        let id_drain = result.ids.drain(..);
-        let vector_drain = result.vectors.drain(..);
-
-        for (id, vector) in id_drain.zip(vector_drain) {
+        let mut output = Vec::with_capacity(result.ids.len());
+        for (id, vector) in result.ids.into_iter().zip(result.vectors.into_iter()) {
             let vector_len = vector.len();
             let proto_vector = match (vector, ScalarEncoding::FLOAT32, vector_len).try_into() {
                 Ok(vector) => vector,
@@ -443,6 +443,7 @@ impl WorkerServer {
                 metadata: request.include_metadata,
             },
         );
+
         let system = self.clone_system()?;
         let result = orchestrator.run(system).await.map_err(|e| {
             tracing::error!("Error running orchestrator: {}", e);
@@ -452,7 +453,7 @@ impl WorkerServer {
             )
         })?;
 
-        let mut output = Vec::new();
+        let mut output = Vec::with_capacity(result.records.len());
         for record in result.records {
             let metadata = if request.include_metadata {
                 let mut meta = record.metadata.unwrap_or_default();
@@ -886,7 +887,13 @@ mod tests {
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
-        assert!(err.message().contains("vector"));
+        let sub_str = "converting vector";
+        assert!(
+            err.message().contains(sub_str),
+            "message: {}, sub_str: {}",
+            err.message(),
+            sub_str
+        );
     }
 
     #[tokio::test]
