@@ -1,9 +1,9 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::IndexUuid;
 use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType};
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
+use uuid::Uuid;
 
 use crate::{
     execution::operator::{Operator, OperatorType},
@@ -32,9 +32,9 @@ pub struct FetchSegmentOperator {
     pub collection_uuid: CollectionUuid,
     pub collection_version: u32,
     // TODO: Enforce segments uuid
-    pub metadata_uuid: Option<IndexUuid>,
-    pub record_uuid: Option<IndexUuid>,
-    pub vector_uuid: Option<IndexUuid>,
+    pub metadata_uuid: Option<Uuid>,
+    pub record_uuid: Option<Uuid>,
+    pub vector_uuid: Option<Uuid>,
 }
 
 type FetchSegmentInput = ();
@@ -106,7 +106,7 @@ impl FetchSegmentOperator {
         self.sysdb
             .clone()
             .get_segments(
-                segment_id.map(|id| id.0),
+                segment_id,
                 Some(segment_type.into()),
                 Some(scope),
                 self.collection_uuid,

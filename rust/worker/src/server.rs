@@ -21,7 +21,6 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_index::IndexUuid;
 use chroma_types::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
 };
@@ -212,7 +211,7 @@ impl WorkerServer {
                 collection_version,
                 metadata_uuid: None,
                 record_uuid: None,
-                vector_uuid: Some(IndexUuid(segment_uuid)),
+                vector_uuid: Some(segment_uuid),
             },
             FilterOperator {
                 query_ids: (!request.allowed_ids.is_empty()).then_some(request.allowed_ids),
@@ -513,7 +512,7 @@ impl WorkerServer {
             FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),
                 vector_uuid: None,
-                metadata_uuid: Some(IndexUuid(segment_uuid)),
+                metadata_uuid: Some(segment_uuid),
                 record_uuid: None,
                 collection_uuid,
                 collection_version,
