@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, cast
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from chromadb.errors import InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "The sentence_transformers python package is not installed. Please install it with `pip install sentence_transformers`"
                 )
             self.models[model_name] = SentenceTransformer(

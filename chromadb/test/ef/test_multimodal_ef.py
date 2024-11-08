@@ -2,6 +2,7 @@ from typing import Generator, cast
 import numpy as np
 import pytest
 import chromadb
+from chromadb.errors import InvalidArgumentError
 from chromadb.api.types import (
     Embeddable,
     EmbeddingFunction,
@@ -69,7 +70,7 @@ def test_multimodal(
 
     # Trying to add a document and an image at the same time should fail
     with pytest.raises(
-        ValueError,
+        InvalidArgumentError,
         # This error string may be in any order
         match=r"Exactly one of (images|documents|uris)(?:, (images|documents|uris))?(?:, (images|documents|uris))? must be provided in add\.",
     ):
@@ -119,7 +120,7 @@ def test_multimodal(
     ]
 
     # Querying with both images and documents should fail
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         multimodal_collection.query(
             query_images=[query_image], query_texts=[query_document]
         )
