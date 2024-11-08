@@ -99,8 +99,8 @@ impl OrderedBlockDelta {
         self.builder.len()
     }
 
-    fn copy_up_to<'a, K: ArrowReadableKey<'a>, V: ArrowReadableValue<'a>>(
-        &'a mut self,
+    fn copy_up_to<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me mut self,
         excluded_prefix: &str,
         excluded_key: &KeyWrapper,
     ) {
