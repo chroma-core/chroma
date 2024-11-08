@@ -924,7 +924,7 @@ mod tests {
     }
 
     #[cfg(debug_assertions)]
-    fn to_byte_slice<T>(v: &[T]) -> &[u8] {
+    fn to_byte_slice(v: &[f32]) -> &[u8] {
         let raw_ptr = v.as_ptr() as *const u8;
         unsafe { std::slice::from_raw_parts(raw_ptr, std::mem::size_of_val(v)) }
     }
