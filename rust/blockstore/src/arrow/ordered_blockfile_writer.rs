@@ -136,6 +136,26 @@ impl ArrowOrderedBlockfileWriter {
 
         let mut split_block_deltas = Vec::new();
         for delta in inner.completed_block_deltas.drain(..) {
+            // Don't we split on-mutation (.set() calls)?
+            // Yes, but that is only a performance optimization. For correctness, we must also split on commit. Why?
+            //
+            // We need to defer copying old forked data until:
+            // - we receive a set()/delete() for a later key
+            // - we are committing the delta (it will receive no further writes)
+            //
+            // Because of this constraint, we cannot always effectively split on-mutation if the writer is over a forked blockfile. Imagine this scenario:
+            // 1. There is 1 existing block whose size == limit.
+            // 2. We receive a .set() for a key before the existing block's start key.
+            // 3. We turn the existing block into a delta and add the new KV pair.
+            // 4. At this point, the total size of the delta (materialized + pending forked data) is above the limit.
+            // 5. We would like to split our delta into two immediately after the newly-added key. However, this means that the right half of the split is empty (there is no materialized data), which violates a fundamental assumption made by our blockstore code. And we cannot materialize only the first key in the right half from the pending forked data because that would violate the above constraint.
+            //
+            // Thus, we handle splitting in two places:
+            //
+            // 1. Split deltas in half on-mutation if the materialized size is over the limit (just a performance optimization).
+            // 2. During the commit phase, after all deltas have been fully materialized, split if necessary.
+            //
+            // An alternative would be to create a fresh delta that does not fork from an existing block if we receive a .set() for a key that is not contained in any existing block key range, however this complicates writing logic and potentially increases fragmentation.
             if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
                 let split_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
                 for (split_key, split_delta) in split_blocks {
@@ -274,8 +294,34 @@ impl ArrowOrderedBlockfileWriter {
         let inner = &mut self
             .advance_current_delta_and_get_inner::<K, V>(prefix, &key)
             .await?;
-        let delta = &mut inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
-        delta.add(prefix, key, value);
+        let current_materialized_delta_size = {
+            let delta = &mut inner.current_block_delta.as_mut().expect("Invariant violation: advance_current_delta_and_get_inner() did not populate current delta").0;
+            delta.add(prefix, key, value);
+            delta.get_size::<K, V>()
+        };
+
+        let max_block_size_bytes = self.block_manager.max_block_size_bytes();
+        if current_materialized_delta_size > max_block_size_bytes {
+            let (mut current_delta, current_end_key) = inner
+                .current_block_delta
+                .take()
+                .expect("We already checked above that there is a current delta");
+            let new_delta = current_delta.split_off_half::<K, V>();
+
+            self.root
+                .sparse_index
+                .add_block(
+                    new_delta
+                        .min_key()
+                        .expect("the split delta should not be empty"),
+                    new_delta.id,
+                )
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
+            inner.completed_block_deltas.push(current_delta);
+            inner.current_block_delta = Some((new_delta, current_end_key));
+        }
+
         Ok(())
     }
 

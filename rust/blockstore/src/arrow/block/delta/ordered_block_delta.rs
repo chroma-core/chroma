@@ -62,17 +62,11 @@ impl OrderedBlockDelta {
         K: ArrowWriteableKey,
         V: ArrowWriteableValue,
     {
-        if let Some(old_block) = self.old_block.clone().as_ref() {
-            // todo: is clone expensive here?
-            self.copy_up_to::<K::ReadableKey<'_>, V::ReadableValue<'_>>(
-                prefix,
-                key.clone().into(),
-                old_block,
-            );
-        }
+        let wrapped_key: KeyWrapper = key.into();
+        self.copy_up_to::<K::ReadableKey<'_>, V::ReadableValue<'_>>(prefix, &wrapped_key);
 
         // TODO: errors?
-        V::add(prefix, key.into(), value, &self.builder);
+        V::add(prefix, wrapped_key, value, &self.builder);
     }
 
     pub fn skip<K, V>(&mut self, prefix: &str, key: K)
@@ -80,19 +74,12 @@ impl OrderedBlockDelta {
         K: ArrowWriteableKey,
         V: ArrowWriteableValue,
     {
-        if let Some(old_block) = self.old_block.clone().as_ref() {
-            // todo: is clone expensive here?
-            self.copy_up_to::<K::ReadableKey<'_>, V::ReadableValue<'_>>(
-                prefix,
-                key.clone().into(),
-                old_block,
-            );
-        }
+        self.copy_up_to::<K::ReadableKey<'_>, V::ReadableValue<'_>>(prefix, &key.into());
     }
 
     pub fn copy_to_end<K: ArrowWriteableKey, V: ArrowWriteableValue>(&mut self) {
         // Copy remaining rows
-        if let Some(old_block) = self.old_block.clone().as_ref() {
+        if let Some(old_block) = self.old_block.as_ref() {
             for i in self.copied_up_to_row_of_old_block..old_block.data.num_rows() {
                 let old_prefix = old_block
                     .data
@@ -112,39 +99,44 @@ impl OrderedBlockDelta {
         self.builder.len()
     }
 
-    fn copy_up_to<'a, K: ArrowReadableKey<'a>, V: ArrowReadableValue<'a>>(
-        &mut self,
+    fn copy_up_to<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
+        &'me mut self,
         excluded_prefix: &str,
-        excluded_key: KeyWrapper,
-        old_block: &'a Block,
+        excluded_key: &KeyWrapper,
     ) {
-        let prefix_arr = old_block
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let key_arr = old_block.data.column(1);
+        if let Some(old_block) = self.old_block.as_ref() {
+            let prefix_arr = old_block
+                .data
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let key_arr = old_block.data.column(1);
 
-        for i in self.copied_up_to_row_of_old_block..old_block.data.num_rows() {
-            let old_prefix = prefix_arr.value(i);
-            let old_key = K::get(key_arr, i);
-            let old_key_wrapped: KeyWrapper = old_key.clone().into(); // todo: remove clone
+            for i in self.copied_up_to_row_of_old_block..old_block.data.num_rows() {
+                let old_prefix = prefix_arr.value(i);
+                let old_key = K::get(key_arr, i);
 
-            if old_prefix > excluded_prefix
-                || (old_prefix == excluded_prefix && old_key_wrapped >= excluded_key)
-            {
-                // If the provided prefix/key pair existed in the old block, we need to skip it (move the pointer past that entry)
-                if old_prefix == excluded_prefix && old_key_wrapped == excluded_key {
-                    self.copied_up_to_row_of_old_block += 1;
+                match old_prefix.cmp(excluded_prefix) {
+                    std::cmp::Ordering::Less => {}
+                    std::cmp::Ordering::Equal => {
+                        match old_key.clone().into().partial_cmp(excluded_key) {
+                            Some(std::cmp::Ordering::Less) => {}
+                            Some(std::cmp::Ordering::Equal) => {
+                                self.copied_up_to_row_of_old_block += 1;
+                                break;
+                            }
+                            Some(std::cmp::Ordering::Greater) => break,
+                            None => panic!("Could not compare keys"),
+                        }
+                    }
+                    std::cmp::Ordering::Greater => break,
                 }
 
-                break;
+                let old_value = V::get(old_block.data.column(2), i);
+                K::add_to_delta(old_prefix, old_key, old_value, &mut self.builder);
+                self.copied_up_to_row_of_old_block += 1;
             }
-
-            let old_value = V::get(old_block.data.column(2), i);
-            K::add_to_delta(old_prefix, old_key, old_value, &mut self.builder);
-            self.copied_up_to_row_of_old_block += 1;
         }
     }
 
@@ -217,5 +209,29 @@ impl OrderedBlockDelta {
         }
 
         output
+    }
+
+    pub(crate) fn split_off_half<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &mut self,
+    ) -> OrderedBlockDelta {
+        let half_size = self.get_size::<K, V>() / 2;
+        let (_, new_delta) = self.builder.split::<K>(half_size);
+
+        let old_block = self.old_block.take();
+
+        let new_delta = OrderedBlockDelta {
+            builder: new_delta,
+            id: Uuid::new_v4(),
+            copied_up_to_row_of_old_block: self.copied_up_to_row_of_old_block,
+            old_block,
+        };
+
+        self.copied_up_to_row_of_old_block = 0;
+
+        new_delta
+    }
+
+    pub(crate) fn min_key(&self) -> Option<CompositeKey> {
+        self.builder.get_min_key()
     }
 }
