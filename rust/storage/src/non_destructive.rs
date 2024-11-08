@@ -20,12 +20,11 @@ use super::SafeObjectStore;
 
 #[derive(Clone)]
 pub struct NonDestructiveObjectStore {
-    object_store: Arc<dyn ObjectStore>,
+    object_store: Arc<dyn SafeObjectStore>,
 }
 
 impl NonDestructiveObjectStore {
-    pub fn new<O: ObjectStore>(object_store: O) -> Self {
-        let object_store = Arc::new(object_store);
+    pub fn new(object_store: Arc<dyn SafeObjectStore>) -> Self {
         Self { object_store }
     }
 }
@@ -108,6 +107,8 @@ impl SafeObjectStore for NonDestructiveObjectStore {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use object_store::path::Path;
     use object_store::{ObjectStore, PutMode};
 
@@ -118,14 +119,14 @@ mod tests {
     #[tokio::test]
     async fn empty() {
         let backing = object_store::memory::InMemory::new();
-        let non_destructive = NonDestructiveObjectStore::new(backing);
+        let non_destructive = NonDestructiveObjectStore::new(Arc::new(backing));
         assert!(!non_destructive.supports_delete());
     }
 
     #[tokio::test]
     async fn insert() {
         let backing = object_store::memory::InMemory::new();
-        let non_destructive = NonDestructiveObjectStore::new(backing);
+        let non_destructive = NonDestructiveObjectStore::new(Arc::new(backing));
         assert!(non_destructive
             .put_opts(
                 &Path::from("test"),
@@ -150,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn overwrite_fails() {
         let backing = object_store::memory::InMemory::new();
-        let non_destructive = NonDestructiveObjectStore::new(backing);
+        let non_destructive = NonDestructiveObjectStore::new(Arc::new(backing));
         assert!(non_destructive
             .put_opts(
                 &Path::from("test"),
@@ -164,7 +165,7 @@ mod tests {
     #[tokio::test]
     async fn delete_fails() {
         let backing = object_store::memory::InMemory::new();
-        let non_destructive = NonDestructiveObjectStore::new(backing);
+        let non_destructive = NonDestructiveObjectStore::new(Arc::new(backing));
         assert!(non_destructive
             .put_opts(
                 &Path::from("test"),
