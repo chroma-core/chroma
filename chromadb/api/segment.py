@@ -185,7 +185,6 @@ class SegmentAPI(ServerAPI):
     # causes the system to somehow convert all values to strings.
     @trace_method("SegmentAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def create_collection(
         self,
         name: str,
@@ -259,7 +258,6 @@ class SegmentAPI(ServerAPI):
         "SegmentAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
     )
     @override
-    @rate_limit
     def get_or_create_collection(
         self,
         name: str,
@@ -282,7 +280,6 @@ class SegmentAPI(ServerAPI):
     # causes the system to somehow convert all values to strings
     @trace_method("SegmentAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def get_collection(
         self,
         name: Optional[str] = None,
@@ -300,7 +297,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def list_collections(
         self,
         limit: Optional[int] = None,
@@ -320,7 +316,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def count_collections(
         self,
         tenant: str = DEFAULT_TENANT,
@@ -334,7 +329,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _modify(
         self,
         id: UUID,
@@ -371,7 +365,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def delete_collection(
         self,
         name: str,
@@ -718,7 +711,6 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
-    @rate_limit
     def _count(
         self,
         collection_id: UUID,
@@ -815,7 +807,6 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
-    @rate_limit
     def _peek(
         self,
         collection_id: UUID,
