@@ -106,6 +106,7 @@ impl Display for CachingObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for CachingObjectStore {
+    /// Put an object, first against the backing store and then the cache.
     async fn put_opts(
         &self,
         location: &Path,
@@ -126,6 +127,9 @@ impl ObjectStore for CachingObjectStore {
         Ok(res)
     }
 
+    /// Do a multi-part put against the backing store.
+    ///
+    /// This will not populate cache.
     async fn put_multipart_opts(
         &self,
         location: &Path,
@@ -134,6 +138,10 @@ impl ObjectStore for CachingObjectStore {
         self.backing.put_multipart_opts(location, opts).await
     }
 
+    /// Get an object.
+    ///
+    /// If there are range options or the get request is a HEAD request, it will bypass cache and
+    /// go straight to the backing store.
     async fn get_opts(&self, location: &Path, options: GetOptions) -> Result<GetResult> {
         if options.range.is_some() || options.head {
             return self.backing.get_opts(location, options).await;
@@ -160,11 +168,19 @@ impl ObjectStore for CachingObjectStore {
         return self.warm_cache(location).await;
     }
 
+    /// Get ranges of an object.
+    ///
+    /// This always bypasses the cache as the alternative would be to load 100% of an object to
+    /// cache and then return a subset of it.  If someone is calling get_ranges, we want to exploit
+    /// their locality.
+    ///
+    /// Long-term we'll probably be able to remove this limitation if get_ranges is used.
     async fn get_ranges(&self, location: &Path, ranges: &[Range<usize>]) -> Result<Vec<Bytes>> {
         // TODO(rescrv):  Perhaps find a way to encode partial fetches.
         self.backing.get_ranges(location, ranges).await
     }
 
+    /// Get the metadata of an object.
     async fn head(&self, location: &Path) -> Result<ObjectMeta> {
         match self.cache.head(location).await {
             Ok(meta) => Ok(meta),
@@ -177,6 +193,7 @@ impl ObjectStore for CachingObjectStore {
         }
     }
 
+    /// Delete an object.
     async fn delete(&self, location: &Path) -> Result<()> {
         if let Err(err) = self.cache.delete(location).await {
             tracing::error!("failed to delete from cache: {}", err);
@@ -184,18 +201,30 @@ impl ObjectStore for CachingObjectStore {
         self.backing.delete(location).await
     }
 
+    /// List objects.
+    ///
+    /// This bypasses the cache and always lists at the backing store.
     fn list(&self, prefix: Option<&Path>) -> BoxStream<'_, Result<ObjectMeta>> {
         self.backing.list(prefix)
     }
 
+    /// List objects with a delimiter.
+    ///
+    /// This bypasses the cache and always lists at the backing store.
     async fn list_with_delimiter(&self, prefix: Option<&Path>) -> Result<ListResult> {
         self.backing.list_with_delimiter(prefix).await
     }
 
+    /// Copy an object if it does not already exist at the destination.
+    ///
+    /// This bypasses the cache and always copies at the backing store.
     async fn copy(&self, from: &Path, to: &Path) -> Result<()> {
         self.backing.copy(from, to).await
     }
 
+    /// Copy an object if it does not already exist at the destination.
+    ///
+    /// This bypasses the cache and always copies at the backing store.
     async fn copy_if_not_exists(&self, from: &Path, to: &Path) -> Result<()> {
         self.backing.copy_if_not_exists(from, to).await
     }
