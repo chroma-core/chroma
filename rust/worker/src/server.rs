@@ -667,10 +667,14 @@ mod tests {
     #[cfg(debug_assertions)]
     use tempfile::tempdir;
 
+    #[cfg(debug_assertions)]
     const COLLECTION_UUID: &str = "00000000-0000-0000-0000-000000000001";
+    #[cfg(debug_assertions)]
     const SEGMENT_UUID: &str = "00000000-0000-0000-0000-000000000003";
+    #[cfg(debug_assertions)]
     const INVALID_UUID: &str = "00000000";
 
+    #[cfg(debug_assertions)]
     fn run_server() -> String {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
@@ -709,7 +713,7 @@ mod tests {
         server.set_system(system);
         server.set_dispatcher(dispatcher_handle);
 
-        let _ = tokio::spawn(async move {
+        tokio::spawn(async move {
             let _ = crate::server::WorkerServer::run(server).await;
         });
 
@@ -919,6 +923,7 @@ mod tests {
         assert!(err.message().contains("context"));
     }
 
+    #[cfg(debug_assertions)]
     fn to_byte_slice<T>(v: &[T]) -> &[u8] {
         let raw_ptr = v.as_ptr() as *const u8;
         unsafe { std::slice::from_raw_parts(raw_ptr, std::mem::size_of_val(v)) }
