@@ -2,28 +2,26 @@
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet, VecDeque};
-
     use chroma_blockstore::arrow::provider::ArrowBlockfileProvider;
     use chroma_blockstore::{
         BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
     };
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::local::LocalStorage;
     use chroma_storage::Storage;
     use futures::executor::block_on;
+    use itertools::Itertools;
     use proptest::prelude::*;
     use proptest::test_runner::Config;
     use proptest_state_machine::prop_state_machine;
     use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
+    use std::collections::{BTreeMap, BTreeSet};
     use uuid::Uuid;
-
-    use chroma_cache::new_cache_for_test;
-    use itertools::Itertools;
 
     /// Possible transitions for our state machine (maps to `.set()`, `.delete()`, and `.commit()` on the blockfile writer).
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum Transition {
-        Set(String, String, String),
+        Set(String, String, Vec<u32>),
         Delete(String, String),
         Commit,
     }
@@ -38,259 +36,124 @@ mod tests {
         }
     }
 
-    impl PartialOrd for Transition {
-        /// The subset of Set and Delete transitions are ordered based on their prefix and key.
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            let self_prefix_and_key = self.get_prefix_and_key();
-            let other_prefix_and_key = other.get_prefix_and_key();
-
-            match (self_prefix_and_key, other_prefix_and_key) {
-                (Some((self_prefix, self_key)), Some((other_prefix, other_key))) => {
-                    if self_prefix == other_prefix {
-                        self_key.partial_cmp(other_key)
-                    } else {
-                        self_prefix.partial_cmp(other_prefix)
-                    }
-                }
-                _ => None,
-            }
-        }
-    }
-
     /// This is the reference implementation of the blockfile writer that we compare against.
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct RefState {
         /// This field is not used in the reference impl, but gives a block size to the real blockfile impl
         generated_max_block_size_bytes: usize,
         /// This field is not used in the reference impl, but gives a mutation ordering to the real blockfile impl
         generated_mutation_ordering: BlockfileWriterMutationOrdering,
-        next_transitions: VecDeque<Transition>,
-        dirty_keys: HashSet<(String, String)>,
-        store: BTreeMap<(String, String), String>,
-        last_commit: Option<BTreeMap<(String, String), String>>,
-    }
-
-    impl std::fmt::Debug for RefState {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            // Omit the next_transitions field from the debug output (it's large and proptest will log the set of failing transitions anyways).
-            f.debug_struct("RefState")
-                .field(
-                    "generated_max_block_size_bytes",
-                    &self.generated_max_block_size_bytes,
-                )
-                .field(
-                    "generated_mutation_ordering",
-                    &self.generated_mutation_ordering,
-                )
-                .field("dirty_keys", &self.dirty_keys)
-                .field("store", &self.store)
-                .field("last_commit", &self.last_commit)
-                .finish()
-        }
+        dirty_keys: BTreeSet<(String, String)>,
+        store: BTreeMap<(String, String), Vec<u32>>,
+        last_commit: Option<BTreeMap<(String, String), Vec<u32>>>,
     }
 
     pub struct BlockfileWriterStateMachine {}
-
-    // Instead of generating transitions during the test, we pre-generate them and store them in the reference implementation. This is not really how proptest should be used:
-    // - more transitions than necessary will likely be generated, slowing down tests
-    // - proptest will spend more time shrinking failing test cases than necessary
-    //
-    // However, this seemed to be the easiest solution for complex transition dependencies. (When using .prop_filter(), proptest has a hard time finding valid test cases for this specific setup.)
-    const MAX_TRANSITIONS: usize = 100;
 
     impl ReferenceStateMachine for BlockfileWriterStateMachine {
         type State = RefState;
         type Transition = Transition;
 
         fn init_state() -> proptest::prelude::BoxedStrategy<Self::State> {
-            // Some transitions are filtered out, so we over-generate transitions to ensure there are enough valid ones left.
-            const NUM_TRANSITIONS: usize = MAX_TRANSITIONS * 2;
-
             let mutation_ordering = prop_oneof![
                 Just(BlockfileWriterMutationOrdering::Unordered),
                 Just(BlockfileWriterMutationOrdering::Ordered)
             ];
-
-            let prefix_strategy = "[0-9a-zA-Z]{1,10}";
-            let key_strategy = "[0-9a-zA-Z]{1,30}";
-            let value_strategy = "[0-9a-zA-Z]{1,100}";
-
-            let set_transitions = (
-                proptest::collection::vec((prefix_strategy, key_strategy), NUM_TRANSITIONS),
-                proptest::collection::vec(value_strategy, NUM_TRANSITIONS),
-            )
-                .prop_map(|(keys, values)| {
-                    keys.into_iter()
-                        .zip(values)
-                        .map(|((prefix, key), value)| Transition::Set(prefix, key, value))
-                        .collect::<Vec<_>>()
+            (1_000..2_000usize, mutation_ordering) // The block size is somewhat arbitrary; the min needs to be more than the largest possible block (after padding) containing a single entry. But it should be small enough that block splitting is likely to occur.
+                .prop_map(|(block_size_bytes, generated_mutation_ordering)| RefState {
+                    generated_max_block_size_bytes: block_size_bytes,
+                    generated_mutation_ordering,
+                    store: BTreeMap::new(),
+                    dirty_keys: BTreeSet::new(),
+                    last_commit: None,
                 })
-                .boxed();
-
-            // Generate:
-            // - set transitions to the same prefix
-            // - set transitions to the same prefix and key
-            let key_update_transitions = set_transitions
-                .clone()
-                .prop_flat_map(move |transitions| {
-                    proptest::collection::vec(
-                        (
-                            proptest::sample::select(transitions),
-                            proptest::option::weighted(0.5, key_strategy),
-                            value_strategy,
-                        ),
-                        NUM_TRANSITIONS / 2,
-                    )
-                })
-                .prop_map(|transitions| {
-                    transitions
-                        .into_iter()
-                        .map(|(transition, new_key, value)| match transition {
-                            Transition::Set(prefix, original_key, _) => {
-                                Transition::Set(prefix, new_key.unwrap_or(original_key), value)
-                            }
-                            _ => unreachable!(),
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .boxed();
-
-            // Generate deletes to existing prefix/key pairs
-            let delete_transitions = set_transitions
-                .clone()
-                .prop_flat_map(|transitions| {
-                    proptest::collection::vec(
-                        prop_oneof![
-                            4 => Just(None),
-                            // 20% chance of deleting an existing key
-                            1 => proptest::sample::select(transitions).prop_map(|transition| {
-                                if let Transition::Set(prefix, key, _) = transition {
-                                    Some(Transition::Delete(prefix, key))
-                                } else {
-                                    unreachable!()
-                                }
-                            })
-                        ],
-                        NUM_TRANSITIONS,
-                    )
-                })
-                .boxed();
-
-            // Mix create and update transitions
-            let set_transitions = (
-                (set_transitions, key_update_transitions)
-                    .prop_map(|(a, b)| a.into_iter().interleave(b).collect::<Vec<_>>()),
-                mutation_ordering.clone(),
-            )
-                .prop_flat_map(|(transitions, mutation_ordering)| {
-                    if mutation_ordering == BlockfileWriterMutationOrdering::Ordered {
-                        // Don't shuffle when in ordered mutation mode. (Shuffling here doesn't break anything, but unnecessarily consumes shrinking iterations for failing test cases.)
-                        Just(transitions).boxed()
-                    } else {
-                        Just(transitions).prop_shuffle().boxed()
-                    }
-                });
-
-            let commit_transitions = proptest::collection::vec(
-                prop_oneof![
-                    8 => Just(None),
-                    // 9% chance of committing
-                    1 => Just(Some(Transition::Commit))
-                ],
-                NUM_TRANSITIONS,
-            );
-
-            // Mix set, delete, and commit transitions
-            let transitions_and_mutation_ordering = (
-                set_transitions,
-                delete_transitions,
-                commit_transitions,
-                mutation_ordering,
-            )
-                .prop_map(
-                    |(mut set_transitions, delete_transitions, commit_transitions, ordering)| {
-                        if ordering == BlockfileWriterMutationOrdering::Ordered {
-                            // Sort
-                            set_transitions.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                        }
-
-                        let mut transitions = set_transitions
-                            .into_iter()
-                            .zip(delete_transitions.into_iter().zip(commit_transitions))
-                            .map(|(set, (delete, commit))| {
-                                if let Some(commit) = commit {
-                                    commit
-                                } else if let Some(delete) = delete {
-                                    delete
-                                } else {
-                                    set
-                                }
-                            })
-                            .collect::<VecDeque<_>>();
-
-                        if ordering == BlockfileWriterMutationOrdering::Ordered {
-                            let mut mutated_keys_since_last_commit = HashSet::new();
-                            transitions = transitions
-                                .into_iter()
-                                .filter(|transition| match transition {
-                                    Transition::Commit => {
-                                        mutated_keys_since_last_commit.clear();
-                                        true
-                                    }
-                                    Transition::Set(prefix, key, _) => {
-                                        let key = (prefix.clone(), key.clone());
-                                        if mutated_keys_since_last_commit.contains(&key) {
-                                            false
-                                        } else {
-                                            mutated_keys_since_last_commit.insert(key);
-                                            true
-                                        }
-                                    }
-                                    Transition::Delete(prefix, key) => {
-                                        let key = (prefix.clone(), key.clone());
-                                        if mutated_keys_since_last_commit.contains(&key) {
-                                            false
-                                        } else {
-                                            mutated_keys_since_last_commit.insert(key);
-                                            true
-                                        }
-                                    }
-                                })
-                                .collect::<VecDeque<_>>()
-                        }
-
-                        (transitions, ordering)
-                    },
-                )
-                .boxed();
-
-            (500..1_000usize, transitions_and_mutation_ordering) // The block size is somewhat arbitrary; the min needs to be more than the largest possible block (after padding) containing a single entry. But it should be small enough that block splitting is likely to occur.
-                .prop_map(
-                    |(block_size_bytes, (next_transitions, generated_mutation_ordering))| {
-                        RefState {
-                            generated_max_block_size_bytes: block_size_bytes,
-                            generated_mutation_ordering,
-                            store: BTreeMap::new(),
-                            dirty_keys: HashSet::new(),
-                            next_transitions,
-                            last_commit: None,
-                        }
-                    },
-                )
                 .boxed()
         }
 
         fn transitions(state: &Self::State) -> proptest::prelude::BoxedStrategy<Self::Transition> {
-            Just(state.next_transitions.front().unwrap().clone()).boxed()
+            let prefix_strategy = "[0-9a-zA-Z]{1,10}";
+            let key_strategy = "[0-9a-zA-Z]{1,30}";
+            let value_strategy = proptest::collection::vec(0..u32::MAX, 1..100);
+
+            let new_set_transition = (prefix_strategy, key_strategy, value_strategy.clone())
+                .prop_map(|(prefix, key, value)| Transition::Set(prefix, key, value));
+
+            let set_transition = if state.store.is_empty() {
+                new_set_transition.boxed()
+            } else {
+                let existing_prefix_key_set_transition = (
+                    proptest::sample::select(state.store.keys().cloned().collect_vec()),
+                    value_strategy.clone(),
+                )
+                    .prop_map(|((prefix, key), value)| Transition::Set(prefix, key, value));
+
+                let existing_prefix_set_transition = (
+                    proptest::sample::select(
+                        state
+                            .store
+                            .keys()
+                            .map(|(prefix, _)| prefix.clone())
+                            .collect_vec(),
+                    ),
+                    key_strategy,
+                    value_strategy.clone(),
+                )
+                    .prop_map(|(prefix, key, value)| Transition::Set(prefix, key, value));
+
+                prop_oneof![
+                    // 75% chance of setting a new key
+                    6 => new_set_transition,
+                    // 15% chance of setting on an existing key
+                    1 => existing_prefix_set_transition,
+                    // 10% chance of setting on an existing prefix and key
+                    1 => existing_prefix_key_set_transition
+                ]
+                .boxed()
+            };
+
+            let delete_nonexisting_transition = (prefix_strategy, key_strategy)
+                .prop_map(|(prefix, key)| Transition::Delete(prefix, key));
+
+            let delete_transition = if state.store.is_empty() {
+                delete_nonexisting_transition.boxed()
+            } else {
+                let delete_existing_transition =
+                    proptest::sample::select(state.store.keys().cloned().collect_vec())
+                        .prop_map(|(prefix, key)| Transition::Delete(prefix, key));
+
+                prop_oneof![
+                    9 => delete_existing_transition,
+                    1 => delete_nonexisting_transition
+                ]
+                .boxed()
+            };
+
+            let commit_transition = Just(Transition::Commit);
+
+            prop_oneof![
+                // 80% chance of a set transition
+                8 => set_transition,
+                // 10% chance of a delete transition
+                1 => delete_transition,
+                // 10% chance of a commit transition
+                1 => commit_transition
+            ]
+            .boxed()
         }
 
         fn preconditions(state: &Self::State, transition: &Self::Transition) -> bool {
             if state.generated_mutation_ordering == BlockfileWriterMutationOrdering::Ordered {
                 if let Some((prefix, key)) = transition.get_prefix_and_key() {
-                    // We cannot mutate the same key twice while in ordered mutation mode. In most cases this is filtered during the transition generation, but when proptest is shrinking a test case it may end up violating this invariant.
-                    return !state
-                        .dirty_keys
-                        .contains(&(prefix.to_string(), key.to_string()));
+                    // When in ordered writing mode, every key/prefix pair provided to `.set()` or `.delete()` must be strictly greater than the last pair provided.
+                    if let Some((max_prefix, max_key)) = state.dirty_keys.last() {
+                        match max_prefix.cmp(prefix) {
+                            std::cmp::Ordering::Less => return true,
+                            std::cmp::Ordering::Equal => {
+                                return max_key.cmp(key) == std::cmp::Ordering::Less;
+                            }
+                            std::cmp::Ordering::Greater => return false,
+                        }
+                    }
                 }
             }
 
@@ -314,8 +177,6 @@ mod tests {
                     state.dirty_keys.clear();
                 }
             }
-
-            state.next_transitions.pop_front();
 
             state
         }
@@ -347,7 +208,7 @@ mod tests {
                 sparse_index_cache,
             );
             let writer = block_on(
-                provider.write::<&str, String>(
+                provider.write::<&str, Vec<u32>>(
                     BlockfileWriterOptions::new()
                         .set_mutation_ordering(ref_state.generated_mutation_ordering),
                 ),
@@ -374,18 +235,18 @@ mod tests {
                     block_on(
                         state
                             .writer
-                            .delete::<&str, String>(prefix.as_str(), key.as_str()),
+                            .delete::<&str, Vec<u32>>(prefix.as_str(), key.as_str()),
                     )
                     .unwrap();
                 }
                 Transition::Commit => {
                     let id = state.writer.id();
-                    let flusher = block_on(state.writer.commit::<&str, String>()).unwrap();
-                    block_on(flusher.flush::<&str, String>()).unwrap();
+                    let flusher = block_on(state.writer.commit::<&str, Vec<u32>>()).unwrap();
+                    block_on(flusher.flush::<&str, Vec<u32>>()).unwrap();
 
                     state.last_blockfile_id = Some(id);
                     state.writer = block_on(
-                        state.provider.write::<&str, String>(
+                        state.provider.write::<&str, Vec<u32>>(
                             BlockfileWriterOptions::new()
                                 .set_mutation_ordering(ref_state.generated_mutation_ordering)
                                 .fork(id),
@@ -409,7 +270,7 @@ mod tests {
             let ref_last_commit = ref_state.last_commit.as_ref().unwrap();
             let last_blockfile_id = state.last_blockfile_id.unwrap();
 
-            let reader = block_on(state.provider.read::<&str, &str>(&last_blockfile_id)).unwrap();
+            let reader = block_on(state.provider.read::<&str, &[u32]>(&last_blockfile_id)).unwrap();
 
             // Check count
             assert_eq!(block_on(reader.count()).unwrap(), ref_last_commit.len());
@@ -440,6 +301,8 @@ mod tests {
     prop_state_machine! {
         #![proptest_config(Config {
             // verbose: 2,
+            cases: 1000, // default is 256, we increase it because this test is relatively fast
+            max_local_rejects: u32::MAX, // the transition precondition can reject many transitions since mutations must be applied in strictly increasing order in ordered writing mode, so we disable this limit
             ..Config::default()
         })]
 
@@ -447,7 +310,7 @@ mod tests {
         fn blockfile_writer_test(
             sequential
             // The number of transitions to be generated for each case.
-            1..MAX_TRANSITIONS
+            1..100usize
             // Macro's boilerplate to separate the following identifier.
             =>
             // The name of the type that implements `StateMachineTest`.
