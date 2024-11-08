@@ -1432,7 +1432,7 @@ def test_invalid_n_results_param(client):
     client.reset()
     collection = client.create_collection("testspace")
     collection.add(**records)
-    with pytest.raises(TypeError) as exc:
+    with pytest.raises(InvalidArgumentError) as exc:
         collection.query(
             query_embeddings=[[1.1, 2.3, 3.2]],
             n_results=-1,
@@ -1441,7 +1441,7 @@ def test_invalid_n_results_param(client):
     assert "Number of requested results -1, cannot be negative, or zero." in str(
         exc.value
     )
-    assert exc.type == TypeError
+    assert exc.type == InvalidArgumentError
 
     with pytest.raises(InvalidArgumentError) as exc:
         collection.query(
