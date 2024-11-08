@@ -145,15 +145,17 @@ impl ArrowOrderedBlockfileWriter {
             //
             // Because of this constraint, we cannot always effectively split on-mutation if the writer is over a forked blockfile. Imagine this scenario:
             // 1. There is 1 existing block whose size == limit.
-            // 2. We receive a .set() for a key near the beginning of the existing block's key range
-            // 3. We copy N items from the old block into our new delta, then add the new KV pair.
+            // 2. We receive a .set() for a key before the existing block's start key.
+            // 3. We turn the existing block into a delta and add the new KV pair.
             // 4. At this point, the total size of the delta (materialized + pending forked data) is above the limit.
-            // 5. We would like to split our delta into two immediately after the newly-added key. However, this means that the right half of the split is empty (there is no materialized data), which violates a fundamental assumption made by our blockstore code. And we cannot materialize only the first key in the right half from the pending forked data because that would violate the above constraint. Additionally, this would result in a smaller-than-ideal block.
+            // 5. We would like to split our delta into two immediately after the newly-added key. However, this means that the right half of the split is empty (there is no materialized data), which violates a fundamental assumption made by our blockstore code. And we cannot materialize only the first key in the right half from the pending forked data because that would violate the above constraint.
             //
             // Thus, we handle splitting in two places:
             //
             // 1. Split deltas in half on-mutation if the materialized size is over the limit (just a performance optimization).
             // 2. During the commit phase, after all deltas have been fully materialized, split if necessary.
+            //
+            // An alternative would be to create a fresh delta that does not fork from an existing block if we receive a .set() for a key that is not contained in any existing block key range, however this complicates writing logic and potentially increases fragmentation.
             if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
                 let split_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
                 for (split_key, split_delta) in split_blocks {
