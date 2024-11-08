@@ -55,8 +55,8 @@ worker = { path = "rust/worker" }
 # Dev dependencies
 bincode = "1.3.3"
 indicatif = "0.17.8"
-proptest = "1.4.0"
-proptest-state-machine = "0.1.0"
+proptest = "1.5.0"
+proptest-state-machine = "0.3.0"
 rand = "0.8.5"
 rand_xorshift = "0.3.0"
 rayon = "1.8.0"
