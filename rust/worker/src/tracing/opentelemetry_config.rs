@@ -20,7 +20,7 @@ fn is_slow(attributes: &[opentelemetry::KeyValue]) -> bool {
             }
         }
     }
-    nanos > 1_000_000
+    nanos > 20_000_000
 }
 
 impl opentelemetry_sdk::trace::ShouldSample for ChromaShouldSample {
