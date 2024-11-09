@@ -3,6 +3,7 @@ import os
 from functools import wraps
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Sequence, Union, TypeVar
+
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -10,6 +11,7 @@ from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
 )
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
 from chromadb.config import Component
 from chromadb.config import System
 
@@ -98,7 +100,7 @@ def otel_init(
     granularity = otel_granularity
 
 
-T = TypeVar("T", bound=Callable)  # type: ignore[type-arg]
+T = TypeVar("T", bound=Callable)
 
 
 def trace_method(
@@ -126,7 +128,7 @@ def trace_method(
         if asyncio.iscoroutinefunction(f):
 
             @wraps(f)
-            async def async_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+            async def async_wrapper(*args, **kwargs):
                 global tracer, granularity
                 add_attributes_to_current_span({"pod_name": os.environ.get("HOSTNAME")})
                 if trace_granularity < granularity:
@@ -140,7 +142,7 @@ def trace_method(
         else:
 
             @wraps(f)
-            def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+            def wrapper(*args, **kwargs):
                 global tracer, granularity
                 add_attributes_to_current_span({"pod_name": os.environ.get("HOSTNAME")})
                 if trace_granularity < granularity:
@@ -152,7 +154,7 @@ def trace_method(
 
             return wrapper  # type: ignore
 
-    return decorator
+    return decorator  # type: ignore
 
 
 def add_attributes_to_current_span(
