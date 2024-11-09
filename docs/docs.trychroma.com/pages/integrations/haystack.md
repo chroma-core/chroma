@@ -30,7 +30,7 @@ from pathlib import Path
 from haystack import Pipeline
 from haystack.components.converters import TextFileToDocument
 from haystack.components.writers import DocumentWriter
-from chroma_haystack import ChromaDocumentStore
+from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 
 file_paths = ["data" / Path(name) for name in os.listdir("data")]
 
@@ -47,9 +47,10 @@ indexing.run({"converter": {"sources": file_paths}})
 #### Build RAG on top of Chroma
 
 ```python
-from chroma_haystack.retriever import ChromaQueryRetriever
-from haystack.components.generators import HuggingFaceTGIGenerator
+from haystack_integrations.components.retrievers.chroma import ChromaQueryTextRetriever
+from haystack.components.generators import HuggingFaceAPIGenerator
 from haystack.components.builders import PromptBuilder
+from haystack.utils import Secret
 
 prompt = """
 Answer the query based on the provided context.
@@ -63,9 +64,10 @@ Answer:
 """
 prompt_builder = PromptBuilder(template=prompt)
 
-llm = HuggingFaceTGIGenerator(model="mistralai/Mixtral-8x7B-Instruct-v0.1", token='YOUR_HF_TOKEN')
-llm.warm_up()
-retriever = ChromaQueryRetriever(document_store)
+llm = HuggingFaceAPIGenerator(api_type="serverless_inference_api", 
+                              api_params={"model": "mistralai/Mixtral-8x7B-Instruct-v0.1"},
+                              token=Secret.from_token("YOUR_HF_TOKEN"))
+retriever = ChromaQueryTextRetriever(document_store)
 
 querying = Pipeline()
 querying.add_component("retriever", retriever)
@@ -75,6 +77,10 @@ querying.add_component("llm", llm)
 querying.connect("retriever.documents", "prompt_builder.documents")
 querying.connect("prompt_builder", "llm")
 
-results = querying.run({"retriever": {"queries": [query], "top_k": 3},
+query = "What is the capital of France?" # query to search for in the documents
+
+results = querying.run({"retriever": {"query": query, "top_k": 3},
                         "prompt_builder": {"query": query}})
+
+print(results)
 ```
