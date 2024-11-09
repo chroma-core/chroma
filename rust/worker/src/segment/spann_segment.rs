@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use arrow::{compute::max, error};
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::IndexUuid;
@@ -5,6 +8,7 @@ use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWri
 use chroma_types::SegmentUuid;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use thiserror::Error;
+use tonic::async_trait;
 use uuid::Uuid;
 
 use super::{
@@ -19,6 +23,7 @@ const HNSW_PATH: &str = "hnsw_path";
 const VERSION_MAP_PATH: &str = "version_map_path";
 #[allow(dead_code)]
 const POSTING_LIST_PATH: &str = "posting_list_path";
+const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
 #[allow(dead_code)]
 pub(crate) struct SpannSegmentWriter {
@@ -40,8 +45,12 @@ pub enum SpannSegmentWriterError {
     VersionMapInvalidFilePath,
     #[error("Postings list invalid file path")]
     PostingListInvalidFilePath,
+    #[error("Max head id invalid file path")]
+    MaxHeadIdInvalidFilePath,
     #[error("Spann index creation error")]
     SpannIndexWriterConstructionError,
+    #[error("Not implemented")]
+    NotImplemented,
 }
 
 impl ChromaError for SpannSegmentWriterError {
@@ -54,6 +63,8 @@ impl ChromaError for SpannSegmentWriterError {
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
             Self::SpannIndexWriterConstructionError => ErrorCodes::Internal,
+            Self::MaxHeadIdInvalidFilePath => ErrorCodes::Internal,
+            Self::NotImplemented => ErrorCodes::Internal,
         }
     }
 }
@@ -133,11 +144,30 @@ impl SpannSegmentWriter {
             None => None,
         };
 
+        let max_head_id_bf_id = match segment.file_path.get(MAX_HEAD_ID_BF_PATH) {
+            Some(max_head_id_bf_path) => match max_head_id_bf_path.first() {
+                Some(max_head_id_bf_id) => {
+                    let max_head_id_bf_uuid = match Uuid::parse_str(max_head_id_bf_id) {
+                        Ok(uuid) => uuid,
+                        Err(_) => {
+                            return Err(SpannSegmentWriterError::IndexIdParsingError);
+                        }
+                    };
+                    Some(max_head_id_bf_uuid)
+                }
+                None => {
+                    return Err(SpannSegmentWriterError::MaxHeadIdInvalidFilePath);
+                }
+            },
+            None => None,
+        };
+
         let index_writer = match SpannIndexWriter::from_id(
             hnsw_provider,
             hnsw_id.as_ref(),
             versions_map_id.as_ref(),
             posting_list_id.as_ref(),
+            max_head_id_bf_id.as_ref(),
             m,
             ef_construction,
             ef_search,
@@ -161,10 +191,9 @@ impl SpannSegmentWriter {
     }
 
     async fn add(&self, record: &MaterializedLogRecord<'_>) {
-        // Initialize the record with a version.
-        self.index.add_new_record_to_versions_map(record.offset_id);
         self.index
-            .add_new_record_to_postings_list(record.offset_id, record.merged_embeddings());
+            .add(record.offset_id, record.merged_embeddings())
+            .await;
     }
 }
 
@@ -188,6 +217,14 @@ impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
     }
 
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+        // TODO: Implement commit.
+        Ok(self)
+    }
+}
+
+#[async_trait]
+impl SegmentFlusher for SpannSegmentWriter {
+    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         todo!()
     }
 }

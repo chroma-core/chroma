@@ -80,6 +80,22 @@ impl BlockfileWriter {
         }
     }
 
+    pub async fn get_clone<
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    >(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Option<V::OwnedReadableValue>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileWriter::MemoryBlockfileWriter(_) => todo!(),
+            BlockfileWriter::ArrowBlockfileWriter(writer) => {
+                writer.get_clone::<K, V>(prefix, key).await
+            }
+        }
+    }
+
     pub fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),

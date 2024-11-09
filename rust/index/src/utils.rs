@@ -16,6 +16,8 @@ pub(super) fn generate_random_data(n: usize, d: usize) -> Vec<f32> {
     data
 }
 
+const EPS: f32 = 1e-30;
+
 pub fn merge_sorted_vecs_disjunction<T: Ord + Clone>(a: &[T], b: &[T]) -> Vec<T> {
     let mut result = Vec::with_capacity(a.len() + b.len());
     let mut a_idx = 0;
@@ -75,6 +77,15 @@ pub fn merge_sorted_vecs_conjunction<T: Ord + Clone>(a: &[T], b: &[T]) -> Vec<T>
         }
     }
     result
+}
+
+pub fn normalize(vector: &[f32]) -> Vec<f32> {
+    let mut norm = 0.0;
+    for x in vector {
+        norm += x * x;
+    }
+    let norm = 1.0 / (norm.sqrt() + EPS);
+    vector.iter().map(|x| x * norm).collect()
 }
 
 #[cfg(test)]
