@@ -183,7 +183,7 @@ impl ArrowOrderedBlockfileWriter {
                     .sparse_index
                     .set_count(delta.id(), delta.len() as u32)
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                let block = self.block_manager.commit::<K, V>(delta);
+                let block = self.block_manager.commit::<K, V>(delta).await;
                 blocks.push(block);
             }
         }

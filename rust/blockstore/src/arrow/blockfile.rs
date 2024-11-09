@@ -105,6 +105,7 @@ impl ArrowUnorderedBlockfileWriter {
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut blocks = Vec::new();
         let mut new_block_ids = HashSet::new();
+        let mut deltas_to_commit = Vec::new();
         for (_, delta) in self.block_deltas.lock().drain() {
             new_block_ids.insert(delta.id);
             let mut removed = false;
@@ -118,9 +119,13 @@ impl ArrowUnorderedBlockfileWriter {
                     .sparse_index
                     .set_count(delta.id, delta.len() as u32)
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                let block = self.block_manager.commit::<K, V>(delta);
-                blocks.push(block);
+                deltas_to_commit.push(delta);
             }
+        }
+
+        for delta in deltas_to_commit {
+            let block = self.block_manager.commit::<K, V>(delta).await;
+            blocks.push(block);
         }
 
         apply_migrations_to_blockfile(&mut self.root, &self.block_manager, &new_block_ids)
