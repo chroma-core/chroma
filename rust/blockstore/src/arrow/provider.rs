@@ -258,13 +258,15 @@ impl BlockManager {
         Ok(Delta::fork_block::<K, V>(new_block_id, &block))
     }
 
-    pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    pub(super) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         delta: impl Delta,
     ) -> Block {
         let delta_id = delta.id();
         let record_batch = delta.finish::<K, V>(None);
-        Block::from_record_batch(delta_id, record_batch)
+        let block = Block::from_record_batch(delta_id, record_batch);
+        self.block_cache.insert(delta_id, block.clone()).await;
+        block
     }
 
     pub(super) async fn cached(&self, id: &Uuid) -> bool {

@@ -186,7 +186,7 @@ mod test {
 
         let size = delta.get_size::<&str, Vec<u32>>();
 
-        let block = block_manager.commit::<&str, Vec<u32>>(delta);
+        let block = block_manager.commit::<&str, Vec<u32>>(delta).await;
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = format!("key{}", i);
@@ -224,7 +224,7 @@ mod test {
             delta.add(prefix, key.as_str(), value.to_owned());
         }
         let size = delta.get_size::<&str, String>();
-        let block = block_manager.commit::<&str, String>(delta);
+        let block = block_manager.commit::<&str, String>(delta).await;
         let mut values_before_flush = vec![];
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
@@ -259,7 +259,7 @@ mod test {
             .await
             .unwrap();
         let new_id = forked_block.id;
-        let block = block_manager.commit::<&str, String>(forked_block);
+        let block = block_manager.commit::<&str, String>(forked_block).await;
         block_manager.flush(&block).await.unwrap();
         let forked_block = block_manager.get(&new_id).await.unwrap().unwrap();
         for i in 0..n {
@@ -288,7 +288,7 @@ mod test {
 
         let size = delta.get_size::<f32, String>();
         let delta_id = delta.id;
-        let block = block_manager.commit::<f32, String>(delta);
+        let block = block_manager.commit::<f32, String>(delta).await;
         let mut values_before_flush = vec![];
         for i in 0..n {
             let key = i as f32;
@@ -327,7 +327,7 @@ mod test {
 
         let size = delta.get_size::<&str, RoaringBitmap>();
         let delta_id = delta.id;
-        let block = block_manager.commit::<&str, RoaringBitmap>(delta);
+        let block = block_manager.commit::<&str, RoaringBitmap>(delta).await;
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta_id).await.unwrap().unwrap();
 
@@ -392,7 +392,7 @@ mod test {
 
         let size = delta.get_size::<&str, &DataRecord>();
         let delta_id = delta.id;
-        let block = block_manager.commit::<&str, &DataRecord>(delta);
+        let block = block_manager.commit::<&str, &DataRecord>(delta).await;
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta_id).await.unwrap().unwrap();
         for i in 0..3 {
@@ -427,7 +427,7 @@ mod test {
 
         let size = delta.get_size::<u32, String>();
         let delta_id = delta.id;
-        let block = block_manager.commit::<u32, String>(delta);
+        let block = block_manager.commit::<u32, String>(delta).await;
         block_manager.flush(&block).await.unwrap();
         let block = block_manager.get(&delta_id).await.unwrap().unwrap();
         assert_eq!(size, block.get_size());
@@ -455,7 +455,7 @@ mod test {
             delta.add(prefix, key, value);
         }
         let size = delta.get_size::<u32, u32>();
-        let block = block_manager.commit::<u32, u32>(delta);
+        let block = block_manager.commit::<u32, u32>(delta).await;
         let mut values_before_flush = vec![];
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
@@ -490,7 +490,7 @@ mod test {
             .await
             .unwrap();
         let new_id = forked_block.id;
-        let block = block_manager.commit::<u32, u32>(forked_block);
+        let block = block_manager.commit::<u32, u32>(forked_block).await;
         block_manager.flush(&block).await.unwrap();
         let forked_block = block_manager.get(&new_id).await.unwrap().unwrap();
         #[allow(clippy::needless_range_loop)]

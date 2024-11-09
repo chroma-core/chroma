@@ -310,9 +310,6 @@ impl Handler<ScheduleMessage> for CompactionManager {
         self.compact_batch(&mut ids).await;
 
         self.hnsw_index_provider.purge_by_id(&ids).await;
-        if let Err(err) = self.blockfile_provider.clear().await {
-            tracing::error!("Failed to clear blockfile provider: {:?}", err);
-        }
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler
