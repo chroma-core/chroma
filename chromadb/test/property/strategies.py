@@ -526,9 +526,7 @@ def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:
     Returns a strategy that will generate all valid values except the input value - testing of $nin
     """
     if isinstance(value, float):
-        return st.floats(allow_nan=False, allow_infinity=False).filter(
-            lambda x: x != value
-        )
+        return safe_floats.filter(lambda x: x != value)
     elif isinstance(value, str):
         return safe_text.filter(lambda x: x != value)
     elif isinstance(value, bool):
