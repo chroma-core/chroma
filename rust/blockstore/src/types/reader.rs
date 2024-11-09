@@ -93,8 +93,8 @@ impl<
         key_range: KeyRange,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone + 'referred_data,
-        KeyRange: RangeBounds<K> + Clone + 'referred_data,
+        PrefixRange: RangeBounds<&'prefix str> + Clone,
+        KeyRange: RangeBounds<K> + Clone,
     {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader
