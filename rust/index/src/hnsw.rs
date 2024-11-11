@@ -1,6 +1,6 @@
 use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
+use chroma_types::MetadataValueConversionError;
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
 use std::path::Path;
@@ -400,12 +400,9 @@ pub mod test {
     use super::*;
     use crate::utils;
     use chroma_distance::DistanceFunction;
-    use chroma_types::CollectionUuid;
-    use chroma_types::SegmentUuid;
     use rand::seq::IteratorRandom;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
-    use std::collections::HashMap;
     use tempfile::tempdir;
     use uuid::Uuid;
 

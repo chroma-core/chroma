@@ -291,7 +291,7 @@ where
     };
     match res {
         Ok(value) => Ok(value),
-        Err(e) => Err(Box::new(MetadataValueConversionError::InvalidValue)),
+        Err(_) => Err(Box::new(MetadataValueConversionError::InvalidValue)),
     }
 }
 

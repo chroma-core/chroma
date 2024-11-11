@@ -13,7 +13,7 @@ use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
-use chroma_types::{CollectionUuid, Segment};
+use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
@@ -211,9 +211,7 @@ impl HnswIndexProvider {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
-                        self.cache
-                            .insert(collection_id.clone(), index.clone())
-                            .await;
+                        self.cache.insert(*collection_id, index.clone()).await;
                         Ok(index)
                     }
                 }
@@ -395,15 +393,13 @@ impl HnswIndexProvider {
             .map_err(|e| Box::new(HnswIndexProviderCreateError::IndexInitError(e)))?;
 
         let _guard = self.write_mutex.lock().await;
-        match self.get(&id, &collection_id).await {
+        match self.get(&id, collection_id).await {
             Some(index) => Ok(index.clone()),
             None => {
                 let index = HnswIndexRef {
                     inner: Arc::new(RwLock::new(index)),
                 };
-                self.cache
-                    .insert(collection_id.clone(), index.clone())
-                    .await;
+                self.cache.insert(*collection_id, index.clone()).await;
                 Ok(index)
             }
         }
@@ -611,8 +607,6 @@ mod tests {
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::{SegmentType, SegmentUuid};
-    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_fork() {

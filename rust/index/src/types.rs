@@ -1,6 +1,5 @@
 use chroma_distance::{DistanceFunction, DistanceFunctionError};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{MetadataValue, Segment};
 use thiserror::Error;
 use uuid::Uuid;
 
