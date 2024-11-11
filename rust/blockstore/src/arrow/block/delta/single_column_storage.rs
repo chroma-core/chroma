@@ -11,7 +11,6 @@ use crate::{
 use arrow::util::bit_util;
 use arrow::{array::Array, datatypes::Schema};
 use parking_lot::RwLock;
-use roaring::RoaringBitmap;
 use std::sync::Arc;
 use std::{collections::HashMap, vec};
 

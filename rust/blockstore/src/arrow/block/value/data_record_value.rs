@@ -20,9 +20,9 @@ use arrow::{
     array::{ArrayRef, BinaryArray},
     util::bit_util,
 };
-use chroma_types::{chroma_proto::UpdateMetadata, DataRecord, MetadataValue};
+use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
 use prost::Message;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 pub struct ValueBuilderWrapper {
     id_builder: StringBuilder,
@@ -31,11 +31,13 @@ pub struct ValueBuilderWrapper {
     document_builder: StringBuilder,
 }
 
+pub type DataRecordStorageEntry = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
     type ArrowBuilder = ValueBuilderWrapper;
     type SizeTracker = DataRecordSizeTracker;
-    type PreparedValue = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+    type PreparedValue = DataRecordStorageEntry;
 
     fn offset_size(item_count: usize) -> usize {
         let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);

@@ -224,6 +224,7 @@ impl ArrowUnorderedBlockfileWriter {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_clone<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
