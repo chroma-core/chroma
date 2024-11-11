@@ -69,7 +69,7 @@ impl SpannSegmentWriter {
                 return Err(SpannSegmentWriterError::DistanceFunctionNotFound);
             }
         };
-        let (hnsw_id, hnsw_params) = match segment.file_path.get(HNSW_PATH) {
+        let (hnsw_id, m, ef_construction, ef_search) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
                     let index_uuid = match Uuid::parse_str(index_id) {
@@ -78,16 +78,19 @@ impl SpannSegmentWriter {
                             return Err(SpannSegmentWriterError::IndexIdParsingError);
                         }
                     };
+                    let hnsw_params = hnsw_params_from_segment(segment);
                     (
                         Some(IndexUuid(index_uuid)),
-                        Some(hnsw_params_from_segment(segment)),
+                        Some(hnsw_params.m),
+                        Some(hnsw_params.ef_construction),
+                        Some(hnsw_params.ef_search),
                     )
                 }
                 None => {
                     return Err(SpannSegmentWriterError::HnswInvalidFilePath);
                 }
             },
-            None => (None, None),
+            None => (None, None, None, None),
         };
         let versions_map_id = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_path) => match version_map_path.first() {
@@ -129,7 +132,9 @@ impl SpannSegmentWriter {
             hnsw_id.as_ref(),
             versions_map_id.as_ref(),
             posting_list_id.as_ref(),
-            hnsw_params,
+            m,
+            ef_construction,
+            ef_search,
             &segment.collection,
             distance_function,
             dimensionality,

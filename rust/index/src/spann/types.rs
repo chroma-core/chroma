@@ -8,7 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    hnsw_provider::{HnswIndexParams, HnswIndexProvider, HnswIndexRef},
+    hnsw_provider::{HnswIndexProvider, HnswIndexRef},
     IndexUuid,
 };
 
@@ -81,14 +81,16 @@ impl SpannIndexWriter {
         collection_id: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
-        hnsw_params: HnswIndexParams,
+        m: usize,
+        ef_construction: usize,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, SpannIndexWriterConstructionError> {
-        let persist_path = &hnsw_provider.temporary_storage_path;
         match hnsw_provider
             .create(
                 collection_id,
-                hnsw_params,
-                persist_path,
+                m,
+                ef_construction,
+                ef_search,
                 dimensionality as i32,
                 distance_function,
             )
@@ -155,7 +157,9 @@ impl SpannIndexWriter {
         hnsw_id: Option<&IndexUuid>,
         versions_map_id: Option<&Uuid>,
         posting_list_id: Option<&Uuid>,
-        hnsw_params: Option<HnswIndexParams>,
+        m: Option<usize>,
+        ef_construction: Option<usize>,
+        ef_search: Option<usize>,
         collection_id: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
@@ -179,7 +183,9 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function,
                     dimensionality,
-                    hnsw_params.unwrap(), // Safe since caller should always provide this.
+                    m.unwrap(), // Safe since caller should always provide this.
+                    ef_construction.unwrap(), // Safe since caller should always provide this.
+                    ef_search.unwrap(), // Safe since caller should always provide this.
                 )
                 .await?
             }

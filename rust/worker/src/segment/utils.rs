@@ -1,19 +1,18 @@
 use chroma_distance::{DistanceFunction, DistanceFunctionError};
-use chroma_index::{
-    hnsw_provider::HnswIndexParams, DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH,
-    DEFAULT_HNSW_M,
-};
+use chroma_index::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
 use chroma_types::{get_metadata_value_as, MetadataValue, Segment};
 
-pub(super) fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParams {
+use super::distributed_hnsw_segment::HnswIndexParamsFromSegment;
+
+pub(super) fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParamsFromSegment {
     let metadata = match &segment.metadata {
         Some(metadata) => metadata,
         None => {
-            return (
-                DEFAULT_HNSW_M,
-                DEFAULT_HNSW_EF_CONSTRUCTION,
-                DEFAULT_HNSW_EF_SEARCH,
-            );
+            return HnswIndexParamsFromSegment {
+                m: DEFAULT_HNSW_M,
+                ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
+                ef_search: DEFAULT_HNSW_EF_SEARCH,
+            };
         }
     };
 
@@ -30,7 +29,11 @@ pub(super) fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParams {
         Err(_) => DEFAULT_HNSW_EF_SEARCH,
     };
 
-    (m, ef_construction, ef_search)
+    HnswIndexParamsFromSegment {
+        m,
+        ef_construction,
+        ef_search,
+    }
 }
 
 pub(crate) fn distance_function_from_segment(
