@@ -1,8 +1,4 @@
-use opentelemetry::global;
-use std::hash::Hash;
-use std::sync::Arc;
-use std::time::Duration;
-
+use super::{CacheError, Weighted};
 use chroma_error::ChromaError;
 use clap::Parser;
 use foyer::{
@@ -10,9 +6,11 @@ use foyer::{
     InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
     StorageKey, StorageValue, TracingOptions,
 };
+use opentelemetry::global;
 use serde::{Deserialize, Serialize};
-
-use super::{CacheError, Weighted};
+use std::hash::Hash;
+use std::sync::Arc;
+use std::time::Duration;
 
 const MIB: usize = 1024 * 1024;
 
@@ -95,7 +93,7 @@ pub struct FoyerCacheConfig {
     #[serde(default = "default_capacity")]
     pub capacity: usize,
 
-    /// In-memory cache capacity. (MiB)
+    /// In-memory cache capacity. (items)
     #[arg(long, default_value_t = 1024)]
     #[serde(default = "default_mem")]
     pub mem: usize,
@@ -273,7 +271,7 @@ where
 
         let builder = HybridCacheBuilder::<K, V>::new()
             .with_tracing_options(tracing_options)
-            .memory(config.mem * MIB)
+            .memory(config.mem)
             .with_shards(config.shards);
 
         let builder = match config.eviction.as_str() {
