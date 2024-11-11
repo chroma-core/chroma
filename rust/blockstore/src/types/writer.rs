@@ -87,12 +87,13 @@ impl BlockfileWriter {
         &self,
         prefix: &str,
         key: K,
-    ) -> Result<Option<V::OwnedReadableValue>, Box<dyn ChromaError>> {
+    ) -> Result<Option<V::PreparedValue>, Box<dyn ChromaError>> {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(_) => todo!(),
-            BlockfileWriter::ArrowBlockfileWriter(writer) => {
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
                 writer.get_clone::<K, V>(prefix, key).await
             }
+            BlockfileWriter::ArrowOrderedBlockfileWriter(_) => todo!(),
         }
     }
 

@@ -263,7 +263,7 @@ impl SpannIndexWriter {
         let max_head_id = match max_head_id_bf_id {
             Some(max_head_id_bf_id) => {
                 let reader = blockfile_provider
-                    .open::<&str, u32>(max_head_id_bf_id)
+                    .read::<&str, u32>(max_head_id_bf_id)
                     .await;
                 match reader {
                     Ok(reader) => reader.get("", MAX_HEAD_OFFSET_ID).await.map_err(|_| {
