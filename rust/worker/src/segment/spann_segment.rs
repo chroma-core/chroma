@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-
-use arrow::error;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter, IndexUuid};
@@ -10,10 +7,14 @@ use uuid::Uuid;
 
 use super::utils::{distance_function_from_segment, hnsw_params_from_segment};
 
+#[allow(dead_code)]
 const HNSW_PATH: &str = "hnsw_path";
+#[allow(dead_code)]
 const VERSION_MAP_PATH: &str = "version_map_path";
+#[allow(dead_code)]
 const POSTING_LIST_PATH: &str = "posting_list_path";
 
+#[allow(dead_code)]
 pub(crate) struct SpannSegmentWriter {
     index: SpannIndexWriter,
     id: SegmentUuid,
@@ -52,6 +53,7 @@ impl ChromaError for SpannSegmentWriterError {
 }
 
 impl SpannSegmentWriter {
+    #[allow(dead_code)]
     pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
@@ -63,7 +65,7 @@ impl SpannSegmentWriter {
         }
         let distance_function = match distance_function_from_segment(segment) {
             Ok(distance_function) => distance_function,
-            Err(e) => {
+            Err(_) => {
                 return Err(SpannSegmentWriterError::DistanceFunctionNotFound);
             }
         };

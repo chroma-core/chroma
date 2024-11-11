@@ -699,7 +699,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
             result.extend(block.get_all_data());
         }
-        return result;
+        result
     }
 }
 

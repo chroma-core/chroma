@@ -586,11 +586,11 @@ impl Writeable for &DataRecord<'_> {
 }
 
 impl Writeable for &SpannPostingList<'_> {
-    fn write_to_storage(prefix: &str, key: KeyWrapper, value: Self, storage: &StorageBuilder) {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {
         todo!()
     }
 
-    fn remove_from_storage(prefix: &str, key: KeyWrapper, storage: &StorageBuilder) {
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {
         todo!()
     }
 }

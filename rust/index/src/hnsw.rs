@@ -1,6 +1,5 @@
 use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::MetadataValueConversionError;
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
 use std::path::Path;

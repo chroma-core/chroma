@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use arrow::error;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriter, BlockfileWriterOptions};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -14,6 +13,7 @@ use crate::{
 };
 
 // TODO(Sanket): Add locking structures as necessary.
+#[allow(dead_code)]
 pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
     hnsw_index: HnswIndexRef,
@@ -125,7 +125,7 @@ impl SpannIndexWriter {
     ) -> Result<BlockfileWriter, SpannIndexWriterConstructionError> {
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
-        bf_options = bf_options.fork(blockfile_id.clone());
+        bf_options = bf_options.fork(*blockfile_id);
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
             .await

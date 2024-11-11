@@ -1,6 +1,5 @@
-use chroma_distance::{DistanceFunction, DistanceFunctionError};
-use chroma_error::{ChromaError, ErrorCodes};
-use thiserror::Error;
+use chroma_distance::DistanceFunction;
+use chroma_error::ChromaError;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]

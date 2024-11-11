@@ -4,16 +4,15 @@ use super::record_segment::ApplyMaterializedLogError;
 use super::utils::hnsw_params_from_segment;
 use super::{SegmentFlusher, SegmentWriter};
 use async_trait::async_trait;
-use chroma_distance::{DistanceFunction, DistanceFunctionError};
+use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
     HnswIndexProviderOpenError, HnswIndexRef,
 };
-use chroma_index::{HnswIndexConfig, Index, IndexConfig, IndexUuid};
-use chroma_index::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
+use chroma_index::{Index, IndexUuid};
 use chroma_types::SegmentUuid;
-use chroma_types::{get_metadata_value_as, MaterializedLogOperation, MetadataValue, Segment};
+use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
