@@ -364,7 +364,7 @@ impl HnswIndexProvider {
     // A query comes in and the index is not in the cache -> we need to load the index from s3 based on the segment files id
     pub async fn create(
         &self,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
         hnsw_params: HnswIndexParams,
         persist_path: &std::path::Path,
         dimensionality: i32,

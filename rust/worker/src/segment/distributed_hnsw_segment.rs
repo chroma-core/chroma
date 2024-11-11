@@ -11,9 +11,9 @@ use chroma_index::{
     HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig, IndexConfigFromSegmentError,
     IndexUuid,
 };
-use chroma_index::{Index, DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
+use chroma_index::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
+use chroma_types::SegmentUuid;
 use chroma_types::{get_metadata_value_as, MaterializedLogOperation, MetadataValue, Segment};
-use chroma_types::{MaterializedLogOperation, Segment, SegmentUuid};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -428,7 +428,7 @@ pub mod test {
         HnswIndexConfig, DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M,
         DEFAULT_MAX_ELEMENTS,
     };
-    use chroma_types::{MetadataValue, Segment};
+    use chroma_types::{CollectionUuid, MetadataValue, Segment, SegmentUuid};
     use tempfile::tempdir;
     use uuid::Uuid;
 
@@ -439,11 +439,11 @@ pub mod test {
         let persist_path = tempdir().unwrap().path().to_owned();
 
         let segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid(Uuid::new_v4()),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(HashMap::new()),
-            collection: Uuid::new_v4(),
+            collection: CollectionUuid(Uuid::new_v4()),
             file_path: HashMap::new(),
         };
 
@@ -464,11 +464,11 @@ pub mod test {
         metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10_i64));
 
         let segment = Segment {
-            id: Uuid::new_v4(),
+            id: SegmentUuid(Uuid::new_v4()),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: Some(metadata),
-            collection: Uuid::new_v4(),
+            collection: CollectionUuid(Uuid::new_v4()),
             file_path: HashMap::new(),
         };
 
