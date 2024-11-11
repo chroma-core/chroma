@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 use crate::{
     hnsw_provider::{HnswIndexProvider, HnswIndexRef},
-    IndexUuid,
+    utils::normalize,
+    Index, IndexUuid,
 };
 
 // TODO(Sanket): Add locking structures as necessary.
