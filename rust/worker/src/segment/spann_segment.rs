@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use arrow::{compute::max, error};
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::IndexUuid;
@@ -202,7 +201,7 @@ impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
         &self,
         records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError> {
-        for (record, idx) in records.iter() {
+        for (record, _) in records.iter() {
             match record.final_operation {
                 MaterializedLogOperation::AddNew => {
                     self.add(record).await;

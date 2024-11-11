@@ -19,7 +19,7 @@ use crate::{
 };
 
 // TODO(Sanket): Add locking structures as necessary.
-struct VersionsMapInner {
+pub struct VersionsMapInner {
     versions_map: HashMap<u32, u32>,
 }
 
@@ -84,8 +84,11 @@ impl ChromaError for SpannIndexWriterConstructionError {
 const MAX_HEAD_OFFSET_ID: &str = "max_head_offset_id";
 
 // TODO(Sanket): Make this configurable.
+#[allow(dead_code)]
 const NUM_CENTROIDS_TO_SEARCH: u32 = 64;
+#[allow(dead_code)]
 const RNG_FACTOR: f32 = 1.0;
+#[allow(dead_code)]
 const SPLIT_THRESHOLD: usize = 100;
 
 impl SpannIndexWriter {
@@ -292,6 +295,7 @@ impl SpannIndexWriter {
         *write_lock.versions_map.get(&id).unwrap()
     }
 
+    #[allow(dead_code)]
     async fn rng_query(
         &self,
         query: &[f32],
@@ -352,6 +356,7 @@ impl SpannIndexWriter {
         Ok((res_ids, res_distances))
     }
 
+    #[allow(dead_code)]
     async fn append(
         &self,
         head_id: u32,
@@ -414,13 +419,14 @@ impl SpannIndexWriter {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn add_postings_list(
         &self,
         id: u32,
         version: u32,
         embeddings: &[f32],
     ) -> Result<(), SpannIndexWriterConstructionError> {
-        let (ids, distances) = self.rng_query(embeddings).await?;
+        let (ids, _) = self.rng_query(embeddings).await?;
         // Create a centroid with just this point.
         if ids.is_empty() {
             let next_id = self
@@ -461,7 +467,7 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    pub async fn add(&self, id: u32, embeddings: &[f32]) {
-        let version = self.add_versions_map(id);
+    pub async fn add(&self, id: u32, _: &[f32]) {
+        let _ = self.add_versions_map(id);
     }
 }
