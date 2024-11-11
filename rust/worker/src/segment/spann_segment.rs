@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use arrow::error;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
-use chroma_types::{Segment, SegmentScope, SegmentType};
+use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter, IndexUuid};
+use chroma_types::{Segment, SegmentScope, SegmentType, SegmentUuid};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ const POSTING_LIST_PATH: &str = "posting_list_path";
 
 pub(crate) struct SpannSegmentWriter {
     index: SpannIndexWriter,
-    id: Uuid,
+    id: SegmentUuid,
 }
 
 #[derive(Error, Debug)]
@@ -76,7 +76,10 @@ impl SpannSegmentWriter {
                             return Err(SpannSegmentWriterError::IndexIdParsingError);
                         }
                     };
-                    (Some(index_uuid), Some(hnsw_params_from_segment(segment)))
+                    (
+                        Some(IndexUuid(index_uuid)),
+                        Some(hnsw_params_from_segment(segment)),
+                    )
                 }
                 None => {
                     return Err(SpannSegmentWriterError::HnswInvalidFilePath);

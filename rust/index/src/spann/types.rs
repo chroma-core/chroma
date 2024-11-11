@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
 use arrow::error;
-use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriter};
+use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriter, BlockfileWriterOptions};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::SpannPostingList;
+use chroma_types::{CollectionUuid, SpannPostingList};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::hnsw_provider::{HnswIndexParams, HnswIndexProvider, HnswIndexRef};
+use crate::{
+    hnsw_provider::{HnswIndexParams, HnswIndexProvider, HnswIndexRef},
+    IndexUuid,
+};
 
 // TODO(Sanket): Add locking structures as necessary.
 pub struct SpannIndexWriter {
@@ -59,8 +62,8 @@ impl SpannIndexWriter {
 
     async fn hnsw_index_from_id(
         hnsw_provider: &HnswIndexProvider,
-        id: &Uuid,
-        collection_id: &Uuid,
+        id: &IndexUuid,
+        collection_id: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
     ) -> Result<HnswIndexRef, SpannIndexWriterConstructionError> {
@@ -75,7 +78,7 @@ impl SpannIndexWriter {
 
     async fn create_hnsw_index(
         hnsw_provider: &HnswIndexProvider,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
         hnsw_params: HnswIndexParams,
@@ -102,7 +105,7 @@ impl SpannIndexWriter {
     ) -> Result<HashMap<u32, u32>, SpannIndexWriterConstructionError> {
         // Create a reader for the blockfile. Load all the data into the versions map.
         let mut versions_map = HashMap::new();
-        let reader = match blockfile_provider.open::<u32, u32>(blockfile_id).await {
+        let reader = match blockfile_provider.read::<u32, u32>(blockfile_id).await {
             Ok(reader) => reader,
             Err(_) => {
                 return Err(SpannIndexWriterConstructionError::BlockfileReaderConstructionError)
@@ -120,8 +123,11 @@ impl SpannIndexWriter {
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterConstructionError> {
+        let mut bf_options = BlockfileWriterOptions::new();
+        bf_options = bf_options.unordered_mutations();
+        bf_options = bf_options.fork(blockfile_id.clone());
         match blockfile_provider
-            .fork::<u32, &SpannPostingList<'_>>(blockfile_id)
+            .write::<u32, &SpannPostingList<'_>>(bf_options)
             .await
         {
             Ok(writer) => Ok(writer),
@@ -132,7 +138,12 @@ impl SpannIndexWriter {
     async fn create_posting_list(
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterConstructionError> {
-        match blockfile_provider.create::<u32, &SpannPostingList<'_>>() {
+        let mut bf_options = BlockfileWriterOptions::new();
+        bf_options = bf_options.unordered_mutations();
+        match blockfile_provider
+            .write::<u32, &SpannPostingList<'_>>(bf_options)
+            .await
+        {
             Ok(writer) => Ok(writer),
             Err(_) => Err(SpannIndexWriterConstructionError::BlockfileWriterConstructionError),
         }
@@ -141,11 +152,11 @@ impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
     pub async fn from_id(
         hnsw_provider: &HnswIndexProvider,
-        hnsw_id: Option<&Uuid>,
+        hnsw_id: Option<&IndexUuid>,
         versions_map_id: Option<&Uuid>,
         posting_list_id: Option<&Uuid>,
         hnsw_params: Option<HnswIndexParams>,
-        collection_id: &Uuid,
+        collection_id: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,

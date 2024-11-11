@@ -1,9 +1,8 @@
+use crate::{HnswIndexConfigError, PersistentIndex};
+
 use super::config::HnswProviderConfig;
-use super::{
-    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
-    IndexConfigFromSegmentError, IndexUuid,
-};
-use crate::PersistentIndex;
+use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
+
 use async_trait::async_trait;
 use chroma_cache::{Cache, Weighted};
 use chroma_config::Configurable;
