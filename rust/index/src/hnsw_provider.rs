@@ -33,11 +33,7 @@ const FILES: [&str; 4] = [
     "link_lists.bin",
 ];
 
-pub type HnswIndexParams = (
-    usize, /* m */
-    usize, /* ef_construction */
-    usize, /* ef_search */
-);
+type CacheKey = CollectionUuid;
 
 // The key of the cache is the collection id and the value is
 // the HNSW index for that collection. This restricts the cache to
@@ -140,12 +136,8 @@ impl HnswIndexProvider {
         }
     }
 
-    pub async fn get(
-        &self,
-        index_id: &IndexUuid,
-        collection_id: &CollectionUuid,
-    ) -> Option<HnswIndexRef> {
-        match self.cache.get(collection_id).await.ok().flatten() {
+    pub async fn get(&self, index_id: &IndexUuid, cache_key: &CacheKey) -> Option<HnswIndexRef> {
+        match self.cache.get(cache_key).await.ok().flatten() {
             Some(index) => {
                 let index_with_lock = index.inner.read();
                 if index_with_lock.id == *index_id {
@@ -166,7 +158,7 @@ impl HnswIndexProvider {
     pub async fn fork(
         &self,
         source_id: &IndexUuid,
-        collection_id: &CollectionUuid,
+        cache_key: &CacheKey,
         dimensionality: i32,
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
@@ -205,13 +197,13 @@ impl HnswIndexProvider {
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.get(&new_id, collection_id).await {
+                match self.get(&new_id, cache_key).await {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
-                        self.cache.insert(*collection_id, index.clone()).await;
+                        self.cache.insert(*cache_key, index.clone()).await;
                         Ok(index)
                     }
                 }
@@ -296,7 +288,7 @@ impl HnswIndexProvider {
     pub async fn open(
         &self,
         id: &IndexUuid,
-        collection_id: &CollectionUuid,
+        cache_key: &CacheKey,
         dimensionality: i32,
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
@@ -335,13 +327,13 @@ impl HnswIndexProvider {
         match HnswIndex::load(index_storage_path_str, &index_config, *id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.get(id, collection_id).await {
+                match self.get(id, cache_key).await {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
-                        self.cache.insert(*collection_id, index.clone()).await;
+                        self.cache.insert(*cache_key, index.clone()).await;
                         Ok(index)
                     }
                 }
@@ -362,9 +354,10 @@ impl HnswIndexProvider {
     // A query comes in and the index is not in the cache -> we need to load the index from s3 based on the segment files id
     pub async fn create(
         &self,
-        collection_id: &CollectionUuid,
-        hnsw_params: HnswIndexParams,
-        persist_path: &std::path::Path,
+        cache_key: &CacheKey,
+        m: usize,
+        ef_construction: usize,
+        ef_search: usize,
         dimensionality: i32,
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
@@ -381,7 +374,7 @@ impl HnswIndexProvider {
         let index_config = IndexConfig::new(dimensionality, distance_function);
 
         let hnsw_config =
-            match HnswIndexConfig::new(hnsw_params.0, hnsw_params.1, hnsw_params.2, persist_path) {
+            match HnswIndexConfig::new(m, ef_construction, ef_search, &index_storage_path) {
                 Ok(hnsw_config) => hnsw_config,
                 Err(e) => {
                     return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
@@ -393,13 +386,13 @@ impl HnswIndexProvider {
             .map_err(|e| Box::new(HnswIndexProviderCreateError::IndexInitError(e)))?;
 
         let _guard = self.write_mutex.lock().await;
-        match self.get(&id, collection_id).await {
+        match self.get(&id, cache_key).await {
             Some(index) => Ok(index.clone()),
             None => {
                 let index = HnswIndexRef {
                     inner: Arc::new(RwLock::new(index)),
                 };
-                self.cache.insert(*collection_id, index.clone()).await;
+                self.cache.insert(*cache_key, index.clone()).await;
                 Ok(index)
             }
         }
@@ -438,8 +431,8 @@ impl HnswIndexProvider {
     }
 
     /// Purge entries from the cache by index ID and remove temporary files from disk.
-    pub async fn purge_by_id(&mut self, collection_uuids: &[CollectionUuid]) {
-        for collection_uuid in collection_uuids {
+    pub async fn purge_by_id(&mut self, cache_keys: &[CacheKey]) {
+        for collection_uuid in cache_keys {
             let Some(index_id) = self
                 .cache
                 .get(collection_uuid)
@@ -623,17 +616,13 @@ mod tests {
         let collection_id = CollectionUuid(Uuid::new_v4());
 
         let dimensionality = 128;
-        let hnsw_params = (
-            DEFAULT_HNSW_M,
-            DEFAULT_HNSW_EF_CONSTRUCTION,
-            DEFAULT_HNSW_EF_SEARCH,
-        );
         let distance_function = DistanceFunction::Euclidean;
         let created_index = provider
             .create(
                 &collection_id,
-                hnsw_params,
-                &provider.temporary_storage_path,
+                DEFAULT_HNSW_M,
+                DEFAULT_HNSW_EF_CONSTRUCTION,
+                DEFAULT_HNSW_EF_SEARCH,
                 dimensionality,
                 distance_function.clone(),
             )

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_distance::{DistanceFunction, DistanceFunctionError};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
-    HnswIndexParams, HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
+    HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{Index, IndexUuid};
@@ -17,6 +17,12 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const HNSW_INDEX: &str = "hnsw_index";
+
+pub struct HnswIndexParamsFromSegment {
+    pub m: usize,
+    pub ef_construction: usize,
+    pub ef_search: usize,
+}
 
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegmentWriter {
@@ -65,15 +71,15 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
     }
 }
 
-fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParams {
+fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParamsFromSegment {
     let metadata = match &segment.metadata {
         Some(metadata) => metadata,
         None => {
-            return (
-                DEFAULT_HNSW_M,
-                DEFAULT_HNSW_EF_CONSTRUCTION,
-                DEFAULT_HNSW_EF_SEARCH,
-            );
+            return HnswIndexParamsFromSegment {
+                m: DEFAULT_HNSW_M,
+                ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
+                ef_search: DEFAULT_HNSW_EF_SEARCH,
+            };
         }
     };
 
@@ -90,7 +96,11 @@ fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParams {
         Err(_) => DEFAULT_HNSW_EF_SEARCH,
     };
 
-    (m, ef_construction, ef_search)
+    HnswIndexParamsFromSegment {
+        m,
+        ef_construction,
+        ef_search,
+    }
 }
 
 pub fn distance_function_from_segment(
@@ -130,7 +140,6 @@ impl DistributedHNSWSegmentWriter {
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
-        let persist_path = &hnsw_index_provider.temporary_storage_path;
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
@@ -205,8 +214,9 @@ impl DistributedHNSWSegmentWriter {
             let index = match hnsw_index_provider
                 .create(
                     &segment.collection,
-                    hnsw_params,
-                    persist_path,
+                    hnsw_params.m,
+                    hnsw_params.ef_construction,
+                    hnsw_params.ef_search,
                     dimensionality as i32,
                     distance_function,
                 )
@@ -445,9 +455,13 @@ pub mod test {
         };
 
         let hnsw_params = hnsw_params_from_segment(&segment);
-        let config =
-            HnswIndexConfig::new(hnsw_params.0, hnsw_params.1, hnsw_params.2, &persist_path)
-                .expect("Error creating hnsw index config");
+        let config = HnswIndexConfig::new(
+            hnsw_params.m,
+            hnsw_params.ef_construction,
+            hnsw_params.ef_search,
+            &persist_path,
+        )
+        .expect("Error creating hnsw index config");
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
         assert_eq!(config.m, DEFAULT_HNSW_M);
@@ -470,9 +484,13 @@ pub mod test {
         };
 
         let hnsw_params = hnsw_params_from_segment(&segment);
-        let config =
-            HnswIndexConfig::new(hnsw_params.0, hnsw_params.1, hnsw_params.2, &persist_path)
-                .expect("Error creating hnsw index config");
+        let config = HnswIndexConfig::new(
+            hnsw_params.m,
+            hnsw_params.ef_construction,
+            hnsw_params.ef_search,
+            &persist_path,
+        )
+        .expect("Error creating hnsw index config");
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
         assert_eq!(config.m, 10);
