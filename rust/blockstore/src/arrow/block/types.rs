@@ -630,7 +630,7 @@ impl Block {
 
 impl chroma_cache::Weighted for Block {
     fn weight(&self) -> usize {
-        1
+        8 // A block is at most 8 MB
     }
 }
 
