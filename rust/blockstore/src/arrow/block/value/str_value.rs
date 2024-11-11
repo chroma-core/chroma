@@ -62,7 +62,7 @@ impl ArrowWriteableValue for String {
 
     fn finish(
         mut builder: Self::ArrowBuilder,
-        size_tracker: &Self::SizeTracker,
+        _: &Self::SizeTracker,
     ) -> (arrow::datatypes::Field, Arc<dyn Array>) {
         let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
         let value_arr = builder.finish();

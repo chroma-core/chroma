@@ -26,7 +26,7 @@ struct SplitInformation {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SpannPostingListDelta {
+pub struct SpannPostingListDelta {
     inner: Arc<RwLock<Inner>>,
 }
 

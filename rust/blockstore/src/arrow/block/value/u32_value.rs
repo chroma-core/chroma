@@ -61,7 +61,7 @@ impl ArrowWriteableValue for u32 {
 
     fn finish(
         mut builder: Self::ArrowBuilder,
-        size_tracker: &Self::SizeTracker,
+        _: &Self::SizeTracker,
     ) -> (arrow::datatypes::Field, Arc<dyn Array>) {
         let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
         let value_arr = builder.finish();
