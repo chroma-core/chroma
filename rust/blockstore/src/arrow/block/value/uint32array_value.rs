@@ -21,7 +21,6 @@ impl ArrowWriteableValue for Vec<u32> {
     type ArrowBuilder = ListBuilder<UInt32Builder>;
     type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = Vec<u32>;
-    type OwnedReadableValue = Vec<u32>;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * size_of::<u32>())
@@ -91,8 +90,8 @@ impl ArrowWriteableValue for Vec<u32> {
     fn get_owned_value_from_delta(
         prefix: &str,
         key: KeyWrapper,
-        delta: &BlockDelta,
-    ) -> Option<Self::OwnedReadableValue> {
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
         match &delta.builder {
             BlockStorage::VecUInt32(builder) => builder.get_owned_value(prefix, key),
             _ => panic!("Invalid builder type"),

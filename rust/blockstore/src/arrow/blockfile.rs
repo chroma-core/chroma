@@ -228,7 +228,7 @@ impl ArrowUnorderedBlockfileWriter {
         &self,
         prefix: &str,
         key: K,
-    ) -> Result<Option<V::OwnedReadableValue>, Box<dyn ChromaError>> {
+    ) -> Result<Option<V::PreparedValue>, Box<dyn ChromaError>> {
         // TODO: for now the BF writer locks the entire write operation
         let _guard = self.write_mutex.lock().await;
 
@@ -258,7 +258,11 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
+                let new_delta = match self
+                    .block_manager
+                    .fork::<K, V, UnorderedBlockDelta>(&block.id)
+                    .await
+                {
                     Ok(delta) => delta,
                     Err(e) => {
                         return Err(Box::new(e));

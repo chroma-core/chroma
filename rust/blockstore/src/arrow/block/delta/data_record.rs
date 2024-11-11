@@ -49,7 +49,11 @@ impl DataRecordStorage {
         inner.size_tracker.get_key_size()
     }
 
-    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<DataRecordStorageEntry> {
+    pub fn get_owned_value(
+        &self,
+        prefix: &str,
+        key: KeyWrapper,
+    ) -> Option<(String, Vec<f32>, Option<Vec<u8>>, Option<String>)> {
         let inner = self.inner.read();
         let composite_key = CompositeKey {
             prefix: prefix.to_string(),

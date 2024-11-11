@@ -11,6 +11,7 @@ use crate::{
 use arrow::util::bit_util;
 use arrow::{array::Array, datatypes::Schema};
 use parking_lot::RwLock;
+use roaring::RoaringBitmap;
 use std::sync::Arc;
 use std::{collections::HashMap, vec};
 
@@ -270,14 +271,11 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         (schema.into(), vec![prefix_arr, key_arr, value_arr])
     }
 
-    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<RoaringBitmap> {
-        let inner = self.inner.read();
-        inner
-            .storage
-            .get(&CompositeKey {
-                prefix: prefix.to_string(),
-                key,
-            })
-            .cloned()
+    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<V::PreparedValue> {
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        self.inner.read().storage.get(&composite_key)
     }
 }

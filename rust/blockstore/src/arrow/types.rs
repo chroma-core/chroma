@@ -22,8 +22,7 @@ pub trait ArrowWriteableValue: Value {
     /// Every writable value has a corresponding readable value type. For example, the readable value type for a `String` is `&str`.
     type ReadableValue<'referred_data>: ArrowReadableValue<'referred_data>;
     /// Some values are a reference type and need to be converted to an owned type or need to be prepared (e.g. serializing a RoaringBitmap) before they can be stored in a delta or Arrow array.
-    type PreparedValue;
-    type OwnedReadableValue;
+    type PreparedValue: Clone;
 
     /// Some values use an offsets array. This returns the size of the offsets array given the number of items in the array.
     fn offset_size(item_count: usize) -> usize;
@@ -49,8 +48,8 @@ pub trait ArrowWriteableValue: Value {
     fn get_owned_value_from_delta(
         prefix: &str,
         key: KeyWrapper,
-        delta: &BlockDelta,
-    ) -> Option<Self::OwnedReadableValue>;
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue>;
 }
 
 pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {

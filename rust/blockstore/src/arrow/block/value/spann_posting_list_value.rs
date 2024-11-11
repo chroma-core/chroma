@@ -22,7 +22,7 @@ use crate::{
     BlockfileWriterMutationOrdering,
 };
 
-type SpannPostingListDeltaEntry = (Vec<u32>, Vec<u32>, Vec<f32>);
+pub type SpannPostingListDeltaEntry = (Vec<u32>, Vec<u32>, Vec<f32>);
 
 pub struct SpannPostingListBuilderWrapper {
     doc_offset_ids_builder: ListBuilder<UInt32Builder>,
@@ -35,7 +35,6 @@ impl ArrowWriteableValue for &SpannPostingList<'_> {
     type PreparedValue = SpannPostingListDeltaEntry;
     type SizeTracker = SpannPostingListSizeTracker;
     type ArrowBuilder = SpannPostingListBuilderWrapper;
-    type OwnedReadableValue = SpannPostingListDeltaEntry;
 
     // This method is only called for SingleColumnStorage.
     fn offset_size(_: usize) -> usize {
@@ -185,8 +184,8 @@ impl ArrowWriteableValue for &SpannPostingList<'_> {
     fn get_owned_value_from_delta(
         prefix: &str,
         key: KeyWrapper,
-        delta: &BlockDelta,
-    ) -> Option<Self::OwnedReadableValue> {
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
         match &delta.builder {
             BlockStorage::SpannPostingListDelta(builder) => builder.get_owned_value(prefix, key),
             _ => panic!("Invalid builder type"),

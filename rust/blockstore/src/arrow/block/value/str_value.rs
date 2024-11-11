@@ -21,7 +21,6 @@ impl ArrowWriteableValue for String {
     type ArrowBuilder = StringBuilder;
     type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = String;
-    type OwnedReadableValue = String;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
@@ -74,8 +73,8 @@ impl ArrowWriteableValue for String {
     fn get_owned_value_from_delta(
         prefix: &str,
         key: KeyWrapper,
-        delta: &BlockDelta,
-    ) -> Option<Self::OwnedReadableValue> {
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
         match &delta.builder {
             BlockStorage::String(builder) => builder.get_owned_value(prefix, key),
             _ => panic!("Invalid builder type"),

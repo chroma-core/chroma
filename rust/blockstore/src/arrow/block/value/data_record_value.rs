@@ -20,13 +20,9 @@ use arrow::{
     array::{ArrayRef, BinaryArray},
     util::bit_util,
 };
-use chroma_types::{chroma_proto::UpdateMetadata, DataRecord};
+use chroma_types::{chroma_proto::UpdateMetadata, DataRecord, MetadataValue};
 use prost::Message;
-use std::sync::Arc;
-
-// Convenience type for the storage entry
-// (id, embedding, metadata, document)
-pub type DataRecordStorageEntry = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+use std::{collections::HashMap, sync::Arc};
 
 pub struct ValueBuilderWrapper {
     id_builder: StringBuilder,
@@ -40,7 +36,6 @@ impl ArrowWriteableValue for &DataRecord<'_> {
     type ArrowBuilder = ValueBuilderWrapper;
     type SizeTracker = DataRecordSizeTracker;
     type PreparedValue = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
-    type OwnedReadableValue = DataRecordStorageEntry;
 
     fn offset_size(item_count: usize) -> usize {
         let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
@@ -187,8 +182,8 @@ impl ArrowWriteableValue for &DataRecord<'_> {
     fn get_owned_value_from_delta(
         prefix: &str,
         key: KeyWrapper,
-        delta: &BlockDelta,
-    ) -> Option<Self::OwnedReadableValue> {
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
         match &delta.builder {
             BlockStorage::DataRecord(builder) => builder.get_owned_value(prefix, key),
             _ => panic!("Invalid builder type"),

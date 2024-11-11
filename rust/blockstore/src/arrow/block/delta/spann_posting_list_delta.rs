@@ -5,7 +5,10 @@ use chroma_types::SpannPostingList;
 use parking_lot::RwLock;
 
 use crate::{
-    arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
+    arrow::{
+        block::value::spann_posting_list_value::SpannPostingListDeltaEntry,
+        types::{ArrowWriteableKey, ArrowWriteableValue},
+    },
     key::{CompositeKey, KeyWrapper},
 };
 

@@ -23,7 +23,6 @@ impl ArrowWriteableValue for RoaringBitmap {
     type ArrowBuilder = BinaryBuilder;
     type SizeTracker = SingleColumnSizeTracker;
     type PreparedValue = Vec<u8>;
-    type OwnedReadableValue = RoaringBitmap;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
@@ -83,8 +82,8 @@ impl ArrowWriteableValue for RoaringBitmap {
     fn get_owned_value_from_delta(
         prefix: &str,
         key: KeyWrapper,
-        delta: &BlockDelta,
-    ) -> Option<Self::OwnedReadableValue> {
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
         match &delta.builder {
             BlockStorage::RoaringBitmap(builder) => builder.get_owned_value(prefix, key),
             _ => panic!("Invalid builder type"),
