@@ -88,12 +88,12 @@ pub struct FoyerCacheConfig {
     #[arg(short, long)]
     pub dir: Option<String>,
 
-    /// In-memory cache capacity. (items)
+    /// In-memory cache capacity. (weighted units)
     #[arg(long, default_value_t = 1048576)]
     #[serde(default = "default_capacity")]
     pub capacity: usize,
 
-    /// In-memory cache capacity. (items)
+    /// In-memory cache capacity. (weighted units)
     #[arg(long, default_value_t = 1024)]
     #[serde(default = "default_mem")]
     pub mem: usize,
