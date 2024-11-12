@@ -11,6 +11,7 @@
 use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
+use super::StorageConfigError;
 use crate::GetError;
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
@@ -132,7 +133,7 @@ impl S3Storage {
         }
     }
 
-    pub(super) async fn get_stream(
+    async fn get_stream(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, S3GetError> {
@@ -305,6 +306,9 @@ impl S3Storage {
                         Err(err) => {
                             tracing::error!("Error reading from S3: {}", err);
                             match err {
+                                GetError::ObjectStoreError(e) => {
+                                    return Err(S3GetError::S3GetError(e.to_string()));
+                                }
                                 GetError::S3Error(e) => {
                                     return Err(e);
                                 }
@@ -486,23 +490,6 @@ impl S3Storage {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum StorageConfigError {
-    #[error("Invalid storage config")]
-    InvalidStorageConfig,
-    #[error("Failed to create bucket: {0}")]
-    FailedToCreateBucket(String),
-}
-
-impl ChromaError for StorageConfigError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            StorageConfigError::InvalidStorageConfig => ErrorCodes::InvalidArgument,
-            StorageConfigError::FailedToCreateBucket(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
 #[async_trait]
 impl Configurable<StorageConfig> for S3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
@@ -577,7 +564,6 @@ impl Configurable<StorageConfig> for S3Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::StreamExt;
     use rand::{Rng, SeedableRng};
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -661,22 +647,9 @@ mod tests {
             .await
             .unwrap();
 
-        let mut stream = storage.get_stream("test").await.unwrap();
-
-        let mut buf = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(data) => {
-                    buf.extend_from_slice(&data);
-                }
-                Err(e) => {
-                    panic!("Error reading stream: {}", e);
-                }
-            }
-        }
-
+        let buf = storage.get("test").await.unwrap();
         let file_contents = std::fs::read(temp_file.path()).unwrap();
-        assert_eq!(buf, file_contents);
+        assert_eq!(buf, file_contents.into());
     }
 
     #[tokio::test]

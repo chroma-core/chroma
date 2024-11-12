@@ -18,7 +18,6 @@ use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
-use futures::StreamExt;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -429,34 +428,14 @@ impl RootManager {
                 // This will be replaced with a full prefix-based storage shortly
                 let key = format!("sparse_index/{}", id);
                 tracing::debug!("Reading root from storage with key: {}", key);
-                // TODO: This should pass through NAC as well.
-                let stream = self.storage.get_stream(&key).await;
-                let mut buf: Vec<u8> = Vec::new();
-                match stream {
-                    Ok(mut bytes) => {
-                        while let Some(res) = bytes.next().await {
-                            match res {
-                                Ok(chunk) => {
-                                    buf.extend(chunk);
-                                }
-                                Err(e) => {
-                                    tracing::error!("Error reading root from storage: {}", e);
-                                    return Err(RootManagerError::StorageGetError(e));
-                                }
-                            }
+                match self.storage.get(&key).await {
+                    Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, *id) {
+                        Ok(root) => Ok(Some(root)),
+                        Err(e) => {
+                            tracing::error!("Error turning bytes into root: {}", e);
+                            Err(RootManagerError::FromBytesError(e))
                         }
-                        let root = RootReader::from_bytes::<K>(&buf, *id);
-                        match root {
-                            Ok(root) => {
-                                self.cache.insert(*id, root.clone()).await;
-                                Ok(Some(root))
-                            }
-                            Err(e) => {
-                                tracing::error!("Error turning bytes into root: {}", e);
-                                Err(RootManagerError::FromBytesError(e))
-                            }
-                        }
-                    }
+                    },
                     Err(e) => {
                         tracing::error!("Error reading root from storage: {}", e);
                         Err(RootManagerError::StorageGetError(e))
