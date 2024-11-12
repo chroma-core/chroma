@@ -6,6 +6,7 @@ use crate::log::log::CollectionRecord;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
 use crate::sysdb::sysdb::SysDb;
+use uuid::Uuid;
 
 pub(crate) struct Scheduler {
     my_ip: String,
@@ -63,7 +64,12 @@ impl Scheduler {
     ) -> Vec<CollectionRecord> {
         let mut collection_records = Vec::new();
         for collection_info in collections {
-            let collection_id = Some(collection_info.collection_id);
+            let collection_id = Uuid::parse_str(collection_info.collection_id.as_str());
+            if collection_id.is_err() {
+                tracing::error!("Error: {:?}", collection_id.err());
+                continue;
+            }
+            let collection_id = Some(collection_id.unwrap());
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
@@ -113,7 +119,7 @@ impl Scheduler {
                     }
 
                     collection_records.push(CollectionRecord {
-                        collection_id: collection[0].collection_id,
+                        id: collection[0].id,
                         tenant_id: collection[0].tenant.clone(),
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
@@ -136,8 +142,7 @@ impl Scheduler {
         for collection in collections {
             let result = self
                 .assignment_policy
-                // NOTE(rescrv):  Need to use the untyped uuid here.
-                .assign(collection.collection_id.0.to_string().as_str());
+                .assign(collection.id.to_string().as_str());
             match result {
                 Ok(member) => {
                     if member == self.my_ip {
@@ -187,15 +192,14 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
     use crate::sysdb::test_sysdb::TestSysDb;
-    use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
+    use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
+    use std::str::FromStr;
 
     #[tokio::test]
     async fn test_scheduler() {
@@ -205,8 +209,7 @@ mod tests {
             _ => panic!("Invalid log type"),
         };
 
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
             collection_uuid_1,
             InternalLogRecord {
@@ -227,8 +230,7 @@ mod tests {
             },
         );
 
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         in_memory_log.add_log(
             collection_uuid_2,
             InternalLogRecord {
@@ -253,7 +255,7 @@ mod tests {
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            collection_id: collection_uuid_1,
+            id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -265,7 +267,7 @@ mod tests {
 
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            collection_id: collection_uuid_2,
+            id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -359,8 +361,7 @@ mod tests {
             _ => panic!("Invalid log type"),
         };
 
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
             collection_uuid_1,
             InternalLogRecord {
@@ -443,7 +444,7 @@ mod tests {
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            collection_id: collection_uuid_1,
+            id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),

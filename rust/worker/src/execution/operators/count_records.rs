@@ -204,18 +204,19 @@ mod tests {
         segment::{record_segment::RecordSegmentWriter, SegmentWriter},
     };
     use chroma_blockstore::provider::BlockfileProvider;
-    use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
+    use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_merge_log_and_storage() {
         let in_memory_provider = BlockfileProvider::new_memory();
         let mut record_segment = chroma_types::Segment {
-            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
@@ -352,10 +353,10 @@ mod tests {
     async fn test_no_compaction_log_only() {
         let in_memory_provider = BlockfileProvider::new_memory();
         let record_segment = chroma_types::Segment {
-            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),

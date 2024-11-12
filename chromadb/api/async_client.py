@@ -201,12 +201,14 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_collection(
         self,
         name: str,
+        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         model = await self._server.get_collection(
+            id=id,
             name=name,
             tenant=self.tenant,
             database=self.database,
@@ -354,13 +356,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
+        where: Optional[Where] = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         return await self._server._get(
@@ -382,8 +384,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
     ) -> None:
         await self._server._delete(
             collection_id=collection_id,
@@ -400,8 +402,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         return await self._server._query(

@@ -20,23 +20,6 @@ We will aim to provide:
 
 ## Migration Log
 
-### v0.5.17
-
-We no longer support sending empty lists or dictionaries for metadata filtering, ID filtering, etc. For example,
-
-```python
-collection.get(
-	ids=["id1", "id2", "id3", ...],
-	where={}
-)
-```
-
-is not supported. Instead, use:
-
-```python
-collection.get(ids=["id1", "id2", "id3", ...])
-```
-
 ### v0.5.12
 
 The operators `$ne` (not equal) and `$nin` (not in) in `where` clauses have been updated:

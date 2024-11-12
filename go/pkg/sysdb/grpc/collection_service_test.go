@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -17,7 +18,6 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/code"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"pgregory.net/rapid"
@@ -184,12 +184,7 @@ func validateDatabase(suite *CollectionServiceTestSuite, collectionId string, co
 	segments, err := suite.s.GetSegments(context.Background(), &getSegmentReq)
 	suite.NoError(err)
 	for _, segment := range segments.Segments {
-		for key, value := range filePaths[segment.Id] {
-			suite.True(proto.Equal(value, segment.FilePaths[key]))
-		}
-		for key, value := range segment.FilePaths {
-			suite.True(proto.Equal(value, filePaths[segment.Id][key]))
-		}
+		suite.True(reflect.DeepEqual(filePaths[segment.Id], segment.FilePaths))
 	}
 }
 

@@ -1,10 +1,8 @@
 import argparse
 import os
 from typing import List
-
-from dotenv import load_dotenv
-from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
+import openai
 import chromadb
 
 
@@ -54,8 +52,7 @@ def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str
     Returns:
     A response to the question.
     """
-    client = OpenAI()
-    response = client.chat.completions.create(
+    response = openai.chat.completions.create(
         model=model_name,
         messages=build_prompt(query, context),
     )
@@ -66,20 +63,17 @@ def get_chatGPT_response(query: str, context: List[str], model_name: str) -> str
 def main(
     collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
-    load_dotenv()
-
-    # Check if the OPENAI_API_KEY environment variable is set.
-    if not os.getenv("OPENAI_API_KEY"):
-        print(
+    # Check if the OPENAI_API_KEY environment variable is set. Prompt the user to set it if not.
+    if "OPENAI_API_KEY" not in os.environ:
+        openai.api_key = input(
             "Please enter your OpenAI API Key. You can get it from https://platform.openai.com/account/api-keys\n"
         )
-        return
 
     # Ask what model to use
-    model_name = "gpt-4o-mini"
-    change_model = input(f"This program is using the GPT-4o-mini model. Do you want to use a different model? (y/n): ")
-    if change_model == "y":
-        model_name = input("Please enter your desired model: ")
+    model_name = "gpt-3.5-turbo"
+    answer = input(f"Do you want to use GPT-4? (y/n) (default is {model_name}): ")
+    if answer == "y":
+        model_name = "gpt-4"
 
     # Instantiate a persistent chroma client in the persist_directory.
     # This will automatically load any previously saved collections.

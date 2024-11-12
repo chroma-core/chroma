@@ -12,14 +12,5 @@ pub(super) mod register;
 pub(super) mod write_segments;
 
 // Required for benchmark
-pub mod fetch_log;
-pub mod fetch_segment;
-pub mod filter;
-pub mod knn;
-pub mod knn_hnsw;
-pub mod knn_log;
-pub mod knn_merge;
-pub mod knn_projection;
-pub mod limit;
-pub mod prefetch_record;
-pub mod projection;
+pub mod hydrate_metadata_results;
+pub mod metadata_filtering;

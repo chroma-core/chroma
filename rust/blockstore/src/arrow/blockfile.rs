@@ -1,7 +1,6 @@
-use super::migrations::{apply_migrations_to_blockfile, MigrationError};
 use super::provider::{GetError, RootManager};
 use super::root::{RootReader, RootWriter, Version};
-use super::{block::delta::UnorderedBlockDelta, provider::BlockManager};
+use super::{block::delta::BlockDelta, provider::BlockManager};
 use super::{
     block::Block,
     flusher::ArrowBlockfileFlusher,
@@ -15,20 +14,18 @@ use crate::BlockfileError;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
-use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::mem::transmute;
-use std::ops::RangeBounds;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub struct ArrowUnorderedBlockfileWriter {
+pub struct ArrowBlockfileWriter {
     block_manager: BlockManager,
     root_manager: RootManager,
-    block_deltas: Arc<Mutex<HashMap<Uuid, UnorderedBlockDelta>>>,
+    block_deltas: Arc<Mutex<HashMap<Uuid, BlockDelta>>>,
     root: RootWriter,
     id: Uuid,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -39,29 +36,23 @@ pub struct ArrowUnorderedBlockfileWriter {
 pub enum ArrowBlockfileError {
     #[error("Block not found")]
     BlockNotFound,
-    #[error("Could not fetch block")]
-    BlockFetchError(#[from] GetError),
-    #[error("Could not migrate blockfile to new version")]
-    MigrationError(#[from] MigrationError),
 }
 
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
             ArrowBlockfileError::BlockNotFound => ErrorCodes::Internal,
-            ArrowBlockfileError::BlockFetchError(_) => ErrorCodes::Internal,
-            ArrowBlockfileError::MigrationError(e) => e.code(),
         }
     }
 }
 
-impl ArrowUnorderedBlockfileWriter {
+impl ArrowBlockfileWriter {
     pub(super) fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         id: Uuid,
         block_manager: BlockManager,
         root_manager: RootManager,
     ) -> Self {
-        let initial_block = block_manager.create::<K, V, UnorderedBlockDelta>();
+        let initial_block = block_manager.create::<K, V>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let root_writer = RootWriter::new(CURRENT_VERSION, id, sparse_index);
 
@@ -104,10 +95,9 @@ impl ArrowUnorderedBlockfileWriter {
         mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
         let mut blocks = Vec::new();
-        let mut new_block_ids = HashSet::new();
-        let mut deltas_to_commit = Vec::new();
+        let mut handled_blocks = HashSet::new();
         for (_, delta) in self.block_deltas.lock().drain() {
-            new_block_ids.insert(delta.id);
+            handled_blocks.insert(delta.id);
             let mut removed = false;
             // Skip empty blocks. Also, remove from sparse index.
             if delta.len() == 0 {
@@ -119,20 +109,50 @@ impl ArrowUnorderedBlockfileWriter {
                     .sparse_index
                     .set_count(delta.id, delta.len() as u32)
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-                deltas_to_commit.push(delta);
+                let block = self.block_manager.commit::<K, V>(delta);
+                blocks.push(block);
             }
         }
 
-        for delta in deltas_to_commit {
-            let block = self.block_manager.commit::<K, V>(delta).await;
-            blocks.push(block);
+        // MIGRATION(10/15/2024 @hammadb) Get all the blocks and manually update the sparse index
+        if self.root.version == Version::V1 {
+            self.root.version = Version::V1_1;
+            let block_ids;
+            // Guard the sparse index data access with a lock
+            // otherwise we have to hold the lock across an await
+            {
+                let sparse_index_data = self.root.sparse_index.data.lock();
+                block_ids = sparse_index_data
+                    .forward
+                    .values()
+                    .filter(|block_id| !handled_blocks.contains(block_id))
+                    .copied()
+                    .collect::<Vec<Uuid>>();
+            }
+            for block_id in block_ids.iter() {
+                let block = self.block_manager.get(block_id).await;
+                match block {
+                    Ok(Some(block)) => {
+                        match self
+                            .root
+                            .sparse_index
+                            .set_count(*block_id, block.len() as u32)
+                        {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(Box::new(e));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                }
+            }
         }
-
-        apply_migrations_to_blockfile(&mut self.root, &self.block_manager, &new_block_ids)
-            .await
-            .map_err(|e| {
-                Box::new(ArrowBlockfileError::MigrationError(e)) as Box<dyn ChromaError>
-            })?;
 
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
@@ -180,11 +200,7 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_delta = match self
-                    .block_manager
-                    .fork::<K, V, UnorderedBlockDelta>(&block.id)
-                    .await
-                {
+                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
                     Ok(delta) => delta,
                     Err(e) => {
                         return Err(Box::new(e));
@@ -207,17 +223,18 @@ impl ArrowUnorderedBlockfileWriter {
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
         delta.add(prefix, key, value);
-
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
             let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
             for (split_key, new_delta) in new_blocks {
-                self.root
-                    .sparse_index
-                    .add_block(split_key, new_delta.id)
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-
-                let mut deltas = self.block_deltas.lock();
-                deltas.insert(new_delta.id, new_delta);
+                match self.root.sparse_index.add_block(split_key, new_delta.id) {
+                    Ok(_) => {
+                        let mut deltas = self.block_deltas.lock();
+                        deltas.insert(new_delta.id, new_delta);
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
             }
         }
 
@@ -251,11 +268,7 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_delta = match self
-                    .block_manager
-                    .fork::<K, V, UnorderedBlockDelta>(&block.id)
-                    .await
-                {
+                let new_delta = match self.block_manager.fork::<K, V>(&block.id).await {
                     Ok(delta) => delta,
                     Err(e) => {
                         return Err(Box::new(e));
@@ -289,7 +302,7 @@ pub struct ArrowBlockfileReader<
     V: ArrowReadableValue<'me>,
 > {
     block_manager: BlockManager,
-    pub(super) root: RootReader,
+    root: RootReader,
     loaded_blocks: Arc<Mutex<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
 }
@@ -465,58 +478,146 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
-    // Returns all Arrow records in the specified range.
-    pub(crate) fn get_range_stream<'prefix, PrefixRange, KeyRange>(
+    /// Returns all arrow records whose key > supplied key.
+    pub(crate) async fn get_gt(
         &'me self,
-        prefix_range: PrefixRange,
-        key_range: KeyRange,
-    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + Send + 'me
-    where
-        PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'me,
-        KeyRange: RangeBounds<K> + Clone + Send + 'me,
-        K: Sync,
-        V: Sync,
-    {
-        futures::stream::iter(
-            self.root
-                .sparse_index
-                .get_block_ids_range(prefix_range.clone(), key_range.clone())
-                .into_iter()
-                .map(Ok),
-        )
-        .try_filter_map(move |block_id| async move {
-            match self.get_block(block_id).await {
-                Ok(Some(block)) => Ok(Some(block)),
-                Ok(None) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
-                Err(e) => Err(Box::new(ArrowBlockfileError::BlockFetchError(e))),
-            }
-        })
-        .map(move |block| match block {
-            Ok(block) => futures::stream::iter(
-                block
-                    .get_range::<K, V, _, _>(prefix_range.clone(), key_range.clone())
-                    .map(Ok),
-            )
-            .boxed(),
-            Err(e) => futures::stream::once(async { Err(e as Box<dyn ChromaError>) }).boxed(),
-        })
-        .flatten()
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        // Get all block ids that contain keys > key from sparse index for this prefix.
+        let block_ids = self.root.sparse_index.get_block_ids_gt(prefix, key.clone());
+        let mut result: Vec<(K, V)> = vec![];
+        // Read all the blocks individually to get keys > key.
+        for block_id in block_ids {
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
+            let block = match block_opt {
+                Some(b) => b,
+                None => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+            };
+            result.extend(block.get_gt(prefix, key.clone()));
+        }
+        Ok(result)
     }
 
-    pub async fn get_range<'prefix, PrefixRange, KeyRange>(
+    /// Returns all arrow records whose key < supplied key.
+    pub(crate) async fn get_lt(
         &'me self,
-        prefix_range: PrefixRange,
-        key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
-    where
-        PrefixRange: RangeBounds<&'prefix str> + Clone,
-        KeyRange: RangeBounds<K> + Clone,
-    {
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        // Get all block ids that contain keys < key from sparse index.
+        let block_ids = self.root.sparse_index.get_block_ids_lt(prefix, key.clone());
+        let mut result: Vec<(K, V)> = vec![];
+        // Read all the blocks individually to get keys < key.
+        for block_id in block_ids {
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
+            let block = match block_opt {
+                Some(b) => b,
+                None => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+            };
+            result.extend(block.get_lt(prefix, key.clone()));
+        }
+        Ok(result)
+    }
+
+    /// Returns all arrow records whose key >= supplied key.
+    pub(crate) async fn get_gte(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        // Get all block ids that contain keys >= key from sparse index.
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix_range.clone(), key_range.clone());
+            .get_block_ids_gte(prefix, key.clone());
+        let mut result: Vec<(K, V)> = vec![];
+        // Read all the blocks individually to get keys >= key.
+        for block_id in block_ids {
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
 
+            let block = match block_opt {
+                Some(b) => b,
+                None => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+            };
+            result.extend(block.get_gte(prefix, key.clone()));
+        }
+        Ok(result)
+    }
+
+    /// Returns all arrow records whose key <= supplied key.
+    pub(crate) async fn get_lte(
+        &'me self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        // Get all block ids that contain keys <= key from sparse index.
+        let block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_lte(prefix, key.clone());
+        let mut result: Vec<(K, V)> = vec![];
+        // Read all the blocks individually to get keys <= key.
+        for block_id in block_ids {
+            let block_opt = match self.get_block(block_id).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
+            let block = match block_opt {
+                Some(b) => b,
+                None => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+            };
+            result.extend(block.get_lte(prefix, key.clone()));
+        }
+        Ok(result)
+    }
+
+    /// Returns all arrow records whose prefix is same as supplied prefix.
+    pub(crate) async fn get_by_prefix(
+        &'me self,
+        prefix: &str,
+    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>> {
+        let block_ids = self.root.sparse_index.get_block_ids_prefix(prefix);
         let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id).await {
@@ -535,9 +636,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
                 }
             };
-            result.extend(block.get_range(prefix_range.clone(), key_range.clone()));
-        }
 
+            result.extend(block.get_prefix(prefix));
+        }
         Ok(result)
     }
 
@@ -604,40 +705,12 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub(crate) fn id(&self) -> Uuid {
         self.root.id
     }
-
-    /// Check if the blockfile is valid.
-    /// Validates that the sparse index is valid and that no block exceeds the max block size.
-    pub async fn is_valid(&self) -> bool {
-        if !self.root.sparse_index.is_valid() {
-            return false;
-        }
-
-        for (_, block_id) in self.root.sparse_index.data.forward.iter() {
-            match self.get_block(block_id.id).await {
-                Ok(Some(block)) => {
-                    if block.get_size() > self.block_manager.max_block_size_bytes() {
-                        return false;
-                    }
-                }
-                Ok(None) => {
-                    return false;
-                }
-                Err(_) => {
-                    return false;
-                }
-            };
-        }
-
-        true
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::arrow::block::delta::types::Delta;
-    use crate::arrow::block::delta::UnorderedBlockDelta;
     use crate::arrow::block::Block;
-    use crate::arrow::blockfile::ArrowUnorderedBlockfileWriter;
+    use crate::arrow::blockfile::ArrowBlockfileWriter;
     use crate::arrow::provider::{BlockManager, RootManager};
     use crate::arrow::root::{RootWriter, Version};
     use crate::arrow::sparse_index::SparseIndexWriter;
@@ -645,17 +718,15 @@ mod tests {
     use crate::{
         arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, arrow::provider::ArrowBlockfileProvider,
     };
-    use crate::{BlockfileReader, BlockfileWriter, BlockfileWriterOptions};
+    use crate::{BlockfileReader, BlockfileWriter};
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{DataRecord, MetadataValue};
-    use futures::{StreamExt, TryStreamExt};
     use parking_lot::Mutex;
     use proptest::prelude::*;
     use proptest::test_runner::Config;
     use rand::seq::IteratorRandom;
     use std::collections::HashMap;
-    use std::ops::Bound;
     use std::sync::Arc;
     use tokio::runtime::Runtime;
     use uuid::Uuid;
@@ -672,10 +743,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
@@ -691,7 +759,7 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &[u32]>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<&str, &[u32]>(&id).await.unwrap();
 
         let count = reader.count().await;
         match count {
@@ -712,10 +780,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = blockfile_provider
-                .write::<&str, u32>(BlockfileWriterOptions::default())
-                .await
-                .unwrap();
+            let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
 
             for j in 1..=5 {
@@ -729,12 +794,10 @@ mod tests {
             let flusher = writer.commit::<&str, u32>().await.unwrap();
             flusher.flush::<&str, u32>().await.unwrap();
 
-            let reader = blockfile_provider.read::<&str, u32>(&id).await.unwrap();
+            let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
             let prefix_query = format!("{}/{}", "prefix", prefix_for_query);
             println!("Query {}, num_keys {}", prefix_query, num_keys);
-            let range_iter =
-                reader.get_range_stream(prefix_query.as_str()..=prefix_query.as_str(), ..);
-            let res = range_iter.try_collect::<Vec<_>>().await;
+            let res = reader.get_by_prefix(prefix_query.as_str()).await;
             match res {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
@@ -779,10 +842,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let writer = blockfile_provider
-                .write::<&str, u32>(BlockfileWriterOptions::default())
-                .await
-                .unwrap();
+            let writer = blockfile_provider.create::<&str, u32>().unwrap();
             let id = writer.id();
             println!("Number of keys {}", num_keys);
             let prefix = "prefix";
@@ -794,96 +854,50 @@ mod tests {
             let flusher = writer.commit::<&str, u32>().await.unwrap();
             flusher.flush::<&str, u32>().await.unwrap();
 
-            let reader = blockfile_provider.read::<&str, u32>(&id).await.unwrap();
+            let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
             let query = format!("{}/{}", "key", query_key);
             println!("Query {}", query);
             println!("Operation {:?}", operation);
-
-            let range_stream = match operation {
-                ComparisonOperation::GreaterThan => reader
-                    .get_range_stream(
-                        prefix..=prefix,
-                        (Bound::Excluded(query.as_str()), Bound::Unbounded),
-                    )
-                    .boxed_local(),
-                ComparisonOperation::GreaterThanOrEquals => reader
-                    .get_range_stream(prefix..=prefix, query.as_str()..)
-                    .boxed_local(),
-                ComparisonOperation::LessThan => reader
-                    .get_range_stream(prefix..=prefix, ..query.as_str())
-                    .boxed_local(),
-                ComparisonOperation::LessThanOrEquals => reader
-                    .get_range_stream(prefix..=prefix, ..=query.as_str())
-                    .boxed_local(),
-            };
-
-            let materialized_range = match operation {
-                ComparisonOperation::GreaterThan => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Excluded(query.as_str()), Bound::Unbounded),
-                        )
-                        .await
-                }
+            let greater_than = match operation {
+                ComparisonOperation::GreaterThan => reader.get_gt(prefix, query.as_str()).await,
                 ComparisonOperation::GreaterThanOrEquals => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Included(query.as_str()), Bound::Unbounded),
-                        )
-                        .await
+                    reader.get_gte(prefix, query.as_str()).await
                 }
-                ComparisonOperation::LessThan => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Unbounded, Bound::Excluded(query.as_str())),
-                        )
-                        .await
-                }
+                ComparisonOperation::LessThan => reader.get_lt(prefix, query.as_str()).await,
                 ComparisonOperation::LessThanOrEquals => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Unbounded, Bound::Included(query.as_str())),
-                        )
-                        .await
+                    reader.get_lte(prefix, query.as_str()).await
                 }
-            }
-            .unwrap();
-
-            let stream_result = range_stream.try_collect::<Vec<_>>().await.unwrap();
-            assert_eq!(
-                materialized_range, stream_result,
-                ".get_range() and .get_range_stream() should return the same result"
-            );
-
-            let mut kv_map = HashMap::new();
-            for entry in materialized_range {
-                kv_map.insert(entry.0, entry.1);
-            }
-            for i in 1..num_keys {
-                let key = format!("{}/{}", "key", i);
-                let condition: bool = match operation {
-                    ComparisonOperation::GreaterThan => key > query,
-                    ComparisonOperation::GreaterThanOrEquals => key >= query,
-                    ComparisonOperation::LessThan => key < query,
-                    ComparisonOperation::LessThanOrEquals => key <= query,
-                };
-                if condition {
-                    assert!(
-                        kv_map.contains_key(key.as_str()),
-                        "{}",
-                        format!("Key {} should be present but not found", key)
-                    );
-                } else {
-                    assert!(
-                        !kv_map.contains_key(key.as_str()),
-                        "{}",
-                        format!("Key {} should not be present but found", key)
-                    );
+            };
+            match greater_than {
+                Ok(c) => {
+                    let mut kv_map = HashMap::new();
+                    for entry in c {
+                        kv_map.insert(entry.0, entry.1);
+                    }
+                    for i in 1..num_keys {
+                        let key = format!("{}/{}", "key", i);
+                        let condition: bool = match operation {
+                            ComparisonOperation::GreaterThan => key > query,
+                            ComparisonOperation::GreaterThanOrEquals => key >= query,
+                            ComparisonOperation::LessThan => key < query,
+                            ComparisonOperation::LessThanOrEquals => key <= query,
+                        };
+                        if condition {
+                            assert!(
+                                kv_map.contains_key(key.as_str()),
+                                "{}",
+                                format!("Key {} should be present but not found", key)
+                            );
+                        } else {
+                            assert!(
+                                !kv_map.contains_key(key.as_str()),
+                                "{}",
+                                format!("Key {} should not be present but found", key)
+                            );
+                        }
+                    }
                 }
+                Err(_) => panic!("Error getting gt"),
             }
         });
     }
@@ -936,10 +950,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
         let id = writer.id();
 
         let prefix_1 = "key";
@@ -955,7 +966,7 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &[u32]>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<&str, &[u32]>(&id).await.unwrap();
 
         let value = reader.get(prefix_1, key1).await.unwrap();
         assert_eq!(value, [1, 2, 3]);
@@ -976,10 +987,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
@@ -993,7 +1001,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_1)
+            .open::<&str, &[u32]>(&id_1)
             .await
             .unwrap();
 
@@ -1014,7 +1022,7 @@ mod tests {
 
         // Add 5 new entries to the first block
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
+            .fork::<&str, Vec<u32>>(&id_1)
             .await
             .unwrap();
         let id_2 = writer.id();
@@ -1028,7 +1036,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_2)
+            .open::<&str, &[u32]>(&id_2)
             .await
             .unwrap();
         for i in 0..5 {
@@ -1049,7 +1057,7 @@ mod tests {
 
         // Add 1200 more entries, causing splits
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
+            .fork::<&str, Vec<u32>>(&id_2)
             .await
             .unwrap();
         let id_3 = writer.id();
@@ -1062,7 +1070,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_3)
+            .open::<&str, &[u32]>(&id_3)
             .await
             .unwrap();
         for i in n..n * 2 {
@@ -1093,10 +1101,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
@@ -1115,7 +1120,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_1)
+            .open::<&str, &[u32]>(&id_1)
             .await
             .unwrap();
 
@@ -1139,10 +1144,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, String>().unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1158,7 +1160,7 @@ mod tests {
         let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
@@ -1179,10 +1181,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = provider
-            .write::<f32, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = provider.create::<f32, String>().unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1195,7 +1194,7 @@ mod tests {
         let flusher = writer.commit::<f32, String>().await.unwrap();
         flusher.flush::<f32, String>().await.unwrap();
 
-        let reader = provider.read::<f32, &str>(&id).await.unwrap();
+        let reader = provider.open::<f32, &str>(&id).await.unwrap();
         for i in 0..n {
             let key = i as f32;
             let value = reader.get("key", key).await.unwrap();
@@ -1217,8 +1216,7 @@ mod tests {
         );
 
         let writer = blockfile_provider
-            .write::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::default())
-            .await
+            .create::<&str, roaring::RoaringBitmap>()
             .unwrap();
         let id = writer.id();
 
@@ -1239,7 +1237,7 @@ mod tests {
             .unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, roaring::RoaringBitmap>(&id)
+            .open::<&str, roaring::RoaringBitmap>(&id)
             .await
             .unwrap();
         for i in 0..n {
@@ -1266,10 +1264,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
-            .write::<u32, u32>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<u32, u32>().unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1282,7 +1277,7 @@ mod tests {
         let flusher = writer.commit::<u32, u32>().await.unwrap();
         flusher.flush::<u32, u32>().await.unwrap();
 
-        let reader = blockfile_provider.read::<u32, u32>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<u32, u32>(&id).await.unwrap();
         for i in 0..n {
             let key = i as u32;
             let value = reader.get("key", key).await.unwrap();
@@ -1303,10 +1298,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
-            .write::<&str, &DataRecord>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, &DataRecord>().unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1327,7 +1319,7 @@ mod tests {
         flusher.flush::<&str, &DataRecord>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, DataRecord>(&id)
+            .open::<&str, DataRecord>(&id)
             .await
             .unwrap();
         for i in 0..n {
@@ -1358,10 +1350,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, String>().unwrap();
         let id = writer.id();
 
         let val_1_small = "a";
@@ -1378,7 +1367,7 @@ mod tests {
         let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         let val_1 = reader.get("key", "1").await.unwrap();
         let val_2 = reader.get("key", "2").await.unwrap();
 
@@ -1398,10 +1387,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, String>().unwrap();
         let id = writer.id();
 
         let n = 2000;
@@ -1417,17 +1403,14 @@ mod tests {
         let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
             assert_eq!(value, format!("{:04}", i));
         }
 
-        let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::new().fork(id))
-            .await
-            .unwrap();
+        let writer = blockfile_provider.fork::<&str, String>(&id).await.unwrap();
         let id = writer.id();
 
         // Delete some keys
@@ -1444,7 +1427,7 @@ mod tests {
         flusher.flush::<&str, String>().await.unwrap();
 
         // Check that the deleted keys are gone
-        let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<&str, &str>(&id).await.unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
             if deleted_keys.contains(&i) {
@@ -1468,10 +1451,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
         let id_1 = writer.id();
 
         let n = 1200;
@@ -1484,7 +1464,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_1)
+            .open::<&str, &[u32]>(&id_1)
             .await
             .unwrap();
 
@@ -1510,10 +1490,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, Vec<u32>>().unwrap();
         let id_1 = writer.id();
 
         // Add the larger keys first then smaller.
@@ -1532,7 +1509,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
+            .fork::<&str, Vec<u32>>(&id_1)
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Delete everything but the last 10 keys.
@@ -1549,7 +1526,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_2)
+            .open::<&str, &[u32]>(&id_2)
             .await
             .unwrap();
 
@@ -1565,7 +1542,7 @@ mod tests {
         }
 
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
+            .fork::<&str, Vec<u32>>(&id_1)
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Add everything back.
@@ -1582,7 +1559,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_3)
+            .open::<&str, &[u32]>(&id_3)
             .await
             .unwrap();
 
@@ -1606,10 +1583,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let writer = blockfile_provider
-            .write::<&str, u32>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
+        let writer = blockfile_provider.create::<&str, u32>().unwrap();
         let id = writer.id();
 
         let n = 20000;
@@ -1622,7 +1596,7 @@ mod tests {
         let flusher = writer.commit::<&str, u32>().await.unwrap();
         flusher.flush::<&str, u32>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, u32>(&id).await.unwrap();
+        let reader = blockfile_provider.open::<&str, u32>(&id).await.unwrap();
         let value = reader.get("prefix", fixed_key).await.unwrap();
         assert_eq!(value, n - 1);
     }
@@ -1637,7 +1611,7 @@ mod tests {
         let block_manager = BlockManager::new(storage.clone(), 8 * 1024 * 1024, block_cache);
 
         // Manually create a v1 blockfile with no counts
-        let initial_block = block_manager.create::<&str, String, UnorderedBlockDelta>();
+        let initial_block = block_manager.create::<&str, String>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let file_id = Uuid::new_v4();
         let root_writer = RootWriter::new(Version::V1, file_id, sparse_index);
@@ -1648,7 +1622,7 @@ mod tests {
             block_deltas_map.insert(initial_block.id, initial_block);
         }
 
-        let writer = ArrowUnorderedBlockfileWriter {
+        let writer = ArrowBlockfileWriter {
             block_manager,
             root_manager: root_manager.clone(),
             block_deltas,
@@ -1706,9 +1680,9 @@ mod tests {
         ////////////////////////// STEP 1 //////////////////////////
 
         // Create two blocks with some data, we will make this conceptually a v1 block
-        let old_block_delta_1 = block_manager.create::<&str, String, UnorderedBlockDelta>();
+        let old_block_delta_1 = block_manager.create::<&str, String>();
         old_block_delta_1.add("prefix", "a", "value_a".to_string());
-        let old_block_delta_2 = block_manager.create::<&str, String, UnorderedBlockDelta>();
+        let old_block_delta_2 = block_manager.create::<&str, String>();
         old_block_delta_2.add("prefix", "f", "value_b".to_string());
         let old_block_id_1 = old_block_delta_1.id;
         let old_block_id_2 = old_block_delta_2.id;
@@ -1747,7 +1721,7 @@ mod tests {
         );
 
         let reader = blockfile_provider
-            .read::<&str, &str>(&first_write_id)
+            .open::<&str, &str>(&first_write_id)
             .await
             .unwrap();
         let reader = match reader {
@@ -1765,12 +1739,12 @@ mod tests {
         // successfully hydrating counts for ALL blocks it needs to set counts for
 
         let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::new().fork(first_write_id))
+            .fork::<&str, String>(&first_write_id)
             .await
             .unwrap();
         let second_write_id = writer.id();
         let writer = match writer {
-            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer,
+            BlockfileWriter::ArrowBlockfileWriter(writer) => writer,
             _ => panic!("Unexpected writer type"),
         };
         assert_eq!(writer.root.version, Version::V1);
@@ -1803,7 +1777,7 @@ mod tests {
         // Verify that the counts were correctly migrated
 
         let blockfile_reader = blockfile_provider
-            .read::<&str, &str>(&second_write_id)
+            .open::<&str, &str>(&second_write_id)
             .await
             .unwrap();
 

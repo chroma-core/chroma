@@ -60,7 +60,7 @@ func (m *MemberlistManager) reconcileMemberlist(updates map[string]bool) {
 		log.Error("Error while getting memberlist", zap.Error(err))
 		return
 	}
-	log.Debug("Old Memberlist", zap.Any("memberlist", memberlist))
+	log.Info("Old Memberlist", zap.Any("memberlist", memberlist))
 	newMemberlist, err := m.nodeWatcher.ListReadyMembers()
 	if err != nil {
 		log.Error("Error while getting ready members", zap.Error(err))
@@ -74,7 +74,7 @@ func (m *MemberlistManager) reconcileMemberlist(updates map[string]bool) {
 			return
 		}
 	} else {
-		log.Debug("Memberlist has not changed")
+		log.Info("Memberlist has not changed")
 	}
 	for key := range updates {
 		m.workqueue.Done(key)
@@ -96,7 +96,7 @@ func (m *MemberlistManager) run() {
 				break
 			}
 			key, ok := interface_key.(string)
-			log.Debug("Reconciling memberlist", zap.String("key", key))
+			log.Info("Reconciling memberlist", zap.String("key", key))
 			if !ok {
 				log.Error("Error while asserting workqueue key to string")
 				m.workqueue.Done(key)

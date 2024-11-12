@@ -13,8 +13,7 @@ message CreateDatabaseRequest {
 }
 
 message CreateDatabaseResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
 }
 
 message GetDatabaseRequest {
@@ -24,8 +23,7 @@ message GetDatabaseRequest {
 
 message GetDatabaseResponse {
   Database database = 1;
-  reserved 2;
-  reserved "status";
+  Status status = 2;
 }
 
 message CreateTenantRequest {
@@ -33,8 +31,7 @@ message CreateTenantRequest {
 }
 
 message CreateTenantResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
 }
 
 message GetTenantRequest {
@@ -43,8 +40,7 @@ message GetTenantRequest {
 
 message GetTenantResponse {
   Tenant tenant = 1;
-  reserved 2;
-  reserved "status";
+  Status status = 2;
 }
 
 
@@ -53,8 +49,7 @@ message CreateSegmentRequest {
 }
 
 message CreateSegmentResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
 }
 
 message DeleteSegmentRequest {
@@ -63,8 +58,7 @@ message DeleteSegmentRequest {
 }
 
 message DeleteSegmentResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
 }
 
 message GetSegmentsRequest {
@@ -76,8 +70,7 @@ message GetSegmentsRequest {
 
 message GetSegmentsResponse {
   repeated Segment segments = 1;
-  reserved 2;
-  reserved "status";
+  Status status = 2;
 }
 
 
@@ -91,8 +84,7 @@ message UpdateSegmentRequest {
 }
 
 message UpdateSegmentResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
 }
 
 message CreateCollectionRequest {
@@ -109,8 +101,7 @@ message CreateCollectionRequest {
 message CreateCollectionResponse {
   Collection collection = 1;
   bool created = 2;
-  reserved 3;
-  reserved "status";
+  Status status = 3;
 }
 
 message DeleteCollectionRequest {
@@ -120,8 +111,7 @@ message DeleteCollectionRequest {
 }
 
 message DeleteCollectionResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
 }
 
 message GetCollectionsRequest {
@@ -135,8 +125,7 @@ message GetCollectionsRequest {
 
 message GetCollectionsResponse {
   repeated Collection collections = 1;
-  reserved 2;
-  reserved "status";
+  Status status = 2;
 }
 
 message UpdateCollectionRequest {
@@ -150,13 +139,18 @@ message UpdateCollectionRequest {
 }
 
 message UpdateCollectionResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
+}
+
+message Notification {
+  int64 id = 1;
+  string collection_id = 2;
+  string type = 3;
+  string status = 4;
 }
 
 message ResetStateResponse {
-  reserved 1;
-  reserved "status";
+  Status status = 1;
 }
 
 message GetLastCompactionTimeForTenantRequest {

@@ -19,7 +19,6 @@ pub(crate) struct OffsetIdToUserIdKeys {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) enum Keys {
     OffsetIdToDataKeys(OffsetIdToDataKeys),
     OffsetIdToUserIdKeys(OffsetIdToUserIdKeys),
@@ -40,7 +39,6 @@ pub(crate) struct RecordSegmentPrefetchIoOutput {
 #[derive(Debug)]
 pub(crate) struct RecordSegmentPrefetchIoOperator {}
 
-#[allow(dead_code)]
 impl RecordSegmentPrefetchIoOperator {
     pub fn new() -> Box<Self> {
         Box::new(RecordSegmentPrefetchIoOperator {})

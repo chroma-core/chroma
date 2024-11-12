@@ -19,7 +19,6 @@ tracing = { workspace = true }
 roaring = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
-tempfile = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
@@ -28,17 +27,14 @@ chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-distance = { workspace = true }
-itertools = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
-chroma-benchmark = { workspace = true }
-proptest = { workspace = true }
+chroma-test = { workspace = true }
 indicatif = "0.17.8"
 anyhow = "1.0.89"
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
 
 
 [build-dependencies]

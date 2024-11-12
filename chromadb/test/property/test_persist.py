@@ -3,7 +3,7 @@ import multiprocessing
 from multiprocessing.connection import Connection
 import multiprocessing.context
 import time
-from typing import Generator, Callable, List, Tuple, cast
+from typing import Generator, Callable
 from uuid import UUID
 from hypothesis import given
 import hypothesis.strategies as st
@@ -11,11 +11,9 @@ import pytest
 import chromadb
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.config import Settings, System
-from chromadb.segment import VectorReader
-from chromadb.segment.impl.manager.local import LocalSegmentManager
+from chromadb.segment import SegmentManager, VectorReader
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from strategies import hashing_embedding_function
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineStates,
     trace,
@@ -26,7 +24,6 @@ from hypothesis.stateful import (
     rule,
     precondition,
     initialize,
-    MultipleResults,
 )
 import os
 import shutil
@@ -69,7 +66,6 @@ collection_st = st.shared(
         with_hnsw_params=True,
         with_persistent_hnsw_params=st.just(True),
         # Makes it more likely to find persist-related bugs (by default these are set to 2000).
-        # Lower values make it more likely that a test will trigger a persist to disk.
         max_hnsw_batch_size=10,
         max_hnsw_sync_threshold=10,
     ),
@@ -77,62 +73,37 @@ collection_st = st.shared(
 )
 
 
-@st.composite
-def collection_and_recordset_strategy(
-    draw: st.DrawFn,
-) -> Tuple[strategies.Collection, strategies.RecordSet]:
-    collection = draw(
-        strategies.collections(
-            with_hnsw_params=True,
-            with_persistent_hnsw_params=st.just(True),
-            # Makes it more likely to find persist-related bugs (by default these are set to 2000).
-            max_hnsw_batch_size=10,
-            max_hnsw_sync_threshold=10,
-        )
-    )
-    recordset = draw(strategies.recordsets(st.just(collection)))
-    return collection, recordset
-
-
 @given(
-    collection_and_recordset_strategies=st.lists(
-        collection_and_recordset_strategy(),
-        min_size=1,
-        unique_by=(lambda x: x[0].name, lambda x: x[0].name),
-    )
+    collection_strategy=collection_st,
+    embeddings_strategy=strategies.recordsets(collection_st),
 )
 def test_persist(
     settings: Settings,
-    collection_and_recordset_strategies: List[
-        Tuple[strategies.Collection, strategies.RecordSet]
-    ],
+    collection_strategy: strategies.Collection,
+    embeddings_strategy: strategies.RecordSet,
 ) -> None:
     system_1 = System(settings)
     system_1.start()
     client_1 = ClientCreator.from_system(system_1)
 
     client_1.reset()
-    for (
-        collection_strategy,
-        recordset_strategy,
-    ) in collection_and_recordset_strategies:
-        coll = client_1.create_collection(
-            name=collection_strategy.name,
-            metadata=collection_strategy.metadata,  # type: ignore[arg-type]
-            embedding_function=collection_strategy.embedding_function,
-        )
+    coll = client_1.create_collection(
+        name=collection_strategy.name,
+        metadata=collection_strategy.metadata,  # type: ignore[arg-type]
+        embedding_function=collection_strategy.embedding_function,
+    )
 
-        coll.add(**recordset_strategy)  # type: ignore[arg-type]
+    coll.add(**embeddings_strategy)  # type: ignore[arg-type]
 
-        invariants.count(coll, recordset_strategy)
-        invariants.metadatas_match(coll, recordset_strategy)
-        invariants.documents_match(coll, recordset_strategy)
-        invariants.ids_match(coll, recordset_strategy)
-        invariants.ann_accuracy(
-            coll,
-            recordset_strategy,
-            embedding_function=collection_strategy.embedding_function,
-        )
+    invariants.count(coll, embeddings_strategy)
+    invariants.metadatas_match(coll, embeddings_strategy)
+    invariants.documents_match(coll, embeddings_strategy)
+    invariants.ids_match(coll, embeddings_strategy)
+    invariants.ann_accuracy(
+        coll,
+        embeddings_strategy,
+        embedding_function=collection_strategy.embedding_function,
+    )
 
     system_1.stop()
     del client_1
@@ -142,23 +113,19 @@ def test_persist(
     system_2.start()
     client_2 = ClientCreator.from_system(system_2)
 
-    for (
-        collection_strategy,
-        recordset_strategy,
-    ) in collection_and_recordset_strategies:
-        coll = client_2.get_collection(
-            name=collection_strategy.name,
-            embedding_function=collection_strategy.embedding_function,
-        )
-        invariants.count(coll, recordset_strategy)
-        invariants.metadatas_match(coll, recordset_strategy)
-        invariants.documents_match(coll, recordset_strategy)
-        invariants.ids_match(coll, recordset_strategy)
-        invariants.ann_accuracy(
-            coll,
-            recordset_strategy,
-            embedding_function=collection_strategy.embedding_function,
-        )
+    coll = client_2.get_collection(
+        name=collection_strategy.name,
+        embedding_function=collection_strategy.embedding_function,
+    )
+    invariants.count(coll, embeddings_strategy)
+    invariants.metadatas_match(coll, embeddings_strategy)
+    invariants.documents_match(coll, embeddings_strategy)
+    invariants.ids_match(coll, embeddings_strategy)
+    invariants.ann_accuracy(
+        coll,
+        embeddings_strategy,
+        embedding_function=collection_strategy.embedding_function,
+    )
 
     system_2.stop()
     del client_2
@@ -174,7 +141,7 @@ def test_sync_threshold(settings: Settings) -> None:
         name="test", metadata={"hnsw:batch_size": 3, "hnsw:sync_threshold": 3}
     )
 
-    manager = system.instance(LocalSegmentManager)
+    manager = system.instance(SegmentManager)
     segment = manager.get_segment(collection.id, VectorReader)
 
     def get_index_last_modified_at() -> float:
@@ -441,279 +408,3 @@ def test_delete_add_after_persist(settings: Settings) -> None:
 
     # At this point, the changes above are not fully persisted
     state.fields_match()
-
-
-def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_ids(
-    caplog: pytest.LogCaptureFixture, settings: Settings
-) -> None:
-    # NOTE(hammadb) this test was autogenerate by hypothesis and added here to ensure that the test is run
-    # in the future. It tests a case where the max seq id was incorrect in response to the same
-    # id being added multiple times in a bathc.
-    client = chromadb.Client(settings)
-    state = PersistEmbeddingsStateMachine(settings=settings, client=client)
-    state.initialize(
-        collection=strategies.Collection(
-            name="JqzMs4pPm14c\n",
-            metadata={
-                "hnsw:construction_ef": 128,
-                "hnsw:search_ef": 128,
-                "hnsw:M": 128,
-                "hnsw:sync_threshold": 9,
-                "hnsw:batch_size": 7,
-            },
-            embedding_function=hashing_embedding_function(dim=92, dtype=np.float64),
-            id=UUID("45c5c816-0a90-4293-8d01-4325ff860040"),
-            dimension=92,
-            dtype=np.float64,
-            known_metadata_keys={},
-            known_document_keywords=[],
-            has_documents=False,
-            has_embeddings=True,
-        )
-    )
-    state.ann_accuracy()
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-    (
-        embedding_ids_0,
-        embedding_ids_1,
-        embedding_ids_2,
-        embedding_ids_3,
-        embedding_ids_4,
-        embedding_ids_5,
-        embedding_ids_6,
-    ) = cast(
-        MultipleResults[str],
-        state.add_embeddings(
-            record_set={
-                "ids": ["N", "e8r6", "4", "Yao", "qFjA2c", "jHCv", "2"],
-                "embeddings": [
-                    [0.0, 0.0, 0.0],
-                    [1.0, 1.0, 1.0],
-                    [2.0, 2.0, 2.0],
-                    [3.0, 3.0, 3.0],
-                    [4.0, 4.0, 4.0],
-                    [5.0, 5.0, 5.0],
-                    [6.0, 6.0, 6.0],
-                ],
-                "metadatas": None,
-                "documents": None,
-            }
-        ),
-    )
-    state.ann_accuracy()
-    # recall: 1.0, missing 0 out of 7, accuracy threshold 1e-06
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-
-    print("\n\n")
-    (_) = state.add_embeddings(
-        record_set={
-            "ids": ["MVu393QTc"],
-            "embeddings": [[7.0, 7.0, 7.0]],
-            "metadatas": None,
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    # recall: 1.0, missing 0 out of 8, accuracy threshold 1e-06
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-
-    (
-        _,
-        _,
-        _,
-        _,
-        embedding_ids_12,
-        _,
-        _,
-        _,
-        _,
-        embedding_ids_17,
-        embedding_ids_18,
-        _,
-        _,
-        _,
-        embedding_ids_22,
-        _,
-        _,
-    ) = cast(
-        MultipleResults[str],
-        state.add_embeddings(
-            record_set={
-                "ids": [
-                    "CyF0Mk-",
-                    "q_Fwu",
-                    "2D2sQSFogDgPLkcfT",
-                    "SrwuQHQ6w4f51qWr2enLPQw8uKYs1",
-                    "G",
-                    "wdzt",
-                    "5W",
-                    "8tpsn",
-                    "fJbV7z",
-                    "5",
-                    "V",
-                    "1iFkoJX",
-                    "Zw4u",
-                    "Fc",
-                    "7",
-                    "vEEwrP",
-                    "Yf",
-                ],
-                "embeddings": [
-                    [8.0, 8.0, 8.0],
-                    [9.0, 9.0, 9.0],
-                    [10.0, 10.0, 10.0],
-                    [11.0, 11.0, 11.0],
-                    [12.0, 12.0, 12.0],
-                    [13.0, 13.0, 13.0],
-                    [14.0, 14.0, 14.0],
-                    [15.0, 15.0, 15.0],
-                    [16.0, 16.0, 16.0],
-                    [17.0, 17.0, 17.0],
-                    [18.0, 18.0, 18.0],
-                    [19.0, 19.0, 19.0],
-                    [20.0, 20.0, 20.0],
-                    [21.0, 21.0, 21.0],
-                    [22.0, 22.0, 22.0],
-                    [23.0, 23.0, 23.0],
-                    [24.0, 24.0, 24.0],
-                ],
-                "metadatas": None,
-                "documents": None,
-            }
-        ),
-    )
-    state.ann_accuracy()
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-
-    state.add_embeddings(
-        record_set={
-            "ids": ["0", "df_RWhR0HelOcv"],
-            "embeddings": [[25.0, 25.0, 25.0], [26.0, 26.0, 26.0]],
-            "metadatas": [None, None],
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-
-    state.add_embeddings(
-        record_set={
-            "ids": ["3R", "9_", "44u", "3B", "MZCXZDS", "Uelx"],
-            "embeddings": [
-                [27.0, 27.0, 27.0],
-                [28.0, 28.0, 28.0],
-                [29.0, 29.0, 29.0],
-                [30.0, 30.0, 30.0],
-                [31.0, 31.0, 31.0],
-                [32.0, 32.0, 32.0],
-            ],
-            "metadatas": None,
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-    state.persist()
-    state.ann_accuracy()
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-
-    state.add_embeddings(
-        record_set={
-            "ids": "YlVm",
-            "embeddings": [[33.0, 33.0, 33.0]],
-            "metadatas": None,
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    # recall: 1.0, missing 0 out of 34, accuracy threshold 1e-06
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-
-    state.add_embeddings(
-        record_set={
-            "ids": ["Rk1", "TPL"],
-            "embeddings": [[34.0, 34.0, 34.0], [35.0, 35.0, 35.0]],
-            "metadatas": [None, None],
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    # recall: 1.0, missing 0 out of 36, accuracy threshold 1e-06
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.no_duplicates()
-
-    state.add_embeddings(
-        record_set={
-            "ids": [
-                "CyF0Mk-",
-                "q_Fwu",
-                "2D2sQSFogDgPLkcfT",
-                "SrwuQHQ6w4f51qWr2enLPQw8uKYs1",
-                embedding_ids_12,
-                "wdzt",
-                "5W",
-                "8tpsn",
-                "fJbV7z",
-                embedding_ids_17,
-                embedding_ids_18,
-                "1iFkoJX",
-                "Zw4u",
-                "Fc",
-                embedding_ids_22,
-                "vEEwrP",
-                "Yf",
-            ],
-            "embeddings": [
-                [8.0, 8.0, 8.0],
-                [9.0, 9.0, 9.0],
-                [10.0, 10.0, 10.0],
-                [11.0, 11.0, 11.0],
-                [12.0, 12.0, 12.0],
-                [13.0, 13.0, 13.0],
-                [14.0, 14.0, 14.0],
-                [15.0, 15.0, 15.0],
-                [16.0, 16.0, 16.0],
-                [17.0, 17.0, 17.0],
-                [18.0, 18.0, 18.0],
-                [19.0, 19.0, 19.0],
-                [20.0, 20.0, 20.0],
-                [21.0, 21.0, 21.0],
-                [22.0, 22.0, 22.0],
-                [23.0, 23.0, 23.0],
-                [24.0, 24.0, 24.0],
-            ],
-            "metadatas": None,
-            "documents": None,
-        }
-    )
-    state.ann_accuracy()
-    state.count()
-    state.fields_match()
-    state.log_size_below_max()
-    state.teardown()

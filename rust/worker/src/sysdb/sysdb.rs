@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
-use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid};
+use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError};
 use chroma_types::{
-    Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
+    Collection, CollectionConversionError, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::fmt::Debug;
@@ -18,6 +18,7 @@ use tonic::service::interceptor;
 use tonic::transport::Endpoint;
 use tonic::Request;
 use tonic::Status;
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SysDb {
@@ -29,7 +30,7 @@ pub(crate) enum SysDb {
 impl SysDb {
     pub(crate) async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
+        collection_id: Option<Uuid>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
@@ -48,10 +49,10 @@ impl SysDb {
 
     pub(crate) async fn get_segments(
         &mut self,
-        id: Option<SegmentUuid>,
+        id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: CollectionUuid,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_segments(id, r#type, scope, collection).await,
@@ -72,7 +73,7 @@ impl SysDb {
     pub(crate) async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: CollectionUuid,
+        collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -170,13 +171,13 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
 impl GrpcSysDb {
     async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
+        collection_id: Option<Uuid>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         // TODO: move off of status into our own error type
-        let collection_id_str = collection_id.map(|id| String::from(id.0));
+        let collection_id_str = collection_id.map(String::from);
         let res = self
             .client
             .get_collections(chroma_proto::GetCollectionsRequest {
@@ -209,16 +210,16 @@ impl GrpcSysDb {
 
     async fn get_segments(
         &mut self,
-        id: Option<SegmentUuid>,
+        id: Option<Uuid>,
         r#type: Option<String>,
         scope: Option<SegmentScope>,
-        collection: CollectionUuid,
+        collection: Uuid,
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         let res = self
             .client
             .get_segments(chroma_proto::GetSegmentsRequest {
                 // TODO: modularize
-                id: id.as_ref().map(ToString::to_string),
+                id: id.map(String::from),
                 r#type,
                 scope: scope.map(|x| x as i32),
                 collection: collection.to_string(),
@@ -269,7 +270,7 @@ impl GrpcSysDb {
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
-        collection_id: CollectionUuid,
+        collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -292,7 +293,7 @@ impl GrpcSysDb {
 
         let req = chroma_proto::FlushCollectionCompactionRequest {
             tenant_id,
-            collection_id: collection_id.0.to_string(),
+            collection_id: collection_id.to_string(),
             log_position,
             collection_version,
             segment_compaction_info,
@@ -320,7 +321,7 @@ impl GrpcSysDb {
 #[derive(Error, Debug)]
 // TODO: This should use our sysdb errors from the proto definition
 // We will have to do an error uniformization pass at some point
-pub enum GetCollectionsError {
+pub(crate) enum GetCollectionsError {
     #[error("Failed to fetch")]
     FailedToGetCollections(#[from] tonic::Status),
     #[error("Failed to convert proto collection")]
@@ -339,7 +340,7 @@ impl ChromaError for GetCollectionsError {
 #[derive(Error, Debug)]
 // TODO: This should use our sysdb errors from the proto definition
 // We will have to do an error uniformization pass at some point
-pub enum GetSegmentsError {
+pub(crate) enum GetSegmentsError {
     #[error("Failed to fetch")]
     FailedToGetSegments(#[from] tonic::Status),
     #[error("Failed to convert proto segment")]

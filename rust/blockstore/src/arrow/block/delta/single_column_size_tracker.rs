@@ -9,8 +9,7 @@ use arrow::util::bit_util;
 /// This struct is not thread safe and users are expected to handle
 /// synchronization themselves.
 #[derive(Clone, Debug)]
-pub struct SingleColumnSizeTracker {
-    num_items: usize,
+pub(super) struct SingleColumnSizeTracker {
     prefix_size: usize,
     key_size: usize,
     value_size: usize,
@@ -19,29 +18,18 @@ pub struct SingleColumnSizeTracker {
 impl SingleColumnSizeTracker {
     pub(super) fn new() -> Self {
         Self {
-            num_items: 0,
             prefix_size: 0,
             key_size: 0,
             value_size: 0,
         }
     }
 
-    pub(super) fn with_values(
-        num_items: usize,
-        prefix_size: usize,
-        key_size: usize,
-        value_size: usize,
-    ) -> Self {
+    pub(super) fn with_values(prefix_size: usize, key_size: usize, value_size: usize) -> Self {
         Self {
-            num_items,
             prefix_size,
             key_size,
             value_size,
         }
-    }
-
-    pub fn get_num_items(&self) -> usize {
-        self.num_items
     }
 
     /// The raw unpadded size of the prefix data in bytes.
@@ -67,7 +55,7 @@ impl SingleColumnSizeTracker {
     }
 
     /// The raw unpadded size of the value data in bytes.
-    pub fn get_value_size(&self) -> usize {
+    pub(super) fn get_value_size(&self) -> usize {
         self.value_size
     }
 
@@ -100,17 +88,5 @@ impl SingleColumnSizeTracker {
 
     pub(super) fn subtract_value_size(&mut self, size: usize) {
         self.value_size -= size;
-    }
-
-    pub(super) fn increment_item_count(&mut self) {
-        self.num_items += 1;
-    }
-
-    pub(super) fn decrement_item_count(&mut self) {
-        self.num_items -= 1;
-    }
-
-    pub(super) fn subtract_item_count(&mut self, count: usize) {
-        self.num_items -= count;
     }
 }

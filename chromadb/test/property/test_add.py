@@ -2,7 +2,6 @@ import uuid
 from random import randint
 from typing import cast, List, Any, Dict
 import hypothesis
-import numpy as np
 import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
@@ -270,7 +269,7 @@ def test_out_of_order_ids(client: ClientAPI) -> None:
     coll = client.create_collection(
         "test", embedding_function=lambda input: [[1, 2, 3] for _ in input]  # type: ignore
     )
-    embeddings: Embeddings = [np.array([1, 2, 3]) for _ in ooo_ids]
+    embeddings: Embeddings = [[1, 2, 3] for _ in ooo_ids]
     coll.add(ids=ooo_ids, embeddings=embeddings)
     get_ids = coll.get(ids=ooo_ids)["ids"]
     assert get_ids == ooo_ids
@@ -284,11 +283,8 @@ def test_add_partial(client: ClientAPI) -> None:
     # TODO: We need to clean up the api types to support this typing
     coll.add(
         ids=["1", "2", "3"],
-        # All embeddings must be provided, or else None - no partial lists allowed
         embeddings=[[1, 2, 3], [1, 2, 3], [1, 2, 3]],  # type: ignore
-        # Metadatas can always be partial
         metadatas=[{"a": 1}, None, {"a": 3}],  # type: ignore
-        # Documents are optional if embeddings are provided
         documents=["a", "b", None],  # type: ignore
     )
 

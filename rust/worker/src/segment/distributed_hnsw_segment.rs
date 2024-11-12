@@ -8,9 +8,8 @@ use chroma_index::hnsw_provider::{
 };
 use chroma_index::{
     HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig, IndexConfigFromSegmentError,
-    IndexUuid,
 };
-use chroma_types::{MaterializedLogOperation, Segment, SegmentUuid};
+use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -22,7 +21,7 @@ const HNSW_INDEX: &str = "hnsw_index";
 pub(crate) struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
-    pub(crate) id: SegmentUuid,
+    pub(crate) id: Uuid,
 }
 
 impl Debug for DistributedHNSWSegmentWriter {
@@ -72,7 +71,7 @@ impl DistributedHNSWSegmentWriter {
     pub(crate) fn new(
         index: HnswIndexRef,
         hnsw_index_provider: HnswIndexProvider,
-        id: SegmentUuid,
+        id: Uuid,
     ) -> Self {
         DistributedHNSWSegmentWriter {
             index,
@@ -137,7 +136,6 @@ impl DistributedHNSWSegmentWriter {
                     ))
                 }
             };
-            let index_uuid = IndexUuid(index_uuid);
 
             let index = match hnsw_index_provider
                 .fork(&index_uuid, segment, dimensionality as i32)
@@ -257,7 +255,7 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 #[derive(Clone)]
 pub(crate) struct DistributedHNSWSegmentReader {
     index: HnswIndexRef,
-    pub(crate) id: SegmentUuid,
+    pub(crate) id: Uuid,
 }
 
 impl Debug for DistributedHNSWSegmentReader {
@@ -269,7 +267,7 @@ impl Debug for DistributedHNSWSegmentReader {
 }
 
 impl DistributedHNSWSegmentReader {
-    fn new(index: HnswIndexRef, id: SegmentUuid) -> Self {
+    fn new(index: HnswIndexRef, id: Uuid) -> Self {
         DistributedHNSWSegmentReader { index, id }
     }
 
@@ -321,7 +319,6 @@ impl DistributedHNSWSegmentReader {
                     ))
                 }
             };
-            let index_uuid = IndexUuid(index_uuid);
 
             let index =
                 match hnsw_index_provider

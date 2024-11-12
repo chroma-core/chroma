@@ -1,5 +1,4 @@
 use crate::arrow::root::RootReader;
-use crate::BlockfileWriterOptions;
 
 use super::arrow::block::Block;
 use super::arrow::provider::ArrowBlockfileProvider;
@@ -9,7 +8,7 @@ use super::arrow::types::{
 use super::config::BlockfileProviderConfig;
 use super::key::{InvalidKeyConversion, KeyWrapper};
 use super::memory::provider::MemoryBlockfileProvider;
-use super::memory::storage::Readable;
+use super::memory::storage::{Readable, Writeable};
 use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
 use async_trait::async_trait;
@@ -60,34 +59,34 @@ impl BlockfileProvider {
         ))
     }
 
-    pub async fn read<
+    pub async fn open<
         'new,
         K: Key
             + Into<KeyWrapper>
             + TryFrom<&'new KeyWrapper, Error = InvalidKeyConversion>
             + ArrowReadableKey<'new>
-            + Sync
             + 'new,
-        V: Value + Readable<'new> + ArrowReadableValue<'new> + Sync + 'new,
+        V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
     >(
         &self,
         id: &uuid::Uuid,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.read::<K, V>(id),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.read::<K, V>(id).await,
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.open::<K, V>(id),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.open::<K, V>(id).await,
         }
     }
 
-    pub async fn write<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+    pub fn create<
+        'new,
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
+        V: Value + Writeable + ArrowWriteableValue + 'new,
+    >(
         &self,
-        options: BlockfileWriterOptions,
     ) -> Result<BlockfileWriter, Box<CreateError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.write(options),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider.write::<K, V>(options).await
-            }
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.create(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.create::<K, V>(),
         }
     }
 
@@ -99,6 +98,16 @@ impl BlockfileProvider {
             }
         };
         Ok(())
+    }
+
+    pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+        &self,
+        id: &uuid::Uuid,
+    ) -> Result<BlockfileWriter, Box<CreateError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.fork(id),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.fork::<K, V>(id).await,
+        }
     }
 }
 

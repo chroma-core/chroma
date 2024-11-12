@@ -10,7 +10,7 @@ pub fn tokio_multi_thread() -> Runtime {
         .expect("Tokio runtime should be set up correctly.")
 }
 
-pub fn bench_run<'t, Arg, Fut>(
+pub fn bench<'t, Arg, Fut>(
     name: &'t str,
     criterion: &'t mut Criterion,
     runtime: &'t Runtime,

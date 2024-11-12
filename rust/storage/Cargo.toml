@@ -16,7 +16,6 @@ serde = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tempfile = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -28,3 +27,4 @@ chroma-error = { workspace = true }
 [dev-dependencies]
 "rand" = { workspace = true}
 rand_xorshift = { workspace = true }
+tempfile = { workspace = true }

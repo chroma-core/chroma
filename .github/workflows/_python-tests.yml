@@ -38,7 +38,7 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Setup
         uses: ./.github/actions/python
         with:
@@ -74,7 +74,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Integration Test
@@ -91,7 +91,6 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["depot-ubuntu-22.04-16"]
         test-globs: ["chromadb/test/db/test_system.py",
-                   "chromadb/test/api/test_collection.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",
@@ -104,7 +103,7 @@ jobs:
                    "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
@@ -147,7 +146,7 @@ jobs:
         platform: [depot-ubuntu-22.04] # # todo: should run on Windows, currently failing because Dockerfile doesn't build
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - name: Setup
         uses: ./.github/actions/python
         with:
@@ -166,7 +165,7 @@ jobs:
         platform: ['depot-ubuntu-22.04-16', '16core-64gb-windows-latest']
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
@@ -184,7 +183,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Integration Test

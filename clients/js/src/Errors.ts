@@ -71,13 +71,6 @@ export class InvalidCollectionError extends Error {
   }
 }
 
-export class InvalidArgumentError extends Error {
-  name = "InvalidArgumentError";
-  constructor(message: string, public readonly cause?: unknown) {
-    super(message);
-  }
-}
-
 export class ChromaUniqueError extends Error {
   name = "ChromaUniqueError";
   constructor(message: string, public readonly cause?: unknown) {
@@ -89,8 +82,6 @@ export function createErrorByType(type: string, message: string) {
   switch (type) {
     case "InvalidCollection":
       return new InvalidCollectionError(message);
-    case "InvalidArgumentError":
-      return new InvalidArgumentError(message);
     default:
       return undefined;
   }

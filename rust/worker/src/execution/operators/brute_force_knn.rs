@@ -222,7 +222,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_types::{CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
+    use chroma_types::{LogRecord, Operation, OperationRecord};
     use std::collections::HashMap;
     use uuid::uuid;
 
@@ -233,10 +233,10 @@ mod tests {
 
         // Create an empty record segment definition
         let record_segment_definition = Segment {
-            id: SegmentUuid(uuid!("00000000-0000-0000-0000-000000000000")),
+            id: uuid!("00000000-0000-0000-0000-000000000000"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: CollectionUuid(uuid!("00000000-0000-0000-0000-000000000000")),
+            collection: uuid!("00000000-0000-0000-0000-000000000000"),
             metadata: None,
             file_path: HashMap::new(),
         };

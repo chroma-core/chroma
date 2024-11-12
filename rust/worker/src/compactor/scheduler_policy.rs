@@ -44,7 +44,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
             tasks.push(CompactionJob {
-                collection_id: collection.collection_id,
+                collection_id: collection.id,
                 tenant_id: collection.tenant_id.clone(),
                 offset: collection.offset,
                 collection_version: collection.collection_version,
@@ -57,19 +57,17 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_types::CollectionUuid;
     use std::str::FromStr;
+    use uuid::Uuid;
 
     #[test]
     fn test_scheduler_policy() {
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let scheduler_policy = LasCompactionTimeSchedulerPolicy {};
         let collections = vec![
             CollectionRecord {
-                collection_id: collection_uuid_1,
+                id: collection_uuid_1,
                 tenant_id: "test".to_string(),
                 last_compaction_time: 1,
                 first_record_time: 1,
@@ -77,7 +75,7 @@ mod tests {
                 collection_version: 0,
             },
             CollectionRecord {
-                collection_id: collection_uuid_2,
+                id: collection_uuid_2,
                 tenant_id: "test".to_string(),
                 last_compaction_time: 0,
                 first_record_time: 0,

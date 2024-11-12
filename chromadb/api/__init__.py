@@ -220,13 +220,13 @@ class BaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
+        where: Optional[Where] = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = IncludeMetadataDocumentsEmbeddings,
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
@@ -253,8 +253,8 @@ class BaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
     ) -> None:
         """[Internal] Deletes entries from a collection specified by UUID.
 
@@ -275,8 +275,8 @@ class BaseAPI(ABC):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = IncludeMetadataDocumentsEmbeddingsDistances,
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
@@ -407,6 +407,7 @@ class ClientAPI(BaseAPI, ABC):
     def get_collection(
         self,
         name: str,
+        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -414,6 +415,7 @@ class ClientAPI(BaseAPI, ABC):
     ) -> Collection:
         """Get a collection with the given name.
         Args:
+            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
             name: The name of the collection to get
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
@@ -575,6 +577,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_collection(
         self,
         name: str,
+        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
@@ -640,13 +643,13 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
+        where: Optional[Where] = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -705,8 +708,8 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -719,8 +722,8 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:

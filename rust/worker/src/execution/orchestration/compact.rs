@@ -41,7 +41,7 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_types::Chunk;
-use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
+use chroma_types::{LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -83,7 +83,7 @@ pub struct CompactOrchestrator {
     state: ExecutionState,
     // Component Execution
     system: System,
-    collection_id: CollectionUuid,
+    collection_id: Uuid,
     // Dependencies
     log: Box<Log>,
     sysdb: Box<SysDb>,
@@ -164,7 +164,7 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         system: System,
-        collection_id: CollectionUuid,
+        collection_id: Uuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         blockfile_provider: BlockfileProvider,

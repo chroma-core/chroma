@@ -1,9 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
-        BlockfileWriterOptions,
-    };
+    use crate::arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider};
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use rand::Rng;
@@ -25,10 +22,7 @@ mod tests {
                     block_cache,
                     sparse_index_cache,
                 );
-                let writer = future::block_on(
-                    blockfile_provider.write::<&str, u32>(BlockfileWriterOptions::default()),
-                )
-                .unwrap();
+                let writer = blockfile_provider.create::<&str, u32>().unwrap();
                 let id = writer.id();
                 // Generate N datapoints and then have T threads write them to the blockfile
                 let range_min = 10;
@@ -67,7 +61,7 @@ mod tests {
                 });
 
                 let reader = future::block_on(async {
-                    blockfile_provider.read::<&str, u32>(&id).await.unwrap()
+                    blockfile_provider.open::<&str, u32>(&id).await.unwrap()
                 });
                 // Read the data back
                 for i in 0..n {

@@ -44,9 +44,8 @@ from chromadb.errors import (
     InvalidDimensionException,
     InvalidHTTPVersion,
     RateLimitError,
-    QuotaError,
 )
-from chromadb.quota import QuotaEnforcer
+from chromadb.quota import QuotaError
 from chromadb.server import Server
 from chromadb.server.fastapi.types import (
     AddEmbedding,
@@ -107,16 +106,6 @@ async def catch_exceptions_middleware(
         return await call_next(request)
     except ChromaError as e:
         return fastapi_json_response(e)
-    except ValueError as e:
-        return JSONResponse(
-            content={"error": "InvalidArgumentError", "message": str(e)},
-            status_code=400,
-        )
-    except TypeError as e:
-        return JSONResponse(
-            content={"error": "InvalidArgumentError", "message": str(e)},
-            status_code=400,
-        )
     except Exception as e:
         logger.exception(e)
         return JSONResponse(content={"error": repr(e)}, status_code=500)
@@ -181,7 +170,6 @@ class FastAPI(Server):
         self._capacity_limiter = CapacityLimiter(
             settings.chroma_server_thread_pool_size
         )
-        self._quota_enforcer = self._system.require(QuotaEnforcer)
         self._system.start()
 
         self._app.middleware("http")(check_http_version_middleware)
@@ -367,7 +355,10 @@ class FastAPI(Server):
     ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
-            content={"message": exc.message()},
+            content={
+                "message": f"quota error. resource: {exc.resource} "
+                f"quota: {exc.quota} actual: {exc.actual}"
+            },
         )
 
     async def heartbeat(self) -> Dict[str, int]:
@@ -375,12 +366,6 @@ class FastAPI(Server):
 
     async def version(self) -> str:
         return self._api.get_version()
-
-    def _set_request_context(self, request: Request) -> None:
-        """
-        Set context about the request on any components that might need it.
-        """
-        self._quota_enforcer.set_context(context={"request": request})
 
     @trace_method(
         "auth_request",
@@ -466,8 +451,6 @@ class FastAPI(Server):
                 db.name,
                 None,
             )
-
-            self._set_request_context(request=request)
 
             return self._api.create_database(db.name, tenant)
 
@@ -560,28 +543,20 @@ class FastAPI(Server):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[CollectionModel]:
-        def process_list_collections(
-            limit: Optional[int], offset: Optional[int], tenant: str, database_name: str
-        ) -> Sequence[CollectionModel]:
-            self.auth_request(
-                request.headers,
-                AuthzAction.LIST_COLLECTIONS,
-                tenant,
-                database_name,
-                None,
-            )
+        self.auth_request(
+            request.headers,
+            AuthzAction.LIST_COLLECTIONS,
+            tenant,
+            database_name,
+            None,
+        )
 
-            self._set_request_context(request=request)
-
-            add_attributes_to_current_span({"tenant": tenant})
-            return self._api.list_collections(
-                tenant=tenant, database=database_name, limit=limit, offset=offset
-            )
+        add_attributes_to_current_span({"tenant": tenant})
 
         api_collection_models = cast(
             Sequence[CollectionModel],
             await to_thread.run_sync(
-                process_list_collections,
+                self._api.list_collections,
                 limit,
                 offset,
                 tenant,
@@ -645,8 +620,6 @@ class FastAPI(Server):
                 create.name,
             )
 
-            self._set_request_context(request=request)
-
             add_attributes_to_current_span({"tenant": tenant})
 
             return self._api.create_collection(
@@ -694,6 +667,7 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api.get_collection,
                 collection_name,
+                None,  # id
                 tenant,
                 database_name,
                 limiter=self._capacity_limiter,
@@ -721,14 +695,11 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
-            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
-                tenant=tenant,
-                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -784,7 +755,6 @@ class FastAPI(Server):
                     database_name,
                     collection_id,
                 )
-                self._set_request_context(request=request)
                 add_attributes_to_current_span({"tenant": tenant})
                 return self._api._add(
                     collection_id=_uuid(collection_id),
@@ -798,8 +768,6 @@ class FastAPI(Server):
                     metadatas=add.metadatas,  # type: ignore
                     documents=add.documents,  # type: ignore
                     uris=add.uris,  # type: ignore
-                    tenant=tenant,
-                    database=database_name,
                 )
 
             return cast(
@@ -833,7 +801,6 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
-            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._update(
@@ -845,8 +812,6 @@ class FastAPI(Server):
                 metadatas=update.metadatas,  # type: ignore
                 documents=update.documents,  # type: ignore
                 uris=update.uris,  # type: ignore
-                tenant=tenant,
-                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -875,7 +840,6 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
-            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._upsert(
@@ -890,8 +854,6 @@ class FastAPI(Server):
                 metadatas=upsert.metadatas,  # type: ignore
                 documents=upsert.documents,  # type: ignore
                 uris=upsert.uris,  # type: ignore
-                tenant=tenant,
-                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -919,7 +881,6 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
-            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._get(
                 collection_id=_uuid(collection_id),
@@ -930,8 +891,6 @@ class FastAPI(Server):
                 offset=get.offset,
                 where_document=get.where_document,
                 include=get.include,
-                tenant=tenant,
-                database=database_name,
             )
 
         get_result = cast(
@@ -970,15 +929,12 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
-            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._delete(
                 collection_id=_uuid(collection_id),
                 ids=delete.ids,
                 where=delete.where,
                 where_document=delete.where_document,
-                tenant=tenant,
-                database=database_name,
             )
 
         await to_thread.run_sync(
@@ -1010,8 +966,6 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api._count,
                 _uuid(collection_id),
-                tenant,
-                database_name,
                 limiter=self._capacity_limiter,
             ),
         )
@@ -1056,7 +1010,6 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
-            self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
 
             return self._api._query(
@@ -1068,11 +1021,9 @@ class FastAPI(Server):
                     else None,
                 ),
                 n_results=query.n_results,
-                where=query.where,
-                where_document=query.where_document,
+                where=query.where,  # type: ignore
+                where_document=query.where_document,  # type: ignore
                 include=query.include,
-                tenant=tenant,
-                database=database_name,
             )
 
         nnresult = cast(
@@ -1568,6 +1519,7 @@ class FastAPI(Server):
             await to_thread.run_sync(
                 self._api.get_collection,
                 collection_name,
+                None,  # id
                 tenant,
                 database,
                 limiter=self._capacity_limiter,
@@ -1887,8 +1839,8 @@ class FastAPI(Server):
                     else None,
                 ),
                 n_results=query.n_results,
-                where=query.where,
-                where_document=query.where_document,
+                where=query.where,  # type: ignore
+                where_document=query.where_document,  # type: ignore
                 include=query.include,
             )
 

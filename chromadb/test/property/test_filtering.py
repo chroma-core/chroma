@@ -120,9 +120,7 @@ EMPTY_STRING: str = ""
 def _filter_embedding_set(
     record_set: strategies.RecordSet, filter: strategies.Filter
 ) -> IDs:
-    """Return IDs from the embedding set that match the given filter object
-    If none match, return an empty list
-    """
+    """Return IDs from the embedding set that match the given filter object"""
 
     normalized_record_set = invariants.wrap_all(record_set)
     ids = set(normalized_record_set["ids"])
@@ -266,15 +264,15 @@ def test_filterable_metadata_get_limit_offset(
         filter["offset"] = offset
         result_ids = coll.get(**filter)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
-        if len(expected_ids) > 0:
-            collection_ids = coll.get(ids=expected_ids)["ids"]
-            offset_id_order = {id: index for index, id in enumerate(collection_ids)}
-            assert (
-                result_ids
-                == sorted(expected_ids, key=lambda id: offset_id_order[id])[
-                    offset : offset + limit
-                ]
-            )
+        offset_id_order = {
+            id: index for index, id in enumerate(coll.get(ids=expected_ids)["ids"])
+        }
+        assert (
+            result_ids
+            == sorted(expected_ids, key=lambda id: offset_id_order[id])[
+                offset : offset + limit
+            ]
+        )
 
 
 @settings(

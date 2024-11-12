@@ -1,8 +1,7 @@
 use super::{
-    block::{delta::types::Delta, Block, BlockLoadError},
-    blockfile::{ArrowBlockfileReader, ArrowUnorderedBlockfileWriter},
+    block::{delta::BlockDelta, Block, BlockLoadError},
+    blockfile::{ArrowBlockfileReader, ArrowBlockfileWriter},
     config::ArrowBlockfileProviderConfig,
-    ordered_blockfile_writer::ArrowOrderedBlockfileWriter,
     root::{FromBytesError, RootReader, RootWriter},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
 };
@@ -10,8 +9,7 @@ use crate::{
     key::KeyWrapper,
     memory::storage::Readable,
     provider::{CreateError, OpenError},
-    BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions, Key,
-    Value,
+    BlockfileReader, BlockfileWriter, Key, Value,
 };
 use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
@@ -45,7 +43,7 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub async fn read<
+    pub async fn open<
         'new,
         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
@@ -63,76 +61,46 @@ impl ArrowBlockfileProvider {
         }
     }
 
-    pub async fn write<
+    pub fn create<
         'new,
         K: Key + Into<KeyWrapper> + ArrowWriteableKey + 'new,
-        V: Value + ArrowWriteableValue + 'new,
+        V: Value + crate::memory::storage::Writeable + ArrowWriteableValue + 'new,
     >(
         &self,
-        options: BlockfileWriterOptions,
     ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
-        if let Some(fork_from) = options.fork_from {
-            tracing::info!("Forking blockfile from {:?}", fork_from);
-            let new_id = Uuid::new_v4();
-            let new_root = self
-                .root_manager
-                .fork::<K>(&fork_from, new_id)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Error forking root: {:?}", e);
-                    Box::new(CreateError::Other(Box::new(e)))
-                })?;
-
-            match options.mutation_ordering {
-                BlockfileWriterMutationOrdering::Ordered => {
-                    let file = ArrowOrderedBlockfileWriter::from_root(
-                        new_id,
-                        self.block_manager.clone(),
-                        self.root_manager.clone(),
-                        new_root,
-                    );
-
-                    Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
-                }
-                BlockfileWriterMutationOrdering::Unordered => {
-                    let file = ArrowUnorderedBlockfileWriter::from_root(
-                        new_id,
-                        self.block_manager.clone(),
-                        self.root_manager.clone(),
-                        new_root,
-                    );
-                    Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
-                }
-            }
-        } else {
-            let new_id = Uuid::new_v4();
-
-            match options.mutation_ordering {
-                BlockfileWriterMutationOrdering::Ordered => {
-                    let file = ArrowOrderedBlockfileWriter::new::<K, V>(
-                        new_id,
-                        self.block_manager.clone(),
-                        self.root_manager.clone(),
-                    );
-
-                    Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
-                }
-                BlockfileWriterMutationOrdering::Unordered => {
-                    let file = ArrowUnorderedBlockfileWriter::new::<K, V>(
-                        new_id,
-                        self.block_manager.clone(),
-                        self.root_manager.clone(),
-                    );
-                    Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
-                }
-            }
-        }
+        // Create a new blockfile and return a writer
+        let new_id = Uuid::new_v4();
+        let file = ArrowBlockfileWriter::new::<K, V>(
+            new_id,
+            self.block_manager.clone(),
+            self.root_manager.clone(),
+        );
+        Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 
     pub async fn clear(&self) -> Result<(), CacheError> {
         self.block_manager.block_cache.clear().await?;
         self.root_manager.cache.clear().await?;
         Ok(())
+    }
+
+    pub async fn fork<K: Key + ArrowWriteableKey, V: Value + ArrowWriteableValue>(
+        &self,
+        id: &uuid::Uuid,
+    ) -> Result<crate::BlockfileWriter, Box<CreateError>> {
+        tracing::info!("Forking blockfile from {:?}", id);
+        let new_id = Uuid::new_v4();
+        let new_root = self.root_manager.fork::<K>(id, new_id).await.map_err(|e| {
+            tracing::error!("Error forking root: {:?}", e);
+            Box::new(CreateError::Other(Box::new(e)))
+        })?;
+        let file = ArrowBlockfileWriter::from_root(
+            new_id,
+            self.block_manager.clone(),
+            self.root_manager.clone(),
+            new_root,
+        );
+        Ok(BlockfileWriter::ArrowBlockfileWriter(file))
     }
 }
 
@@ -173,7 +141,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
 }
 
 #[derive(Error, Debug)]
-pub enum GetError {
+pub(super) enum GetError {
     #[error(transparent)]
     BlockLoadError(#[from] BlockLoadError),
     #[error(transparent)]
@@ -235,15 +203,15 @@ impl BlockManager {
         }
     }
 
-    pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(&self) -> D {
+    pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self) -> BlockDelta {
         let new_block_id = Uuid::new_v4();
-        D::new::<K, V>(new_block_id)
+        BlockDelta::new::<K, V>(new_block_id)
     }
 
-    pub(super) async fn fork<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(
+    pub(super) async fn fork<KeyWrite: ArrowWriteableKey, ValueWrite: ArrowWriteableValue>(
         &self,
         block_id: &Uuid,
-    ) -> Result<D, ForkError> {
+    ) -> Result<BlockDelta, ForkError> {
         let block = self.get(block_id).await;
         let block = match block {
             Ok(Some(block)) => block,
@@ -255,18 +223,30 @@ impl BlockManager {
             }
         };
         let new_block_id = Uuid::new_v4();
-        Ok(Delta::fork_block::<K, V>(new_block_id, &block))
+        let delta = BlockDelta::new::<KeyWrite, ValueWrite>(new_block_id);
+        let populated_delta = self.fork_lifetime_scope::<KeyWrite, ValueWrite>(&block, delta);
+        Ok(populated_delta)
     }
 
-    pub(super) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    fn fork_lifetime_scope<'new, KeyWrite, ValueWrite>(
         &self,
-        delta: impl Delta,
+        block: &'new Block,
+        delta: BlockDelta,
+    ) -> BlockDelta
+    where
+        KeyWrite: ArrowWriteableKey,
+        ValueWrite: ArrowWriteableValue,
+    {
+        block.to_block_delta::<KeyWrite::ReadableKey<'new>, ValueWrite::ReadableValue<'new>>(delta)
+    }
+
+    pub(super) fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &self,
+        delta: BlockDelta,
     ) -> Block {
-        let delta_id = delta.id();
+        let delta_id = delta.id;
         let record_batch = delta.finish::<K, V>(None);
-        let block = Block::from_record_batch(delta_id, record_batch);
-        self.block_cache.insert(delta_id, block.clone()).await;
-        block
+        Block::from_record_batch(delta_id, record_batch)
     }
 
     pub(super) async fn cached(&self, id: &Uuid) -> bool {
@@ -283,7 +263,7 @@ impl BlockManager {
                     .storage
                     .get(&key)
                     .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
+                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get"),
                     )
                     .await;
                 match bytes_res {
@@ -323,7 +303,7 @@ impl BlockManager {
                         Err(GetError::StorageGetError(e))
                     }
                 }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
+            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold")).await
         }
     }
 
@@ -336,15 +316,10 @@ impl BlockManager {
             }
         };
         let key = format!("block/{}", block.id);
-        let block_bytes_len = bytes.len();
         let res = self.storage.put_bytes(&key, bytes).await;
         match res {
             Ok(_) => {
-                tracing::info!(
-                    "Block: {} written to storage ({}B)",
-                    block.id,
-                    block_bytes_len
-                );
+                tracing::info!("Block: {} written to storage", block.id);
             }
             Err(e) => {
                 tracing::info!("Error writing block to storage {}", e);

@@ -5,7 +5,6 @@ use super::{
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
 use chroma_error::ChromaError;
-use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 
 pub struct ArrowBlockfileFlusher {
@@ -40,26 +39,10 @@ impl ArrowBlockfileFlusher {
         if self.root.sparse_index.len() == 0 {
             panic!("Invariant violation. Sparse index should be not empty during flush.");
         }
-
-        // Flush all blocks in parallel using futures unordered
-        // NOTE(hammadb) we do not use try_join_all here because we want to flush all blocks
-        // in parallel and try_join_all / join_all switches to using futures_ordered if the
-        // number of futures is high. However, our NAC controls the number of futures that can be
-        // created at once, so that behavior is redudant and suboptimal for us.
-        // As of 10/28 the NAC does not impact the write path, only the read path.
-        // As a workaround we used buffered futures to reduce concurrency
-        // once the NAC supports write path admission control we can switch back
-        // to unbuffered futures.
-
-        let mut futures = Vec::new();
+        // TODO: We could flush in parallel
         for block in &self.blocks {
-            futures.push(self.block_manager.flush(block));
+            self.block_manager.flush(block).await?;
         }
-        futures::stream::iter(futures)
-            .buffer_unordered(30)
-            .try_collect::<Vec<_>>()
-            .await?;
-
         self.root_manager.flush::<K>(&self.root).await?;
         Ok(())
     }

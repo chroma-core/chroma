@@ -40,7 +40,7 @@ use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_index::IndexConfig;
-use chroma_types::{Chunk, Collection, CollectionUuid, LogRecord, Segment, VectorQueryResult};
+use chroma_types::{Chunk, Collection, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -65,7 +65,6 @@ understand. We can always add more abstraction later if we need it.
 ```
 */
 #[derive(Debug)]
-#[allow(dead_code)]
 enum ExecutionState {
     Pending,
     PullLogs,
@@ -76,7 +75,6 @@ enum ExecutionState {
 }
 
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 enum HnswSegmentQueryError {
     #[error(transparent)]
     GetByIdError(#[from] super::common::GetHnswSegmentByIdError),
@@ -113,7 +111,7 @@ pub(crate) struct HnswQueryOrchestrator {
     allowed_ids: Arc<[String]>,
     include_embeddings: bool,
     hnsw_segment_id: Uuid,
-    collection_id: CollectionUuid,
+    collection_id: Uuid,
     // State fetched or created for query execution
     hnsw_segment: Option<Segment>,
     record_segment: Option<Segment>,
@@ -148,7 +146,6 @@ pub(crate) struct HnswQueryOrchestrator {
     log_position: u64,
 }
 
-#[allow(dead_code)]
 impl HnswQueryOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -158,7 +155,7 @@ impl HnswQueryOrchestrator {
         allowed_ids: Vec<String>,
         include_embeddings: bool,
         segment_id: Uuid,
-        collection_id: CollectionUuid,
+        collection_id: Uuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         hnsw_index_provider: HnswIndexProvider,
@@ -176,9 +173,9 @@ impl HnswQueryOrchestrator {
         // pre-allocate the result vectors
         let results = Some(Vec::with_capacity(query_vectors.len()));
         tracing::info!(
-            "Performing KNN for k = {}, num allowed_ids = {:?}, num query vectors = {:?}",
+            "Performing KNN for k = {}, allowed_ids = {:?}, num query vectors = {:?}",
             k,
-            allowed_ids.len(),
+            allowed_ids,
             query_vectors.len()
         );
 
@@ -237,7 +234,7 @@ impl HnswQueryOrchestrator {
             .expect("State machine invariant violation. The collection is not set when pulling logs. This should never happen.");
 
         let input = PullLogsInput::new(
-            collection.collection_id,
+            collection.id,
             // The collection log position is inclusive, and we want to start from the next log
             // Note that we query using the incoming log position this is critical for correctness
             // TODO: We should make all the log service code use u64 instead of i64
@@ -476,10 +473,9 @@ impl HnswQueryOrchestrator {
         let brute_force_result = self.brute_force_results.remove(&query_vector_index);
 
         tracing::info!(
-            "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids, hnsw ids: {:?}...",
+            "[HnswQueryOperation]: Brute force {} user ids, hnsw {} offset ids",
             brute_force_result.as_ref().map_or(0, |x| x.user_ids.len()),
-            hnsw_result_offset_ids.len(),
-            &hnsw_result_offset_ids,
+            hnsw_result_offset_ids.len()
         );
 
         let operator = Box::new(MergeKnnResultsOperator {});

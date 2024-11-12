@@ -3,7 +3,7 @@ use crate::{
     system::{Component, ComponentContext},
 };
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Collection, CollectionUuid, Segment, SegmentType, SegmentUuid};
+use chroma_types::{Collection, Segment, SegmentType};
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
@@ -28,15 +28,10 @@ impl ChromaError for GetHnswSegmentByIdError {
 pub(super) async fn get_hnsw_segment_by_id(
     mut sysdb: Box<SysDb>,
     hnsw_segment_id: &Uuid,
-    collection_id: &CollectionUuid,
+    collection_id: &Uuid,
 ) -> Result<Segment, Box<GetHnswSegmentByIdError>> {
     let segments = sysdb
-        .get_segments(
-            Some(SegmentUuid(*hnsw_segment_id)),
-            None,
-            None,
-            *collection_id,
-        )
+        .get_segments(Some(*hnsw_segment_id), None, None, *collection_id)
         .await;
     let segment = match segments {
         Ok(segments) => {
@@ -63,7 +58,7 @@ pub(super) async fn get_hnsw_segment_by_id(
 #[derive(Debug, Error)]
 pub(super) enum GetCollectionByIdError {
     #[error("Collection with id: {0} not found")]
-    CollectionNotFound(CollectionUuid),
+    CollectionNotFound(Uuid),
     #[error("Get collection error")]
     GetCollectionError(#[from] GetCollectionsError),
 }
@@ -79,7 +74,7 @@ impl ChromaError for GetCollectionByIdError {
 
 pub(super) async fn get_collection_by_id(
     mut sysdb: Box<SysDb>,
-    collection_id: &CollectionUuid,
+    collection_id: &Uuid,
 ) -> Result<Collection, Box<GetCollectionByIdError>> {
     let child_span: tracing::Span =
         trace_span!(parent: Span::current(), "get collection for collection id");
@@ -103,7 +98,7 @@ pub(super) async fn get_collection_by_id(
 #[derive(Debug, Error)]
 pub(super) enum GetRecordSegmentByCollectionIdError {
     #[error("Record segment for collection with id: {0} not found")]
-    RecordSegmentNotFound(CollectionUuid),
+    RecordSegmentNotFound(Uuid),
     #[error("Get segments error: {0}")]
     GetSegmentsError(#[from] GetSegmentsError),
 }
@@ -119,7 +114,7 @@ impl ChromaError for GetRecordSegmentByCollectionIdError {
 
 pub(super) async fn get_record_segment_by_collection_id(
     mut sysdb: Box<SysDb>,
-    collection_id: &CollectionUuid,
+    collection_id: &Uuid,
 ) -> Result<Segment, Box<GetRecordSegmentByCollectionIdError>> {
     let segments = sysdb
         .get_segments(
@@ -163,13 +158,12 @@ pub(super) async fn get_record_segment_by_collection_id(
 /// * `ctx` - The component context
 /// # Panics
 /// This function panics if the result channel is not set
-pub(super) fn terminate_with_error<Output, C, E>(
-    mut result_channel: Option<tokio::sync::oneshot::Sender<Result<Output, E>>>,
-    error: E,
+pub(super) fn terminate_with_error<Output, C>(
+    mut result_channel: Option<tokio::sync::oneshot::Sender<Result<Output, Box<dyn ChromaError>>>>,
+    error: Box<dyn ChromaError>,
     ctx: &ComponentContext<C>,
 ) where
     C: Component,
-    E: ChromaError,
 {
     let result_channel = result_channel
         .take()

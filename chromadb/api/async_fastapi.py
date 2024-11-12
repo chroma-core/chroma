@@ -257,12 +257,21 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_collection(
         self,
         name: str,
+        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        if (name is None and id is None) or (name is not None and id is not None):
+            raise ValueError("Name or id must be specified, but not both")
+
+        params: Dict[str, str] = {}
+        if id is not None:
+            params["type"] = str(id)
+
         resp_json = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{name}",
+            params=params,
         )
 
         model = CollectionModel.from_json(resp_json)
@@ -360,13 +369,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
+        where: Optional[Where] = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -405,8 +414,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -536,8 +545,8 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,

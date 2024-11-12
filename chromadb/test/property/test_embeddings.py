@@ -8,14 +8,7 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
-from chromadb.api.types import (
-    ID,
-    Embeddings,
-    Include,
-    IDs,
-    validate_embeddings,
-    normalize_embeddings,
-)
+from chromadb.api.types import ID, Embeddings, Include, IDs, validate_embeddings
 from chromadb.config import System
 import chromadb.errors as errors
 from chromadb.api import ClientAPI
@@ -217,16 +210,10 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @invariant()
     def fields_match(self) -> None:
-        if self._is_state_empty():
-            # Check that the collection is empty
-            assert self.collection.count() == 0
-        else:
-            # RecordSet is a superset of StateMachineRecordSet
-            record_set_state = cast(strategies.RecordSet, self.record_set_state)
-
-            invariants.embeddings_match(self.collection, record_set_state)
-            invariants.metadatas_match(self.collection, record_set_state)
-            invariants.documents_match(self.collection, record_set_state)
+        self.record_set_state = cast(strategies.RecordSet, self.record_set_state)  # type: ignore[assignment]
+        invariants.embeddings_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
+        invariants.metadatas_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
+        invariants.documents_match(self.collection, self.record_set_state)  # type: ignore[arg-type]
 
     @precondition(
         lambda self: is_client_in_process(self.client)
@@ -237,12 +224,6 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
         invariants.log_size_below_max(
             system, [self.collection], self.has_collection_mutated
         )
-
-    def _is_state_empty(self) -> bool:
-        for field in self.record_set_state.values():
-            if field:
-                return False
-        return True
 
     def _upsert_embeddings(self, record_set: strategies.RecordSet) -> None:
         normalized_record_set: strategies.NormalizedRecordSet = invariants.wrap_all(
@@ -770,11 +751,22 @@ def test_escape_chars_in_ids(client: ClientAPI) -> None:
     assert coll.count() == 0
 
 
-def test_delete_empty_fails(client: ClientAPI) -> None:
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"ids": []},
+        {"where": {}},
+        {"where_document": {}},
+        {"where_document": {}, "where": {}},
+    ],
+)
+def test_delete_empty_fails(client: ClientAPI, kwargs: Any) -> None:
     reset(client)
     coll = client.create_collection(name="foo")
-    with pytest.raises(ValueError):
-        coll.delete()
+    with pytest.raises(Exception) as e:
+        coll.delete(**kwargs)
+    assert "You must provide either ids, where, or where_document to delete." in str(e)
 
 
 @pytest.mark.parametrize(
@@ -804,12 +796,7 @@ def test_autocasting_validate_embeddings_for_compatible_types(
     supported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings(10, 10, supported_types)
-    validated_embeddings = validate_embeddings(
-        cast(
-            Embeddings,
-            normalize_embeddings(embds),
-        )
-    )
+    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
             isinstance(value, np.ndarray)
@@ -829,9 +816,7 @@ def test_autocasting_validate_embeddings_with_ndarray(
     supported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings_ndarray(10, 10, supported_types)
-    validated_embeddings = validate_embeddings(
-        cast(Embeddings, normalize_embeddings(embds))
-    )
+    validated_embeddings = validate_embeddings(Collection._normalize_embeddings(embds))
     assert all(
         [
             isinstance(value, np.ndarray)
@@ -852,12 +837,9 @@ def test_autocasting_validate_embeddings_incompatible_types(
 ) -> None:
     embds = strategies.create_embeddings(10, 10, unsupported_types)
     with pytest.raises(ValueError) as e:
-        validate_embeddings(cast(Embeddings, normalize_embeddings(embds)))
+        validate_embeddings(Collection._normalize_embeddings(embds))
 
-    assert (
-        "Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got "
-        in str(e.value)
-    )
+    assert "Expected each value in the embedding to be a int or float" in str(e)
 
 
 def test_0dim_embedding_validation() -> None:

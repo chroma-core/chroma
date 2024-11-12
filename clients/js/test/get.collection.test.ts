@@ -7,7 +7,7 @@ import {
   test,
 } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
-import { InvalidArgumentError, InvalidCollectionError } from "../src/Errors";
+import { ChromaValueError, InvalidCollectionError } from "../src/Errors";
 import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
 import { StartedTestContainer } from "testcontainers";
 import { ChromaClient } from "../src/ChromaClient";
@@ -65,7 +65,7 @@ describe("get collections", () => {
       });
     } catch (error: any) {
       expect(error).toBeDefined();
-      expect(error).toBeInstanceOf(InvalidArgumentError);
+      expect(error).toBeInstanceOf(ChromaValueError);
       expect(error.message).toMatchInlineSnapshot(
         `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
       );

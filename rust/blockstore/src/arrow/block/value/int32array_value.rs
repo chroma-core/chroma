@@ -1,26 +1,18 @@
 use crate::{
     arrow::{
-        block::delta::{
-            single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
-        },
+        block::delta::{single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage},
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
-    BlockfileWriterMutationOrdering,
 };
 use arrow::{
-    array::{Array, Int32Array, ListArray, ListBuilder, UInt32Array, UInt32Builder},
-    datatypes::Field,
+    array::{Array, Int32Array, ListArray, UInt32Array},
     util::bit_util,
 };
 use std::{mem::size_of, sync::Arc};
 
 impl ArrowWriteableValue for Vec<u32> {
     type ReadableValue<'referred_data> = &'referred_data [u32];
-    type ArrowBuilder = ListBuilder<UInt32Builder>;
-    type SizeTracker = SingleColumnSizeTracker;
-    type PreparedValue = Vec<u32>;
 
     fn offset_size(item_count: usize) -> usize {
         bit_util::round_upto_multiple_of_64((item_count + 1) * size_of::<u32>())
@@ -30,8 +22,8 @@ impl ArrowWriteableValue for Vec<u32> {
         0 // We don't support None values for Int32Array
     }
 
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
-        match &delta {
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
+        match &delta.builder {
             BlockStorage::VecUInt32(builder) => {
                 builder.add(prefix, key, value);
             }
@@ -39,7 +31,7 @@ impl ArrowWriteableValue for Vec<u32> {
         }
     }
 
-    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
+    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
         match &delta.builder {
             BlockStorage::VecUInt32(builder) => {
                 builder.delete(prefix, key);
@@ -48,43 +40,8 @@ impl ArrowWriteableValue for Vec<u32> {
         }
     }
 
-    fn get_delta_builder(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> BlockStorage {
-        BlockStorage::VecUInt32(SingleColumnStorage::new(mutation_ordering_hint))
-    }
-
-    fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
-        let total_value_count = size_tracker.get_value_size() / size_of::<u32>();
-        ListBuilder::with_capacity(
-            UInt32Builder::with_capacity(total_value_count),
-            size_tracker.get_num_items(),
-        )
-    }
-
-    fn prepare(value: Self) -> Self::PreparedValue {
-        value
-    }
-
-    fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder) {
-        for v in value {
-            builder.values().append_value(v);
-        }
-        builder.append(true);
-    }
-
-    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
-        let value_field = Field::new(
-            "value",
-            arrow::datatypes::DataType::List(Arc::new(Field::new(
-                "item",
-                arrow::datatypes::DataType::UInt32,
-                true,
-            ))),
-            true,
-        );
-        let value_arr = builder.finish();
-        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-
-        (value_field, Arc::new(value_arr))
+    fn get_delta_builder() -> BlockStorage {
+        BlockStorage::VecUInt32(SingleColumnStorage::new())
     }
 }
 
@@ -129,8 +86,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
         prefix: &str,
         key: K,
         value: Self,
-        storage: &mut BlockStorage,
+        delta: &mut BlockDelta,
     ) {
-        <Vec<u32>>::add(prefix, key.into(), value.to_vec(), storage);
+        delta.add(prefix, key, value.to_vec());
     }
 }

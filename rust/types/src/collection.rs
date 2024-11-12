@@ -4,36 +4,9 @@ use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 use uuid::Uuid;
 
-/// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CollectionUuid(pub Uuid);
-
-impl CollectionUuid {
-    pub fn new() -> Self {
-        CollectionUuid(Uuid::new_v4())
-    }
-}
-
-impl std::str::FromStr for CollectionUuid {
-    type Err = CollectionConversionError;
-
-    fn from_str(s: &str) -> Result<Self, CollectionConversionError> {
-        match Uuid::parse_str(s) {
-            Ok(uuid) => Ok(CollectionUuid(uuid)),
-            Err(_) => Err(CollectionConversionError::InvalidUuid),
-        }
-    }
-}
-
-impl std::fmt::Display for CollectionUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct Collection {
-    pub collection_id: CollectionUuid,
+    pub id: Uuid,
     pub name: String,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
@@ -68,7 +41,6 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             Ok(uuid) => uuid,
             Err(_) => return Err(CollectionConversionError::InvalidUuid),
         };
-        let collection_id = CollectionUuid(collection_uuid);
         let collection_metadata: Option<Metadata> = match proto_collection.metadata {
             Some(proto_metadata) => match proto_metadata.try_into() {
                 Ok(metadata) => Some(metadata),
@@ -77,7 +49,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             None => None,
         };
         Ok(Collection {
-            collection_id,
+            id: collection_uuid,
             name: proto_collection.name,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
@@ -108,10 +80,7 @@ mod test {
             version: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
-        assert_eq!(
-            converted_collection.collection_id,
-            CollectionUuid(Uuid::nil())
-        );
+        assert_eq!(converted_collection.id, Uuid::nil());
         assert_eq!(converted_collection.name, "foo".to_string());
         assert_eq!(converted_collection.metadata, None);
         assert_eq!(converted_collection.dimension, None);

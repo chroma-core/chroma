@@ -1,5 +1,6 @@
 from typing import Dict, List, Set, cast
-from chromadb.types import LogRecord, Operation, Vector
+
+from chromadb.types import LogRecord, Operation, SeqId, Vector
 
 
 class Batch:
@@ -11,6 +12,7 @@ class Batch:
     _upsert_add_ids: Set[str]  # IDs that are being added in an upsert
     add_count: int
     update_count: int
+    max_seq_id: SeqId
 
     def __init__(self) -> None:
         self._ids_to_records = {}
@@ -19,6 +21,7 @@ class Batch:
         self._upsert_add_ids = set()
         self.add_count = 0
         self.update_count = 0
+        self.max_seq_id = 0
 
     def __len__(self) -> int:
         """Get the number of changes in this batch"""
@@ -55,6 +58,7 @@ class Batch:
         For example, a delete or update presumes the ID exists in the index. An add presumes the ID does not exist in the index.
         The exists_already flag should be set to True if the ID does exist in the index, and False otherwise.
         """
+
         id = record["record"]["id"]
         if record["record"]["operation"] == Operation.DELETE:
             # If the ID was previously written, remove it from the written set
@@ -104,3 +108,5 @@ class Batch:
                 self.add_count += 1
             elif record["record"]["operation"] == Operation.UPDATE:
                 self.update_count += 1
+
+        self.max_seq_id = max(self.max_seq_id, record["log_offset"])

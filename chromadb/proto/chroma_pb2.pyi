@@ -74,6 +74,14 @@ GTE: NumberComparator
 LT: NumberComparator
 LTE: NumberComparator
 
+class Status(_message.Message):
+    __slots__ = ("reason", "code")
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    reason: str
+    code: int
+    def __init__(self, reason: _Optional[str] = ..., code: _Optional[int] = ...) -> None: ...
+
 class Vector(_message.Message):
     __slots__ = ("dimension", "vector", "encoding")
     DIMENSION_FIELD_NUMBER: _ClassVar[int]

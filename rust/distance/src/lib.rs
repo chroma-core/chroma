@@ -12,8 +12,3 @@ pub use distance_neon::*;
 #[cfg(target_feature = "sse")]
 pub use distance_sse::*;
 pub use types::*;
-
-pub fn normalize(vector: &[f32]) -> Vec<f32> {
-    let norm = vector.iter().map(|x| x * x).sum::<f32>().sqrt();
-    vector.iter().map(|x| x / (norm + 1e-32)).collect()
-}

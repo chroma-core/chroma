@@ -1,4 +1,7 @@
-use super::{CacheError, Weighted};
+use std::hash::Hash;
+use std::sync::Arc;
+use std::time::Duration;
+
 use chroma_error::ChromaError;
 use clap::Parser;
 use foyer::{
@@ -6,11 +9,9 @@ use foyer::{
     InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
     StorageKey, StorageValue, TracingOptions,
 };
-use opentelemetry::global;
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
-use std::sync::Arc;
-use std::time::Duration;
+
+use super::{CacheError, Weighted};
 
 const MIB: usize = 1024 * 1024;
 
@@ -31,7 +32,7 @@ const fn default_file_size() -> usize {
 }
 
 const fn default_flushers() -> usize {
-    4
+    64
 }
 
 const fn default_flush() -> bool {
@@ -39,7 +40,7 @@ const fn default_flush() -> bool {
 }
 
 const fn default_reclaimers() -> usize {
-    2
+    4
 }
 
 const fn default_recover_concurrency() -> usize {
@@ -47,7 +48,7 @@ const fn default_recover_concurrency() -> usize {
 }
 
 const fn default_admission_rate_limit() -> usize {
-    100
+    50
 }
 
 const fn default_shards() -> usize {
@@ -55,7 +56,7 @@ const fn default_shards() -> usize {
 }
 
 fn default_eviction() -> String {
-    "lru".to_string()
+    "lfu".to_string()
 }
 
 const fn default_invalid_ratio() -> f64 {
@@ -88,12 +89,12 @@ pub struct FoyerCacheConfig {
     #[arg(short, long)]
     pub dir: Option<String>,
 
-    /// In-memory cache capacity. (weighted units)
+    /// In-memory cache capacity. (items)
     #[arg(long, default_value_t = 1048576)]
     #[serde(default = "default_capacity")]
     pub capacity: usize,
 
-    /// In-memory cache capacity. (weighted units)
+    /// In-memory cache capacity. (MiB)
     #[arg(long, default_value_t = 1024)]
     #[serde(default = "default_mem")]
     pub mem: usize,
@@ -119,7 +120,7 @@ pub struct FoyerCacheConfig {
     pub flush: bool,
 
     /// Reclaimer count.
-    #[arg(long, default_value_t = 2)]
+    #[arg(long, default_value_t = 4)]
     #[serde(default = "default_reclaimers")]
     pub reclaimers: usize,
 
@@ -129,7 +130,7 @@ pub struct FoyerCacheConfig {
     pub recover_concurrency: usize,
 
     /// Enable rated ticket admission picker if `admission_rate_limit > 0`. (MiB/s)
-    #[arg(long, default_value_t = 100)]
+    #[arg(long, default_value_t = 50)]
     #[serde(default = "default_admission_rate_limit")]
     pub admission_rate_limit: usize,
 
@@ -139,7 +140,7 @@ pub struct FoyerCacheConfig {
     pub shards: usize,
 
     /// Eviction algorithm to use
-    #[arg(long, default_value = "lru")]
+    #[arg(long, default_value = "lfu")]
     #[serde(default = "default_eviction")]
     pub eviction: String,
 
@@ -199,7 +200,7 @@ impl FoyerCacheConfig {
 
     pub async fn build_memory_with_event_listener<K, V>(
         &self,
-        tx: tokio::sync::mpsc::UnboundedSender<(K, V)>,
+        tx: tokio::sync::mpsc::UnboundedSender<K>,
     ) -> Result<Box<dyn super::Cache<K, V>>, Box<dyn ChromaError>>
     where
         K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
@@ -222,24 +223,6 @@ impl FoyerCacheConfig {
     }
 }
 
-struct Stopwatch<'a>(
-    &'a opentelemetry::metrics::Histogram<u64>,
-    std::time::Instant,
-);
-
-impl<'a> Stopwatch<'a> {
-    fn new(histogram: &'a opentelemetry::metrics::Histogram<u64>) -> Self {
-        Self(histogram, std::time::Instant::now())
-    }
-}
-
-impl<'a> Drop for Stopwatch<'a> {
-    fn drop(&mut self) {
-        let elapsed = self.1.elapsed().as_micros() as u64;
-        self.0.record(elapsed, &[]);
-    }
-}
-
 #[derive(Clone)]
 pub struct FoyerHybridCache<K, V>
 where
@@ -247,10 +230,6 @@ where
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
     cache: foyer::HybridCache<K, V>,
-    get_latency: opentelemetry::metrics::Histogram<u64>,
-    insert_latency: opentelemetry::metrics::Histogram<u64>,
-    remove_latency: opentelemetry::metrics::Histogram<u64>,
-    clear_latency: opentelemetry::metrics::Histogram<u64>,
 }
 
 impl<K, V> FoyerHybridCache<K, V>
@@ -271,7 +250,7 @@ where
 
         let builder = HybridCacheBuilder::<K, V>::new()
             .with_tracing_options(tracing_options)
-            .memory(config.mem)
+            .memory(config.mem * MIB)
             .with_shards(config.shards);
 
         let builder = match config.eviction.as_str() {
@@ -325,18 +304,7 @@ where
                 e
             ))) as _
         })?;
-        let meter = global::meter("chroma");
-        let get_latency = meter.u64_histogram("get_latency").init();
-        let insert_latency = meter.u64_histogram("insert_latency").init();
-        let remove_latency = meter.u64_histogram("remove_latency").init();
-        let clear_latency = meter.u64_histogram("clear_latency").init();
-        Ok(FoyerHybridCache {
-            cache,
-            get_latency,
-            insert_latency,
-            remove_latency,
-            clear_latency,
-        })
+        Ok(FoyerHybridCache { cache })
     }
 }
 
@@ -346,27 +314,19 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
-    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency);
         Ok(self.cache.get(key).await?.map(|v| v.value().clone()))
     }
 
-    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
-        let _stopwatch = Stopwatch::new(&self.insert_latency);
         self.cache.insert(key, value);
     }
 
-    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
-        let _stopwatch = Stopwatch::new(&self.remove_latency);
         self.cache.remove(key);
     }
 
-    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
-        let _stopwatch = Stopwatch::new(&self.clear_latency);
         Ok(self.cache.clear().await?)
     }
 }
@@ -385,10 +345,6 @@ where
     V: Clone + Send + Sync + Weighted + 'static,
 {
     cache: foyer::Cache<K, V>,
-    insert_latency: opentelemetry::metrics::Histogram<u64>,
-    get_latency: opentelemetry::metrics::Histogram<u64>,
-    remove_latency: opentelemetry::metrics::Histogram<u64>,
-    clear_latency: opentelemetry::metrics::Histogram<u64>,
 }
 
 impl<K, V> FoyerPlainCache<K, V>
@@ -403,26 +359,18 @@ where
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
             .build();
-        let meter = global::meter("chroma");
-        let insert_latency = meter.u64_histogram("insert_latency").init();
-        let get_latency = meter.u64_histogram("get_latency").init();
-        let remove_latency = meter.u64_histogram("remove_latency").init();
-        let clear_latency = meter.u64_histogram("clear_latency").init();
-        Ok(FoyerPlainCache {
-            cache,
-            insert_latency,
-            get_latency,
-            remove_latency,
-            clear_latency,
-        })
+        Ok(FoyerPlainCache { cache })
     }
 
     /// Build an in-memory cache that emits keys that get evicted to a channel.
     pub async fn memory_with_event_listener(
         config: &FoyerCacheConfig,
-        tx: tokio::sync::mpsc::UnboundedSender<(K, V)>,
+        tx: tokio::sync::mpsc::UnboundedSender<K>,
     ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
-        struct TokioEventListener<K, V>(tokio::sync::mpsc::UnboundedSender<(K, V)>)
+        struct TokioEventListener<K, V>(
+            tokio::sync::mpsc::UnboundedSender<K>,
+            std::marker::PhantomData<V>,
+        )
         where
             K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
             V: Clone + Send + Sync + Weighted + 'static;
@@ -434,38 +382,22 @@ where
             type Key = K;
             type Value = V;
 
-            fn on_memory_release(&self, key: Self::Key, value: Self::Value)
+            fn on_memory_release(&self, key: Self::Key, _: Self::Value)
             where
                 K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
             {
                 // NOTE(rescrv):  There's no mechanism by which we can error.  We could log a
                 // metric, but this should really never happen.
-                let _ = self.0.send((key, value));
+                let _ = self.0.send(key.clone());
             }
         }
-        let evl = TokioEventListener(tx);
+        let evl = TokioEventListener(tx, std::marker::PhantomData);
 
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
             .with_event_listener(Arc::new(evl))
             .build();
-        let get_latency = global::meter("chroma").u64_histogram("get_latency").init();
-        let insert_latency = global::meter("chroma")
-            .u64_histogram("insert_latency")
-            .init();
-        let remove_latency = global::meter("chroma")
-            .u64_histogram("remove_latency")
-            .init();
-        let clear_latency = global::meter("chroma")
-            .u64_histogram("clear_latency")
-            .init();
-        Ok(FoyerPlainCache {
-            cache,
-            insert_latency,
-            get_latency,
-            remove_latency,
-            clear_latency,
-        })
+        Ok(FoyerPlainCache { cache })
     }
 }
 
@@ -475,27 +407,19 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + Weighted + 'static,
 {
-    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency);
         Ok(self.cache.get(key).map(|v| v.value().clone()))
     }
 
-    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
-        let _stopwatch = Stopwatch::new(&self.insert_latency);
         self.cache.insert(key, value);
     }
 
-    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
-        let _stopwatch = Stopwatch::new(&self.remove_latency);
         self.cache.remove(key);
     }
 
-    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
-        let _stopwatch = Stopwatch::new(&self.clear_latency);
         self.cache.clear();
         Ok(())
     }

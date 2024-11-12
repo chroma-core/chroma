@@ -5,9 +5,10 @@ use crate::sysdb::sysdb::FlushCompactionError;
 use crate::sysdb::sysdb::SysDb;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
+use chroma_types::{FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// The register  operator is responsible for flushing compaction data to the sysdb
 /// as well as updating the log offset in the log service.
@@ -38,7 +39,7 @@ impl RegisterOperator {
 /// * `log` - The log client.
 pub struct RegisterInput {
     tenant: String,
-    collection_id: CollectionUuid,
+    collection_id: Uuid,
     log_position: i64,
     collection_version: i32,
     segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -50,7 +51,7 @@ impl RegisterInput {
     /// Create a new flush sysdb input.
     pub fn new(
         tenant: String,
-        collection_id: CollectionUuid,
+        collection_id: Uuid,
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -141,20 +142,20 @@ mod tests {
     use super::*;
     use crate::log::log::InMemoryLog;
     use crate::sysdb::test_sysdb::TestSysDb;
-    use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
+    use chroma_types::{Collection, Segment, SegmentScope, SegmentType};
     use std::collections::HashMap;
     use std::str::FromStr;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_register_operator() {
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
         let log = Box::new(Log::InMemory(InMemoryLog::new()));
         let collection_version = 0;
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            collection_id: collection_uuid_1,
+            id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -164,11 +165,10 @@ mod tests {
             version: collection_version,
         };
 
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            collection_id: collection_uuid_2,
+            id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -188,7 +188,7 @@ mod tests {
 
         let mut file_path_1 = HashMap::new();
         file_path_1.insert("hnsw".to_string(), vec!["path_1".to_string()]);
-        let segment_id_1 = SegmentUuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
+        let segment_id_1 = Uuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
 
         let segment_1 = Segment {
             id: segment_id_1,
@@ -201,7 +201,7 @@ mod tests {
 
         let mut file_path_2 = HashMap::new();
         file_path_2.insert("hnsw".to_string(), vec!["path_2".to_string()]);
-        let segment_id_2 = SegmentUuid::from_str("00000000-0000-0000-0000-000000000004").unwrap();
+        let segment_id_2 = Uuid::from_str("00000000-0000-0000-0000-000000000004").unwrap();
         let segment_2 = Segment {
             id: segment_id_2,
             r#type: SegmentType::HnswDistributed,

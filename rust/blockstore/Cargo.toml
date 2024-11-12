@@ -23,7 +23,6 @@ prost-types = { workspace = true }
 tokio = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
-itertools = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }
@@ -32,13 +31,8 @@ chroma-cache = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
-criterion = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 bincode = { workspace = true }
-
-[[bench]]
-name = "blockfile_writer"
-harness = false

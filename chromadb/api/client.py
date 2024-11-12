@@ -163,12 +163,14 @@ class Client(SharedSystemClient, ClientAPI):
     def get_collection(
         self,
         name: str,
+        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
         model = self._server.get_collection(
+            id=id,
             name=name,
             tenant=self.tenant,
             database=self.database,
@@ -302,8 +304,6 @@ class Client(SharedSystemClient, ClientAPI):
     def _count(self, collection_id: UUID) -> int:
         return self._server._count(
             collection_id=collection_id,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -311,8 +311,6 @@ class Client(SharedSystemClient, ClientAPI):
         return self._server._peek(
             collection_id=collection_id,
             n=n,
-            tenant=self.tenant,
-            database=self.database,
         )
 
     @override
@@ -320,13 +318,13 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = None,
+        where: Optional[Where] = {},
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = None,
+        where_document: Optional[WhereDocument] = {},
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
     ) -> GetResult:
         return self._server._get(
@@ -348,8 +346,8 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Optional[Where] = {},
+        where_document: Optional[WhereDocument] = {},
     ) -> None:
         self._server._delete(
             collection_id=collection_id,
@@ -366,8 +364,8 @@ class Client(SharedSystemClient, ClientAPI):
         collection_id: UUID,
         query_embeddings: Embeddings,
         n_results: int = 10,
-        where: Optional[Where] = None,
-        where_document: Optional[WhereDocument] = None,
+        where: Where = {},
+        where_document: WhereDocument = {},
         include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
     ) -> QueryResult:
         return self._server._query(

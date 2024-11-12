@@ -147,17 +147,6 @@ class VersionMismatchError(ChromaError):
         return "VersionMismatchError"
 
 
-class InternalError(ChromaError):
-    @overrides
-    def code(self) -> int:
-        return 500
-
-    @classmethod
-    @overrides
-    def name(cls) -> str:
-        return "InternalError"
-
-
 class RateLimitError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -169,20 +158,8 @@ class RateLimitError(ChromaError):
         return "RateLimitError"
 
 
-class QuotaError(ChromaError):
-    @overrides
-    def code(self) -> int:
-        return 400
-
-    @classmethod
-    @overrides
-    def name(cls) -> str:
-        return "QuotaError"
-
-
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
-    "InvalidArgumentError": InvalidArgumentError,
     "InvalidCollection": InvalidCollectionException,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,

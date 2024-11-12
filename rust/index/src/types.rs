@@ -61,7 +61,7 @@ pub trait Index<C> {
     fn init(
         index_config: &IndexConfig,
         custom_config: Option<&C>,
-        id: IndexUuid,
+        id: Uuid,
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
@@ -88,21 +88,7 @@ pub trait Index<C> {
 /// TODO: Right now load() takes IndexConfig because we don't implement save/load of the config.
 pub trait PersistentIndex<C>: Index<C> {
     fn save(&self) -> Result<(), Box<dyn ChromaError>>;
-    fn load(
-        path: &str,
-        index_config: &IndexConfig,
-        id: IndexUuid,
-    ) -> Result<Self, Box<dyn ChromaError>>
+    fn load(path: &str, index_config: &IndexConfig, id: Uuid) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
-}
-
-/// IndexUuid is a wrapper around Uuid to provide a type for the index id.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct IndexUuid(pub Uuid);
-
-impl std::fmt::Display for IndexUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
 }
