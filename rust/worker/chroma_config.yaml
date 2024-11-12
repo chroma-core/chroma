@@ -124,4 +124,4 @@ compaction_service:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
             weighted_lru:
-                capacity: 8589934592 # 8GB
+                capacity: 8192 # 8192 MiB = 8GB
