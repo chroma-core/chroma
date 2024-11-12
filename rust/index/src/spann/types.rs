@@ -3,7 +3,9 @@ use std::{
     sync::{atomic::AtomicU32, Arc},
 };
 
-use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriter, BlockfileWriterOptions};
+use chroma_blockstore::{
+    provider::BlockfileProvider, BlockfileFlusher, BlockfileWriter, BlockfileWriterOptions,
+};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::CollectionUuid;
@@ -29,9 +31,10 @@ pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
     hnsw_index: HnswIndexRef,
     hnsw_provider: HnswIndexProvider,
+    blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
     // TODO(Sanket): For now the lock is very coarse grained. But this should
-    // be change in future.
+    // be changed in future.
     posting_list_writer: Arc<Mutex<BlockfileWriter>>,
     next_head_id: Arc<AtomicU32>,
     // Version number of each point.
@@ -93,9 +96,11 @@ const RNG_FACTOR: f32 = 1.0;
 const SPLIT_THRESHOLD: usize = 100;
 
 impl SpannIndexWriter {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         hnsw_index: HnswIndexRef,
         hnsw_provider: HnswIndexProvider,
+        blockfile_provider: BlockfileProvider,
         posting_list_writer: BlockfileWriter,
         next_head_id: u32,
         versions_map: VersionsMapInner,
@@ -105,6 +110,7 @@ impl SpannIndexWriter {
         SpannIndexWriter {
             hnsw_index,
             hnsw_provider,
+            blockfile_provider,
             posting_list_writer: Arc::new(Mutex::new(posting_list_writer)),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
             versions_map: Arc::new(RwLock::new(versions_map)),
@@ -273,16 +279,17 @@ impl SpannIndexWriter {
                     Ok(reader) => reader.get("", MAX_HEAD_OFFSET_ID).await.map_err(|_| {
                         SpannIndexWriterConstructionError::BlockfileReaderConstructionError
                     })?,
-                    Err(_) => 0,
+                    Err(_) => 1,
                 }
             }
-            None => 0,
+            None => 1,
         };
         Ok(Self::new(
             hnsw_index,
             hnsw_provider.clone(),
+            blockfile_provider.clone(),
             posting_list_writer,
-            1 + max_head_id,
+            max_head_id,
             versions_map,
             distance_function,
             dimensionality,
@@ -468,7 +475,140 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    pub async fn add(&self, id: u32, _: &[f32]) {
-        let _ = self.add_versions_map(id);
+    pub async fn add(
+        &self,
+        id: u32,
+        embedding: &[f32],
+    ) -> Result<(), SpannIndexWriterConstructionError> {
+        let version = self.add_versions_map(id);
+        // Add to the posting list.
+        self.add_postings_list(id, version, embedding).await
+    }
+
+    // TODO(Sanket): Change the error types.
+    pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterConstructionError> {
+        // Pl list.
+        let pl_flusher = match Arc::try_unwrap(self.posting_list_writer) {
+            Ok(writer) => writer
+                .into_inner()
+                .commit::<u32, &SpannPostingList<'_>>()
+                .await
+                .map_err(|_| SpannIndexWriterConstructionError::PostingListAddError)?,
+            Err(_) => {
+                // This should never happen.
+                panic!("Failed to unwrap posting list writer");
+            }
+        };
+        // Versions map. Create a writer, write all the data and commit.
+        let mut bf_options = BlockfileWriterOptions::new();
+        bf_options = bf_options.unordered_mutations();
+        let versions_map_bf_writer = self
+            .blockfile_provider
+            .write::<u32, u32>(bf_options)
+            .await
+            .map_err(|_| SpannIndexWriterConstructionError::BlockfileWriterConstructionError)?;
+        let versions_map_flusher = match Arc::try_unwrap(self.versions_map) {
+            Ok(writer) => {
+                let writer = writer.into_inner();
+                for (doc_offset_id, doc_version) in writer.versions_map.into_iter() {
+                    versions_map_bf_writer
+                        .set("", doc_offset_id, doc_version)
+                        .await
+                        .map_err(|_| SpannIndexWriterConstructionError::PostingListAddError)?;
+                }
+                versions_map_bf_writer
+                    .commit::<u32, u32>()
+                    .await
+                    .map_err(|_| SpannIndexWriterConstructionError::PostingListAddError)?
+            }
+            Err(_) => {
+                // This should never happen.
+                panic!("Failed to unwrap posting list writer");
+            }
+        };
+        // Next head.
+        let mut bf_options = BlockfileWriterOptions::new();
+        bf_options = bf_options.unordered_mutations();
+        let max_head_id_bf = self
+            .blockfile_provider
+            .write::<&str, u32>(bf_options)
+            .await
+            .map_err(|_| SpannIndexWriterConstructionError::BlockfileWriterConstructionError)?;
+        let max_head_id_flusher = match Arc::try_unwrap(self.next_head_id) {
+            Ok(value) => {
+                let value = value.into_inner();
+                max_head_id_bf
+                    .set("", MAX_HEAD_OFFSET_ID, value)
+                    .await
+                    .map_err(|_| SpannIndexWriterConstructionError::PostingListAddError)?;
+                max_head_id_bf
+                    .commit::<&str, u32>()
+                    .await
+                    .map_err(|_| SpannIndexWriterConstructionError::PostingListAddError)?
+            }
+            Err(_) => {
+                // This should never happen.
+                panic!("Failed to unwrap next head id");
+            }
+        };
+
+        let hnsw_id = self.hnsw_index.inner.read().id;
+
+        // Hnsw.
+        self.hnsw_provider
+            .commit(self.hnsw_index)
+            .map_err(|_| SpannIndexWriterConstructionError::HnswIndexConstructionError)?;
+
+        Ok(SpannIndexFlusher {
+            pl_flusher,
+            versions_map_flusher,
+            max_head_id_flusher,
+            hnsw_id,
+            hnsw_flusher: self.hnsw_provider,
+        })
+    }
+}
+
+pub struct SpannIndexFlusher {
+    pl_flusher: BlockfileFlusher,
+    versions_map_flusher: BlockfileFlusher,
+    max_head_id_flusher: BlockfileFlusher,
+    hnsw_id: IndexUuid,
+    hnsw_flusher: HnswIndexProvider,
+}
+
+pub struct SpannIndexIds {
+    pub pl_id: Uuid,
+    pub versions_map_id: Uuid,
+    pub max_head_id_id: Uuid,
+    pub hnsw_id: IndexUuid,
+}
+
+// TODO(Sanket): Change the error types.
+impl SpannIndexFlusher {
+    pub async fn flush(self) -> Result<SpannIndexIds, SpannIndexWriterConstructionError> {
+        let res = SpannIndexIds {
+            pl_id: self.pl_flusher.id(),
+            versions_map_id: self.versions_map_flusher.id(),
+            max_head_id_id: self.max_head_id_flusher.id(),
+            hnsw_id: self.hnsw_id,
+        };
+        self.pl_flusher
+            .flush::<u32, &SpannPostingList<'_>>()
+            .await
+            .map_err(|_| SpannIndexWriterConstructionError::BlockfileWriterConstructionError)?;
+        self.versions_map_flusher
+            .flush::<u32, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterConstructionError::BlockfileWriterConstructionError)?;
+        self.max_head_id_flusher
+            .flush::<&str, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterConstructionError::BlockfileWriterConstructionError)?;
+        self.hnsw_flusher
+            .flush(&self.hnsw_id)
+            .await
+            .map_err(|_| SpannIndexWriterConstructionError::HnswIndexConstructionError)?;
+        Ok(res)
     }
 }

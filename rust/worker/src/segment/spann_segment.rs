@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::spann::types::{SpannIndexFlusher, SpannIndexWriterConstructionError};
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::SegmentUuid;
@@ -189,11 +190,18 @@ impl SpannSegmentWriter {
         })
     }
 
-    async fn add(&self, record: &MaterializedLogRecord<'_>) {
+    async fn add(
+        &self,
+        record: &MaterializedLogRecord<'_>,
+    ) -> Result<(), SpannIndexWriterConstructionError> {
         self.index
             .add(record.offset_id, record.merged_embeddings())
-            .await;
+            .await
     }
+}
+
+struct SpannSegmentFlusher {
+    index_flusher: SpannIndexFlusher,
 }
 
 impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
@@ -204,7 +212,9 @@ impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
         for (record, _) in records.iter() {
             match record.final_operation {
                 MaterializedLogOperation::AddNew => {
-                    self.add(record).await;
+                    self.add(record)
+                        .await
+                        .map_err(|_| ApplyMaterializedLogError::BlockfileSet)?;
                 }
                 // TODO(Sanket): Implement other operations.
                 _ => {
@@ -216,14 +226,41 @@ impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
     }
 
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
-        // TODO: Implement commit.
-        Ok(self)
+        let index_flusher = self
+            .index
+            .commit()
+            .await
+            .map_err(|_| Box::new(SpannSegmentWriterError::SpannIndexWriterConstructionError));
+        match index_flusher {
+            Err(e) => Err(e),
+            Ok(index_flusher) => Ok(SpannSegmentFlusher { index_flusher }),
+        }
     }
 }
 
 #[async_trait]
-impl SegmentFlusher for SpannSegmentWriter {
+impl SegmentFlusher for SpannSegmentFlusher {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        todo!()
+        let index_flusher_res = self.index_flusher.flush().await;
+        match index_flusher_res {
+            Err(e) => Err(Box::new(e)),
+            Ok(index_ids) => {
+                let mut index_id_map = HashMap::new();
+                index_id_map.insert(HNSW_PATH.to_string(), vec![index_ids.hnsw_id.to_string()]);
+                index_id_map.insert(
+                    VERSION_MAP_PATH.to_string(),
+                    vec![index_ids.versions_map_id.to_string()],
+                );
+                index_id_map.insert(
+                    POSTING_LIST_PATH.to_string(),
+                    vec![index_ids.pl_id.to_string()],
+                );
+                index_id_map.insert(
+                    MAX_HEAD_ID_BF_PATH.to_string(),
+                    vec![index_ids.max_head_id_id.to_string()],
+                );
+                Ok(index_id_map)
+            }
+        }
     }
 }
