@@ -12,32 +12,39 @@ type ICollectionDb struct {
 	mock.Mock
 }
 
-// CheckCollectionIsSoftDeleted provides a mock function with given fields: collectionID, tenantID, databaseName
-func (_m *ICollectionDb) CheckCollectionIsSoftDeleted(collectionID string, tenantID string, databaseName string) (bool, error) {
-	ret := _m.Called(collectionID, tenantID, databaseName)
+// CheckCollectionIsSoftDeleted provides a mock function with given fields: collectionName, tenantID, databaseName
+func (_m *ICollectionDb) CheckCollectionIsSoftDeleted(collectionName string, tenantID string, databaseName string) (bool, string, error) {
+	ret := _m.Called(collectionName, tenantID, databaseName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckCollectionIsSoftDeleted")
 	}
 
 	var r0 bool
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string, string) (bool, error)); ok {
-		return rf(collectionID, tenantID, databaseName)
+	var r1 string
+	var r2 error
+	if rf, ok := ret.Get(0).(func(string, string, string) (bool, string, error)); ok {
+		return rf(collectionName, tenantID, databaseName)
 	}
 	if rf, ok := ret.Get(0).(func(string, string, string) bool); ok {
-		r0 = rf(collectionID, tenantID, databaseName)
+		r0 = rf(collectionName, tenantID, databaseName)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string, string) error); ok {
-		r1 = rf(collectionID, tenantID, databaseName)
+	if rf, ok := ret.Get(1).(func(string, string, string) string); ok {
+		r1 = rf(collectionName, tenantID, databaseName)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(string)
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(string, string, string) error); ok {
+		r2 = rf(collectionName, tenantID, databaseName)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // DeleteAll provides a mock function with given fields:

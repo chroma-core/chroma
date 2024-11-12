@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"testing"
@@ -1079,6 +1080,31 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.Len(softDeletedResults, 1)
 	suite.Equal(testCollection.ID, softDeletedResults[0].ID)
 
+	// Create a new collection with the same name as the soft deleted one.
+	// This should pass, and create a new soft deleted collection whose name is
+	// of the form "deleted_<name>_<timestamp>"
+	newTestCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         testCollection.Name,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, newTestCollection)
+	suite.NoError(err)
+
+	// Get the newly created collection to verify it exists
+	results, err = suite.coordinator.GetCollections(ctx, newTestCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(results, 1)
+	suite.Equal(newTestCollection.Name, results[0].Name)
+
+	// Verify the soft deleted collection still appears in the soft deleted list but with a different name.
+	softDeletedResults, err = suite.coordinator.GetSoftDeletedCollections(ctx, nil, suite.tenantName, suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Len(softDeletedResults, 1)
+	suite.Equal(id, softDeletedResults[0].ID.String())
+	renamedCollectionNamePrefix := fmt.Sprintf("deleted_%s_", testCollection.Name)
+	suite.Contains(softDeletedResults[0].Name, renamedCollectionNamePrefix)
 }
 
 func TestAPIsTestSuite(t *testing.T) {

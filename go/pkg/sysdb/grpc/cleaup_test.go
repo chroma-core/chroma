@@ -78,6 +78,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	suite.Equal(2, len(softDeletedCollections))
 
 	// Start the cleaner.
+	suite.s.softDeleteCleaner.maxInitialJitter = 0 * time.Second
 	suite.s.softDeleteCleaner.Start()
 
 	// Wait for cleanup cycle
@@ -90,6 +91,30 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 
 	// Stop the cleaner.
 	suite.s.softDeleteCleaner.Stop()
+
+	// Create a test collection
+	collectionName := "cleanup_test_collection_double_delete"
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	suite.NoError(err)
+
+	// Hard delete it once
+	err = suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+		ID: types.MustParse(collectionID),
+	})
+	suite.NoError(err)
+
+	// Call CleanupSoftDeletedCollection twice - should not error
+	// This is to account for the Cleanup loop deleting the collection twice from separate nodes.
+	err = suite.s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
+		ID: types.MustParse(collectionID),
+	})
+	suite.NoError(err)
+
+	err = suite.s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
+		ID: types.MustParse(collectionID),
+	})
+	suite.NoError(err)
+
 }
 
 func TestCleanupTestSuite(t *testing.T) {

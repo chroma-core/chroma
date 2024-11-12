@@ -216,19 +216,19 @@ func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosit
 	return version, nil
 }
 
-func (s *collectionDb) CheckCollectionIsSoftDeleted(collectionID string, tenantID string, databaseName string) (bool, error) {
+func (s *collectionDb) CheckCollectionIsSoftDeleted(collectionName string, tenantID string, databaseName string) (bool, string, error) {
 	var collection dbmodel.Collection
-	query := s.db.Select("collections.is_deleted").
+	query := s.db.Select("collections.is_deleted, collections.id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("collections.id = ? AND databases.tenant_id = ? AND databases.name = ?",
-			collectionID, tenantID, databaseName)
+		Where("collections.name = ? AND databases.tenant_id = ? AND databases.name = ?",
+			collectionName, tenantID, databaseName)
 
 	err := query.First(&collection).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
+			return false, "", nil
 		}
-		return false, err
+		return false, "", err
 	}
-	return collection.IsDeleted, nil
+	return collection.IsDeleted, collection.ID, nil
 }
