@@ -71,10 +71,18 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
     ) -> Result<PrefetchRecordOutput, PrefetchRecordError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        let record_segment_reader =
-            RecordSegmentReader::from_segment(&input.record_segment, &input.blockfile_provider)
-                .await
-                .map_err(|e| *e)?;
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &input.record_segment,
+            &input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => reader,
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                return Ok(())
+            }
+            Err(e) => return Err((*e).into()),
+        };
 
         let materializer = LogMaterializer::new(
             Some(record_segment_reader.clone()),
