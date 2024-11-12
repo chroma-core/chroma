@@ -365,6 +365,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrrg"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a350fe7fd683a2b1c781ffc8e88b2a3888812fabbc327770828882f0b40fea"
+dependencies = [
+ "arrrg_derive",
+ "getopts",
+]
+
+[[package]]
+name = "arrrg_derive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "289198f9de45cef3ee361c783b8104497e8ef648c853407ebc91aa45750f0721"
+dependencies = [
+ "derive_util",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "assoc"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1023,9 +1045,9 @@ dependencies = [
 
 [[package]]
 name = "biometrics"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22a50124c9be28b92ff57aa4f0d14744de4053b253d3d451b7bc08f989dba6a4"
+checksum = "d497470bfb1e5ade63ac03cd2871ed7ef7c7cc8657ee43b1469e4988e1bafc97"
 dependencies = [
  "sig_fig_histogram",
 ]
@@ -1353,6 +1375,8 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "futures",
+ "futures-core",
+ "guacamole",
  "object_store",
  "parking_lot",
  "rand",
@@ -1831,6 +1855,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_util"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcc793ff4fee33f08b7305ace0b2b5642f7c3000fd111b7c0af3533572494284"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "derive_utils"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2271,9 +2306,9 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfc6580bb841c5a68e9ef15c77ccc837b40a7504914d52e47b8b0e9bbda25a1d"
+checksum = "05f29059c0c2090612e8d742178b0580d2dc940c837851ad723096f87af6663e"
 
 [[package]]
 name = "futures-executor"
@@ -2381,6 +2416,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "getopts"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,6 +2458,17 @@ dependencies = [
  "ff",
  "rand_core",
  "subtle",
+]
+
+[[package]]
+name = "guacamole"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7edce4d0c9e2a7e7fb7d037cf82a57e26379be4e453dd55c813953ba405fb1d1"
+dependencies = [
+ "arrrg",
+ "arrrg_derive",
+ "getopts",
 ]
 
 [[package]]
@@ -5176,9 +5231,9 @@ dependencies = [
 
 [[package]]
 name = "sync42"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f142b8e692a4cc7d1988d8280c5507f5e43a198b4f774aa2b5660632906e212"
+checksum = "89b13d9260de381373a792e01e070de9106315639c38f95b13cd4f93da33e0c6"
 dependencies = [
  "biometrics",
 ]
