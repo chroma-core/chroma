@@ -492,7 +492,7 @@ mod tests {
         let response = reader.count(request).await;
 
         assert!(response.is_err());
-        assert_eq!(response.unwrap_err(), tonic::Code::InvalidArgument);
+        assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
     #[tokio::test]
