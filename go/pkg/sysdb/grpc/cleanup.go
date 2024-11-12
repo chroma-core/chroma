@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"math/rand"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
@@ -16,6 +17,7 @@ type SoftDeleteCleaner struct {
 	cleanupInterval time.Duration
 	maxAge          time.Duration
 	limitPerCheck   uint
+	maxInitialJitter time.Duration
 }
 
 func NewSoftDeleteCleaner(coordinator coordinator.Coordinator, cleanupInterval time.Duration, maxAge time.Duration, limitPerCheck uint) *SoftDeleteCleaner {
@@ -24,6 +26,7 @@ func NewSoftDeleteCleaner(coordinator coordinator.Coordinator, cleanupInterval t
 		cleanupInterval: cleanupInterval,
 		maxAge:          maxAge,
 		limitPerCheck:   limitPerCheck,
+		maxInitialJitter: 5 * time.Second,
 	}
 }
 
@@ -33,10 +36,16 @@ func (s *SoftDeleteCleaner) Start() error {
 }
 
 func (s *SoftDeleteCleaner) run() {
+	// Use configurable jitter instead of hard-coded 5000
+	time.Sleep(time.Duration(rand.Int63n(int64(s.maxInitialJitter.Milliseconds()))) * time.Millisecond)
+	
 	// Periodically check for soft deleted collections and delete them.
 	s.ticker = time.NewTicker(s.cleanupInterval)
 	// Delete only the collections that are older than the max age.
 	for range s.ticker.C {
+		// Add small random jitter (0-1 second) between checks
+		time.Sleep(time.Duration(rand.Int63n(1000)) * time.Millisecond)
+		
 		collections, err := s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", int32(s.limitPerCheck))
 		log.Info("Fetched soft deleted collections", zap.Int("num_collections", len(collections)))
 		if err != nil {

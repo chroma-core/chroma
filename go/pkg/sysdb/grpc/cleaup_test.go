@@ -78,6 +78,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	suite.Equal(2, len(softDeletedCollections))
 
 	// Start the cleaner.
+	suite.s.softDeleteCleaner.maxInitialJitter = 0 * time.Second
 	suite.s.softDeleteCleaner.Start()
 
 	// Wait for cleanup cycle
