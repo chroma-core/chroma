@@ -55,12 +55,12 @@ pub struct CachingObjectStore {
 }
 
 impl CachingObjectStore {
-    pub fn new<C: SafeObjectStore, B: SafeObjectStore>(cache: C, backing: B) -> Self {
+    pub fn new(cache: Arc<dyn SafeObjectStore>, backing: Arc<dyn SafeObjectStore>) -> Self {
         assert!(cache.supports_delete());
         assert!(!backing.supports_delete());
         Self {
-            cache: Arc::new(cache),
-            backing: Arc::new(backing),
+            cache,
+            backing,
             dedupe: Arc::new(StateHashTable::new()),
         }
     }
@@ -210,6 +210,8 @@ impl SafeObjectStore for CachingObjectStore {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use object_store::path::Path;
     use object_store::{ObjectStore, PutMode};
 
@@ -221,8 +223,9 @@ mod tests {
     #[tokio::test]
     async fn empty() {
         let cache = object_store::memory::InMemory::new();
-        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
-        let cached = CachingObjectStore::new(cache, backing);
+        let backing =
+            NonDestructiveObjectStore::new(Arc::new(object_store::memory::InMemory::new()));
+        let cached = CachingObjectStore::new(Arc::new(cache), Arc::new(backing));
         assert!(cached
             .get_opts(&Path::from("test"), Default::default())
             .await
@@ -232,8 +235,9 @@ mod tests {
     #[tokio::test]
     async fn insert() {
         let cache = object_store::memory::InMemory::new();
-        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
-        let cached = CachingObjectStore::new(cache, backing);
+        let backing =
+            NonDestructiveObjectStore::new(Arc::new(object_store::memory::InMemory::new()));
+        let cached = CachingObjectStore::new(Arc::new(cache), Arc::new(backing));
         assert!(cached
             .put_opts(
                 &Path::from("test"),
@@ -258,8 +262,9 @@ mod tests {
     #[tokio::test]
     async fn not_in_cache_but_populates() {
         let cache = object_store::memory::InMemory::new();
-        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
-        let cached = CachingObjectStore::new(cache, backing);
+        let backing =
+            NonDestructiveObjectStore::new(Arc::new(object_store::memory::InMemory::new()));
+        let cached = CachingObjectStore::new(Arc::new(cache), Arc::new(backing));
         assert!(cached
             .backing
             .put_opts(
@@ -301,8 +306,9 @@ mod tests {
     #[tokio::test]
     async fn in_cache_only_still_serves() {
         let cache = object_store::memory::InMemory::new();
-        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
-        let cached = CachingObjectStore::new(cache, backing);
+        let backing =
+            NonDestructiveObjectStore::new(Arc::new(object_store::memory::InMemory::new()));
+        let cached = CachingObjectStore::new(Arc::new(cache), Arc::new(backing));
         assert!(cached
             .cache
             .put_opts(
@@ -361,15 +367,16 @@ mod tests {
         // Use a destructive store and it will panic.
         let backing = object_store::memory::InMemory::new();
         if backing.supports_delete() {
-            let _cached = CachingObjectStore::new(cache, backing);
+            let _cached = CachingObjectStore::new(Arc::new(cache), Arc::new(backing));
         }
     }
 
     #[tokio::test]
     async fn caching_impls_safe() {
         let cache = object_store::memory::InMemory::new();
-        let backing = NonDestructiveObjectStore::new(object_store::memory::InMemory::new());
-        let cached = CachingObjectStore::new(cache, backing);
+        let backing =
+            NonDestructiveObjectStore::new(Arc::new(object_store::memory::InMemory::new()));
+        let cached = CachingObjectStore::new(Arc::new(cache), Arc::new(backing));
         assert!(!cached.supports_delete());
     }
 }

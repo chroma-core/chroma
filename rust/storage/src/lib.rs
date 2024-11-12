@@ -31,6 +31,17 @@ pub enum Storage {
     AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
 }
 
+impl std::fmt::Debug for Storage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Storage::ObjectStore(_) => write!(f, "ObjectStore"),
+            Storage::S3(_) => write!(f, "S3"),
+            Storage::Local(_) => write!(f, "Local"),
+            Storage::AdmissionControlledS3(_) => write!(f, "AdmissionControlledS3"),
+        }
+    }
+}
+
 #[derive(Error, Debug, Clone)]
 pub enum GetError {
     #[error("No such key: {0}")]
@@ -214,6 +225,15 @@ impl Storage {
             }
         }
     }
+
+    pub fn supports_delete(&self) -> bool {
+        match self {
+            Storage::ObjectStore(object_store) => object_store.supports_delete(),
+            Storage::S3(_) => true,
+            Storage::Local(_) => true,
+            Storage::AdmissionControlledS3(_) => true,
+        }
+    }
 }
 
 pub async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn ChromaError>> {
@@ -262,6 +282,12 @@ impl SafeObjectStore for ::object_store::memory::InMemory {
 }
 
 impl SafeObjectStore for ::object_store::local::LocalFileSystem {
+    fn supports_delete(&self) -> bool {
+        true
+    }
+}
+
+impl SafeObjectStore for ::object_store::aws::AmazonS3 {
     fn supports_delete(&self) -> bool {
         true
     }
