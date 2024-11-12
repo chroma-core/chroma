@@ -402,6 +402,7 @@ where
     ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
+            .with_weighter(|_: &_, v: &V| v.weight())
             .build();
         let meter = global::meter("chroma");
         let insert_latency = meter.u64_histogram("insert_latency").init();
@@ -447,6 +448,7 @@ where
 
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
+            .with_weighter(|_: &_, v: &V| v.weight())
             .with_event_listener(Arc::new(evl))
             .build();
         let get_latency = global::meter("chroma").u64_histogram("get_latency").init();
