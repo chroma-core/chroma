@@ -21,6 +21,8 @@ use sync42::lru::{LeastRecentlyUsedCache, Value};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 
+use super::SafeObjectStore;
+
 #[derive(Debug, Clone)]
 struct EvictionStub {
     size: usize,
@@ -34,15 +36,16 @@ impl Value for EvictionStub {
 
 pub struct EvictingObjectStore {
     target_disk_usage: usize,
-    object_store: Arc<dyn ObjectStore>,
+    object_store: Arc<dyn SafeObjectStore>,
     lru: Arc<LeastRecentlyUsedCache<Path, EvictionStub>>,
 }
 
 impl EvictingObjectStore {
-    pub async fn new<O: ObjectStore>(
+    pub async fn new<O: SafeObjectStore>(
         object_store: O,
         target_disk_usage: usize,
     ) -> Result<Self, object_store::Error> {
+        assert!(object_store.supports_delete());
         let object_store = Arc::new(object_store);
         let lru = Arc::new(LeastRecentlyUsedCache::new(1024));
         let mut all_objects = object_store.list(None);
@@ -145,6 +148,12 @@ impl ObjectStore for EvictingObjectStore {
     }
 }
 
+impl SafeObjectStore for EvictingObjectStore {
+    fn supports_delete(&self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use object_store::path::Path;
@@ -225,5 +234,13 @@ mod tests {
             evicting.lru.approximate_size()
         );
         assert!(found >= 64, "{}", found);
+    }
+
+    #[tokio::test]
+    async fn eviction_impls_safe() {
+        let object_store = object_store::memory::InMemory::new();
+        let evicting: &dyn SafeObjectStore =
+            &EvictingObjectStore::new(object_store, 1024).await.unwrap();
+        assert!(evicting.supports_delete());
     }
 }
