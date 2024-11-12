@@ -7,7 +7,7 @@ use super::{
 };
 
 use async_trait::async_trait;
-use chroma_cache::Cache;
+use chroma_cache::{Cache, Weighted};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
@@ -113,6 +113,8 @@ impl HnswIndexProvider {
                     let index = index_ref.inner.read();
                     index.id
                 };
+                let weight = index_ref.weight();
+                tracing::info!("Purging index: {} with weight: {}", index_id, weight);
                 let _ = Self::purge_one_id(&temporary_storage_path, index_id).await;
             }
         })));
