@@ -95,7 +95,12 @@ impl chroma_cache::Weighted for HnswIndexRef {
             return 1;
         }
         let bytes = index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize;
-        bytes / 1024 / 1024 // MB
+        let as_mb = bytes / 1024 / 1024;
+        if as_mb == 0 {
+            1
+        } else {
+            as_mb
+        }
     }
 }
 
