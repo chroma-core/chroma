@@ -95,19 +95,21 @@ impl SpannSegmentWriter {
                             return Err(SpannSegmentWriterError::IndexIdParsingError);
                         }
                     };
-                    let hnsw_params = hnsw_params_from_segment(segment);
-                    (
-                        Some(IndexUuid(index_uuid)),
-                        Some(hnsw_params.m),
-                        Some(hnsw_params.ef_construction),
-                        Some(hnsw_params.ef_search),
-                    )
+                    (Some(IndexUuid(index_uuid)), None, None, None)
                 }
                 None => {
                     return Err(SpannSegmentWriterError::HnswInvalidFilePath);
                 }
             },
-            None => (None, None, None, None),
+            None => {
+                let hnsw_params = hnsw_params_from_segment(segment);
+                (
+                    None,
+                    Some(hnsw_params.m),
+                    Some(hnsw_params.ef_construction),
+                    Some(hnsw_params.ef_search),
+                )
+            }
         };
         let versions_map_id = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_path) => match version_map_path.first() {
@@ -262,5 +264,212 @@ impl SegmentFlusher for SpannSegmentFlusher {
                 Ok(index_id_map)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{collections::HashMap, path::PathBuf};
+
+    use chroma_blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
+    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_distance::DistanceFunction;
+    use chroma_index::{hnsw_provider::HnswIndexProvider, Index};
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{
+        Chunk, CollectionUuid, LogRecord, Metadata, MetadataValue, Operation, OperationRecord,
+        SegmentUuid, SpannPostingList,
+    };
+
+    use crate::segment::{
+        spann_segment::SpannSegmentWriter, LogMaterializer, SegmentFlusher, SegmentWriter,
+    };
+
+    #[tokio::test]
+    async fn test_spann_segment_writer() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmp_dir.path().to_str().unwrap()),
+            hnsw_cache,
+            rx,
+        );
+        let collection_id = CollectionUuid::new();
+        let segment_id = SegmentUuid::new();
+        let mut metadata_hash_map = Metadata::new();
+        metadata_hash_map.insert(
+            "hnsw:space".to_string(),
+            MetadataValue::Str("l2".to_string()),
+        );
+        metadata_hash_map.insert("hnsw:M".to_string(), MetadataValue::Int(16));
+        metadata_hash_map.insert("hnsw:construction_ef".to_string(), MetadataValue::Int(100));
+        metadata_hash_map.insert("hnsw:search_ef".to_string(), MetadataValue::Int(100));
+        let mut spann_segment = chroma_types::Segment {
+            id: segment_id,
+            collection: collection_id,
+            r#type: chroma_types::SegmentType::Spann,
+            scope: chroma_types::SegmentScope::VECTOR,
+            metadata: Some(metadata_hash_map),
+            file_path: HashMap::new(),
+        };
+        let spann_writer = SpannSegmentWriter::from_segment(
+            &spann_segment,
+            &blockfile_provider,
+            &hnsw_provider,
+            3,
+        )
+        .await
+        .expect("Error creating spann segment writer");
+        let data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about cats.")),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about dogs.")),
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let chunked_log = Chunk::new(data.into());
+        // Materialize the logs.
+        let materializer = LogMaterializer::new(None, chunked_log, None);
+        let materialized_log = materializer
+            .materialize()
+            .await
+            .expect("Error materializing logs");
+        spann_writer
+            .apply_materialized_log_chunk(materialized_log)
+            .await
+            .expect("Error applying materialized log");
+        let flusher = spann_writer
+            .commit()
+            .await
+            .expect("Error committing spann writer");
+        spann_segment.file_path = flusher.flush().await.expect("Error flushing spann writer");
+        assert_eq!(spann_segment.file_path.len(), 4);
+        assert!(spann_segment.file_path.contains_key("hnsw_path"));
+        assert!(spann_segment.file_path.contains_key("version_map_path"),);
+        assert!(spann_segment.file_path.contains_key("posting_list_path"),);
+        assert!(spann_segment.file_path.contains_key("max_head_id_path"),);
+        // Load this segment and check if the embeddings are present. New cache
+        // so that the previous cache is not used.
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let hnsw_provider = HnswIndexProvider::new(
+            storage,
+            PathBuf::from(tmp_dir.path().to_str().unwrap()),
+            hnsw_cache,
+            rx,
+        );
+        let spann_writer = SpannSegmentWriter::from_segment(
+            &spann_segment,
+            &blockfile_provider,
+            &hnsw_provider,
+            3,
+        )
+        .await
+        .expect("Error creating spann segment writer");
+        assert_eq!(spann_writer.index.dimensionality, 3);
+        assert_eq!(
+            spann_writer.index.distance_function,
+            DistanceFunction::Euclidean
+        );
+        // Next head id should be 2 since one centroid is already taken up.
+        assert_eq!(
+            spann_writer
+                .index
+                .next_head_id
+                .load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+        let read_guard = spann_writer.index.versions_map.read();
+        assert_eq!(read_guard.versions_map.len(), 2);
+        assert_eq!(
+            *read_guard
+                .versions_map
+                .get(&1)
+                .expect("Doc offset id 1 not found"),
+            1
+        );
+        assert_eq!(
+            *read_guard
+                .versions_map
+                .get(&2)
+                .expect("Doc offset id 2 not found"),
+            1
+        );
+        {
+            // Test HNSW.
+            let hnsw_index = spann_writer.index.hnsw_index.inner.read();
+            assert_eq!(hnsw_index.len(), 1);
+            let r = hnsw_index
+                .get(1)
+                .expect("Expect one centroid")
+                .expect("Expect centroid embedding");
+            assert_eq!(r.len(), 3);
+            assert_eq!(r[0], 1.0);
+            assert_eq!(r[1], 2.0);
+            assert_eq!(r[2], 3.0);
+        }
+        // Test PL.
+        let read_guard = spann_writer.index.posting_list_writer.lock().await;
+        let res = read_guard
+            .get_clone::<u32, &SpannPostingList<'_>>("", 1)
+            .await
+            .expect("Expected posting list to be present")
+            .expect("Expected posting list to be present");
+        assert_eq!(res.0.len(), 2);
+        assert_eq!(res.1.len(), 2);
+        assert_eq!(res.2.len(), 6);
+        assert_eq!(res.0[0], 1);
+        assert_eq!(res.0[1], 2);
+        assert_eq!(res.1[0], 1);
+        assert_eq!(res.1[1], 1);
+        assert_eq!(res.2[0], 1.0);
+        assert_eq!(res.2[1], 2.0);
+        assert_eq!(res.2[2], 3.0);
+        assert_eq!(res.2[3], 4.0);
+        assert_eq!(res.2[4], 5.0);
+        assert_eq!(res.2[5], 6.0);
     }
 }

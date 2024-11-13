@@ -23,25 +23,26 @@ use crate::{
 
 // TODO(Sanket): Add locking structures as necessary.
 pub struct VersionsMapInner {
-    versions_map: HashMap<u32, u32>,
+    pub versions_map: HashMap<u32, u32>,
 }
 
 #[allow(dead_code)]
+// The structures inside are public for testing.
 pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
-    hnsw_index: HnswIndexRef,
+    pub hnsw_index: HnswIndexRef,
     hnsw_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
     // TODO(Sanket): For now the lock is very coarse grained. But this should
     // be changed in future.
-    posting_list_writer: Arc<Mutex<BlockfileWriter>>,
-    next_head_id: Arc<AtomicU32>,
+    pub posting_list_writer: Arc<Mutex<BlockfileWriter>>,
+    pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future.
-    versions_map: Arc<RwLock<VersionsMapInner>>,
-    distance_function: DistanceFunction,
-    dimensionality: usize,
+    pub versions_map: Arc<RwLock<VersionsMapInner>>,
+    pub distance_function: DistanceFunction,
+    pub dimensionality: usize,
 }
 
 #[derive(Error, Debug)]
