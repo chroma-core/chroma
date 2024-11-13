@@ -83,9 +83,9 @@ impl SpannPostingListSizeTracker {
         value: &<&chroma_types::SpannPostingList<'_> as ArrowWriteableValue>::PreparedValue,
     ) {
         let (doc_offset_ids, doc_versions, doc_embeddings) = value;
-        self.doc_offset_ids_size += std::mem::size_of_val(doc_offset_ids);
-        self.doc_versions_size += std::mem::size_of_val(doc_versions);
-        self.doc_embeddings_size += std::mem::size_of_val(doc_embeddings);
+        self.doc_offset_ids_size += doc_offset_ids.len() * 4;
+        self.doc_versions_size += doc_versions.len() * 4;
+        self.doc_embeddings_size += doc_embeddings.len() * 4;
         self.embedding_dimension = Some(doc_embeddings.len() / doc_offset_ids.len());
     }
 
@@ -94,9 +94,9 @@ impl SpannPostingListSizeTracker {
         value: &<&chroma_types::SpannPostingList<'_> as ArrowWriteableValue>::PreparedValue,
     ) {
         let (doc_offset_ids, doc_versions, doc_embeddings) = value;
-        self.doc_offset_ids_size -= std::mem::size_of_val(doc_offset_ids);
-        self.doc_versions_size -= std::mem::size_of_val(doc_versions);
-        self.doc_embeddings_size -= std::mem::size_of_val(doc_embeddings);
+        self.doc_offset_ids_size -= doc_offset_ids.len() * 4;
+        self.doc_versions_size -= doc_versions.len() * 4;
+        self.doc_embeddings_size -= doc_embeddings.len() * 4;
     }
 
     pub fn increment_item_count(&mut self) {

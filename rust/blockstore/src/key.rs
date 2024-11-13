@@ -27,9 +27,9 @@ impl KeyWrapper {
         match self {
             // TOOD: use key trait if possible
             KeyWrapper::String(s) => s.len(),
-            KeyWrapper::Float32(_) => std::mem::size_of::<f32>(),
-            KeyWrapper::Bool(_) => std::mem::size_of::<bool>(),
-            KeyWrapper::Uint32(_) => std::mem::size_of::<u32>(),
+            KeyWrapper::Float32(_) => 4,
+            KeyWrapper::Bool(_) => 1,
+            KeyWrapper::Uint32(_) => 4,
         }
     }
 }

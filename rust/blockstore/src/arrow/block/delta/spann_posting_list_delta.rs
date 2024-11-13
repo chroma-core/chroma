@@ -112,16 +112,12 @@ impl SpannPostingListDelta {
 
         // Account for offsets.
         let num_elts = read_guard.storage.len();
-        let prefix_offset_size =
-            bit_util::round_upto_multiple_of_64((num_elts + 1) * std::mem::size_of::<i32>());
+        let prefix_offset_size = bit_util::round_upto_multiple_of_64((num_elts + 1) * 4);
         let key_offset_size = K::offset_size(num_elts);
-        let doc_offset_ids_offset_size =
-            bit_util::round_upto_multiple_of_64((num_elts + 1) * std::mem::size_of::<i32>());
-        let doc_versions_offset_size =
-            bit_util::round_upto_multiple_of_64((num_elts + 1) * std::mem::size_of::<i32>());
+        let doc_offset_ids_offset_size = bit_util::round_upto_multiple_of_64((num_elts + 1) * 4);
+        let doc_versions_offset_size = bit_util::round_upto_multiple_of_64((num_elts + 1) * 4);
         // validity bitmap for fixed size embeddings list not required since it is not null.
-        let doc_embeddings_offset_size =
-            bit_util::round_upto_multiple_of_64((num_elts + 1) * std::mem::size_of::<i32>());
+        let doc_embeddings_offset_size = bit_util::round_upto_multiple_of_64((num_elts + 1) * 4);
         prefix_size
             + key_size
             + doc_offset_ids_size
@@ -148,19 +144,15 @@ impl SpannPostingListDelta {
 
             let cumulative_count = size_up_to_split_key.get_num_items();
 
-            let prefix_offset_size = bit_util::round_upto_multiple_of_64(
-                (cumulative_count + 1) * std::mem::size_of::<i32>(),
-            );
+            let prefix_offset_size =
+                bit_util::round_upto_multiple_of_64((cumulative_count + 1) * 4);
             let key_offset_size = K::offset_size(cumulative_count);
-            let doc_offset_ids_offset_size = bit_util::round_upto_multiple_of_64(
-                (cumulative_count + 1) * std::mem::size_of::<i32>(),
-            );
-            let doc_versions_offset_size = bit_util::round_upto_multiple_of_64(
-                (cumulative_count + 1) * std::mem::size_of::<i32>(),
-            );
-            let doc_embeddings_offset_size = bit_util::round_upto_multiple_of_64(
-                (cumulative_count + 1) * std::mem::size_of::<i32>(),
-            );
+            let doc_offset_ids_offset_size =
+                bit_util::round_upto_multiple_of_64((cumulative_count + 1) * 4);
+            let doc_versions_offset_size =
+                bit_util::round_upto_multiple_of_64((cumulative_count + 1) * 4);
+            let doc_embeddings_offset_size =
+                bit_util::round_upto_multiple_of_64((cumulative_count + 1) * 4);
             let total_size =
                 bit_util::round_upto_multiple_of_64(size_up_to_split_key.get_prefix_size())
                     + bit_util::round_upto_multiple_of_64(size_up_to_split_key.get_key_size())
