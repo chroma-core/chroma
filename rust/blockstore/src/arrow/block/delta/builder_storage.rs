@@ -1,7 +1,6 @@
 use crate::{arrow::types::ArrowWriteableValue, key::CompositeKey};
 use std::collections::BTreeMap;
 
-#[derive(Debug)]
 pub struct BTreeBuilderStorage<V: ArrowWriteableValue> {
     storage: BTreeMap<CompositeKey, V>,
 }
@@ -54,7 +53,6 @@ impl<V: ArrowWriteableValue> Default for BTreeBuilderStorage<V> {
     }
 }
 
-#[derive(Debug)]
 /// This storage assumes that KV pairs are added in order. Deletes are a no-op. Calling `.add()` with the same key more than once is not allowed.
 pub struct VecBuilderStorage<V: ArrowWriteableValue> {
     storage: Vec<(CompositeKey, V)>,
@@ -110,7 +108,6 @@ impl<V: ArrowWriteableValue> Default for VecBuilderStorage<V> {
     }
 }
 
-#[derive(Debug)]
 pub enum BuilderStorage<V: ArrowWriteableValue> {
     BTreeBuilderStorage(BTreeBuilderStorage<V>),
     VecBuilderStorage(VecBuilderStorage<V>),
