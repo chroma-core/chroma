@@ -74,7 +74,7 @@ pub enum FilterError {
     MetadataReader(#[from] MetadataSegmentError),
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderCreationError),
-    #[error("Could not get records: {0}")]
+    #[error("Error getting record: {0}")]
     GetError(Box<dyn ChromaError>),
 }
 
