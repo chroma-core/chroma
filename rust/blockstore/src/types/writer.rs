@@ -80,7 +80,7 @@ impl BlockfileWriter {
         }
     }
 
-    pub async fn get_clone<
+    pub async fn get_owned<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,
     >(
@@ -91,7 +91,7 @@ impl BlockfileWriter {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(_) => todo!(),
             BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
-                writer.get_clone::<K, V>(prefix, key).await
+                writer.get_owned::<K, V>(prefix, key).await
             }
             BlockfileWriter::ArrowOrderedBlockfileWriter(_) => todo!(),
         }

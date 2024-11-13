@@ -464,7 +464,7 @@ mod test {
         // Test PL.
         let read_guard = spann_writer.index.posting_list_writer.lock().await;
         let res = read_guard
-            .get_clone::<u32, &SpannPostingList<'_>>("", 1)
+            .get_owned::<u32, &SpannPostingList<'_>>("", 1)
             .await
             .expect("Expected posting list to be present")
             .expect("Expected posting list to be present");

@@ -377,7 +377,7 @@ impl SpannIndexWriter {
             // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
             // deletes it.
             let current_pl = write_guard
-                .get_clone::<u32, &SpannPostingList<'_>>("", head_id)
+                .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
                 .await
                 .map_err(|_| SpannIndexWriterConstructionError::PostingListSearchError)?
                 .ok_or(SpannIndexWriterConstructionError::PostingListSearchError)?;
