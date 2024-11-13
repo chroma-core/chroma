@@ -276,9 +276,13 @@ impl SpannIndexWriter {
                     .read::<&str, u32>(max_head_id_bf_id)
                     .await;
                 match reader {
-                    Ok(reader) => reader.get("", MAX_HEAD_OFFSET_ID).await.map_err(|_| {
-                        SpannIndexWriterConstructionError::BlockfileReaderConstructionError
-                    })?,
+                    Ok(reader) => reader
+                        .get("", MAX_HEAD_OFFSET_ID)
+                        .await
+                        .map_err(|_| {
+                            SpannIndexWriterConstructionError::BlockfileReaderConstructionError
+                        })?
+                        .unwrap(),
                     Err(_) => 1,
                 }
             }
