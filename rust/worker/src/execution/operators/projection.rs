@@ -141,11 +141,10 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                 // The offset id is in the record segment
                 None => {
                     if let Some(reader) = &record_segment_reader {
-                        let Some(record) = reader.get_data_for_offset_id(*offset_id).await? else {
-                            // NOTE(rescrv): This is a bit of a hack.  It's the error type we
-                            // returned on NotFound for the offset id.  Preserving behavior.
-                            return Err(ProjectionError::RecordSegmentUninitialized);
-                        };
+                        let record = reader
+                            .get_data_for_offset_id(*offset_id)
+                            .await?
+                            .ok_or(ProjectionError::RecordSegmentUninitialized)?;
                         ProjectionRecord {
                             id: record.id.to_string(),
                             document: record
