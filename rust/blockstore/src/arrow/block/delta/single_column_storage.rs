@@ -250,7 +250,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             )
             .into_inner();
 
-        let mut value_builder = V::get_arrow_builder(inner.size_tracker);
+        let mut value_builder = V::get_arrow_builder(inner.size_tracker.clone());
 
         let storage = inner.storage;
         for (key, value) in storage.into_iter() {
@@ -259,7 +259,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         }
 
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-        let (value_field, value_arr) = V::finish(value_builder);
+        let (value_field, value_arr) = V::finish(value_builder, &inner.size_tracker);
         let schema = arrow::datatypes::Schema::new(vec![prefix_field, key_field, value_field]);
 
         if let Some(metadata) = metadata {

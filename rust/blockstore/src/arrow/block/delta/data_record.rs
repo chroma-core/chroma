@@ -258,7 +258,8 @@ impl DataRecordStorage {
 
         // Build arrow key with fields.
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-        let (struct_field, value_arr) = <&DataRecord as ArrowWriteableValue>::finish(value_builder);
+        let (struct_field, value_arr) =
+            <&DataRecord as ArrowWriteableValue>::finish(value_builder, &inner.size_tracker);
 
         let schema = Arc::new(arrow::datatypes::Schema::new(vec![
             prefix_field,

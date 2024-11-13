@@ -71,7 +71,7 @@ impl ArrowWriteableValue for Vec<u32> {
         builder.append(true);
     }
 
-    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder, _: &Self::SizeTracker) -> (Field, Arc<dyn Array>) {
         let value_field = Field::new(
             "value",
             arrow::datatypes::DataType::List(Arc::new(Field::new(

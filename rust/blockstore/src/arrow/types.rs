@@ -41,7 +41,10 @@ pub trait ArrowWriteableValue: Value {
     /// Given only a prepared value (not a K/V pair), append it to an Arrow builder. This is called during delta serialization when it's being turned into an Arrow array.
     fn append(value: Self::PreparedValue, builder: &mut Self::ArrowBuilder);
     /// Finish an Arrow builder and return the Arrow array and its corresponding field.
-    fn finish(builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>);
+    fn finish(
+        builder: Self::ArrowBuilder,
+        size_tracker: &Self::SizeTracker,
+    ) -> (Field, Arc<dyn Array>);
 }
 
 pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {

@@ -126,7 +126,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         builder.document_builder.append_option(document);
     }
 
-    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder, _: &Self::SizeTracker) -> (Field, Arc<dyn Array>) {
         let id_field = Field::new("id", arrow::datatypes::DataType::Utf8, true);
         let embedding_field = Field::new(
             "embedding",
