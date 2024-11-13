@@ -21,13 +21,12 @@ use crate::{
     Index, IndexUuid,
 };
 
-// TODO(Sanket): Add locking structures as necessary.
 pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
 }
 
 #[allow(dead_code)]
-// The structures inside are public for testing.
+// Note: Fields of this struct are public for testing.
 pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
     pub hnsw_index: HnswIndexRef,
@@ -35,11 +34,11 @@ pub struct SpannIndexWriter {
     blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
     // TODO(Sanket): For now the lock is very coarse grained. But this should
-    // be changed in future.
+    // be changed in future if perf is not satisfactory.
     pub posting_list_writer: Arc<Mutex<BlockfileWriter>>,
     pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
-    // TODO(Sanket): Finer grained locking for this map in future.
+    // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
     pub versions_map: Arc<RwLock<VersionsMapInner>>,
     pub distance_function: DistanceFunction,
     pub dimensionality: usize,
@@ -47,11 +46,11 @@ pub struct SpannIndexWriter {
 
 #[derive(Error, Debug)]
 pub enum SpannIndexWriterConstructionError {
-    #[error("HNSW index construction error")]
+    #[error("Error creating/forking hnsw index")]
     HnswIndexConstructionError,
-    #[error("Blockfile reader construction error")]
+    #[error("Error creating blockfile reader")]
     BlockfileReaderConstructionError,
-    #[error("Blockfile writer construction error")]
+    #[error("Error creating/forking blockfile writer")]
     BlockfileWriterConstructionError,
     #[error("Error loading version data from blockfile")]
     BlockfileVersionDataLoadError,
@@ -88,7 +87,7 @@ impl ChromaError for SpannIndexWriterConstructionError {
 
 const MAX_HEAD_OFFSET_ID: &str = "max_head_offset_id";
 
-// TODO(Sanket): Make this configurable.
+// TODO(Sanket): Make these configurable.
 #[allow(dead_code)]
 const NUM_CENTROIDS_TO_SEARCH: u32 = 64;
 #[allow(dead_code)]

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::spann::types::{SpannIndexFlusher, SpannIndexWriterConstructionError};
+use chroma_index::spann::types::SpannIndexFlusher;
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::SegmentUuid;
@@ -17,17 +17,14 @@ use super::{
     MaterializedLogRecord, SegmentFlusher, SegmentWriter,
 };
 
-#[allow(dead_code)]
 const HNSW_PATH: &str = "hnsw_path";
-#[allow(dead_code)]
 const VERSION_MAP_PATH: &str = "version_map_path";
-#[allow(dead_code)]
 const POSTING_LIST_PATH: &str = "posting_list_path";
 const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
-#[allow(dead_code)]
 pub(crate) struct SpannSegmentWriter {
     index: SpannIndexWriter,
+    #[allow(dead_code)]
     id: SegmentUuid,
 }
 
@@ -35,20 +32,26 @@ pub(crate) struct SpannSegmentWriter {
 pub enum SpannSegmentWriterError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Distance function not found")]
+    #[error("Segment metadata does not contain distance function")]
     DistanceFunctionNotFound,
-    #[error("Hnsw index id parsing error")]
+    #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
-    #[error("Hnsw Invalid file path")]
+    #[error("Invalid file path for HNSW index")]
     HnswInvalidFilePath,
-    #[error("Version map Invalid file path")]
+    #[error("Invalid file path for version map")]
     VersionMapInvalidFilePath,
-    #[error("Postings list invalid file path")]
+    #[error("Invalid file path for posting list")]
     PostingListInvalidFilePath,
-    #[error("Max head id invalid file path")]
+    #[error("Invalid file path for max head id")]
     MaxHeadIdInvalidFilePath,
-    #[error("Spann index creation error")]
-    SpannIndexWriterConstructionError,
+    #[error("Error constructing spann index writer")]
+    SpannSegmentWriterCreateError,
+    #[error("Error adding record to spann index writer")]
+    SpannSegmentWriterAddRecordError,
+    #[error("Error committing spann index writer")]
+    SpannSegmentWriterCommitError,
+    #[error("Error flushing spann index writer")]
+    SpannSegmentWriterFlushError,
     #[error("Not implemented")]
     NotImplemented,
 }
@@ -62,9 +65,12 @@ impl ChromaError for SpannSegmentWriterError {
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
-            Self::SpannIndexWriterConstructionError => ErrorCodes::Internal,
+            Self::SpannSegmentWriterCreateError => ErrorCodes::Internal,
             Self::MaxHeadIdInvalidFilePath => ErrorCodes::Internal,
             Self::NotImplemented => ErrorCodes::Internal,
+            Self::SpannSegmentWriterCommitError => ErrorCodes::Internal,
+            Self::SpannSegmentWriterFlushError => ErrorCodes::Internal,
+            Self::SpannSegmentWriterAddRecordError => ErrorCodes::Internal,
         }
     }
 }
@@ -182,7 +188,7 @@ impl SpannSegmentWriter {
         {
             Ok(index_writer) => index_writer,
             Err(_) => {
-                return Err(SpannSegmentWriterError::SpannIndexWriterConstructionError);
+                return Err(SpannSegmentWriterError::SpannSegmentWriterCreateError);
             }
         };
 
@@ -192,13 +198,11 @@ impl SpannSegmentWriter {
         })
     }
 
-    async fn add(
-        &self,
-        record: &MaterializedLogRecord<'_>,
-    ) -> Result<(), SpannIndexWriterConstructionError> {
+    async fn add(&self, record: &MaterializedLogRecord<'_>) -> Result<(), SpannSegmentWriterError> {
         self.index
             .add(record.offset_id, record.merged_embeddings())
             .await
+            .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
 }
 
@@ -232,9 +236,9 @@ impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
             .index
             .commit()
             .await
-            .map_err(|_| Box::new(SpannSegmentWriterError::SpannIndexWriterConstructionError));
+            .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterCommitError);
         match index_flusher {
-            Err(e) => Err(e),
+            Err(e) => Err(Box::new(e)),
             Ok(index_flusher) => Ok(SpannSegmentFlusher { index_flusher }),
         }
     }
@@ -243,7 +247,11 @@ impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
 #[async_trait]
 impl SegmentFlusher for SpannSegmentFlusher {
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        let index_flusher_res = self.index_flusher.flush().await;
+        let index_flusher_res = self
+            .index_flusher
+            .flush()
+            .await
+            .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterFlushError);
         match index_flusher_res {
             Err(e) => Err(Box::new(e)),
             Ok(index_ids) => {
