@@ -149,6 +149,9 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         }
     }
 
+    /// Splits the storage into two parts. The split point is the first key that exceeds the given size.
+    /// `self` will contain all the keys before the split key.
+    /// The returned storage will contain all the keys starting from the split key.
     pub(super) fn split_before_size<K: ArrowWriteableKey>(
         &self,
         max_size: usize,
@@ -195,7 +198,10 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         (split_key, right)
     }
 
-    // todo: update comment/name params
+    /// Splits the storage into two parts. The split point after the first key that exceeds the given size.
+    /// `self` will contain all the keys before the split key.
+    /// The returned storage will contain all the keys starting from the split key.
+    /// Note that after calling `self.split_after_size(n)`, `self.get_size()` may still be greater than `n`.
     pub(super) fn split_after_size<K: ArrowWriteableKey>(
         &self,
         split_size: usize,
