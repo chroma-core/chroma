@@ -141,7 +141,10 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                 // The offset id is in the record segment
                 None => {
                     if let Some(reader) = &record_segment_reader {
-                        let record = reader.get_data_for_offset_id(*offset_id).await?;
+                        let record = reader
+                            .get_data_for_offset_id(*offset_id)
+                            .await?
+                            .ok_or(ProjectionError::RecordSegmentUninitialized)?;
                         ProjectionRecord {
                             id: record.id.to_string(),
                             document: record

@@ -106,7 +106,16 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                         if let Some(hnsw_result_vectors) = &mut hnsw_result_vectors {
                             let record = reader.get_data_for_offset_id(*offset_id as u32).await;
                             match record {
-                                Ok(record) => hnsw_result_vectors.push(record.embedding.to_vec()),
+                                Ok(Some(record)) => {
+                                    hnsw_result_vectors.push(record.embedding.to_vec())
+                                }
+                                Ok(None) => {
+                                    return Err(Box::new(
+                                        RecordSegmentReaderCreationError::DataRecordNotFound(
+                                            *offset_id as u32,
+                                        ),
+                                    ));
+                                }
                                 Err(e) => return Err(e),
                             }
                         }
@@ -141,6 +150,12 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                         return Err(e);
                     }
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        return Err(e);
+                    }
+                    RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        return Err(e);
+                    }
+                    RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                         return Err(e);
                     }
                     RecordSegmentReaderCreationError::UninitializedSegment => {

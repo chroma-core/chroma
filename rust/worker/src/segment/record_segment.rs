@@ -639,6 +639,12 @@ pub enum RecordSegmentReaderCreationError {
     BlockfileOpenError(#[from] Box<OpenError>),
     #[error("Segment has invalid number of files")]
     InvalidNumberOfFiles,
+    // This case should never happen, so it's internal, but until our APIs rule it out, we have it.
+    #[error("Data record not found (offset id: {0})")]
+    DataRecordNotFound(u32),
+    // This case should never happen, so it's internal, but until our APIs rule it out, we have it.
+    #[error("User record not found (user id: {0})")]
+    UserRecordNotFound(String),
 }
 
 impl ChromaError for RecordSegmentReaderCreationError {
@@ -647,6 +653,8 @@ impl ChromaError for RecordSegmentReaderCreationError {
             RecordSegmentReaderCreationError::BlockfileOpenError(e) => e.code(),
             RecordSegmentReaderCreationError::InvalidNumberOfFiles => ErrorCodes::InvalidArgument,
             RecordSegmentReaderCreationError::UninitializedSegment => ErrorCodes::InvalidArgument,
+            RecordSegmentReaderCreationError::DataRecordNotFound(_) => ErrorCodes::Internal,
+            RecordSegmentReaderCreationError::UserRecordNotFound(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -683,8 +691,8 @@ impl RecordSegmentReader<'_> {
                 };
                 let exising_max_offset_id = match max_offset_id_bf_reader {
                     Some(reader) => match reader.get("", MAX_OFFSET_ID).await {
-                        Ok(max_offset_id) => Arc::new(AtomicU32::new(max_offset_id)),
-                        Err(_) => Arc::new(AtomicU32::new(0)),
+                        Ok(Some(max_offset_id)) => Arc::new(AtomicU32::new(max_offset_id)),
+                        Ok(None) | Err(_) => Arc::new(AtomicU32::new(0)),
                     },
                     None => Arc::new(AtomicU32::new(0)),
                 };
@@ -760,35 +768,45 @@ impl RecordSegmentReader<'_> {
         &self,
         offset_id: u32,
     ) -> Result<&str, Box<dyn ChromaError>> {
-        self.id_to_user_id.get("", offset_id).await
+        match self.id_to_user_id.get("", offset_id).await {
+            Ok(Some(user_id)) => Ok(user_id),
+            Ok(None) => Err(Box::new(
+                RecordSegmentReaderCreationError::UserRecordNotFound(offset_id.to_string()),
+            )),
+            Err(e) => Err(e),
+        }
     }
 
     pub(crate) async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
-    ) -> Result<u32, Box<dyn ChromaError>> {
+    ) -> Result<Option<u32>, Box<dyn ChromaError>> {
         self.user_id_to_id.get("", user_id).await
     }
 
     pub(crate) async fn get_data_for_offset_id(
         &self,
         offset_id: u32,
-    ) -> Result<DataRecord, Box<dyn ChromaError>> {
+    ) -> Result<Option<DataRecord>, Box<dyn ChromaError>> {
         self.id_to_data.get("", offset_id).await
     }
 
     pub(crate) async fn get_data_and_offset_id_for_user_id(
         &self,
         user_id: &str,
-    ) -> Result<(DataRecord, u32), Box<dyn ChromaError>> {
+    ) -> Result<Option<(DataRecord, u32)>, Box<dyn ChromaError>> {
         let offset_id = match self.user_id_to_id.get("", user_id).await {
-            Ok(id) => id,
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                return Ok(None);
+            }
             Err(e) => {
                 return Err(e);
             }
         };
         match self.id_to_data.get("", offset_id).await {
-            Ok(data_record) => Ok((data_record, offset_id)),
+            Ok(Some(data_record)) => Ok(Some((data_record, offset_id))),
+            Ok(None) => Ok(None),
             Err(e) => Err(e),
         }
     }
@@ -801,7 +819,10 @@ impl RecordSegmentReader<'_> {
             return Ok(false);
         }
         let offset_id = match self.user_id_to_id.get("", user_id).await {
-            Ok(id) => id,
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                return Ok(false);
+            }
             Err(e) => {
                 return Err(e);
             }
@@ -819,8 +840,15 @@ impl RecordSegmentReader<'_> {
             let res = self.user_id_to_id.get_at_index(i).await;
             match res {
                 Ok((_, _, offset_id)) => {
-                    let data_record = self.id_to_data.get("", offset_id).await?;
-                    data.push(data_record);
+                    if let Some(data_record) = self.id_to_data.get("", offset_id).await? {
+                        data.push(data_record);
+                    } else {
+                        return Err(
+                            Box::new(RecordSegmentReaderCreationError::DataRecordNotFound(
+                                offset_id,
+                            )) as _,
+                        );
+                    }
                 }
                 Err(e) => {
                     tracing::error!(

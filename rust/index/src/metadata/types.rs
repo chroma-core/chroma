@@ -1,5 +1,8 @@
 use crate::fulltext::types::FullTextIndexError;
-use chroma_blockstore::{key::KeyWrapper, BlockfileFlusher, BlockfileReader, BlockfileWriter};
+use chroma_blockstore::{
+    key::KeyWrapper, types::errors::BlockfileError, BlockfileFlusher, BlockfileReader,
+    BlockfileWriter,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::TryStreamExt;
 use thiserror::Error;
@@ -506,7 +509,10 @@ impl<'me> MetadataIndexReader<'me> {
                         }
                         let rbm = blockfile_reader.get(metadata_key, k).await;
                         match rbm {
-                            Ok(rbm) => Ok(rbm),
+                            Ok(Some(rbm)) => Ok(rbm),
+                            Ok(None) => Err(MetadataIndexError::BlockfileError(Box::new(
+                                BlockfileError::NotFoundError,
+                            ))),
                             Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }
@@ -520,7 +526,10 @@ impl<'me> MetadataIndexReader<'me> {
                     }
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
-                        Ok(rbm) => Ok(rbm),
+                        Ok(Some(rbm)) => Ok(rbm),
+                        Ok(None) => Err(MetadataIndexError::BlockfileError(Box::new(
+                            BlockfileError::NotFoundError,
+                        ))),
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
@@ -533,7 +542,10 @@ impl<'me> MetadataIndexReader<'me> {
                     }
                     let rbm = blockfile_reader.get(metadata_key, *k).await;
                     match rbm {
-                        Ok(rbm) => Ok(rbm),
+                        Ok(Some(rbm)) => Ok(rbm),
+                        Ok(None) => Err(MetadataIndexError::BlockfileError(Box::new(
+                            BlockfileError::NotFoundError,
+                        ))),
                         Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                     }
                 }
@@ -547,7 +559,10 @@ impl<'me> MetadataIndexReader<'me> {
                         }
                         let rbm = blockfile_reader.get(metadata_key, *k).await;
                         match rbm {
-                            Ok(rbm) => Ok(rbm),
+                            Ok(Some(rbm)) => Ok(rbm),
+                            Ok(None) => Err(MetadataIndexError::BlockfileError(Box::new(
+                                BlockfileError::NotFoundError,
+                            ))),
                             Err(e) => Err(MetadataIndexError::BlockfileError(e)),
                         }
                     }

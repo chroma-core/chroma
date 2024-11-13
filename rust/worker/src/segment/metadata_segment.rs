@@ -1184,6 +1184,12 @@ mod test {
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
                     }
                 };
@@ -1472,6 +1478,12 @@ mod test {
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
                     }
                 };
@@ -1719,6 +1731,12 @@ mod test {
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
                     }
                 };
@@ -1933,6 +1951,12 @@ mod test {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
                         }

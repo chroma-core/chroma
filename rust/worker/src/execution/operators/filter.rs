@@ -74,6 +74,8 @@ pub enum FilterError {
     MetadataReader(#[from] MetadataSegmentError),
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderCreationError),
+    #[error("Error getting record: {0}")]
+    GetError(Box<dyn ChromaError>),
 }
 
 impl ChromaError for FilterError {
@@ -83,6 +85,7 @@ impl ChromaError for FilterError {
             FilterError::LogMaterializer(e) => e.code(),
             FilterError::MetadataReader(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
+            FilterError::GetError(e) => e.code(),
         }
     }
 }
@@ -444,11 +447,18 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                 let compact_offset_ids = if let Some(reader) = record_segment_reader {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
-                        if let Ok(offset_id) =
-                            reader.get_offset_id_for_user_id(user_id.as_str()).await
-                        {
-                            offset_ids.insert(offset_id);
-                        }
+                        match reader.get_offset_id_for_user_id(user_id.as_str()).await {
+                            Ok(Some(offset_id)) => {
+                                offset_ids.insert(offset_id);
+                            }
+                            Ok(None) => {
+                                // NOTE(rescrv):  We are filtering by user id, and there is no
+                                // document.  Drop it.
+                            }
+                            Err(e) => {
+                                return Err(FilterError::GetError(e));
+                            }
+                        };
                     }
                     SignedRoaringBitmap::Include(offset_ids)
                 } else {

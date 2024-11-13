@@ -109,6 +109,12 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
+                    RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
                 }
             }
         };
@@ -276,9 +282,13 @@ mod tests {
                                 );
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!(
-                                "Error creating record segment reader. Invalid number of files."
-                            );
+                                panic!("Error creating record segment reader. Invalid number of files.");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
                             }
                         }
                     }

@@ -31,7 +31,7 @@ impl<
         &'referred_data self,
         prefix: &str,
         key: K,
-    ) -> Result<V, Box<dyn ChromaError>> {
+    ) -> Result<Option<V>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key).await,
