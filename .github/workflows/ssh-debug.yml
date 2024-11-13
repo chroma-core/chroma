@@ -3,7 +3,7 @@ name: SSH Debug
 on:
  push:
     branches:
-      - hammad/ssh_into_gh_impl_knn_orch
+      - revert-3106-11-08-_bug_switch_to_old_hnsw_orchestrator
 
 jobs:
   debug:
