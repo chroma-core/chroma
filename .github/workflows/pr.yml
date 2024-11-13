@@ -40,4 +40,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_logs
-          path: *.log
+          path: ~/work/chroma/chroma/*.log
