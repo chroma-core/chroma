@@ -164,8 +164,6 @@ impl OrderedBlockDelta {
         &self,
         max_block_size_bytes: usize,
     ) -> Vec<(CompositeKey, OrderedBlockDelta)> {
-        // let half_size = max_block_size_bytes / 2;
-
         let mut blocks_to_split: Vec<OrderedBlockDelta> = Vec::new();
 
         // Special case for the first split (self) because it's an immutable borrow

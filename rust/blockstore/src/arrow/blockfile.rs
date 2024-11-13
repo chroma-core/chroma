@@ -206,7 +206,7 @@ impl ArrowUnorderedBlockfileWriter {
 
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
-        delta.add(prefix, key.clone(), value);
+        delta.add(prefix, key, value);
 
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
             let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());

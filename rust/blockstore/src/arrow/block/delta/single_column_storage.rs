@@ -14,7 +14,7 @@ use parking_lot::RwLock;
 use std::{collections::HashMap, vec};
 use std::{panic, sync::Arc};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SingleColumnStorage<T: ArrowWriteableValue> {
     mutation_ordering_hint: BlockfileWriterMutationOrdering,
     inner: Arc<RwLock<Inner<T>>>,
@@ -182,8 +182,6 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 split_key = Some(key.clone());
             }
         }
-
-        println!("split key: {:?}", split_key);
 
         let right_size = inner.size_tracker - left_size;
         inner.size_tracker = left_size;
