@@ -269,4 +269,12 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
 
         (schema.into(), vec![prefix_arr, key_arr, value_arr])
     }
+
+    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<V::PreparedValue> {
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        self.inner.read().storage.get(&composite_key)
+    }
 }

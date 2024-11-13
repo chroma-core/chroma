@@ -224,6 +224,68 @@ impl ArrowUnorderedBlockfileWriter {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn get_owned<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+        &self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Option<V::PreparedValue>, Box<dyn ChromaError>> {
+        // TODO: for now the BF writer locks the entire write operation
+        let _guard = self.write_mutex.lock().await;
+
+        // TODO: value must be smaller than the block size except for position lists, which are a special case
+        //  where we split the value across multiple blocks
+
+        // Get the target block id for the key
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+
+        // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
+        // Creating a delta loads the block entirely into memory
+
+        let delta = {
+            let deltas = self.block_deltas.lock();
+            deltas.get(&target_block_id).cloned()
+        };
+
+        let delta = match delta {
+            None => {
+                let block = match self.block_manager.get(&target_block_id).await {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                let new_delta = match self
+                    .block_manager
+                    .fork::<K, V, UnorderedBlockDelta>(&block.id)
+                    .await
+                {
+                    Ok(delta) => delta,
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                let new_id = new_delta.id;
+                // Blocks can be empty.
+                self.root
+                    .sparse_index
+                    .replace_block(target_block_id, new_delta.id);
+                {
+                    let mut deltas = self.block_deltas.lock();
+                    deltas.insert(new_id, new_delta.clone());
+                }
+                new_delta
+            }
+            Some(delta) => delta,
+        };
+
+        Ok(V::get_owned_value_from_delta(prefix, key.into(), &delta))
+    }
+
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,

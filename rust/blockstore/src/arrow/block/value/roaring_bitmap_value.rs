@@ -78,6 +78,17 @@ impl ArrowWriteableValue for RoaringBitmap {
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
         (value_field, value_arr)
     }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
+        match &delta.builder {
+            BlockStorage::RoaringBitmap(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type"),
+        }
+    }
 }
 
 impl ArrowReadableValue<'_> for RoaringBitmap {

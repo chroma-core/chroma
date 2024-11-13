@@ -22,7 +22,7 @@ use crate::{
     BlockfileWriterMutationOrdering,
 };
 
-type SpannPostingListDeltaEntry = (Vec<u32>, Vec<u32>, Vec<f32>);
+pub type SpannPostingListDeltaEntry = (Vec<u32>, Vec<u32>, Vec<f32>);
 
 pub struct SpannPostingListBuilderWrapper {
     doc_offset_ids_builder: ListBuilder<UInt32Builder>,
@@ -179,6 +179,17 @@ impl ArrowWriteableValue for &SpannPostingList<'_> {
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
 
         (value_field, value_arr)
+    }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
+        match &delta.builder {
+            BlockStorage::SpannPostingListDelta(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type"),
+        }
     }
 }
 

@@ -14,6 +14,13 @@ impl<V: ArrowWriteableValue> BTreeBuilderStorage<V> {
         self.storage.remove(key)
     }
 
+    fn get(&self, key: &CompositeKey) -> Option<V::PreparedValue> {
+        if !self.storage.contains_key(key) {
+            return None;
+        }
+        Some(V::prepare(self.storage.get(key).unwrap().clone()))
+    }
+
     fn min_key(&self) -> Option<&CompositeKey> {
         self.storage.keys().next()
     }
@@ -59,6 +66,10 @@ impl<V: ArrowWriteableValue> VecBuilderStorage<V> {
 
     fn delete(&mut self, _: &CompositeKey) -> Option<V> {
         None
+    }
+
+    fn get(&self, _: &CompositeKey) -> Option<V::PreparedValue> {
+        unimplemented!()
     }
 
     fn min_key(&self) -> Option<&CompositeKey> {
@@ -134,6 +145,13 @@ impl<V: ArrowWriteableValue> BuilderStorage<V> {
         match self {
             BuilderStorage::BTreeBuilderStorage(storage) => storage.delete(key),
             BuilderStorage::VecBuilderStorage(storage) => storage.delete(key),
+        }
+    }
+
+    pub fn get(&self, key: &CompositeKey) -> Option<V::PreparedValue> {
+        match self {
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.get(key),
+            BuilderStorage::VecBuilderStorage(storage) => storage.get(key),
         }
     }
 

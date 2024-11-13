@@ -31,11 +31,13 @@ pub struct ValueBuilderWrapper {
     document_builder: StringBuilder,
 }
 
+pub type DataRecordStorageEntry = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
     type ArrowBuilder = ValueBuilderWrapper;
     type SizeTracker = DataRecordSizeTracker;
-    type PreparedValue = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+    type PreparedValue = DataRecordStorageEntry;
 
     fn offset_size(item_count: usize) -> usize {
         let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
@@ -177,6 +179,17 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         let value_arr = (&struct_arr as &dyn Array).slice(0, struct_arr.len());
 
         (struct_field, value_arr)
+    }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
+        match &delta.builder {
+            BlockStorage::DataRecord(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type"),
+        }
     }
 }
 

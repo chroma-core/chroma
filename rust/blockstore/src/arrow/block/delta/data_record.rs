@@ -1,5 +1,6 @@
 use super::data_record_size_tracker::DataRecordSizeTracker;
 use super::BlockKeyArrowBuilder;
+use crate::arrow::block::value::data_record_value::DataRecordStorageEntry;
 use crate::arrow::types::ArrowWriteableValue;
 use crate::{
     arrow::types::ArrowWriteableKey,
@@ -47,6 +48,15 @@ impl DataRecordStorage {
     pub(super) fn get_key_size(&self) -> usize {
         let inner = self.inner.read();
         inner.size_tracker.get_key_size()
+    }
+
+    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<DataRecordStorageEntry> {
+        let inner = self.inner.read();
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        inner.storage.get(&composite_key).cloned()
     }
 
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: &DataRecord<'_>) {
