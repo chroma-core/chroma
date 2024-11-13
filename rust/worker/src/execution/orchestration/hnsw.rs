@@ -104,6 +104,7 @@ impl ChromaError for HnswSegmentQueryError {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct HnswQueryOrchestrator {
     state: ExecutionState,
     // Component Execution
