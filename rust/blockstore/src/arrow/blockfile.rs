@@ -206,7 +206,13 @@ impl ArrowUnorderedBlockfileWriter {
 
         // Add the key, value pair to delta.
         // Then check if its over size and split as needed
-        delta.add(prefix, key, value);
+        delta.add(prefix, key.clone(), value);
+        println!(
+            "set {:?}, {:?}, new size: {}",
+            prefix,
+            key,
+            delta.get_size::<K, V>()
+        );
 
         if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
             let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
@@ -220,6 +226,7 @@ impl ArrowUnorderedBlockfileWriter {
                 deltas.insert(new_delta.id, new_delta);
             }
         }
+        println!("finished set");
 
         Ok(())
     }
@@ -612,9 +619,18 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             return false;
         }
 
+        println!("num of blocks: {}", self.root.sparse_index.len());
+
         for (_, block_id) in self.root.sparse_index.data.forward.iter() {
             match self.get_block(block_id.id).await {
                 Ok(Some(block)) => {
+                    println!(
+                        "block size ratio: {} ({}, {:?})",
+                        block.get_size() as f64 / self.block_manager.max_block_size_bytes() as f64,
+                        block.get_size(),
+                        block_id.id
+                    );
+                    println!("block len: {:?}", block.len());
                     if block.get_size() > self.block_manager.max_block_size_bytes() {
                         return false;
                     }
@@ -1007,7 +1023,7 @@ mod tests {
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
                 assert_eq!(reader.root.sparse_index.len(), 3);
-                assert!(reader.root.sparse_index.is_valid());
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }
@@ -1041,8 +1057,8 @@ mod tests {
         // Sparse index should still have 3 blocks
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert!(reader.is_valid().await);
                 assert_eq!(reader.root.sparse_index.len(), 3);
-                assert!(reader.root.sparse_index.is_valid());
             }
             _ => panic!("Unexpected reader type"),
         }
@@ -1075,7 +1091,7 @@ mod tests {
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
                 assert_eq!(reader.root.sparse_index.len(), 6);
-                assert!(reader.root.sparse_index.is_valid());
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }

@@ -1,6 +1,7 @@
 use crate::{arrow::types::ArrowWriteableValue, key::CompositeKey};
 use std::collections::BTreeMap;
 
+#[derive(Debug)]
 pub struct BTreeBuilderStorage<V: ArrowWriteableValue> {
     storage: BTreeMap<CompositeKey, V>,
 }
@@ -23,14 +24,20 @@ impl<V: ArrowWriteableValue> BTreeBuilderStorage<V> {
         Self { storage: split_off }
     }
 
+    fn pop_last(&mut self) -> Option<(CompositeKey, V)> {
+        self.storage.pop_last()
+    }
+
     fn len(&self) -> usize {
         self.storage.len()
     }
 
     fn iter<'referred_data>(
         &'referred_data self,
-    ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
-    {
+    ) -> Box<
+        dyn DoubleEndedIterator<Item = (&'referred_data CompositeKey, &'referred_data V)>
+            + 'referred_data,
+    > {
         Box::new(self.storage.iter())
     }
 
@@ -47,6 +54,7 @@ impl<V: ArrowWriteableValue> Default for BTreeBuilderStorage<V> {
     }
 }
 
+#[derive(Debug)]
 /// This storage assumes that KV pairs are added in order. Deletes are a no-op. Calling `.add()` with the same key more than once is not allowed.
 pub struct VecBuilderStorage<V: ArrowWriteableValue> {
     storage: Vec<(CompositeKey, V)>,
@@ -72,14 +80,20 @@ impl<V: ArrowWriteableValue> VecBuilderStorage<V> {
         Self { storage: split_off }
     }
 
+    fn pop_last(&mut self) -> Option<(CompositeKey, V)> {
+        self.storage.pop()
+    }
+
     fn len(&self) -> usize {
         self.storage.len()
     }
 
     fn iter<'referred_data>(
         &'referred_data self,
-    ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
-    {
+    ) -> Box<
+        dyn DoubleEndedIterator<Item = (&'referred_data CompositeKey, &'referred_data V)>
+            + 'referred_data,
+    > {
         Box::new(self.storage.iter().map(|(k, v)| (k, v))) // .map transforms from &(k, v) to (&k, &v)
     }
 
@@ -96,6 +110,7 @@ impl<V: ArrowWriteableValue> Default for VecBuilderStorage<V> {
     }
 }
 
+#[derive(Debug)]
 pub enum BuilderStorage<V: ArrowWriteableValue> {
     BTreeBuilderStorage(BTreeBuilderStorage<V>),
     VecBuilderStorage(VecBuilderStorage<V>),
@@ -162,10 +177,19 @@ impl<V: ArrowWriteableValue> BuilderStorage<V> {
         }
     }
 
+    pub fn pop_last(&mut self) -> Option<(CompositeKey, V)> {
+        match self {
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.pop_last(),
+            BuilderStorage::VecBuilderStorage(storage) => storage.pop_last(),
+        }
+    }
+
     pub fn iter<'referred_data>(
         &'referred_data self,
-    ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
-    {
+    ) -> Box<
+        dyn DoubleEndedIterator<Item = (&'referred_data CompositeKey, &'referred_data V)>
+            + 'referred_data,
+    > {
         match self {
             BuilderStorage::BTreeBuilderStorage(storage) => storage.iter(),
             BuilderStorage::VecBuilderStorage(storage) => storage.iter(),

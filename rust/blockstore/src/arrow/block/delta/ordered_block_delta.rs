@@ -164,12 +164,12 @@ impl OrderedBlockDelta {
         &self,
         max_block_size_bytes: usize,
     ) -> Vec<(CompositeKey, OrderedBlockDelta)> {
-        let half_size = max_block_size_bytes / 2;
+        // let half_size = max_block_size_bytes / 2;
 
         let mut blocks_to_split: Vec<OrderedBlockDelta> = Vec::new();
 
         // Special case for the first split (self) because it's an immutable borrow
-        let (new_start_key, new_delta) = self.builder.split::<K>(half_size);
+        let (new_start_key, new_delta) = self.builder.split_before_size::<K>(max_block_size_bytes);
         let new_block = OrderedBlockDelta {
             builder: new_delta,
             id: Uuid::new_v4(),
@@ -185,7 +185,9 @@ impl OrderedBlockDelta {
         let mut output = Vec::new();
         // iterate over all blocks to split until its empty
         while let Some(curr_block) = blocks_to_split.pop() {
-            let (new_start_key, new_delta) = curr_block.builder.split::<K>(half_size);
+            let (new_start_key, new_delta) = curr_block
+                .builder
+                .split_before_size::<K>(max_block_size_bytes);
             let new_block = OrderedBlockDelta {
                 builder: new_delta,
                 id: Uuid::new_v4(),
@@ -211,14 +213,30 @@ impl OrderedBlockDelta {
         output
     }
 
-    pub(crate) fn split_off_half<K: ArrowWriteableKey, V: ArrowWriteableValue>(
-        &mut self,
-    ) -> OrderedBlockDelta {
-        let half_size = self.get_size::<K, V>() / 2;
-        let (_, new_delta) = self.builder.split::<K>(half_size);
+    // pub(crate) fn split_off_half<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    //     &mut self,
+    // ) -> OrderedBlockDelta {
+    //     let half_size = self.get_size::<K, V>() / 2;
+    //     let (_, new_delta) = self.builder.split::<K>(half_size);
+
+    //     let old_block = self.old_block.take();
+
+    //     let new_delta = OrderedBlockDelta {
+    //         builder: new_delta,
+    //         id: Uuid::new_v4(),
+    //         copied_up_to_row_of_old_block: self.copied_up_to_row_of_old_block,
+    //         old_block,
+    //     };
+
+    //     self.copied_up_to_row_of_old_block = 0;
+
+    //     new_delta
+    // }
+
+    pub(crate) fn split_off_last_key(&mut self) -> Option<OrderedBlockDelta> {
+        let (_, new_delta) = self.builder.split_off_last_key()?;
 
         let old_block = self.old_block.take();
-
         let new_delta = OrderedBlockDelta {
             builder: new_delta,
             id: Uuid::new_v4(),
@@ -228,7 +246,7 @@ impl OrderedBlockDelta {
 
         self.copied_up_to_row_of_old_block = 0;
 
-        new_delta
+        Some(new_delta)
     }
 
     pub(crate) fn min_key(&self) -> Option<CompositeKey> {

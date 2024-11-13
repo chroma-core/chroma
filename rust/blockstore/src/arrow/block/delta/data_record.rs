@@ -232,6 +232,31 @@ impl DataRecordStorage {
         (split_info.split_key, drs)
     }
 
+    pub(super) fn split_off_last_key(&self) -> Option<(CompositeKey, DataRecordStorage)> {
+        let mut inner = self.inner.write();
+        let (key, value) = inner.storage.pop_last()?;
+
+        let mut right_size = DataRecordSizeTracker::new();
+        right_size.add_prefix_size(key.prefix.len());
+        right_size.add_key_size(key.key.get_size());
+        right_size.add_value_size(&value);
+        right_size.increment_item_count();
+
+        inner.size_tracker = inner.size_tracker - right_size;
+
+        let mut right_storage = BTreeMap::new();
+        right_storage.insert(key.clone(), value);
+
+        let drs = DataRecordStorage {
+            inner: Arc::new(RwLock::new(Inner {
+                storage: right_storage,
+                size_tracker: right_size,
+            })),
+        };
+
+        Some((key, drs))
+    }
+
     pub(super) fn len(&self) -> usize {
         let inner = self.inner.read();
         inner.storage.len()

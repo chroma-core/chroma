@@ -10,6 +10,7 @@ use super::{
     flusher::ArrowBlockfileFlusher,
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
+use crate::arrow::block::delta::BlockStorage;
 use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
@@ -156,8 +157,28 @@ impl ArrowOrderedBlockfileWriter {
             //
             // An alternative would be to create a fresh delta that does not fork from an existing block if we receive a .set() for a key that is not contained in any existing block key range, however this complicates writing logic and potentially increases fragmentation.
             if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+                println!(
+                    "splitting at commit: size: {}, max size: {}",
+                    delta.get_size::<K, V>(),
+                    self.block_manager.max_block_size_bytes()
+                );
                 let split_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
                 for (split_key, split_delta) in split_blocks {
+                    println!(
+                        "size ratio of left half after split: {} ({}, {:?})",
+                        delta.get_size::<K, V>() as f64
+                            / self.block_manager.max_block_size_bytes() as f64,
+                        delta.get_size::<K, V>(),
+                        delta.id,
+                    );
+                    println!("left delta: {:?}", delta.len());
+                    println!(
+                        "size ratio of right half after split: {} ({}, {:?})",
+                        split_delta.get_size::<K, V>() as f64
+                            / self.block_manager.max_block_size_bytes() as f64,
+                        split_delta.get_size::<K, V>(),
+                        split_delta.id,
+                    );
                     self.root
                         .sparse_index
                         .add_block(split_key, split_delta.id)
@@ -305,7 +326,8 @@ impl ArrowOrderedBlockfileWriter {
                 .current_block_delta
                 .take()
                 .expect("We already checked above that there is a current delta");
-            let new_delta = current_delta.split_off_half::<K, V>();
+
+            let new_delta = current_delta.split_off_last_key().expect("This returns None only if the delta is empty. We just added to the delta, so it is not empty.");
 
             self.root
                 .sparse_index
@@ -484,11 +506,11 @@ mod tests {
             assert_eq!(value, [i]);
         }
 
-        // Sparse index should have 3 blocks
+        // Sparse index should have 2 blocks
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
-                assert_eq!(reader.root.sparse_index.len(), 3);
-                assert!(reader.root.sparse_index.is_valid());
+                assert_eq!(reader.root.sparse_index.len(), 2);
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }
@@ -554,8 +576,8 @@ mod tests {
         // Sparse index should have 6 blocks
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
-                assert_eq!(reader.root.sparse_index.len(), 6);
-                assert!(reader.root.sparse_index.is_valid());
+                assert_eq!(reader.root.sparse_index.len(), 5);
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }

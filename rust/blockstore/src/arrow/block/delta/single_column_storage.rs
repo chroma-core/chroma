@@ -11,11 +11,12 @@ use crate::{
 use arrow::util::bit_util;
 use arrow::{array::Array, datatypes::Schema};
 use parking_lot::RwLock;
-use std::sync::Arc;
 use std::{collections::HashMap, vec};
+use std::{panic, sync::Arc};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SingleColumnStorage<T: ArrowWriteableValue> {
+    mutation_ordering_hint: BlockfileWriterMutationOrdering,
     inner: Arc<RwLock<Inner<T>>>,
 }
 
@@ -44,6 +45,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         };
 
         Self {
+            mutation_ordering_hint,
             inner: Arc::new(RwLock::new(Inner {
                 storage,
                 size_tracker: SingleColumnSizeTracker::new(),
@@ -73,19 +75,23 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
 
     pub(super) fn get_size<K: ArrowWriteableKey>(&self) -> usize {
         let inner = self.inner.read();
+        Self::get_size_of_tracker::<K>(&inner.size_tracker)
+    }
 
-        let prefix_size = inner.size_tracker.get_arrow_padded_prefix_size();
-        let key_size = inner.size_tracker.get_arrow_padded_key_size();
-        let value_size = inner.size_tracker.get_arrow_padded_value_size();
+    fn get_size_of_tracker<K: ArrowWriteableKey>(size_tracker: &SingleColumnSizeTracker) -> usize {
+        let prefix_size = size_tracker.get_arrow_padded_prefix_size();
+        let key_size = size_tracker.get_arrow_padded_key_size();
+        let value_size = size_tracker.get_arrow_padded_value_size();
 
         // offset sizing
         // https://docs.rs/arrow-buffer/52.2.0/arrow_buffer/buffer/struct.OffsetBuffer.html
         // 4 bytes per offset entry, n+1 entries
-        let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
-        let key_offset_bytes: usize = K::offset_size(self.len());
+        let prefix_offset_bytes =
+            bit_util::round_upto_multiple_of_64((size_tracker.get_num_items() + 1) * 4);
+        let key_offset_bytes: usize = K::offset_size(size_tracker.get_num_items());
 
-        let value_offset_bytes = V::offset_size(self.len());
-        let value_validity_bytes = V::validity_size(self.len());
+        let value_offset_bytes = V::offset_size(size_tracker.get_num_items());
+        let value_validity_bytes = V::validity_size(size_tracker.get_num_items());
 
         prefix_size
             + key_size
@@ -143,7 +149,60 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         }
     }
 
-    pub(super) fn split<K: ArrowWriteableKey>(
+    pub(super) fn split_before_size<K: ArrowWriteableKey>(
+        &self,
+        max_size: usize,
+    ) -> (CompositeKey, SingleColumnStorage<V>) {
+        let mut inner = self.inner.write();
+        let mut left_size = inner.size_tracker;
+
+        let mut split_key = None;
+
+        {
+            let mut iter = inner.storage.iter();
+            while let Some((key, value)) = iter.next_back() {
+                let prefix_size = key.prefix.len();
+                let key_size = key.key.get_size();
+                let value_size = value.get_size();
+
+                if Self::get_size_of_tracker::<K>(&left_size) <= max_size {
+                    if split_key.is_none() {
+                        panic!("splitting on first key!!!!!!");
+                        split_key = Some(key.clone());
+                    }
+
+                    break;
+                }
+
+                left_size.subtract_prefix_size(prefix_size);
+                left_size.subtract_key_size(key_size);
+                left_size.subtract_value_size(value_size);
+                left_size.decrement_item_count();
+
+                split_key = Some(key.clone());
+            }
+        }
+
+        println!("split key: {:?}", split_key);
+
+        let right_size = inner.size_tracker - left_size;
+        inner.size_tracker = left_size;
+
+        let right_storage = inner.storage.split_off(&split_key.clone().unwrap()); // todo
+
+        let right = SingleColumnStorage {
+            mutation_ordering_hint: self.mutation_ordering_hint,
+            inner: Arc::new(RwLock::new(Inner {
+                storage: right_storage,
+                size_tracker: right_size,
+            })),
+        };
+
+        (split_key.unwrap(), right)
+    }
+
+    // todo: update comment/name params
+    pub(super) fn split_after_size<K: ArrowWriteableKey>(
         &self,
         split_size: usize,
     ) -> (CompositeKey, SingleColumnStorage<V>) {
@@ -189,6 +248,8 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                             prefix_size -= key.prefix.len();
                             key_size -= key.key.get_size();
                             value_size -= value.get_size();
+                            num_items -= 1;
+
                             Some(key.clone())
                         }
                         Some((next_key, _)) => Some(next_key.clone()),
@@ -224,6 +285,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 (
                     split_key,
                     SingleColumnStorage {
+                        mutation_ordering_hint: self.mutation_ordering_hint,
                         inner: Arc::new(RwLock::new(Inner {
                             storage: new_delta,
                             size_tracker: SingleColumnSizeTracker::with_values(
@@ -237,6 +299,42 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 )
             }
         }
+    }
+
+    pub(super) fn split_off_last_key(&self) -> Option<(CompositeKey, SingleColumnStorage<V>)> {
+        let mut inner = self.inner.write();
+        let (key, value) = inner.storage.pop_last()?;
+        let prefix_size = key.prefix.len();
+        let key_size = key.key.get_size();
+        let value_size = value.get_size();
+
+        let mut right_size = SingleColumnSizeTracker::new();
+        right_size.add_prefix_size(prefix_size);
+        right_size.add_key_size(key_size);
+        right_size.add_value_size(value_size);
+        right_size.increment_item_count();
+
+        inner.size_tracker = inner.size_tracker - right_size;
+
+        let mut right_storage = match self.mutation_ordering_hint {
+            BlockfileWriterMutationOrdering::Unordered => {
+                BuilderStorage::BTreeBuilderStorage(BTreeBuilderStorage::default())
+            }
+            BlockfileWriterMutationOrdering::Ordered => {
+                BuilderStorage::VecBuilderStorage(VecBuilderStorage::default())
+            }
+        };
+        right_storage.add(key.clone(), value.clone());
+
+        let right = SingleColumnStorage {
+            mutation_ordering_hint: self.mutation_ordering_hint,
+            inner: Arc::new(RwLock::new(Inner {
+                storage: right_storage,
+                size_tracker: right_size,
+            })),
+        };
+
+        Some((key, right))
     }
 
     pub(super) fn into_arrow(

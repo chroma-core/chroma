@@ -197,6 +197,7 @@ mod tests {
         fn init_test(
             ref_state: &<Self::Reference as proptest_state_machine::ReferenceStateMachine>::State,
         ) -> Self::SystemUnderTest {
+            println!("starting test case---------------------------------------------------------");
             let storage_dir = tempfile::tempdir().unwrap();
             let storage = Storage::Local(LocalStorage::new(storage_dir.path().to_str().unwrap()));
             let block_cache = new_cache_for_test();
@@ -300,7 +301,7 @@ mod tests {
 
     prop_state_machine! {
         #![proptest_config(Config {
-            // verbose: 2,
+            verbose: 2,
             cases: 1000, // default is 256, we increase it because this test is relatively fast
             max_local_rejects: u32::MAX, // the transition precondition can reject many transitions since mutations must be applied in strictly increasing order in ordered writing mode, so we disable this limit
             ..Config::default()
