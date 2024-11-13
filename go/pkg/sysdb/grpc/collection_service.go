@@ -84,11 +84,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 			res.Created = false
 			if err == common.ErrSegmentUniqueConstraintViolation {
 				log.Error("segment id already exist", zap.Error(err))
-				res.Status = failResponseWithError(err, 409)
-				return res, nil
+				return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 			}
-			res.Status = failResponseWithError(err, errorCode)
-			return res, nil
+			return res, grpcutils.BuildInternalGrpcError(err.Error())
 		}
 		createSegments = append(createSegments, createSegment)
 	}
