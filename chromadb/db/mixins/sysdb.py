@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
 from overrides import override
@@ -33,6 +34,8 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SqlSysDB(SqlDB, SysDB):
