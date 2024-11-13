@@ -166,11 +166,6 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 let value_size = value.get_size();
 
                 if Self::get_size_of_tracker::<K>(&left_size) <= max_size {
-                    if split_key.is_none() {
-                        panic!("splitting on first key!!!!!!");
-                        split_key = Some(key.clone());
-                    }
-
                     break;
                 }
 
@@ -186,8 +181,9 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         let right_size = inner.size_tracker - left_size;
         inner.size_tracker = left_size;
 
-        let right_storage = inner.storage.split_off(&split_key.clone().unwrap()); // todo
+        let split_key = split_key.expect("A storage should have at least one element to be split.");
 
+        let right_storage = inner.storage.split_off(&split_key);
         let right = SingleColumnStorage {
             mutation_ordering_hint: self.mutation_ordering_hint,
             inner: Arc::new(RwLock::new(Inner {
@@ -196,7 +192,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             })),
         };
 
-        (split_key.unwrap(), right)
+        (split_key, right)
     }
 
     // todo: update comment/name params
