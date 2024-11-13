@@ -422,22 +422,24 @@ mod test {
                 .load(std::sync::atomic::Ordering::SeqCst),
             2
         );
-        let read_guard = spann_writer.index.versions_map.read();
-        assert_eq!(read_guard.versions_map.len(), 2);
-        assert_eq!(
-            *read_guard
-                .versions_map
-                .get(&1)
-                .expect("Doc offset id 1 not found"),
-            1
-        );
-        assert_eq!(
-            *read_guard
-                .versions_map
-                .get(&2)
-                .expect("Doc offset id 2 not found"),
-            1
-        );
+        {
+            let read_guard = spann_writer.index.versions_map.read();
+            assert_eq!(read_guard.versions_map.len(), 2);
+            assert_eq!(
+                *read_guard
+                    .versions_map
+                    .get(&1)
+                    .expect("Doc offset id 1 not found"),
+                1
+            );
+            assert_eq!(
+                *read_guard
+                    .versions_map
+                    .get(&2)
+                    .expect("Doc offset id 2 not found"),
+                1
+            );
+        }
         {
             // Test HNSW.
             let hnsw_index = spann_writer.index.hnsw_index.inner.read();
