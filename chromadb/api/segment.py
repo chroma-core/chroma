@@ -221,11 +221,13 @@ class SegmentAPI(ServerAPI):
             database=database,
             dimension=None,
         )
+
         # TODO: Let sysdb create the collection directly from the model
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
+            segments=[], # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -233,9 +235,8 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
-        # TODO: wrap sysdb call in try except and log error if it fails
         if created:
-            segments = self._manager.create_segments(coll)
+            segments = self._manager.prepare_segments_for_new_collection(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
         else:

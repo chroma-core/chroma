@@ -152,6 +152,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self, request: CreateSegmentRequest, context: grpc.ServicerContext
     ) -> CreateSegmentResponse:
         segment = from_proto_segment(request.segment)
+        return self.CreateSegmentHelper(segment, context)
+
+    def CreateSegmentHelper(self, segment: Segment, context: grpc.ServicerContext) -> CreateSegmentResponse:
         if segment["id"].hex in self._segments:
             context.abort(
                 grpc.StatusCode.ALREADY_EXISTS,
@@ -288,6 +291,12 @@ class GrpcMockSysDB(SysDBServicer, Component):
             version=0,
         )
         collections[request.id] = new_collection
+        
+        # Create segments for the collection
+        for segment_proto in request.segments:
+            segment = from_proto_segment(segment_proto)
+            self.CreateSegmentHelper(segment, context)
+
         return CreateCollectionResponse(
             collection=to_proto_collection(new_collection),
             created=True,
