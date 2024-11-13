@@ -136,6 +136,24 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
                             ),
                         );
                     }
+                    RecordSegmentReaderCreationError::DataRecordNotFound(c) => {
+                        tracing::error!(
+                            "Error creating record segment reader: offset {} not found",
+                            c
+                        );
+                        return Err(
+                            WriteSegmentsOperatorError::LogMaterializationPreparationError(*e),
+                        );
+                    }
+                    RecordSegmentReaderCreationError::UserRecordNotFound(ref c) => {
+                        tracing::error!(
+                            "Error creating record segment reader: user {} not found",
+                            c
+                        );
+                        return Err(
+                            WriteSegmentsOperatorError::LogMaterializationPreparationError(*e),
+                        );
+                    }
                 };
             }
         };

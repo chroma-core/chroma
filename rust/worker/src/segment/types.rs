@@ -11,7 +11,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::record_segment::{
+    ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
+};
 
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
@@ -478,11 +480,20 @@ impl<'me> LogMaterializer<'me> {
                             .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
                             .await
                         {
-                            Ok((data_record, offset_id)) => {
+                            Ok(Some((data_record, offset_id))) => {
                                 existing_id_to_materialized.insert(
                                     log_record.record.id.as_str(),
                                     MaterializedLogRecord::from((data_record, offset_id)),
                                 );
+                            }
+                            Ok(None) => {
+                                return Err(LogMaterializerError::RecordSegment(Box::new(
+                                    RecordSegmentReaderCreationError::UserRecordNotFound(format!(
+                                        "not found: {}",
+                                        log_record.record.id,
+                                    )),
+                                )
+                                    as _));
                             }
                             Err(e) => {
                                 return Err(LogMaterializerError::RecordSegment(e));
@@ -888,6 +899,12 @@ mod tests {
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
                     }
                 };
@@ -1181,6 +1198,12 @@ mod tests {
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                         }
                     }
                 };
@@ -1464,6 +1487,12 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
                         }
@@ -1768,6 +1797,12 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
                         }

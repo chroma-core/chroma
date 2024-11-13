@@ -438,10 +438,10 @@ mod tests {
 
         let reader = blockfile_provider.read::<&str, &[u32]>(&id).await.unwrap();
 
-        let value = reader.get(prefix_1, key1).await.unwrap();
+        let value = reader.get(prefix_1, key1).await.unwrap().unwrap();
         assert_eq!(value, [1, 2, 3]);
 
-        let value = reader.get(prefix_2, key2).await.unwrap();
+        let value = reader.get(prefix_2, key2).await.unwrap().unwrap();
         assert_eq!(value, [4, 5, 6]);
     }
 
@@ -480,7 +480,7 @@ mod tests {
 
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).await.unwrap();
+            let value = reader.get("key", &key).await.unwrap().unwrap();
             assert_eq!(value, [i]);
         }
 
@@ -514,7 +514,7 @@ mod tests {
             .unwrap();
         for i in 0..5 {
             let key = format!("{:05}", i);
-            let value = reader.get("key", &key).await.unwrap();
+            let value = reader.get("key", &key).await.unwrap().unwrap();
             assert_eq!(value, [i]);
         }
 
@@ -547,7 +547,7 @@ mod tests {
             .unwrap();
         for i in n..n * 2 {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).await.unwrap();
+            let value = reader.get("key", &key).await.unwrap().unwrap();
             assert_eq!(value, [i]);
         }
 
@@ -596,8 +596,8 @@ mod tests {
         flusher.flush::<&str, String>().await.unwrap();
 
         let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
-        let val_1 = reader.get("key", "1").await.unwrap();
-        let val_2 = reader.get("key", "2").await.unwrap();
+        let val_1 = reader.get("key", "1").await.unwrap().unwrap();
+        let val_2 = reader.get("key", "2").await.unwrap().unwrap();
 
         assert_eq!(val_1, val_1_small);
         assert_eq!(val_2, val_2_large);
@@ -637,7 +637,7 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
-            assert_eq!(value, format!("{:04}", i));
+            assert_eq!(value, Some(format!("{:04}", i).as_str()));
         }
 
         let writer = blockfile_provider
@@ -665,10 +665,10 @@ mod tests {
         for i in 0..n {
             let key = format!("{:04}", i);
             if deleted_keys.contains(&i) {
-                assert!(reader.get("key", &key).await.is_err());
+                assert!(matches!(reader.get("key", &key).await, Ok(None)));
             } else {
                 let value = reader.get("key", &key).await.unwrap();
-                assert_eq!(value, format!("{:04}", i));
+                assert_eq!(value, Some(format!("{:04}", i).as_str()));
             }
         }
     }
@@ -730,7 +730,7 @@ mod tests {
 
         for i in delete_end..n {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).await.unwrap();
+            let value = reader.get("key", &key).await.unwrap().unwrap();
             assert_eq!(value, [i]);
         }
 
@@ -758,7 +758,7 @@ mod tests {
 
         for i in 0..n {
             let key = format!("{:04}", i);
-            let value = reader.get("key", &key).await.unwrap();
+            let value = reader.get("key", &key).await.unwrap().unwrap();
             assert_eq!(value, &[i]);
         }
     }
@@ -887,8 +887,8 @@ mod tests {
             BlockfileReader::ArrowBlockfileReader(reader) => reader,
             _ => panic!("Unexpected reader type"),
         };
-        assert_eq!(reader.get("prefix", "a").await.unwrap(), "value_a");
-        assert_eq!(reader.get("prefix", "f").await.unwrap(), "value_b");
+        assert_eq!(reader.get("prefix", "a").await.unwrap(), Some("value_a"));
+        assert_eq!(reader.get("prefix", "f").await.unwrap(), Some("value_b"));
         assert_eq!(reader.count().await.unwrap(), 2);
         assert_eq!(reader.root.version, Version::V1);
 
