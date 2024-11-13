@@ -58,6 +58,8 @@ func (s *Server) ResetState(context.Context, *emptypb.Empty) (*coordinatorpb.Res
 func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.CreateCollectionRequest) (*coordinatorpb.CreateCollectionResponse, error) {
 	res := &coordinatorpb.CreateCollectionResponse{}
 
+	log.Info("CreateCollectionRequest", zap.Any("request", req))
+
 	createCollection, err := convertToCreateCollectionModel(req)
 	if err != nil {
 		log.Error("CreateCollection failed. error converting to create collection model", zap.Error(err), zap.String("collection_id", req.Id), zap.String("collection_name", req.Name))
