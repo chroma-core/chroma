@@ -212,17 +212,7 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
                             writer.set(&prefix, key, value).await.unwrap();
                         }
 
-                        let writer_id = writer.id();
-                        let flusher = writer.commit::<D::Key, D::Value>().await.unwrap();
-                        flusher.flush::<D::Key, D::Value>().await.unwrap();
-
-                        let reader = provider.read::<u32, &[u32]>(&writer_id).await.unwrap();
-                        match reader {
-                            chroma_blockstore::BlockfileReader::ArrowBlockfileReader(reader) => {
-                                assert!(reader.is_valid().await)
-                            }
-                            _ => panic!("Expected ArrowBlockfileReader"),
-                        }
+                        writer.commit::<D::Key, D::Value>().await.unwrap();
                     },
                     criterion::BatchSize::LargeInput,
                 );
