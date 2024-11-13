@@ -188,7 +188,6 @@ class SqlSysDB(SqlDB, SysDB):
                     segment["metadata"],
                 )
             except Exception as e:
-                logger.error(f"Error inserting segment metadata: {e}")
                 raise
 
 
