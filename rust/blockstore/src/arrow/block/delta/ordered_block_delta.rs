@@ -213,6 +213,8 @@ impl OrderedBlockDelta {
         output
     }
 
+    /// Splits the block delta into two block deltas. The split point is the last key.
+    /// Returns None if the block delta is empty.
     pub(crate) fn split_off_last_key(&mut self) -> Option<OrderedBlockDelta> {
         let (_, new_delta) = self.builder.split_off_last_key()?;
 

@@ -301,6 +301,10 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         }
     }
 
+    /// Splits the storage into two parts. The split point is the last key.
+    /// The left part will contain all the keys except the last key.
+    /// The right part will contain a single entry; the last key.
+    /// Returns None if the storage is empty.
     pub(super) fn split_off_last_key(&self) -> Option<(CompositeKey, SingleColumnStorage<V>)> {
         let mut inner = self.inner.write();
         let (key, value) = inner.storage.pop_last()?;

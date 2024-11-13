@@ -241,12 +241,9 @@ impl BlockStorage {
         }
     }
 
+    /// Splits the block delta into two block deltas. The split point is the last key.
+    /// Returns None if the block delta is empty.
     pub fn split_off_last_key(&mut self) -> Option<(CompositeKey, BlockStorage)> {
-        // There must be at least one key to split off
-        if self.len() < 1 {
-            return None;
-        }
-
         match self {
             BlockStorage::String(builder) => {
                 let (key, storage) = builder.split_off_last_key()?;
