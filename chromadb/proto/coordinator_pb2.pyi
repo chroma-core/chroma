@@ -144,16 +144,16 @@ class CreateCollectionResponse(_message.Message):
     def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., created: bool = ...) -> None: ...
 
 class DeleteCollectionRequest(_message.Message):
-    __slots__ = ("id", "tenant", "database", "with_segments")
+    __slots__ = ("id", "tenant", "database", "segment_ids")
     ID_FIELD_NUMBER: _ClassVar[int]
     TENANT_FIELD_NUMBER: _ClassVar[int]
     DATABASE_FIELD_NUMBER: _ClassVar[int]
-    WITH_SEGMENTS_FIELD_NUMBER: _ClassVar[int]
+    SEGMENT_IDS_FIELD_NUMBER: _ClassVar[int]
     id: str
     tenant: str
     database: str
-    with_segments: bool
-    def __init__(self, id: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., with_segments: bool = ...) -> None: ...
+    segment_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, id: _Optional[str] = ..., tenant: _Optional[str] = ..., database: _Optional[str] = ..., segment_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class DeleteCollectionResponse(_message.Message):
     __slots__ = ()
