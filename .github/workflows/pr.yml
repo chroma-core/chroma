@@ -163,3 +163,32 @@ jobs:
       with:
         jobs: ${{ toJSON(needs) }}
         allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests
+
+  debug:
+    strategy:
+        matrix:
+          python: ['3.12']
+          platform: [ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+      - name: Install Tilt
+        shell: bash
+        run: |
+          TILT_VERSION="0.33.3"
+          curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
+            tar -xzv -C /usr/local/bin tilt
+      - name: Install ctlptlc
+        shell: bash
+        run: |
+          CTLPTL_VERSION="0.8.20"
+          curl -fsSL https://github.com/tilt-dev/ctlptl/releases/download/v$CTLPTL_VERSION/ctlptl.$CTLPTL_VERSION.linux.x86_64.tar.gz | \
+            tar -xzv -C /usr/local/bin ctlptl
+      - name: Set up kind
+        shell: bash
+        run: ctlptl create cluster kind --registry=ctlptl-registry
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
