@@ -106,7 +106,11 @@ class SysDB(Component):
 
     @abstractmethod
     def delete_collection(
-        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+        segments: Optional[Sequence[UUID]] = None,
     ) -> None:
         """Delete a collection, all associated segments and any associate resources (log stream)
         from the SysDB and the system at large."""

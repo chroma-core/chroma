@@ -191,11 +191,9 @@ class SqlSysDB(SqlDB, SysDB):
                     segment["metadata"],
                 )
             except Exception as e:
-                logger.error(f"Error inserting segment metadata: {e}")
                 raise
 
 
-    # TODO(rohit): Investigate and remove this method completely.
     @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
     @override
     def create_segment(self, segment: Segment) -> None:
@@ -492,6 +490,10 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def delete_segment(self, collection: UUID, id: UUID) -> None:
         """Delete a segment from the SysDB"""
+        with self.tx() as cur:
+            self.delete_segment_with_tx(cur, collection, id)
+
+    def delete_segment_with_tx(self, cur: Cursor, collection: UUID, id: UUID) -> None:
         add_attributes_to_current_span(
             {
                 "segment_id": str(id),
@@ -504,13 +506,12 @@ class SqlSysDB(SqlDB, SysDB):
             .where(t.id == ParameterValue(self.uuid_to_db(id)))
             .delete()
         )
-        with self.tx() as cur:
-            # no need for explicit del from metadata table because of ON DELETE CASCADE
-            sql, params = get_sql(q, self.parameter_format())
-            sql = sql + " RETURNING id"
-            result = cur.execute(sql, params).fetchone()
-            if not result:
-                raise NotFoundError(f"Segment {id} not found")
+        sql, params = get_sql(q, self.parameter_format())
+        # no need for explicit del from metadata table because of ON DELETE CASCADE
+        sql = sql + " RETURNING id"
+        result = cur.execute(sql, params).fetchone()
+        if not result:
+            raise NotFoundError(f"Segment {id} not found")
 
     @trace_method("SqlSysDB.delete_collection", OpenTelemetryGranularity.ALL)
     @override
@@ -519,6 +520,7 @@ class SqlSysDB(SqlDB, SysDB):
         id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        segments: Optional[Sequence[UUID]] = None,
     ) -> None:
         """Delete a collection and all associated segments from the SysDB. Deletes
         the log stream for this collection as well."""
@@ -550,6 +552,11 @@ class SqlSysDB(SqlDB, SysDB):
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
+            # Delete segments if provided.
+            if segments:
+                for segment in segments:
+                    self.delete_segment_with_tx(cur, id, segment)
+
         self._producer.delete_log(result[0])
 
     @trace_method("SqlSysDB.update_segment", OpenTelemetryGranularity.ALL)

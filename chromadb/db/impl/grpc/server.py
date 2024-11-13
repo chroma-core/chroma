@@ -290,13 +290,22 @@ class GrpcMockSysDB(SysDBServicer, Component):
             tenant=tenant,
             version=0,
         )
-        collections[request.id] = new_collection
         
+        # Check that segments are unique and do not already exist
+        # Keep a track of the segments that are being added
+        segments_added = []
         # Create segments for the collection
         for segment_proto in request.segments:
             segment = from_proto_segment(segment_proto)
+            if segment["id"].hex in self._segments:
+                # Remove the already added segment since we need to roll back
+                for s in segments_added:
+                    self.DeleteSegment(DeleteSegmentRequest(id=s["id"].hex), context)
+                context.abort(grpc.StatusCode.ALREADY_EXISTS, f"Segment {segment['id']} already exists")
             self.CreateSegmentHelper(segment, context)
+            segments_added.append(segment)
 
+        collections[request.id] = new_collection
         return CreateCollectionResponse(
             collection=to_proto_collection(new_collection),
             created=True,
@@ -316,6 +325,10 @@ class GrpcMockSysDB(SysDBServicer, Component):
         collections = self._tenants_to_databases_to_collections[tenant][database]
         if collection_id in collections:
             del collections[collection_id]
+            segment_ids = [UUID(hex=id) for id in request.segment_ids] if request.segment_ids else None
+            if segment_ids: # Delete segments if provided.
+                for segment_id in segment_ids:
+                    del self._segments[segment_id.hex]
             return DeleteCollectionResponse()
         else:
             context.abort(
