@@ -671,7 +671,9 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
                 self.num_write_tasks -= 1;
                 if self.num_write_tasks == 0 {
                     let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
-                        self.get_segment_writers().await.unwrap(); // todo
+                        self.writers
+                            .clone()
+                            .expect("Invariant violation. Writers not set.");
 
                     self.flush_s3(
                         record_segment_writer.clone(),
