@@ -69,4 +69,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_${{ matrix.attempt }}
-          path: ~/work/chroma/chroma/**/*.log
+          path: |
+            ~/work/chroma/chroma/**/*.log
+            ~/tmp/*
