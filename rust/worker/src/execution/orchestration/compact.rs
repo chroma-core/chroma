@@ -104,6 +104,12 @@ pub struct CompactOrchestrator {
     curr_max_offset_id: Arc<AtomicU32>,
     max_compaction_size: usize,
     max_partition_size: usize,
+    // Populated during compaction
+    writers: Option<(
+        RecordSegmentWriter,
+        Box<DistributedHNSWSegmentWriter>,
+        MetadataSegmentWriter<'static>,
+    )>,
 }
 
 #[derive(Error, Debug)]
@@ -197,6 +203,7 @@ impl CompactOrchestrator {
             curr_max_offset_id,
             max_compaction_size,
             max_partition_size,
+            writers: None,
         }
     }
 
@@ -420,6 +427,10 @@ impl CompactOrchestrator {
         ),
         Box<dyn ChromaError>,
     > {
+        if let Some(writer) = &self.writers {
+            return Ok(writer.clone());
+        }
+
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
@@ -542,6 +553,12 @@ impl CompactOrchestrator {
                 return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
             }
         };
+
+        self.writers = Some((
+            record_segment_writer.clone(),
+            hnsw_segment_writer.clone(),
+            mt_segment_writer.clone(),
+        ));
 
         Ok((
             record_segment_writer,
