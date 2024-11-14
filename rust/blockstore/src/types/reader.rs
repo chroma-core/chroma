@@ -131,11 +131,4 @@ impl<
             }
         }
     }
-
-    pub async fn get_all_data(&'referred_data self) -> Vec<(&'referred_data str, K, V)> {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(_) => todo!(),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_all_data().await,
-        }
-    }
 }

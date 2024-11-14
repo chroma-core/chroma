@@ -682,25 +682,6 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
         true
     }
-
-    pub async fn get_all_data(&'me self) -> Vec<(&'me str, K, V)> {
-        let block_ids = self.root.sparse_index.get_all_block_ids();
-        let mut result = vec![];
-        for block_id in block_ids {
-            let block = match self.get_block(block_id).await {
-                Ok(Some(block)) => block,
-                Ok(None) => {
-                    continue;
-                }
-                Err(_) => {
-                    continue;
-                }
-            };
-
-            result.extend(block.get_all_data());
-        }
-        result
-    }
 }
 
 #[cfg(test)]

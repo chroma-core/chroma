@@ -33,6 +33,8 @@ pub enum SpannIndexWriterConstructionError {
     BlockfileReaderConstructionError,
     #[error("Blockfile writer construction error")]
     BlockfileWriterConstructionError,
+    #[error("Error loading version data from blockfile")]
+    BlockfileVersionDataLoadError,
 }
 
 impl ChromaError for SpannIndexWriterConstructionError {
@@ -41,6 +43,7 @@ impl ChromaError for SpannIndexWriterConstructionError {
             Self::HnswIndexConstructionError => ErrorCodes::Internal,
             Self::BlockfileReaderConstructionError => ErrorCodes::Internal,
             Self::BlockfileWriterConstructionError => ErrorCodes::Internal,
+            Self::BlockfileVersionDataLoadError => ErrorCodes::Internal,
         }
     }
 }
@@ -114,8 +117,11 @@ impl SpannIndexWriter {
             }
         };
         // Load data using the reader.
-        let versions_data = reader.get_all_data().await;
-        versions_data.iter().for_each(|(_, key, value)| {
+        let versions_data = reader
+            .get_range(.., ..)
+            .await
+            .map_err(|_| SpannIndexWriterConstructionError::BlockfileVersionDataLoadError)?;
+        versions_data.iter().for_each(|(key, value)| {
             versions_map.insert(*key, *value);
         });
         Ok(versions_map)

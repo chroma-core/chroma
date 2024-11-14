@@ -321,10 +321,6 @@ impl SparseIndexReader {
         get_target_block(search_key, forward).id
     }
 
-    pub(super) fn get_all_block_ids(&self) -> Vec<Uuid> {
-        self.data.forward.values().map(|v| v.id).collect()
-    }
-
     /// Get all the block ids that contain keys in the given input search keys
     pub(super) fn get_all_target_block_ids(&self, mut search_keys: Vec<CompositeKey>) -> Vec<Uuid> {
         // Sort so that we can search in one iteration.
