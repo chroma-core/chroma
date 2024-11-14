@@ -41,3 +41,241 @@ jobs:
         with:
           name: test_logs
           path: ~/work/chroma/chroma/*.log
+
+  test-embeddings-0:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["depot-ubuntu-22.04-16"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: 3.12
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: normal
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          # Output the logs zip file path as a job output
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get-logs.outputs.artifact_name }}
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+
+  test-embeddings-1:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["depot-ubuntu-22.04-16"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: 3.12
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: normal
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          # Output the logs zip file path as a job output
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get-logs.outputs.artifact_name }}
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+
+  test-embeddings-2:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["depot-ubuntu-22.04-16"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: 3.12
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: normal
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          # Output the logs zip file path as a job output
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get-logs.outputs.artifact_name }}
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+
+  test-embeddings-3:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["depot-ubuntu-22.04-16"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: 3.12
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: normal
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          # Output the logs zip file path as a job output
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get-logs.outputs.artifact_name }}
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+
+  test-embeddings-4:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["depot-ubuntu-22.04-16"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: 3.12
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: normal
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          # Output the logs zip file path as a job output
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get-logs.outputs.artifact_name }}
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+
+  test-embeddings-5:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["depot-ubuntu-22.04-16"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: 3.12
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: normal
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          # Output the logs zip file path as a job output
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get-logs.outputs.artifact_name }}
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+
+  test-embeddings-6:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["depot-ubuntu-22.04-16"]
+        test-globs: ["chromadb/test/property/test_embeddings.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: 3.12
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: normal
+      - name: Get logs of all services
+        id: get-logs
+        if: success() || failure()
+        run: |
+          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          # Output the logs zip file path as a job output
+          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+        shell: bash
+      - name: Upload logs as artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get-logs.outputs.artifact_name }}
+          path: ${{ steps.get-logs.outputs.logs_zip_path }}
