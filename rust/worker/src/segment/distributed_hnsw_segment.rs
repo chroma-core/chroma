@@ -47,11 +47,11 @@ pub enum DistributedHNSWSegmentFromSegmentError {
     InvalidUUID,
     #[error("HNSW segment uninitialized")]
     Uninitialized,
-    #[error("HNSW index provider open error")]
+    #[error("HNSW index provider open error: {0}")]
     HnswIndexProviderOpenError(#[from] HnswIndexProviderOpenError),
-    #[error("HNSW index provider fork error")]
+    #[error("HNSW index provider fork error: {0}")]
     HnswIndexProviderForkError(#[from] HnswIndexProviderForkError),
-    #[error("HNSW index provider create error")]
+    #[error("HNSW index provider create error: {0}")]
     HnswIndexProviderCreateError(#[from] HnswIndexProviderCreateError),
     #[error("Error extracting distance function")]
     DistanceFunctionError(#[from] DistanceFunctionError),
