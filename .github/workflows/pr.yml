@@ -53,25 +53,21 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()
-        run: |
-          bin/get-logs.sh "test_embeddngs_state" "3"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log_0" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
+        run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          name: test_embeddings_log_0
+          path: ~/work/chroma/chroma/*.log
 
   test-embeddings-1:
     strategy:
@@ -84,25 +80,21 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()
-        run: |
-          bin/get-logs.sh "test_embeddngs_state" "3"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log_1" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
+        run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          name: test_embeddings_log_1
+          path: ~/work/chroma/chroma/*.log
 
   test-embeddings-2:
     strategy:
@@ -115,25 +107,21 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()
-        run: |
-          bin/get-logs.sh "test_embeddngs_state" "3"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log_2" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
+        run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          name: test_embeddings_log_2
+          path: ~/work/chroma/chroma/*.log
 
   test-embeddings-3:
     strategy:
@@ -146,25 +134,21 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()
-        run: |
-          bin/get-logs.sh "test_embeddngs_state" "3"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log_3" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
+        run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          name: test_embeddings_log_3
+          path: ~/work/chroma/chroma/*.log
 
   test-embeddings-4:
     strategy:
@@ -177,25 +161,21 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()
-        run: |
-          bin/get-logs.sh "test_embeddngs_state" "3"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log_4" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
+        run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          name: test_embeddings_log_4
+          path: ~/work/chroma/chroma/*.log
 
   test-embeddings-5:
     strategy:
@@ -208,25 +188,21 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()
-        run: |
-          bin/get-logs.sh "test_embeddngs_state" "3"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log_5" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
+        run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          name: test_embeddings_log_5
+          path: ~/work/chroma/chroma/*.log
 
   test-embeddings-6:
     strategy:
@@ -239,22 +215,18 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
         if: success() || failure()
-        run: |
-          bin/get-logs.sh "test_embeddngs_state" "3"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log_6" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
+        run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          name: test_embeddings_log_6
+          path: ~/work/chroma/chroma/*.log
