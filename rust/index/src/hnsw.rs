@@ -51,17 +51,6 @@ impl ChromaError for HnswIndexFromSegmentError {
 }
 
 impl HnswIndexConfig {
-    pub fn new_default() -> Self {
-        HnswIndexConfig {
-            max_elements: DEFAULT_MAX_ELEMENTS,
-            m: DEFAULT_HNSW_M,
-            ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
-            ef_search: DEFAULT_HNSW_EF_SEARCH,
-            random_seed: 0,
-            persist_path: "".to_string(),
-        }
-    }
-
     pub fn new(
         m: usize,
         ef_construction: usize,
