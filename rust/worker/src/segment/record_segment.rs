@@ -333,6 +333,10 @@ impl ChromaError for ApplyMaterializedLogError {
 }
 
 impl SegmentWriter for RecordSegmentWriter {
+    fn get_name(&self) -> &'static str {
+        "RecordSegmentWriter"
+    }
+
     async fn apply_materialized_log_chunk<'referred_data>(
         &self,
         records: Chunk<MaterializedLogRecord<'referred_data>>,

@@ -174,7 +174,8 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
             .segment_writer
             .apply_materialized_log_chunk(res.clone())
             .instrument(tracing::trace_span!(
-                "Apply materialized logs to record segment"
+                "Apply materialized logs",
+                segment = input.segment_writer.get_name()
             ))
             .await
         {

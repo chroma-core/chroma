@@ -239,6 +239,10 @@ impl DistributedHNSWSegmentWriter {
 }
 
 impl SegmentWriter for DistributedHNSWSegmentWriter {
+    fn get_name(&self) -> &'static str {
+        "DistributedHNSWSegmentWriter"
+    }
+
     async fn apply_materialized_log_chunk(
         &self,
         records: chroma_types::Chunk<super::MaterializedLogRecord<'_>>,
@@ -302,6 +306,10 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
 }
 
 impl SegmentWriter for Box<DistributedHNSWSegmentWriter> {
+    fn get_name(&self) -> &'static str {
+        self.as_ref().get_name()
+    }
+
     async fn apply_materialized_log_chunk(
         &self,
         records: chroma_types::Chunk<super::MaterializedLogRecord<'_>>,

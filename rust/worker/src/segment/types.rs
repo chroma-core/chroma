@@ -789,6 +789,7 @@ impl<'me> LogMaterializer<'me> {
 // This needs to be public for testing
 #[allow(async_fn_in_trait)]
 pub trait SegmentWriter {
+    fn get_name(&self) -> &'static str;
     fn apply_materialized_log_chunk(
         &self,
         records: Chunk<MaterializedLogRecord>,
