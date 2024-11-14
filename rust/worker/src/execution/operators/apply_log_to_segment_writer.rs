@@ -81,9 +81,7 @@ impl<Writer: SegmentWriter> ApplyLogToSegmentWriterInput<Writer> {
 }
 
 #[derive(Debug)]
-pub struct ApplyLogToSegmentWriterOutput {
-    // pub(crate) segment_writer: Writer,
-}
+pub struct ApplyLogToSegmentWriterOutput {}
 
 #[async_trait]
 impl<Writer: SegmentWriter + Send + Sync + Clone>

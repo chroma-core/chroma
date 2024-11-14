@@ -266,8 +266,8 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn dispatch_segment_writer<
-        Writer: SegmentWriter + Clone + Send + Sync + std::fmt::Debug + 'static, // todo
+    async fn dispatch_apply_log_to_segment_writer_task<
+        Writer: SegmentWriter + Clone + Send + Sync + std::fmt::Debug + 'static,
     >(
         &mut self,
         segment_writer: Writer,
@@ -327,21 +327,21 @@ impl CompactOrchestrator {
 
         self.num_write_tasks = partitions.len() as i32 * 3;
         for partition in partitions.iter() {
-            self.dispatch_segment_writer(
+            self.dispatch_apply_log_to_segment_writer_task(
                 record_segment_writer.clone(),
                 self_address.clone(),
                 partition.clone(),
             )
             .await;
 
-            self.dispatch_segment_writer(
+            self.dispatch_apply_log_to_segment_writer_task(
                 hnsw_segment_writer.clone(),
                 self_address.clone(),
                 partition.clone(),
             )
             .await;
 
-            self.dispatch_segment_writer(
+            self.dispatch_apply_log_to_segment_writer_task(
                 metadata_segment_writer.clone(),
                 self_address.clone(),
                 partition.clone(),
