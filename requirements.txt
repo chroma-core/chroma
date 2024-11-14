@@ -2,7 +2,7 @@ bcrypt>=4.0.1
 chroma-hnswlib==0.7.6
 fastapi>=0.95.2
 graphlib_backport==1.0.3; python_version < '3.9'
-grpcio>=1.66.1
+grpcio>=1.58.0
 httpx>=0.27.0
 importlib-resources
 kubernetes>=28.1.0
@@ -17,7 +17,6 @@ orjson>=3.9.12, < 3.10.6 # 3.10.7 is currently missing a wheel for x86 glibc
 overrides>=7.3.1
 posthog>=2.4.0
 pydantic>=1.9
-protobuf>=5.26.1,<6.0dev
 pypika>=0.48.9
 PyYAML>=6.0.0
 rich>=10.11.0
