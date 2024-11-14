@@ -530,10 +530,10 @@ impl<'me> MetadataSegmentWriter<'me> {
     }
 }
 
-impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
+impl SegmentWriter for MetadataSegmentWriter<'_> {
     async fn apply_materialized_log_chunk(
         &self,
-        records: Chunk<MaterializedLogRecord<'log_records>>,
+        records: Chunk<MaterializedLogRecord<'_>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         let mut count = 0u64;
         let full_text_writer_batch = records.iter().filter_map(|record| {

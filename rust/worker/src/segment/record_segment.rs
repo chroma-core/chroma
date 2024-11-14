@@ -332,10 +332,10 @@ impl ChromaError for ApplyMaterializedLogError {
     }
 }
 
-impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
-    async fn apply_materialized_log_chunk(
+impl SegmentWriter for RecordSegmentWriter {
+    async fn apply_materialized_log_chunk<'referred_data>(
         &self,
-        records: Chunk<MaterializedLogRecord<'a>>,
+        records: Chunk<MaterializedLogRecord<'referred_data>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         let mut count = 0u64;
         for (log_record, _) in records.iter() {

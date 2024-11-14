@@ -238,10 +238,10 @@ impl DistributedHNSWSegmentWriter {
     }
 }
 
-impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
+impl SegmentWriter for DistributedHNSWSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
+        records: chroma_types::Chunk<super::MaterializedLogRecord<'_>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         for (record, _) in records.iter() {
             match record.final_operation {
@@ -298,6 +298,19 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
             Ok(_) => Ok(self),
             Err(e) => Err(e),
         }
+    }
+}
+
+impl SegmentWriter for Box<DistributedHNSWSegmentWriter> {
+    async fn apply_materialized_log_chunk(
+        &self,
+        records: chroma_types::Chunk<super::MaterializedLogRecord<'_>>,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        self.as_ref().apply_materialized_log_chunk(records).await
+    }
+
+    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+        DistributedHNSWSegmentWriter::commit(*self).await
     }
 }
 
