@@ -63,7 +63,7 @@ jobs:
         run: |
           bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log_0" >> $GITHUB_OUTPUT
           echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
@@ -94,7 +94,7 @@ jobs:
         run: |
           bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log_1" >> $GITHUB_OUTPUT
           echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
@@ -125,7 +125,7 @@ jobs:
         run: |
           bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log_2" >> $GITHUB_OUTPUT
           echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
@@ -156,7 +156,7 @@ jobs:
         run: |
           bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log_3" >> $GITHUB_OUTPUT
           echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
@@ -187,7 +187,7 @@ jobs:
         run: |
           bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log_4" >> $GITHUB_OUTPUT
           echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
@@ -218,7 +218,7 @@ jobs:
         run: |
           bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log_5" >> $GITHUB_OUTPUT
           echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
@@ -249,7 +249,7 @@ jobs:
         run: |
           bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log_6" >> $GITHUB_OUTPUT
           echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
