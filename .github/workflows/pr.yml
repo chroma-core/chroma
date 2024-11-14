@@ -40,7 +40,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_logs
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
 
   test-embeddings-0:
     strategy:
@@ -53,7 +53,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
@@ -67,7 +67,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_0
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
 
   test-embeddings-1:
     strategy:
@@ -80,7 +80,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
@@ -94,7 +94,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_1
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
 
   test-embeddings-2:
     strategy:
@@ -107,7 +107,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
@@ -121,7 +121,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_2
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
 
   test-embeddings-3:
     strategy:
@@ -134,7 +134,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
@@ -148,7 +148,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_3
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
 
   test-embeddings-4:
     strategy:
@@ -161,7 +161,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
@@ -175,7 +175,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_4
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
 
   test-embeddings-5:
     strategy:
@@ -188,7 +188,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
@@ -202,7 +202,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_5
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
 
   test-embeddings-6:
     strategy:
@@ -215,7 +215,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"' > test_stdout.log
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
@@ -229,4 +229,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test_embeddings_log_6
-          path: ~/work/chroma/chroma/*.log
+          path: ~/work/chroma/chroma/**/*.log
