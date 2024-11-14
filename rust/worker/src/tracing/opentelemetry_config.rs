@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
@@ -67,7 +69,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // Prepare trace config.
     let trace_config = opentelemetry_sdk::trace::Config::default()
         .with_sampler(ChromaShouldSample)
-        .with_resource(resource);
+        .with_resource(resource.clone());
     // Prepare exporter.
     let exporter = opentelemetry_otlp::new_exporter()
         .tonic()
@@ -161,8 +163,16 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
 
         prev_hook(panic_info);
     }));
+    let mut metadata = tonic::metadata::MetadataMap::new();
+    metadata.insert(
+        "service.name",
+        // SAFETY(rescrv):  This will always be ascii in practice.  If it fails we will have a
+        // clear path to fixing it.
+        tonic::metadata::AsciiMetadataValue::from_str(service_name).unwrap(),
+    );
     let exporter = opentelemetry_otlp::new_exporter()
         .tonic()
+        .with_metadata(metadata)
         .with_endpoint(otel_endpoint);
     let provider = opentelemetry_otlp::new_pipeline()
         .metrics(opentelemetry_sdk::runtime::Tokio)
