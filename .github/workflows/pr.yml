@@ -8,9 +8,9 @@ on:
 jobs:
   debug:
     strategy:
-        matrix:
-          python: ['3.12']
-          platform: [ubuntu-latest]
+      matrix:
+        python: ['3.12']
+        platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
@@ -42,9 +42,11 @@ jobs:
           name: test_logs
           path: ~/work/chroma/chroma/**/*.log
 
-  test-embeddings-0:
+  test-embeddings:
     strategy:
       fail-fast: false
+      matrix:
+        attempt: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k']
     runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
@@ -59,174 +61,12 @@ jobs:
           PROPERTY_TESTING_PRESET: normal
       - name: Get logs of all services
         id: get-logs
-        if: success() || failure()
+        if: failure()
         run: bin/get-logs.sh
         shell: bash
       - name: Upload logs as artifact
-        if: success() || failure()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test_embeddings_log_0
-          path: ~/work/chroma/chroma/**/*.log
-
-  test-embeddings-1:
-    strategy:
-      fail-fast: false
-    runs-on: depot-ubuntu-22.04-16
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: 3.12
-      - uses: ./.github/actions/tilt
-      - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: normal
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: bin/get-logs.sh
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test_embeddings_log_1
-          path: ~/work/chroma/chroma/**/*.log
-
-  test-embeddings-2:
-    strategy:
-      fail-fast: false
-    runs-on: depot-ubuntu-22.04-16
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: 3.12
-      - uses: ./.github/actions/tilt
-      - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: normal
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: bin/get-logs.sh
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test_embeddings_log_2
-          path: ~/work/chroma/chroma/**/*.log
-
-  test-embeddings-3:
-    strategy:
-      fail-fast: false
-    runs-on: depot-ubuntu-22.04-16
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: 3.12
-      - uses: ./.github/actions/tilt
-      - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: normal
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: bin/get-logs.sh
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test_embeddings_log_3
-          path: ~/work/chroma/chroma/**/*.log
-
-  test-embeddings-4:
-    strategy:
-      fail-fast: false
-    runs-on: depot-ubuntu-22.04-16
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: 3.12
-      - uses: ./.github/actions/tilt
-      - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: normal
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: bin/get-logs.sh
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test_embeddings_log_4
-          path: ~/work/chroma/chroma/**/*.log
-
-  test-embeddings-5:
-    strategy:
-      fail-fast: false
-    runs-on: depot-ubuntu-22.04-16
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: 3.12
-      - uses: ./.github/actions/tilt
-      - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: normal
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: bin/get-logs.sh
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test_embeddings_log_5
-          path: ~/work/chroma/chroma/**/*.log
-
-  test-embeddings-6:
-    strategy:
-      fail-fast: false
-    runs-on: depot-ubuntu-22.04-16
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: 3.12
-      - uses: ./.github/actions/tilt
-      - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: normal
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: bin/get-logs.sh
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test_embeddings_log_6
+          name: test_embeddings_log_${{ matrix.attempt }}
           path: ~/work/chroma/chroma/**/*.log
