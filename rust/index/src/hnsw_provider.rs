@@ -473,13 +473,13 @@ impl HnswIndexProvider {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderOpenError {
-    #[error("Index configuration error")]
+    #[error("Index configuration error: {0}")]
     IndexConfigError(#[from] IndexConfigFromSegmentError),
-    #[error("Hnsw index file error")]
+    #[error("Hnsw index file error: {0}")]
     FileError(#[from] HnswIndexProviderFileError),
-    #[error("Hnsw config error")]
+    #[error("Hnsw config error: {0}")]
     HnswConfigError(#[from] HnswIndexFromSegmentError),
-    #[error("Index load error")]
+    #[error("Index load error: {0}")]
     IndexLoadError(#[from] Box<dyn ChromaError>),
     #[error("Path: {0} could not be converted to string")]
     PathToStringError(PathBuf),
