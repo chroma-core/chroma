@@ -9,10 +9,11 @@ use super::{
 use async_trait::async_trait;
 use chroma_cache::{Cache, Weighted};
 use chroma_config::Configurable;
+use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
-use chroma_types::{CollectionUuid, Segment};
+use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
@@ -31,6 +32,8 @@ const FILES: [&str; 4] = [
     "length.bin",
     "link_lists.bin",
 ];
+
+type CacheKey = CollectionUuid;
 
 // The key of the cache is the collection id and the value is
 // the HNSW index for that collection. This restricts the cache to
@@ -133,12 +136,8 @@ impl HnswIndexProvider {
         }
     }
 
-    pub async fn get(
-        &self,
-        index_id: &IndexUuid,
-        collection_id: &CollectionUuid,
-    ) -> Option<HnswIndexRef> {
-        match self.cache.get(collection_id).await.ok().flatten() {
+    pub async fn get(&self, index_id: &IndexUuid, cache_key: &CacheKey) -> Option<HnswIndexRef> {
+        match self.cache.get(cache_key).await.ok().flatten() {
             Some(index) => {
                 let index_with_lock = index.inner.read();
                 if index_with_lock.id == *index_id {
@@ -159,8 +158,9 @@ impl HnswIndexProvider {
     pub async fn fork(
         &self,
         source_id: &IndexUuid,
-        segment: &Segment,
+        cache_key: &CacheKey,
         dimensionality: i32,
+        distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
         let new_id = IndexUuid(Uuid::new_v4());
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
@@ -183,22 +183,7 @@ impl HnswIndexProvider {
             }
         }
 
-        let index_config = IndexConfig::from_segment(segment, dimensionality);
-
-        let index_config = match index_config {
-            Ok(index_config) => index_config,
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderForkError::IndexConfigError(*e)));
-            }
-        };
-
-        let hnsw_config = HnswIndexConfig::from_segment(segment, &new_storage_path);
-        match hnsw_config {
-            Ok(hnsw_config) => hnsw_config,
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderForkError::HnswConfigError(*e)));
-            }
-        };
+        let index_config = IndexConfig::new(dimensionality, distance_function);
 
         let storage_path_str = match new_storage_path.to_str() {
             Some(storage_path_str) => storage_path_str,
@@ -212,13 +197,13 @@ impl HnswIndexProvider {
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.get(&new_id, &segment.collection).await {
+                match self.get(&new_id, cache_key).await {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
-                        self.cache.insert(segment.collection, index.clone()).await;
+                        self.cache.insert(*cache_key, index.clone()).await;
                         Ok(index)
                     }
                 }
@@ -303,8 +288,9 @@ impl HnswIndexProvider {
     pub async fn open(
         &self,
         id: &IndexUuid,
-        segment: &Segment,
+        cache_key: &CacheKey,
         dimensionality: i32,
+        distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
@@ -327,17 +313,7 @@ impl HnswIndexProvider {
         }
 
         // Thread safe.
-        let index_config = IndexConfig::from_segment(segment, dimensionality);
-        let index_config = match index_config {
-            Ok(index_config) => index_config,
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderOpenError::IndexConfigError(*e)));
-            }
-        };
-
-        // Thread safe.
-        let _hnsw_config = HnswIndexConfig::from_segment(segment, &index_storage_path)
-            .map_err(|e| Box::new(HnswIndexProviderOpenError::HnswConfigError(*e)))?;
+        let index_config = IndexConfig::new(dimensionality, distance_function);
 
         let index_storage_path_str = match index_storage_path.to_str() {
             Some(index_storage_path_str) => index_storage_path_str,
@@ -351,13 +327,13 @@ impl HnswIndexProvider {
         match HnswIndex::load(index_storage_path_str, &index_config, *id) {
             Ok(index) => {
                 let _guard = self.write_mutex.lock().await;
-                match self.get(id, &segment.collection).await {
+                match self.get(id, cache_key).await {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = HnswIndexRef {
                             inner: Arc::new(RwLock::new(index)),
                         };
-                        self.cache.insert(segment.collection, index.clone()).await;
+                        self.cache.insert(*cache_key, index.clone()).await;
                         Ok(index)
                     }
                 }
@@ -378,9 +354,12 @@ impl HnswIndexProvider {
     // A query comes in and the index is not in the cache -> we need to load the index from s3 based on the segment files id
     pub async fn create(
         &self,
-        // TODO: This should not take Segment. The index layer should not know about the segment concept
-        segment: &Segment,
+        cache_key: &CacheKey,
+        m: usize,
+        ef_construction: usize,
+        ef_search: usize,
         dimensionality: i32,
+        distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
         let id = IndexUuid(Uuid::new_v4());
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
@@ -392,31 +371,28 @@ impl HnswIndexProvider {
             }
         }
 
-        let index_config = match IndexConfig::from_segment(segment, dimensionality) {
-            Ok(index_config) => index_config,
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderCreateError::IndexConfigError(*e)));
-            }
-        };
+        let index_config = IndexConfig::new(dimensionality, distance_function);
 
-        let hnsw_config = match HnswIndexConfig::from_segment(segment, &index_storage_path) {
-            Ok(hnsw_config) => hnsw_config,
-            Err(e) => {
-                return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
-            }
-        };
+        let hnsw_config =
+            match HnswIndexConfig::new(m, ef_construction, ef_search, &index_storage_path) {
+                Ok(hnsw_config) => hnsw_config,
+                Err(e) => {
+                    return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
+                }
+            };
+
         // HnswIndex init is not thread safe. We should not call it from multiple threads
         let index = HnswIndex::init(&index_config, Some(&hnsw_config), id)
             .map_err(|e| Box::new(HnswIndexProviderCreateError::IndexInitError(e)))?;
 
         let _guard = self.write_mutex.lock().await;
-        match self.get(&id, &segment.collection).await {
+        match self.get(&id, cache_key).await {
             Some(index) => Ok(index.clone()),
             None => {
                 let index = HnswIndexRef {
                     inner: Arc::new(RwLock::new(index)),
                 };
-                self.cache.insert(segment.collection, index.clone()).await;
+                self.cache.insert(*cache_key, index.clone()).await;
                 Ok(index)
             }
         }
@@ -455,8 +431,8 @@ impl HnswIndexProvider {
     }
 
     /// Purge entries from the cache by index ID and remove temporary files from disk.
-    pub async fn purge_by_id(&mut self, collection_uuids: &[CollectionUuid]) {
-        for collection_uuid in collection_uuids {
+    pub async fn purge_by_id(&mut self, cache_keys: &[CacheKey]) {
+        for collection_uuid in cache_keys {
             let Some(index_id) = self
                 .cache
                 .get(collection_uuid)
@@ -619,11 +595,11 @@ pub enum HnswIndexProviderFileError {
 
 #[cfg(test)]
 mod tests {
+    use crate::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
+
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::{SegmentType, SegmentUuid};
-    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_fork() {
@@ -637,21 +613,30 @@ mod tests {
         let cache = new_non_persistent_cache_for_test();
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, rx);
-        let segment = Segment {
-            id: SegmentUuid::new(),
-            r#type: SegmentType::HnswDistributed,
-            scope: chroma_types::SegmentScope::VECTOR,
-            collection: CollectionUuid(Uuid::new_v4()),
-            metadata: None,
-            file_path: HashMap::new(),
-        };
+        let collection_id = CollectionUuid(Uuid::new_v4());
 
         let dimensionality = 128;
-        let created_index = provider.create(&segment, dimensionality).await.unwrap();
+        let distance_function = DistanceFunction::Euclidean;
+        let created_index = provider
+            .create(
+                &collection_id,
+                DEFAULT_HNSW_M,
+                DEFAULT_HNSW_EF_CONSTRUCTION,
+                DEFAULT_HNSW_EF_SEARCH,
+                dimensionality,
+                distance_function.clone(),
+            )
+            .await
+            .unwrap();
         let created_index_id = created_index.inner.read().id;
 
         let forked_index = provider
-            .fork(&created_index_id, &segment, dimensionality)
+            .fork(
+                &created_index_id,
+                &collection_id,
+                dimensionality,
+                distance_function,
+            )
             .await
             .unwrap();
         let forked_index_id = forked_index.inner.read().id;
