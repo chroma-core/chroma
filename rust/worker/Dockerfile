@@ -3,7 +3,7 @@ FROM rust:1.81.0 AS builder
 ARG RELEASE_MODE=
 
 WORKDIR /
-RUN git clone https://github.com/chroma-core/hnswlib.git
+RUN git clone -b sicheng/cand https://github.com/chroma-core/hnswlib.git
 
 WORKDIR /chroma/
 
