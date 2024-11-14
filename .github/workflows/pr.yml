@@ -45,10 +45,7 @@ jobs:
   test-embeddings-0:
     strategy:
       fail-fast: false
-      matrix:
-        platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/property/test_embeddings.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -64,10 +61,10 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
@@ -79,10 +76,7 @@ jobs:
   test-embeddings-1:
     strategy:
       fail-fast: false
-      matrix:
-        platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/property/test_embeddings.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -98,10 +92,10 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
@@ -113,10 +107,7 @@ jobs:
   test-embeddings-2:
     strategy:
       fail-fast: false
-      matrix:
-        platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/property/test_embeddings.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -132,10 +123,10 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
@@ -147,10 +138,7 @@ jobs:
   test-embeddings-3:
     strategy:
       fail-fast: false
-      matrix:
-        platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/property/test_embeddings.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -166,10 +154,10 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
@@ -181,10 +169,7 @@ jobs:
   test-embeddings-4:
     strategy:
       fail-fast: false
-      matrix:
-        platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/property/test_embeddings.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -200,10 +185,10 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
@@ -215,10 +200,7 @@ jobs:
   test-embeddings-5:
     strategy:
       fail-fast: false
-      matrix:
-        platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/property/test_embeddings.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -234,10 +216,10 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
@@ -249,10 +231,7 @@ jobs:
   test-embeddings-6:
     strategy:
       fail-fast: false
-      matrix:
-        platform: ["depot-ubuntu-22.04-16"]
-        test-globs: ["chromadb/test/property/test_embeddings.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: depot-ubuntu-22.04-16
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -268,10 +247,10 @@ jobs:
         id: get-logs
         if: success() || failure()
         run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
+          bin/get-logs.sh "test_embeddngs_state" "3"
           # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
+          echo "artifact_name=test_embeddings_log" >> $GITHUB_OUTPUT
+          echo "logs_zip_path=$(pwd)/test_embeddings_state_3_logs.zip" >> $GITHUB_OUTPUT
         shell: bash
       - name: Upload logs as artifact
         if: success() || failure()
