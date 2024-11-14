@@ -71,4 +71,4 @@ jobs:
           name: test_embeddings_log_${{ matrix.attempt }}
           path: |
             ~/work/chroma/chroma/**/*.log
-            ~/tmp/*
+            ~/tmp/**/*
