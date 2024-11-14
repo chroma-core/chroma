@@ -325,6 +325,10 @@ where
                 e
             ))) as _
         })?;
+        cache.enable_tracing();
+        cache.update_tracing_options(
+            TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)),
+        );
         let meter = global::meter("chroma");
         let get_latency = meter.u64_histogram("get_latency").init();
         let insert_latency = meter.u64_histogram("insert_latency").init();
