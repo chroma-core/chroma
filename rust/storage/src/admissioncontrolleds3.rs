@@ -95,6 +95,11 @@ impl AdmissionControlledS3Storage {
             ranges
         );
         let mut output_buffer: Vec<u8> = vec![0; content_length as usize];
+
+        if ranges.is_empty() {
+            return Ok(Arc::new(output_buffer));
+        }
+
         let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut futures = Vec::new();
