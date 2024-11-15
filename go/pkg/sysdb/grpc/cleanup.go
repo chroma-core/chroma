@@ -62,7 +62,8 @@ func (s *SoftDeleteCleaner) run() {
 			if timeSinceDelete > s.maxAge {
 				log.Info("Deleting soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete))
 				err := s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
-					ID: collection.ID,
+					ID:           collection.ID,
+					DatabaseName: collection.DatabaseName,
 				})
 				if err != nil {
 					if err != common.ErrCollectionDeleteNonExistingCollection {

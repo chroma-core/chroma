@@ -334,7 +334,7 @@ func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model
 }
 
 func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
-	log.Info("hard deleting collection", zap.Any("deleteCollection", deleteCollection))
+	log.Info("hard deleting collection", zap.Any("deleteCollection", deleteCollection), zap.String("databaseName", deleteCollection.DatabaseName))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
 

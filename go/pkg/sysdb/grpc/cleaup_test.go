@@ -14,6 +14,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -83,11 +84,12 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	suite.s.softDeleteCleaner.Start()
 
 	// Wait for cleanup cycle
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	// Verify collections are permanently deleted
 	softDeletedCollections, err = suite.s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", 10)
 	suite.NoError(err)
+	log.Info("softDeletedCollections", zap.Any("softDeletedCollections", softDeletedCollections))
 	suite.Equal(0, len(softDeletedCollections))
 
 	// Stop the cleaner.
@@ -108,12 +110,14 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	// This is to account for the Cleanup loop deleting the collection twice from separate nodes.
 	// It will return ErrCollectionDeleteNonExistingCollection after the first deletion.
 	err = suite.s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
-		ID: types.MustParse(collectionID),
+		ID:           types.MustParse(collectionID),
+		DatabaseName: suite.databaseName,
 	})
 	suite.NoError(err)
 
 	err = suite.s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
-		ID: types.MustParse(collectionID),
+		ID:           types.MustParse(collectionID),
+		DatabaseName: suite.databaseName,
 	})
 	// Check that it returns ErrCollectionDeleteNonExistingCollection after the first deletion.
 	suite.ErrorIs(err, common.ErrCollectionDeleteNonExistingCollection)
