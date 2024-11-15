@@ -237,8 +237,10 @@ impl Index<HnswIndexConfig> for HnswIndex {
 
 impl PersistentIndex<HnswIndexConfig> for HnswIndex {
     fn save(&self) -> Result<(), Box<dyn ChromaError>> {
+        println!("Persisting dirty hnsw index...");
         unsafe { persist_dirty(self.ffi_ptr) };
         read_and_return_hnsw_error(self.ffi_ptr)?;
+        println!("Successfully persisted dirty hnsw index...");
         Ok(())
     }
 
