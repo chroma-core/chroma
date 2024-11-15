@@ -160,6 +160,7 @@ impl WorkerServer {
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
+            self.hnsw_index_provider.clone(),
             // TODO: Load the configuration for this
             1000,
             FetchLogOperator {
@@ -212,7 +213,6 @@ impl WorkerServer {
                 KnnOrchestrator::new(
                     self.blockfile_provider.clone(),
                     dispatcher.clone(),
-                    self.hnsw_index_provider.clone(),
                     // TODO: Load the configuration for this
                     1000,
                     knn_filter_output.clone(),
