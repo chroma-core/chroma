@@ -441,26 +441,20 @@ impl<'me> LogMaterializer<'me> {
             "Total length of logs in materializer: {}",
             self.logs.total_len()
         );
-        let next_offset_id;
-        match self.curr_offset_id.as_ref() {
+        let next_offset_id = match self.curr_offset_id.as_ref() {
             Some(curr_offset_id) => {
-                next_offset_id = curr_offset_id.clone();
-                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                curr_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                curr_offset_id.clone()
             }
             None => {
                 match self.record_segment_reader.as_ref() {
-                    Some(reader) => {
-                        next_offset_id = reader.get_current_max_offset_id();
-                        next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    // This means that the segment is uninitialized so counting starts
-                    // from 1.
-                    None => {
-                        next_offset_id = Arc::new(AtomicU32::new(1));
-                    }
-                };
+                    Some(reader) => Arc::new(AtomicU32::new(reader.get_max_offset_id() + 1)),
+                    // This means that the segment is uninitialized so counting starts from 1.
+                    None => Arc::new(AtomicU32::new(1)),
+                }
             }
-        }
+        };
+
         // Populate entries that are present in the record segment.
         let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
         let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
@@ -898,6 +892,9 @@ mod tests {
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
@@ -1197,6 +1194,9 @@ mod tests {
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
@@ -1486,6 +1486,9 @@ mod tests {
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
@@ -1796,6 +1799,9 @@ mod tests {
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {

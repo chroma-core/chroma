@@ -1182,16 +1182,7 @@ mod test {
                             // Uninitialized segment is fine and means that the record
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            _ => {
                                 panic!("Error creating record segment reader");
                             }
                         }
@@ -1476,16 +1467,7 @@ mod test {
                             // Uninitialized segment is fine and means that the record
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            _ => {
                                 panic!("Error creating record segment reader");
                             }
                         }
@@ -1729,16 +1711,7 @@ mod test {
                             // Uninitialized segment is fine and means that the record
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            _ => {
                                 panic!("Error creating record segment reader");
                             }
                         }
@@ -1951,16 +1924,7 @@ mod test {
                             // Uninitialized segment is fine and means that the record
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
-                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                                panic!("Error creating record segment reader");
-                            }
-                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                            _ => {
                                 panic!("Error creating record segment reader");
                             }
                         }

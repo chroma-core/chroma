@@ -284,6 +284,7 @@ impl CompactOrchestrator {
             >,
         >,
         chunk: Chunk<LogRecord>,
+        curr_max_offset_id: Arc<AtomicU32>,
     ) {
         let operator = ApplyLogToSegmentWriterOperator::new();
         let input = ApplyLogToSegmentWriterInput::new(
@@ -294,7 +295,7 @@ impl CompactOrchestrator {
                 .as_ref()
                 .expect("WriteSegmentsInput: Record segment not set in the input")
                 .clone(),
-            self.curr_max_offset_id.clone(),
+            curr_max_offset_id,
         );
         let task = wrap(operator, input, self_address.clone());
         match self.dispatcher.send(task, Some(Span::current())).await {
@@ -334,10 +335,24 @@ impl CompactOrchestrator {
 
         self.num_write_tasks = partitions.len() as i32 * 3;
         for partition in partitions.iter() {
+            // We must have an atomic that tracks the current offset ID across partitions to guarantee unique offset IDs for every record.
+            // Every partition has a log materializer that is responsible for updating this atomic.
+            // However, because the log materializer returns borrowed values, we currently run the materializer multiple times for each partition (for each segment writer).
+            // This means that only one log materializer run per partition should access and update the atomic shared across all partitions, and the atomics for the other log materializer runs should not be shared.
+            let shared_curr_max_offset_id = self.curr_max_offset_id.clone();
+            let unshared_curr_max_offset_id1 = Arc::new(AtomicU32::new(
+                self.curr_max_offset_id
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            ));
+            let unshared_curr_max_offset_id2 = Arc::new(AtomicU32::new(
+                self.curr_max_offset_id
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            ));
             self.dispatch_apply_log_to_segment_writer_task(
                 record_segment_writer.clone(),
                 self_address.clone(),
                 partition.clone(),
+                shared_curr_max_offset_id,
             )
             .await;
 
@@ -345,6 +360,7 @@ impl CompactOrchestrator {
                 hnsw_segment_writer.clone(),
                 self_address.clone(),
                 partition.clone(),
+                unshared_curr_max_offset_id1,
             )
             .await;
 
@@ -352,6 +368,7 @@ impl CompactOrchestrator {
                 metadata_segment_writer.clone(),
                 self_address.clone(),
                 partition.clone(),
+                unshared_curr_max_offset_id2,
             )
             .await;
         }
@@ -480,7 +497,7 @@ impl CompactOrchestrator {
         tracing::debug!("Record Segment Writer created");
         match RecordSegmentReader::from_segment(record_segment, &self.blockfile_provider).await {
             Ok(reader) => {
-                self.curr_max_offset_id = reader.get_current_max_offset_id();
+                self.curr_max_offset_id = Arc::new(AtomicU32::new(reader.get_max_offset_id()));
             }
             Err(_) => {
                 self.curr_max_offset_id = Arc::new(AtomicU32::new(0));
@@ -676,9 +693,9 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
                             .expect("Invariant violation. Writers not set.");
 
                     self.flush_s3(
-                        record_segment_writer.clone(),
-                        hnsw_segment_writer.clone(),
-                        metadata_segment_writer.clone(),
+                        record_segment_writer,
+                        hnsw_segment_writer,
+                        metadata_segment_writer,
                         ctx.receiver(),
                     )
                     .await;

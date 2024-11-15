@@ -108,6 +108,9 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                 record_segment::RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
                     return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
                 }
+                record_segment::RecordSegmentReaderCreationError::BlockfileReadError(_) => {
+                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
+                }
                 record_segment::RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                     return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
                 }

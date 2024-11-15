@@ -121,6 +121,14 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
                             ),
                         );
                     }
+                    RecordSegmentReaderCreationError::BlockfileReadError(e) => {
+                        tracing::error!("Error creating record segment reader {}", e);
+                        return Err(
+                            ApplyLogToSegmentWriterOperatorError::LogMaterializationPreparationError(
+                                RecordSegmentReaderCreationError::BlockfileReadError(e),
+                            ),
+                        );
+                    }
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                         tracing::error!("Error creating record segment reader {}", e);
                         return Err(
@@ -170,7 +178,7 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
         // Apply materialized records.
         match input
             .segment_writer
-            .apply_materialized_log_chunk(res.clone())
+            .apply_materialized_log_chunk(res)
             .instrument(tracing::trace_span!(
                 "Apply materialized logs",
                 segment = input.segment_writer.get_name()
