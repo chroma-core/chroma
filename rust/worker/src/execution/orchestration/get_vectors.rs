@@ -31,6 +31,7 @@ use tracing::{trace, Span};
 use uuid::Uuid;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum ExecutionState {
     Pending,
     PullLogs,
@@ -58,6 +59,7 @@ impl ChromaError for GetVectorsError {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GetVectorsOrchestrator {
     state: ExecutionState,
     // Component Execution
@@ -81,6 +83,7 @@ pub struct GetVectorsOrchestrator {
     log_position: u64,
 }
 
+#[allow(dead_code)]
 impl GetVectorsOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(

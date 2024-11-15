@@ -4,6 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "../../idl/chromadb/proto/chroma.proto",
         "../../idl/chromadb/proto/coordinator.proto",
         "../../idl/chromadb/proto/logservice.proto",
+        "../../idl/chromadb/proto/query_executor.proto",
     ];
 
     // Can't use #[cfg(test)] here because a build for tests is technically a regular debug build, meaning that #[cfg(test)] is useless in build.rs.
