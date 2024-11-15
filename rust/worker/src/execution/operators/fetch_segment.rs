@@ -81,7 +81,8 @@ impl FetchSegmentOperator {
             .clone()
             .get_collections(Some(self.collection_uuid), None, None, None)
             .await?
-            .pop()
+            .first()
+            .cloned()
             .ok_or(FetchSegmentError::NoCollection)?;
         if collection.version != self.collection_version as i32 {
             Err(FetchSegmentError::VersionMismatch)
