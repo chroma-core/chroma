@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"testing"
@@ -50,7 +51,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.db)
+	c, err := NewCoordinator(ctx, suite.db, SoftDelete)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -81,7 +82,7 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db)
+	c, err := NewCoordinator(ctx, db, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -134,7 +135,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db)
+	c, err := NewCoordinator(ctx, db, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -320,6 +321,9 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	suite.Empty(collections)
 }
 
+// TestCreateGetDeleteCollections tests the create, get and delete collection APIs.
+// Test does not check for soft delete and hard delete scenarios, but checks that
+// the APIs are working as expected. i.e. Get does not return deleted collections.
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	ctx := context.Background()
 	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -1003,6 +1007,104 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
+}
+
+// TestSoftAndHardDeleteCollection tests the soft and hard delete scenarios for collections.
+func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
+	ctx := context.Background()
+
+	// Test Hard Delete scenario
+	suite.coordinator.deleteMode = HardDelete
+	// Create test collection
+	testCollection2 := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_hard_delete_collection",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	// Create the collection
+	_, _, err := suite.coordinator.CreateCollection(ctx, testCollection2)
+	suite.NoError(err)
+
+	// Hard delete the collection
+	err = suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           testCollection2.ID,
+		TenantID:     testCollection2.TenantID,
+		DatabaseName: testCollection2.DatabaseName,
+	})
+	suite.NoError(err)
+
+	// Verify collection is not returned in normal get
+	results, err := suite.coordinator.GetCollections(ctx, testCollection2.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(results)
+
+	// Verify collection does not appear in soft deleted list
+	id := testCollection2.ID.String()
+	softDeletedResults, err := suite.coordinator.GetSoftDeletedCollections(ctx, &id, suite.tenantName, suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Empty(softDeletedResults)
+
+	// Test Soft Delete scenario
+	suite.coordinator.deleteMode = SoftDelete
+	// Create a test collection
+	testCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_soft_delete_collection",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	// Create the collection
+	_, _, err = suite.coordinator.CreateCollection(ctx, testCollection)
+	suite.NoError(err)
+
+	// Soft delete the collection
+	err = suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           testCollection.ID,
+		TenantID:     testCollection.TenantID,
+		DatabaseName: testCollection.DatabaseName,
+	})
+	suite.NoError(err)
+
+	// Verify collection is not returned in normal get
+	results, err = suite.coordinator.GetCollections(ctx, testCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(results)
+
+	// Verify collection appears in soft deleted list
+	id = testCollection.ID.String()
+	softDeletedResults, err = suite.coordinator.GetSoftDeletedCollections(ctx, &id, suite.tenantName, suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Len(softDeletedResults, 1)
+	suite.Equal(testCollection.ID, softDeletedResults[0].ID)
+
+	// Create a new collection with the same name as the soft deleted one.
+	// This should pass, and create a new soft deleted collection whose name is
+	// of the form "deleted_<name>_<timestamp>"
+	newTestCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         testCollection.Name,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, newTestCollection)
+	suite.NoError(err)
+
+	// Get the newly created collection to verify it exists
+	results, err = suite.coordinator.GetCollections(ctx, newTestCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(results, 1)
+	suite.Equal(newTestCollection.Name, results[0].Name)
+
+	// Verify the soft deleted collection still appears in the soft deleted list but with a different name.
+	softDeletedResults, err = suite.coordinator.GetSoftDeletedCollections(ctx, nil, suite.tenantName, suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Len(softDeletedResults, 1)
+	suite.Equal(id, softDeletedResults[0].ID.String())
+	renamedCollectionNamePrefix := fmt.Sprintf("deleted_%s_", testCollection.Name)
+	suite.Contains(softDeletedResults[0].Name, renamedCollectionNamePrefix)
 }
 
 func TestAPIsTestSuite(t *testing.T) {

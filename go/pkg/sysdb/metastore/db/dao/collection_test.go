@@ -1,7 +1,9 @@
 package dao
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/pingcap/log"
@@ -87,7 +89,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
 	// Test limit and offset
-	_, err = CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
+	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
 	suite.NoError(err)
 
 	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -113,6 +115,8 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 
 	// clean up
 	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+	err = CleanUpTestCollection(suite.db, collectionID2)
 	suite.NoError(err)
 }
 
@@ -147,6 +151,58 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion
 
 	//clean up
 	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
+	// Ensure there are no collections from before.
+	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	if len(collections) != 0 {
+		suite.FailNow(fmt.Sprintf(
+			"expected 0 collections, got %d. Printing name of first collection: %s", len(collections), *collections[0].Collection.Name))
+	}
+
+	// Test goal -
+	// Create 2 collections. Soft delete one.
+	// Check that the deleted collection does not appear in the normal get collection results.
+	// Check that the deleted collection does appear in the soft deleted collection results.
+
+	// Create 2 collections.
+	collectionName1 := "test_collection_soft_delete1"
+	collectionName2 := "test_collection_soft_delete2"
+	collectionID1, err := CreateTestCollection(suite.db, collectionName1, 128, suite.databaseId)
+	suite.NoError(err)
+	collectionID2, err := CreateTestCollection(suite.db, collectionName2, 128, suite.databaseId)
+	suite.NoError(err)
+
+	// Soft delete collection 1 by Updating the is_deleted column
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:         collectionID1,
+		DatabaseID: suite.databaseId,
+		IsDeleted:  true,
+		UpdatedAt:  time.Now(),
+	})
+	suite.NoError(err)
+
+	// Verify normal get collections only returns non-deleted collection
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(collectionID2, collections[0].Collection.ID)
+	suite.Equal(collectionName2, *collections[0].Collection.Name)
+
+	// Verify getting soft deleted collections
+	collections, err = suite.collectionDb.GetSoftDeletedCollections(&collectionID1, "", suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(collectionID1, collections[0].Collection.ID)
+	suite.Equal(collectionName1, *collections[0].Collection.Name)
+
+	// Clean up
+	err = CleanUpTestCollection(suite.db, collectionID1)
+	suite.NoError(err)
+	err = CleanUpTestCollection(suite.db, collectionID2)
 	suite.NoError(err)
 }
 

@@ -14,17 +14,29 @@ import (
 	"gorm.io/gorm"
 )
 
+// DeleteMode represents whether to perform a soft or hard delete
+type DeleteMode int
+
+const (
+	// SoftDelete marks records as deleted but keeps them in the database
+	SoftDelete DeleteMode = iota
+	// HardDelete permanently removes records from the database
+	HardDelete
+)
+
 // Coordinator is the top level component.
 // Currently, it only has the system catalog related APIs and will be extended to
 // support other functionalities such as membership managed and propagation.
 type Coordinator struct {
-	ctx     context.Context
-	catalog Catalog
+	ctx        context.Context
+	catalog    Catalog
+	deleteMode DeleteMode
 }
 
-func NewCoordinator(ctx context.Context, db *gorm.DB) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, db *gorm.DB, deleteMode DeleteMode) (*Coordinator, error) {
 	s := &Coordinator{
-		ctx: ctx,
+		ctx:        ctx,
+		deleteMode: deleteMode,
 	}
 
 	// catalog
@@ -91,8 +103,19 @@ func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.Uni
 	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
 }
 
+func (s *Coordinator) GetSoftDeletedCollections(ctx context.Context, collectionID *string, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
+	return s.catalog.GetSoftDeletedCollections(ctx, collectionID, tenantID, databaseName, limit)
+}
+
 func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
-	return s.catalog.DeleteCollection(ctx, deleteCollection)
+	if s.deleteMode == SoftDelete {
+		return s.catalog.DeleteCollection(ctx, deleteCollection, true)
+	}
+	return s.catalog.DeleteCollection(ctx, deleteCollection, false)
+}
+
+func (s *Coordinator) CleanupSoftDeletedCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	return s.catalog.DeleteCollection(ctx, deleteCollection, false)
 }
 
 func (s *Coordinator) UpdateCollection(ctx context.Context, collection *model.UpdateCollection) (*model.Collection, error) {
