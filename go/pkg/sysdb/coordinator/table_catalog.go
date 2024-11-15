@@ -411,6 +411,15 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
 
+		collectionEntry, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(types.FromUniqueID(collectionID), &deleteCollection.DatabaseName)
+		if err != nil {
+			return err
+		}
+		if collectionEntry == nil {
+			log.Info("collection not found during hard delete", zap.Any("deleteCollection", deleteCollection))
+			return common.ErrCollectionDeleteNonExistingCollection
+		}
+
 		// Delete collection and collection metadata.
 		collectionDeletedCount, err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
 		if err != nil {
