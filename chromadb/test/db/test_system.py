@@ -7,7 +7,7 @@ from typing import Generator, List, Callable, Dict, Union
 
 from chromadb.db.impl.grpc.client import GrpcSysDB
 from chromadb.db.impl.grpc.server import GrpcMockSysDB
-from chromadb.errors import NotFoundError, UniqueConstraintError
+from chromadb.errors import NotFoundError, UniqueConstraintError, InternalError
 from chromadb.test.conftest import find_free_port
 from chromadb.types import Collection, Segment, SegmentScope
 from chromadb.db.impl.sqlite import SqliteDB
@@ -451,6 +451,9 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
 
 def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
     sysdb.reset_state()
+    # Check that collection doesn't exist in new_database
+    result = sysdb.get_collections(id=sample_collections[1].id, database="new_database")
+    assert len(result) == 0
 
     # Create a new database
     sysdb.create_database(id=uuid.uuid4(), name="new_database")
@@ -480,6 +483,10 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
             get_or_create=False,
         )
 
+    # Check that collection doesn't exist in new_database
+    result = sysdb.get_collections(id=sample_collections[1].id, database="new_database")
+    assert len(result) == 0
+
     # Create a new collection in the default database
     sysdb.create_collection(
         id=sample_collections[1].id,
@@ -489,6 +496,10 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
         dimension=sample_collections[1]["dimension"],
         segments=[sample_segment(sample_collections[1].id)],
     )
+
+    # Check that collection doesn't exist in new_database
+    result = sysdb.get_collections(id=sample_collections[1].id, database="new_database")
+    assert len(result) == 0
 
     # Check that the new database and collections exist
     result = sysdb.get_collections(
@@ -528,11 +539,6 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
     # Delete the deleted collection in the default database and expect an error
     with pytest.raises(NotFoundError):
         sysdb.delete_collection(id=sample_collections[0].id)
-
-    # Delete the existing collection in the new database and expect an error
-    with pytest.raises(NotFoundError):
-        sysdb.delete_collection(id=sample_collections[1].id, database="new_database")
-
 
 def test_create_update_with_database(sysdb: SysDB) -> None:
     sysdb.reset_state()

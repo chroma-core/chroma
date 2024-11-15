@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
@@ -103,8 +104,9 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	})
 	suite.NoError(err)
 
-	// Call CleanupSoftDeletedCollection twice - should not error
+	// Call CleanupSoftDeletedCollection twice.
 	// This is to account for the Cleanup loop deleting the collection twice from separate nodes.
+	// It will return ErrCollectionDeleteNonExistingCollection after the first deletion.
 	err = suite.s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
 		ID: types.MustParse(collectionID),
 	})
@@ -113,7 +115,8 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	err = suite.s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
 		ID: types.MustParse(collectionID),
 	})
-	suite.NoError(err)
+	// Check that it returns ErrCollectionDeleteNonExistingCollection after the first deletion.
+	suite.ErrorIs(err, common.ErrCollectionDeleteNonExistingCollection)
 
 }
 

@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/pingcap/log"
@@ -64,7 +65,9 @@ func (s *SoftDeleteCleaner) run() {
 					ID: collection.ID,
 				})
 				if err != nil {
-					log.Error("Error while deleting soft deleted collection", zap.Error(err), zap.String("collection", collection.ID.String()))
+					if err != common.ErrCollectionDeleteNonExistingCollection {
+						log.Error("Error while deleting soft deleted collection", zap.Error(err), zap.String("collection", collection.ID.String()))
+					}
 				} else {
 					numDeleted++
 				}

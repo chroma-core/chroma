@@ -419,7 +419,7 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 		}
 		if collectionDeletedCount == 0 {
 			log.Info("collection not found during hard delete", zap.Any("deleteCollection", deleteCollection))
-			return nil
+			return common.ErrCollectionDeleteNonExistingCollection
 		}
 		// Delete collection metadata.
 		collectionMetadataDeletedCount, err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
