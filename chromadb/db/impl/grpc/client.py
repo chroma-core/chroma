@@ -325,8 +325,6 @@ class GrpcSysDB(SysDB):
             if id is not None:
                 request = GetCollectionsRequest(
                     id=id.hex,
-                    tenant=tenant,
-                    database=database,
                     limit=limit,
                     offset=offset,
                 )
