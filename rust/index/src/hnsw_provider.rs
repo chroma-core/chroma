@@ -258,7 +258,7 @@ impl HnswIndexProvider {
                 .in_scope(|| async {
                     let key = self.format_key(source_id, file);
                     tracing::info!("Loading hnsw index file: {} into directory", key);
-                    let bytes_res = self.storage.get_parallel(&key).await;
+                    let bytes_res = self.storage.get(&key).await;
                     let bytes_read;
                     let buf = match bytes_res {
                         Ok(buf) => {
