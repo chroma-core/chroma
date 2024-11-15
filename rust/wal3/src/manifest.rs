@@ -348,7 +348,24 @@ impl Manifest {
                 2
             } else if can_snapshot_fragments {
                 for fragment in self.fragments.iter() {
-                    if fragments.len() < snapshot_options.fragment_rollover_threshold {
+                    // NOTE(rescrv):  When taking a snapshot, it's important that we keep around
+                    // one fragment per shard so that the max seq no is always calculable.
+                    //
+                    // Otherwise, a low-traffic shard could be compacted into a state where all of
+                    // its fragments have been compacted and therefore the implicit shard seq no
+                    // for each fragment is zero.  This wedges the manifest manager.
+                    //
+                    // The fix is to keep around the last fragment for each shard.
+                    if fragments.len() < snapshot_options.fragment_rollover_threshold
+                        && self
+                            .fragments
+                            .iter()
+                            .filter(|f| f.shard_id == fragment.shard_id)
+                            .map(|f| f.seq_no)
+                            .max()
+                            .unwrap_or(ShardSeqNo(0))
+                            != fragment.seq_no
+                    {
                         setsum += fragment.setsum;
                         fragments.push(fragment.clone());
                     }
