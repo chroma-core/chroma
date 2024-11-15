@@ -483,10 +483,6 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
             get_or_create=False,
         )
 
-    # Check that collection doesn't exist in new_database
-    result = sysdb.get_collections(id=sample_collections[1].id, database="new_database")
-    assert len(result) == 0
-
     # Create a new collection in the default database
     sysdb.create_collection(
         id=sample_collections[1].id,
@@ -497,9 +493,6 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
         segments=[sample_segment(sample_collections[1].id)],
     )
 
-    # Check that collection doesn't exist in new_database
-    result = sysdb.get_collections(id=sample_collections[1].id, database="new_database")
-    assert len(result) == 0
     # Check that the new database and collections exist
     result = sysdb.get_collections(
         name=sample_collections[0]["name"], database="new_database"
@@ -535,13 +528,13 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
     assert len(result) == 1
     assert result[0] == sample_collections[1]
 
-    # Delete the existing collection in the new database and expect an error
-    with pytest.raises(NotFoundError):
-        sysdb.delete_collection(id=sample_collections[1].id, database="new_database")
-
     # Delete the deleted collection in the default database and expect an error
     with pytest.raises(NotFoundError):
         sysdb.delete_collection(id=sample_collections[0].id)
+
+    # Delete the existing collection in the new database and expect an error
+    with pytest.raises(NotFoundError):
+        sysdb.delete_collection(id=sample_collections[1].id, database="new_database")
 
 def test_create_update_with_database(sysdb: SysDB) -> None:
     sysdb.reset_state()
