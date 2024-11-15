@@ -194,20 +194,18 @@ impl HnswIndexProvider {
             }
         };
 
+        let _guard = self.write_mutex.lock().await;
         match HnswIndex::load(storage_path_str, &index_config, new_id) {
-            Ok(index) => {
-                let _guard = self.write_mutex.lock().await;
-                match self.get(&new_id, cache_key).await {
-                    Some(index) => Ok(index.clone()),
-                    None => {
-                        let index = HnswIndexRef {
-                            inner: Arc::new(RwLock::new(index)),
-                        };
-                        self.cache.insert(*cache_key, index.clone()).await;
-                        Ok(index)
-                    }
+            Ok(index) => match self.get(&new_id, cache_key).await {
+                Some(index) => Ok(index.clone()),
+                None => {
+                    let index = HnswIndexRef {
+                        inner: Arc::new(RwLock::new(index)),
+                    };
+                    self.cache.insert(*cache_key, index.clone()).await;
+                    Ok(index)
                 }
-            }
+            },
             Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
         }
     }
@@ -324,20 +322,18 @@ impl HnswIndexProvider {
             }
         };
 
+        let _guard = self.write_mutex.lock().await;
         match HnswIndex::load(index_storage_path_str, &index_config, *id) {
-            Ok(index) => {
-                let _guard = self.write_mutex.lock().await;
-                match self.get(id, cache_key).await {
-                    Some(index) => Ok(index.clone()),
-                    None => {
-                        let index = HnswIndexRef {
-                            inner: Arc::new(RwLock::new(index)),
-                        };
-                        self.cache.insert(*cache_key, index.clone()).await;
-                        Ok(index)
-                    }
+            Ok(index) => match self.get(id, cache_key).await {
+                Some(index) => Ok(index.clone()),
+                None => {
+                    let index = HnswIndexRef {
+                        inner: Arc::new(RwLock::new(index)),
+                    };
+                    self.cache.insert(*cache_key, index.clone()).await;
+                    Ok(index)
                 }
-            }
+            },
             Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
         }
     }
