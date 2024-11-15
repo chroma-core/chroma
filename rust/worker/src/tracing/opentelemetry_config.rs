@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
