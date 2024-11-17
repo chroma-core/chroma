@@ -89,6 +89,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+          {{ if .Values.queryService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.queryService.resources.limits.cpu }}
+              memory: {{ .Values.queryService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.queryService.resources.requests.cpu }}
+              memory: {{ .Values.queryService.resources.requests.memory }}
+          {{ end }}
       {{if .Values.queryService.tolerations}}
       tolerations:
         {{ toYaml .Values.queryService.tolerations | nindent 8 }}

@@ -35,6 +35,15 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
+          {{ if .Values.logService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.logService.resources.limits.cpu }}
+              memory: {{ .Values.logService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.logService.resources.requests.cpu }}
+              memory: {{ .Values.logService.resources.requests.memory }}
+          {{ end }}
       {{if .Values.logService.nodeSelector}}
       nodeSelector:
         {{ toYaml .Values.logService.nodeSelector | nindent 8 }}
