@@ -16,7 +16,7 @@
     "ChromaVersion": {
       "Description": "Chroma version to install",
       "Type": "String",
-      "Default": "0.5.18"
+      "Default": "0.5.19"
     },
     "ChromaServerAuthCredentials": {
       "Description": "Chroma authentication credentials",
