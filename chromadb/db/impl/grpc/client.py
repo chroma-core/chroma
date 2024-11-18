@@ -303,6 +303,8 @@ class GrpcSysDB(SysDB):
             logger.error(
                 f"Failed to delete collection id {id} for database {database} and tenant {tenant} due to error: {e}"
             )
+            e = cast(grpc.Call, e)
+            logger.error(f"Error code: {e.code()}, NotFoundError: {grpc.StatusCode.NOT_FOUND}")
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 raise NotFoundError()
             raise InternalError()
@@ -395,6 +397,7 @@ class GrpcSysDB(SysDB):
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:
+            e = cast(grpc.Call, e)
             logger.error(
                 f"Failed to update collection id {id}, name {name} due to error: {e}"
             )

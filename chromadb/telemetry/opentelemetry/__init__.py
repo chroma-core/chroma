@@ -1,4 +1,5 @@
 import asyncio
+import os
 from functools import wraps
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Sequence, Union, TypeVar
@@ -99,7 +100,7 @@ def otel_init(
     granularity = otel_granularity
 
 
-T = TypeVar("T", bound=Callable)
+T = TypeVar("T", bound=Callable)  # type: ignore[type-arg]
 
 
 def trace_method(
@@ -127,31 +128,37 @@ def trace_method(
         if asyncio.iscoroutinefunction(f):
 
             @wraps(f)
-            async def async_wrapper(*args, **kwargs):
+            async def async_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
                 global tracer, granularity
                 if trace_granularity < granularity:
                     return await f(*args, **kwargs)
                 if not tracer:
                     return await f(*args, **kwargs)
                 with tracer.start_as_current_span(trace_name, attributes=attributes):
+                    add_attributes_to_current_span(
+                        {"pod_name": os.environ.get("HOSTNAME")}
+                    )
                     return await f(*args, **kwargs)
 
             return async_wrapper  # type: ignore
         else:
 
             @wraps(f)
-            def wrapper(*args, **kwargs):
+            def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
                 global tracer, granularity
                 if trace_granularity < granularity:
                     return f(*args, **kwargs)
                 if not tracer:
                     return f(*args, **kwargs)
                 with tracer.start_as_current_span(trace_name, attributes=attributes):
+                    add_attributes_to_current_span(
+                        {"pod_name": os.environ.get("HOSTNAME")}
+                    )
                     return f(*args, **kwargs)
 
             return wrapper  # type: ignore
 
-    return decorator  # type: ignore
+    return decorator
 
 
 def add_attributes_to_current_span(

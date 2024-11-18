@@ -19,6 +19,15 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
+          {{ if .Values.frontendService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.frontendService.resources.limits.cpu }}
+              memory: {{ .Values.frontendService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.frontendService.resources.requests.cpu }}
+              memory: {{ .Values.frontendService.resources.requests.memory }}
+          {{ end }}
           volumeMounts:
             - name: chroma
               mountPath: /test

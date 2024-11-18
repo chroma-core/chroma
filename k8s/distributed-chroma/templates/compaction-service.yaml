@@ -70,6 +70,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+          {{ if .Values.compactionService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.compactionService.resources.limits.cpu }}
+              memory: {{ .Values.compactionService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.compactionService.resources.requests.cpu }}
+              memory: {{ .Values.compactionService.resources.requests.memory }}
+          {{ end }}
       {{if .Values.compactionService.tolerations}}
       tolerations:
         {{ toYaml .Values.compactionService.tolerations | nindent 8 }}

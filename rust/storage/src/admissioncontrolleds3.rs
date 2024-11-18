@@ -88,6 +88,12 @@ impl AdmissionControlledS3Storage {
                 return Err(AdmissionControlledS3StorageError::S3GetError(e));
             }
         };
+
+        // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
+        if content_length == 0 {
+            return Ok(Arc::new(Vec::new()));
+        }
+
         let part_size = storage.download_part_size_bytes;
         tracing::info!(
             "[AdmissionControlledS3][Parallel fetch] Content length: {}, key ranges: {:?}",
@@ -95,11 +101,6 @@ impl AdmissionControlledS3Storage {
             ranges
         );
         let mut output_buffer: Vec<u8> = vec![0; content_length as usize];
-
-        if ranges.is_empty() {
-            return Ok(Arc::new(output_buffer));
-        }
-
         let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut futures = Vec::new();
@@ -438,5 +439,10 @@ mod tests {
         test_multipart_get_for_size(1024 * 1024 * 10).await;
         // Greater than NAC limit i.e. > 2*8 MB = 16 MB.
         test_multipart_get_for_size(1024 * 1024 * 18).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_empty_file() {
+        test_multipart_get_for_size(0).await;
     }
 }
