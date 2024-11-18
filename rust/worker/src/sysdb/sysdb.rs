@@ -75,7 +75,7 @@ impl SysDb {
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
+        segment_flush_info: Arc<Vec<SegmentFlushInfo>>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -272,7 +272,7 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
+        segment_flush_info: Arc<Vec<SegmentFlushInfo>>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info

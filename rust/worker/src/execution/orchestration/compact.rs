@@ -317,7 +317,7 @@ impl CompactOrchestrator {
     async fn flush_s3(
         &mut self,
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+        hnsw_segment_writer: Option<Box<DistributedHNSWSegmentWriter>>,
         metadata_segment_writer: MetadataSegmentWriter<'static>,
         self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
     ) {
@@ -346,7 +346,7 @@ impl CompactOrchestrator {
     async fn register(
         &mut self,
         log_position: i64,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
+        segment_flush_info: Arc<Vec<SegmentFlushInfo>>,
         self_address: Box<dyn ReceiverForMessage<TaskResult<RegisterOutput, RegisterError>>>,
     ) {
         self.state = ExecutionState::Register;
@@ -379,7 +379,7 @@ impl CompactOrchestrator {
     ) -> Result<
         (
             RecordSegmentWriter,
-            Box<DistributedHNSWSegmentWriter>,
+            Option<Box<DistributedHNSWSegmentWriter>>,
             MetadataSegmentWriter<'static>,
         ),
         Box<dyn ChromaError>,
@@ -489,22 +489,22 @@ impl CompactOrchestrator {
             return Err(Box::new(GetSegmentWritersError::NoHnswSegmentFound));
         }
         let hnsw_segment = hnsw_segment.unwrap();
-        let dimension = collection
-            .dimension
-            .expect("Dimension is required in the compactor");
 
-        let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
-            hnsw_segment,
-            dimension as usize,
-            self.hnsw_index_provider.clone(),
-        )
-        .await
-        {
-            Ok(writer) => writer,
-            Err(e) => {
-                println!("Error creating HNSW Segment Writer: {:?}", e);
-                return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
-            }
+        let hnsw_segment_writer = match collection.dimension {
+            Some(dim) => match DistributedHNSWSegmentWriter::from_segment(
+                hnsw_segment,
+                dim as usize,
+                self.hnsw_index_provider.clone(),
+            )
+            .await
+            {
+                Ok(writer) => Some(writer),
+                Err(e) => {
+                    println!("Error creating HNSW Segment Writer: {:?}", e);
+                    return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
+                }
+            },
+            None => None,
         };
 
         Ok((

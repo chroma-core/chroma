@@ -177,7 +177,7 @@ impl TestSysDb {
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
+        segment_flush_info: Arc<Vec<SegmentFlushInfo>>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let mut inner = self.inner.lock();
         let collection = inner.collections.get(&collection_id);

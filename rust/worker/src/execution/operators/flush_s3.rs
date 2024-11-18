@@ -25,14 +25,14 @@ impl FlushS3Operator {
 #[derive(Debug)]
 pub struct FlushS3Input {
     record_segment_writer: RecordSegmentWriter,
-    hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+    hnsw_segment_writer: Option<Box<DistributedHNSWSegmentWriter>>,
     metadata_segment_writer: MetadataSegmentWriter<'static>,
 }
 
 impl FlushS3Input {
     pub fn new(
         record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+        hnsw_segment_writer: Option<Box<DistributedHNSWSegmentWriter>>,
         metadata_segment_writer: MetadataSegmentWriter<'static>,
     ) -> Self {
         Self {
@@ -45,7 +45,7 @@ impl FlushS3Input {
 
 #[derive(Debug)]
 pub struct FlushS3Output {
-    pub(crate) segment_flush_info: Arc<[SegmentFlushInfo]>,
+    pub(crate) segment_flush_info: Arc<Vec<SegmentFlushInfo>>,
 }
 
 #[async_trait]
@@ -65,6 +65,9 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
         // only need to be called once across all partitions combined.
         // Eventually, we want the blockfile itself to support read then write semantics
         // so we will get rid of this write_to_blockfile() extravaganza.
+
+        let mut segment_flush_info = vec![];
+
         let mut metadata_segment_writer = input.metadata_segment_writer.clone();
         match metadata_segment_writer
             .write_to_blockfiles()
@@ -105,33 +108,38 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
             }
         };
 
-        let hnsw_segment_flusher = input.hnsw_segment_writer.clone().commit().await;
-        let hnsw_segment_flush_info = match hnsw_segment_flusher {
-            Ok(flusher) => {
-                let segment_id = input.hnsw_segment_writer.id;
-                let res = flusher
-                    .flush()
-                    .instrument(tracing::info_span!("Flush HNSW segment"))
-                    .await;
-                match res {
-                    Ok(res) => {
-                        tracing::info!("HNSW Segment Flushed. File paths {:?}", res);
-                        SegmentFlushInfo {
-                            segment_id,
-                            file_paths: res,
+        segment_flush_info.push(record_segment_flush_info);
+
+        if let Some(hnsw_segment_writer) = input.hnsw_segment_writer.as_ref() {
+            let hnsw_segment_flusher = hnsw_segment_writer.clone().commit().await;
+            let hnsw_segment_flush_info = match hnsw_segment_flusher {
+                Ok(flusher) => {
+                    let segment_id = hnsw_segment_writer.id;
+                    let res = flusher
+                        .flush()
+                        .instrument(tracing::info_span!("Flush HNSW segment"))
+                        .await;
+                    match res {
+                        Ok(res) => {
+                            tracing::info!("HNSW Segment Flushed. File paths {:?}", res);
+                            SegmentFlushInfo {
+                                segment_id,
+                                file_paths: res,
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Error Flushing HNSW Segment: {:?}", e);
+                            return Err(e);
                         }
                     }
-                    Err(e) => {
-                        tracing::error!("Error Flushing HNSW Segment: {:?}", e);
-                        return Err(e);
-                    }
                 }
-            }
-            Err(e) => {
-                tracing::error!("Error Commiting HNSW Segment: {:?}", e);
-                return Err(e);
-            }
-        };
+                Err(e) => {
+                    tracing::error!("Error Commiting HNSW Segment: {:?}", e);
+                    return Err(e);
+                }
+            };
+            segment_flush_info.push(hnsw_segment_flush_info);
+        }
 
         let metadata_segment_flusher = metadata_segment_writer.commit().await;
         let metadata_segment_flush_info = match metadata_segment_flusher {
@@ -160,14 +168,11 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
                 return Err(e);
             }
         };
+        segment_flush_info.push(metadata_segment_flush_info);
 
         tracing::info!("Flush to S3 complete");
         Ok(FlushS3Output {
-            segment_flush_info: Arc::new([
-                record_segment_flush_info,
-                hnsw_segment_flush_info,
-                metadata_segment_flush_info,
-            ]),
+            segment_flush_info: Arc::new(segment_flush_info),
         })
     }
 }

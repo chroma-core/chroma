@@ -41,7 +41,7 @@ pub struct RegisterInput {
     collection_id: CollectionUuid,
     log_position: i64,
     collection_version: i32,
-    segment_flush_info: Arc<[SegmentFlushInfo]>,
+    segment_flush_info: Arc<Vec<SegmentFlushInfo>>,
     sysdb: Box<SysDb>,
     log: Box<Log>,
 }
@@ -53,7 +53,7 @@ impl RegisterInput {
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
+        segment_flush_info: Arc<Vec<SegmentFlushInfo>>,
         sysdb: Box<SysDb>,
         log: Box<Log>,
     ) -> Self {
