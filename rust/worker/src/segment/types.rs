@@ -441,6 +441,7 @@ impl<'me> LogMaterializer<'me> {
             "Total length of logs in materializer: {}",
             self.logs.total_len()
         );
+        // The offset ID that should be used for the next record
         let next_offset_id = match self.curr_offset_id.as_ref() {
             Some(curr_offset_id) => {
                 curr_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
