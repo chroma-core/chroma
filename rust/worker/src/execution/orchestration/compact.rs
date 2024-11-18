@@ -342,11 +342,11 @@ impl CompactOrchestrator {
             let shared_curr_max_offset_id = self.curr_max_offset_id.clone();
             let unshared_curr_max_offset_id1 = Arc::new(AtomicU32::new(
                 self.curr_max_offset_id
-                    .load(std::sync::atomic::Ordering::SeqCst),
+                    .load(std::sync::atomic::Ordering::Relaxed),
             ));
             let unshared_curr_max_offset_id2 = Arc::new(AtomicU32::new(
                 self.curr_max_offset_id
-                    .load(std::sync::atomic::Ordering::SeqCst),
+                    .load(std::sync::atomic::Ordering::Relaxed),
             ));
             self.dispatch_apply_log_to_segment_writer_task(
                 record_segment_writer.clone(),
