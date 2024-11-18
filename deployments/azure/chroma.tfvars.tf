@@ -4,7 +4,7 @@ machine_type        = "Standard_B1s"            # Azure VM size
 ssh_public_key_path = "~/.ssh/id_rsa.pub"       # Path to your SSH public key
 
 instance_name                           = "chroma-instance"
-chroma_version                          = "0.5.19"
+chroma_version                          = "0.5.20"
 chroma_server_auth_credentials          = ""
 chroma_server_auth_provider             = ""
 chroma_auth_token_transport_header      = ""
