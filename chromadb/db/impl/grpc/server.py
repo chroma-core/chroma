@@ -1,5 +1,5 @@
 from concurrent import futures
-from typing import Any, Dict, cast
+from typing import Any, Dict, List, cast
 from uuid import UUID
 from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
@@ -56,6 +56,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
     _server: grpc.Server
     _server_port: int
     _segments: Dict[str, Segment] = {}
+    _collection_to_segments: Dict[str, List[UUID]] = {}
     _tenants_to_databases_to_collections: Dict[
         str, Dict[str, Dict[str, Collection]]
     ] = {}
@@ -306,6 +307,8 @@ class GrpcMockSysDB(SysDBServicer, Component):
             segments_added.append(segment)
 
         collections[request.id] = new_collection
+        collection_unique_key = f"{tenant}:{database}:{request.id}"
+        self._collection_to_segments[collection_unique_key] = segments_added
         return CreateCollectionResponse(
             collection=to_proto_collection(new_collection),
             created=True,
@@ -325,7 +328,8 @@ class GrpcMockSysDB(SysDBServicer, Component):
         collections = self._tenants_to_databases_to_collections[tenant][database]
         if collection_id in collections:
             del collections[collection_id]
-            segment_ids = [UUID(hex=id) for id in request.segment_ids] if request.segment_ids else None
+            collection_unique_key = f"{tenant}:{database}:{collection_id}"
+            segment_ids = self._collection_to_segments[collection_unique_key]
             if segment_ids: # Delete segments if provided.
                 for segment_id in segment_ids:
                     del self._segments[segment_id.hex]

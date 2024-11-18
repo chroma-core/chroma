@@ -224,7 +224,7 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
     # Delete
     c1 = sample_collections[0]
-    sysdb.delete_collection(id=c1.id, segments=[segments_created_with_collection[0]["id"]])
+    sysdb.delete_collection(id=c1.id)
 
     results = sysdb.get_collections()
     assert c1 not in results
