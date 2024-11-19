@@ -277,7 +277,7 @@ impl CompactOrchestrator {
         Writer: SegmentWriter + Clone + Send + Sync + std::fmt::Debug + 'static,
     >(
         &mut self,
-        segment_writer: Writer,
+        segment_writer: Option<Writer>,
         self_address: Box<
             dyn ReceiverForMessage<
                 TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
@@ -322,16 +322,21 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Write;
 
-        let writer_res = self.get_segment_writers().await;
-        let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) = match writer_res
-        {
-            Ok(writers) => writers,
-            Err(e) => {
-                tracing::error!("Error creating writers for compaction {:?}", e);
-                terminate_with_error(self.result_channel.take(), e, ctx);
-                return;
-            }
-        };
+        if let Err(e) = self.init_segment_writers().await {
+            tracing::error!("Error creating writers for compaction {:?}", e);
+            terminate_with_error(self.result_channel.take(), e, ctx);
+            return;
+        }
+
+        let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
+            match self.writers.as_ref() {
+                Some((rec_writer, hnsw_writer, metadata_writer)) => (
+                    Some(rec_writer.clone()),
+                    Some(hnsw_writer.clone()),
+                    Some(metadata_writer.clone()),
+                ),
+                None => (None, None, None),
+            };
 
         self.num_write_tasks = partitions.len() as i32 * 3;
         for partition in partitions.iter() {
@@ -434,18 +439,10 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn get_segment_writers(
-        &mut self,
-    ) -> Result<
-        (
-            RecordSegmentWriter,
-            Box<DistributedHNSWSegmentWriter>,
-            MetadataSegmentWriter<'static>,
-        ),
-        Box<dyn ChromaError>,
-    > {
-        if let Some(writer) = &self.writers {
-            return Ok(writer.clone());
+    // Initialize the segment writers and store it in the orchestrator
+    async fn init_segment_writers(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        if self.writers.is_some() {
+            return Ok(());
         }
 
         // Care should be taken to use the same writers across the compaction process
@@ -553,35 +550,32 @@ impl CompactOrchestrator {
             return Err(Box::new(GetSegmentWritersError::NoHnswSegmentFound));
         }
         let hnsw_segment = hnsw_segment.unwrap();
-        let dimension = collection
-            .dimension
-            .expect("Dimension is required in the compactor");
 
-        let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
-            hnsw_segment,
-            dimension as usize,
-            self.hnsw_index_provider.clone(),
-        )
-        .await
-        {
-            Ok(writer) => writer,
-            Err(e) => {
-                println!("Error creating HNSW Segment Writer: {:?}", e);
-                return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
-            }
-        };
+        // If the collection has no dimension set, it is either because no record
+        // has been added to the collection or the frontend is not working properly.
+        // In this case we only compact if there is no delta after materialization.
+        if let Some(dimension) = collection.dimension {
+            let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
+                hnsw_segment,
+                dimension as usize,
+                self.hnsw_index_provider.clone(),
+            )
+            .await
+            {
+                Ok(writer) => writer,
+                Err(e) => {
+                    println!("Error creating HNSW Segment Writer: {:?}", e);
+                    return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
+                }
+            };
 
-        self.writers = Some((
-            record_segment_writer.clone(),
-            hnsw_segment_writer.clone(),
-            mt_segment_writer.clone(),
-        ));
-
-        Ok((
-            record_segment_writer,
-            hnsw_segment_writer,
-            mt_segment_writer,
-        ))
+            self.writers = Some((
+                record_segment_writer.clone(),
+                hnsw_segment_writer.clone(),
+                mt_segment_writer.clone(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) async fn run(mut self) -> Result<CompactionResponse, Box<dyn ChromaError>> {

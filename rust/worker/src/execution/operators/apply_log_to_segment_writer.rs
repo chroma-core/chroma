@@ -29,6 +29,8 @@ pub enum ApplyLogToSegmentWriterOperatorError {
     ApplyMaterializedLogsError(#[from] ApplyMaterializedLogError),
     #[error("Materialized logs failed to apply {0}")]
     ApplyMaterializedLogsErrorMetadataSegment(#[from] MetadataSegmentError),
+    #[error("Uninitialized segment writer")]
+    UninitializedSegmentWriter,
 }
 
 impl ChromaError for ApplyLogToSegmentWriterOperatorError {
@@ -39,6 +41,9 @@ impl ChromaError for ApplyLogToSegmentWriterOperatorError {
             ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(e) => e.code(),
             ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsErrorMetadataSegment(e) => {
                 e.code()
+            }
+            ApplyLogToSegmentWriterOperatorError::UninitializedSegmentWriter => {
+                ErrorCodes::FailedPrecondition
             }
         }
     }
@@ -55,7 +60,8 @@ impl ApplyLogToSegmentWriterOperator {
 
 #[derive(Debug)]
 pub struct ApplyLogToSegmentWriterInput<Writer: SegmentWriter> {
-    segment_writer: Writer,
+    // In the case where the materialized log is empty, we allow the segment writer to be uninitialized
+    segment_writer: Option<Writer>,
     chunk: Chunk<LogRecord>,
     provider: BlockfileProvider,
     record_segment: Segment,
@@ -64,7 +70,7 @@ pub struct ApplyLogToSegmentWriterInput<Writer: SegmentWriter> {
 
 impl<Writer: SegmentWriter> ApplyLogToSegmentWriterInput<Writer> {
     pub fn new(
-        segment_writer: Writer,
+        segment_writer: Option<Writer>,
         chunk: Chunk<LogRecord>,
         provider: BlockfileProvider,
         record_segment: Segment,
@@ -175,22 +181,19 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
                 return Err(ApplyLogToSegmentWriterOperatorError::LogMaterializationError(e));
             }
         };
-        // Apply materialized records.
-        match input
-            .segment_writer
-            .apply_materialized_log_chunk(res)
-            .instrument(tracing::trace_span!(
-                "Apply materialized logs",
-                segment = input.segment_writer.get_name()
-            ))
-            .await
-        {
-            Ok(()) => (),
-            Err(e) => {
-                return Err(ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsError(e));
-            }
+        if !res.is_empty() {
+            let writer = input
+                .segment_writer
+                .as_ref()
+                .ok_or(ApplyLogToSegmentWriterOperatorError::UninitializedSegmentWriter)?;
+            writer
+                .apply_materialized_log_chunk(res)
+                .instrument(tracing::trace_span!(
+                    "Apply materialized logs",
+                    segment = writer.get_name()
+                ))
+                .await?;
         }
-
         Ok(ApplyLogToSegmentWriterOutput {})
     }
 }
