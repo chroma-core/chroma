@@ -383,12 +383,13 @@ class SegmentAPI(ServerAPI):
             name=name, tenant=tenant, database=database
         )
 
-        if not existing:
+        if existing:
+            self._sysdb.delete_collection(
+                existing[0].id, tenant=tenant, database=database
+            )
+            self._manager.delete_segments(existing[0].id)
+        else:
             raise ValueError(f"Collection {name} does not exist.")
-
-        self._sysdb.delete_collection(
-            existing[0].id, tenant=tenant, database=database,
-        )
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
