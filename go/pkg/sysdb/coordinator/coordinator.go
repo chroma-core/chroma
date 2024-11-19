@@ -137,6 +137,10 @@ func (s *Coordinator) GetSegments(ctx context.Context, segmentID types.UniqueID,
 	return s.catalog.GetSegments(ctx, segmentID, segmentType, scope, collectionID)
 }
 
+// DeleteSegment is a no-op.
+// Segments are deleted as part of atomic delete of collection.
+// Keeping this API so that older clients continue to work, since older clients will issue DeleteSegment
+// after a DeleteCollection.
 func (s *Coordinator) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
 	return s.catalog.DeleteSegment(ctx, segmentID, collectionID)
 }

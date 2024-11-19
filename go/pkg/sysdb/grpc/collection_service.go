@@ -161,7 +161,6 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 		TenantID:     req.GetTenant(),
 		DatabaseName: req.GetDatabase(),
 	}
-
 	err = s.coordinator.DeleteCollection(ctx, deleteCollection)
 	if err != nil {
 		log.Error("DeleteCollection failed", zap.Error(err), zap.String("collection_id", collectionID))

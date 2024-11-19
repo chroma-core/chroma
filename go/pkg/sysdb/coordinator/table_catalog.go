@@ -651,6 +651,9 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	return segments, nil
 }
 
+// DeleteSegment is a no-op.
+// Segments are deleted as part of atomic delete of collection.
+// Keeping this API so that older clients continue to work.
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
 	return nil
 }
