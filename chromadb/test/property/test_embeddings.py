@@ -874,7 +874,8 @@ def test_no_op_compaction(client: ClientAPI) -> None:
     coll = client.create_collection(name="noop")
     for batch in range(0, 5000, 100):
         coll.delete(ids=[str(i) for i in range(batch, batch + 100)])
-    wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+    if not NOT_CLUSTER_ONLY:
+        wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
 
 def test_add_then_purge(client: ClientAPI) -> None:
     reset(client)
@@ -887,14 +888,16 @@ def test_add_then_purge(client: ClientAPI) -> None:
         record_id_vals = [i for i in range(batch, batch + batch_count)]
         record_ids = [str(i) for i in record_id_vals]
         coll.add(ids=record_ids, embeddings=[[2 * i, 2 * i + 1] for i in record_id_vals])
-    wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+    if not NOT_CLUSTER_ONLY:
+        wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
 
     # Purge records and wait for compaction
     for batch in range(0, record_count, batch_count):
         record_id_vals = [i for i in range(batch, batch + batch_count)]
         record_ids = [str(i) for i in record_id_vals]
         coll.delete(ids=record_ids)
-    wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+    if not NOT_CLUSTER_ONLY:
+        wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
 
     # There should be no records left
     assert len(coll.get()["ids"]) == 0
