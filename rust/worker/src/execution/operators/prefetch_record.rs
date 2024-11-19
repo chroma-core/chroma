@@ -10,8 +10,9 @@ use tracing::{trace, Instrument, Span};
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializerError,
     },
 };
 
@@ -84,13 +85,8 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
             Err(e) => return Err((*e).into()),
         };
 
-        let materializer = LogMaterializer::new(
-            Some(record_segment_reader.clone()),
-            input.logs.clone(),
-            None,
-        );
-        let materialized_logs = materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader.clone());
+        let materialized_logs = materialize_logs(&some_reader, &input.logs, None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
 

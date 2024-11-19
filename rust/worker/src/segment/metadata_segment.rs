@@ -1075,11 +1075,12 @@ mod test {
     #![allow(deprecated)]
 
     use crate::segment::{
+        materialize_logs,
         metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
         record_segment::{
             RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
-        LogMaterializer, SegmentFlusher, SegmentWriter,
+        SegmentFlusher, SegmentWriter,
     };
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
@@ -1193,9 +1194,7 @@ mod test {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             metadata_writer
@@ -1265,9 +1264,8 @@ mod test {
             MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
-        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
-        let mat_records = materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader);
+        let mat_records = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Log materialization failed");
         metadata_writer
@@ -1347,9 +1345,8 @@ mod test {
             MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
-        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
-        let mat_records = materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader);
+        let mat_records = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Log materialization failed");
         metadata_writer
@@ -1487,9 +1484,7 @@ mod test {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             metadata_writer
@@ -1566,9 +1561,8 @@ mod test {
             MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
-        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
-        let mat_records = materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader);
+        let mat_records = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Log materialization failed");
         metadata_writer
@@ -1740,9 +1734,7 @@ mod test {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             metadata_writer
@@ -1801,9 +1793,8 @@ mod test {
             MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
-        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
-        let mat_records = materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader);
+        let mat_records = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Log materialization failed");
         metadata_writer
@@ -1962,9 +1953,7 @@ mod test {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             metadata_writer
@@ -2021,9 +2010,8 @@ mod test {
             MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Error creating segment writer");
-        let materializer = LogMaterializer::new(Some(record_segment_reader), data, None);
-        let mat_records = materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader);
+        let mat_records = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Log materialization failed");
         metadata_writer
