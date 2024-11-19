@@ -318,6 +318,9 @@ impl<O: ObjectStore> LogWriter<O> {
     }
 
     pub async fn open(mut options: LogWriterOptions, object_store: O) -> Result<Arc<Self>, Error> {
+        // We clamp throttle_manifest_outstanding and store_alpha to the min of the two.  It is
+        // always acceptable to operate with a smaller write alpha or bigger read alpha, so what
+        // we're effectively doing is allowing two independent constraints on the write ahead.
         options.throttle_manifest.outstanding =
             std::cmp::min(options.throttle_manifest.outstanding, options.store_alpha);
         options.store_alpha = options.throttle_manifest.outstanding;

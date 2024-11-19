@@ -156,23 +156,8 @@ impl Manifest {
     }
 
     pub fn apply_fragment(&mut self, fragment: ShardFragment) {
-        let ShardFragment {
-            path,
-            shard_id,
-            seq_no,
-            start,
-            limit,
-            setsum,
-        } = fragment;
-        self.fragments.push(ShardFragment {
-            path: path.clone(),
-            shard_id,
-            seq_no,
-            start,
-            limit,
-            setsum,
-        });
-        self.setsum += setsum;
+        self.setsum += fragment.setsum;
+        self.fragments.push(fragment);
     }
 
     pub fn generate_next_pointer(&mut self) -> Result<(), Error> {

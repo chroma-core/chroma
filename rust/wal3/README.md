@@ -178,8 +178,8 @@ manifest/MANIFEST.1728663515390
 ```
 
 This means approximately 3,500 writes per second for each shard and the manifest.  We can have as
-many shards as we need, but analysis (in s3.napkin) shows that just 12 partitions is the most we'll
-ever need for a single log given our size restrictions.
+many shards as we need, but analysis shows that just 12 partitions is the most we'll ever need for a
+single log given our size restrictions.
 
 ## Writer Arch Diagram
 
@@ -558,7 +558,7 @@ This imposes a limit of ~65M shard fragments referenced by a manifest.  A 2MB ma
 
 ## Snapshotting of the Log
 
-There is no file stored in S3 that is every mutated or overwritten in a correctly-functioning wal3
+There is no file stored in S3 that is ever mutated or overwritten in a correctly-functioning wal3
 instance.
 
 Ever.

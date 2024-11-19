@@ -116,6 +116,8 @@ impl ShardManager {
                 enqueued: Vec::new(),
                 last_batch: Instant::now(),
             }),
+            // Set these to 100k and 1 to avoid division by zero.  100k is a reasonable batch size,
+            // so this should give a good starting point.
             records_written: AtomicUsize::new(100_000),
             batches_written: AtomicUsize::new(1),
             write_finished: tokio::sync::Notify::new(),
@@ -171,6 +173,7 @@ impl ShardManager {
         }
         let batch_size = self.batch_size();
         let mut batch_size =
+            // If our estimate is wildly under-estimating, just take everything available.
             if state.enqueued.len() > batch_size * 2 || state.enqueued.len() < batch_size {
                 state.enqueued.len()
             } else {
