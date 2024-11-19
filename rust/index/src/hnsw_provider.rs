@@ -1,11 +1,9 @@
-use crate::PersistentIndex;
-
 use super::config::HnswProviderConfig;
 use super::{
     HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
     IndexConfigFromSegmentError, IndexUuid,
 };
-
+use crate::PersistentIndex;
 use async_trait::async_trait;
 use chroma_cache::{Cache, Weighted};
 use chroma_config::Configurable;
@@ -32,6 +30,8 @@ const FILES: [&str; 4] = [
     "length.bin",
     "link_lists.bin",
 ];
+
+const STAGED_FILE_PATH: &str = "staged_files";
 
 type CacheKey = CollectionUuid;
 
@@ -214,12 +214,36 @@ impl HnswIndexProvider {
 
     async fn copy_bytes_to_local_file(
         &self,
-        file_path: &PathBuf,
+        file_path: &Path,
         buf: Arc<Vec<u8>>,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
-        let random_file_path = self
-            .temporary_storage_path
-            .join(Path::new(uuid::Uuid::new_v4().to_string().as_str()));
+        let path_prefix = match file_path.parent() {
+            Some(path) => path,
+            None => {
+                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
+            }
+        };
+        let path_suffix = match file_path.file_name() {
+            Some(path) => path,
+            None => {
+                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
+            }
+        };
+
+        let random_dir = path_prefix
+            .join(Path::new(STAGED_FILE_PATH))
+            .join(uuid::Uuid::new_v4().to_string());
+
+        // This is ok to be called from multiple threads concurrently. See
+        // the documentation of tokio::fs::create_dir_all to see why.
+        match self.create_dir_all(&random_dir).await {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
+        let random_file_path = random_dir.join(path_suffix);
 
         // First write to a random file path and then rename to the actual file path.
         // this defends against potentially concurrent writes to the same file. But still
@@ -251,11 +275,11 @@ impl HnswIndexProvider {
         async fn remove_temporary_files(
             path: &Path,
         ) -> Result<(), Box<HnswIndexProviderFileError>> {
-            // Remove the random file path.
-            match tokio::fs::remove_file(path).await {
+            // Remove the random directory.
+            match tokio::fs::remove_dir_all(path).await {
                 Ok(_) => Ok(()),
                 Err(e) => {
-                    tracing::error!("Failed to remove file: {}", e);
+                    tracing::error!("Failed to remove directory: {}", e);
                     Err(Box::new(HnswIndexProviderFileError::IOError(e)))
                 }
             }
@@ -275,7 +299,7 @@ impl HnswIndexProvider {
             }
         }
         // Remove the random file path.
-        remove_temporary_files(&random_file_path).await
+        remove_temporary_files(&random_dir).await
     }
 
     #[instrument]
@@ -625,6 +649,8 @@ pub enum HnswIndexProviderFileError {
     StorageGetError(#[from] chroma_storage::GetError),
     #[error("Storage Put Error")]
     StoragePutError(#[from] chroma_storage::PutError),
+    #[error("Must provide full path to file")]
+    InvalidFilePath,
 }
 
 #[cfg(test)]

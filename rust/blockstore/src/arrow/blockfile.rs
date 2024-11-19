@@ -22,7 +22,6 @@ use std::mem::transmute;
 use std::ops::RangeBounds;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
-use tracing::Span;
 use uuid::Uuid;
 
 #[derive(Clone)]
