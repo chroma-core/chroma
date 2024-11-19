@@ -56,6 +56,10 @@ impl Operator<FlushSegmentWriterInput, FlushSegmentWriterOutput> for FlushSegmen
         "FlushSegmentWriterOperator"
     }
 
+    fn get_type(&self) -> crate::execution::operator::OperatorType {
+        crate::execution::operator::OperatorType::IO
+    }
+
     async fn run(
         &self,
         input: &FlushSegmentWriterInput,

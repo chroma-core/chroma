@@ -364,12 +364,7 @@ impl CompactOrchestrator {
         let input = ApplyLogToSegmentWriterInput::new(segment_writer, materialized_log);
         let task = wrap(operator, input, self_address.clone());
         match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => {
-                self.num_uncompleted_log_apply_tasks
-                    .entry(segment_id)
-                    .and_modify(|e| *e += 1)
-                    .or_insert(1);
-            }
+            Ok(_) => {}
             Err(e) => {
                 tracing::error!(
                     "Error dispatching apply log to segment writer task: {:?}",
@@ -420,9 +415,7 @@ impl CompactOrchestrator {
         let input = FlushSegmentWriterInput::new(segment_writer);
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => {
-                self.num_uncompleted_flush_tasks += 1;
-            }
+            Ok(_) => {}
             Err(e) => {
                 tracing::error!("Error dispatching flush for compaction {:?}", e);
                 panic!(
@@ -432,35 +425,6 @@ impl CompactOrchestrator {
             }
         }
     }
-
-    // async fn flush_s3(
-    //     &mut self,
-    //     record_segment_writer: RecordSegmentWriter,
-    //     hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
-    //     metadata_segment_writer: MetadataSegmentWriter<'static>,
-    //     self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
-    // ) {
-    //     self.state = ExecutionState::Flush;
-
-    //     let operator = FlushS3Operator::new();
-    //     let input = FlushS3Input::new(
-    //         record_segment_writer,
-    //         hnsw_segment_writer,
-    //         metadata_segment_writer,
-    //     );
-
-    //     let task = wrap(operator, input, self_address);
-    //     match self.dispatcher.send(task, Some(Span::current())).await {
-    //         Ok(_) => (),
-    //         Err(e) => {
-    //             tracing::error!("Error dispatching flush to S3 for compaction {:?}", e);
-    //             panic!(
-    //                 "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
-    //                 e
-    //             );
-    //         }
-    //     }
-    // }
 
     async fn register(
         &mut self,
