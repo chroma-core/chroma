@@ -768,6 +768,9 @@ pub trait SegmentWriter {
         &self,
         records: Chunk<MaterializedLogRecord>,
     ) -> impl Future<Output = Result<(), ApplyMaterializedLogError>> + Send;
+    async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        Ok(())
+    }
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
 }
 
@@ -895,7 +898,7 @@ mod tests {
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
-                .write_to_blockfiles()
+                .finish()
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
@@ -992,7 +995,7 @@ mod tests {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
@@ -1190,7 +1193,7 @@ mod tests {
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
-                .write_to_blockfiles()
+                .finish()
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
@@ -1278,7 +1281,7 @@ mod tests {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer
@@ -1477,7 +1480,7 @@ mod tests {
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
-                .write_to_blockfiles()
+                .finish()
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
@@ -1585,7 +1588,7 @@ mod tests {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         let flusher = segment_writer

@@ -325,65 +325,6 @@ impl<'me> MetadataSegmentWriter<'me> {
         })
     }
 
-    pub async fn write_to_blockfiles(&mut self) -> Result<(), MetadataSegmentError> {
-        let mut full_text_index_writer = self
-            .full_text_index_writer
-            .take()
-            .ok_or_else(|| MetadataSegmentError::NoWriter)?;
-        let res = full_text_index_writer.write_to_blockfiles().await;
-        self.full_text_index_writer = Some(full_text_index_writer);
-        match res {
-            Ok(_) => {}
-            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
-        }
-
-        let mut string_metadata_index_writer = self
-            .string_metadata_index_writer
-            .take()
-            .ok_or_else(|| MetadataSegmentError::NoWriter)?;
-        let res = string_metadata_index_writer.write_to_blockfile().await;
-        self.string_metadata_index_writer = Some(string_metadata_index_writer);
-        match res {
-            Ok(_) => {}
-            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
-        }
-
-        let mut bool_metadata_index_writer = self
-            .bool_metadata_index_writer
-            .take()
-            .ok_or_else(|| MetadataSegmentError::NoWriter)?;
-        let res = bool_metadata_index_writer.write_to_blockfile().await;
-        self.bool_metadata_index_writer = Some(bool_metadata_index_writer);
-        match res {
-            Ok(_) => {}
-            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
-        }
-
-        let mut f32_metadata_index_writer = self
-            .f32_metadata_index_writer
-            .take()
-            .ok_or_else(|| MetadataSegmentError::NoWriter)?;
-        let res = f32_metadata_index_writer.write_to_blockfile().await;
-        self.f32_metadata_index_writer = Some(f32_metadata_index_writer);
-        match res {
-            Ok(_) => {}
-            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
-        }
-
-        let mut u32_metadata_index_writer = self
-            .u32_metadata_index_writer
-            .take()
-            .ok_or_else(|| MetadataSegmentError::NoWriter)?;
-        let res = u32_metadata_index_writer.write_to_blockfile().await;
-        self.u32_metadata_index_writer = Some(u32_metadata_index_writer);
-        match res {
-            Ok(_) => {}
-            Err(_) => return Err(MetadataSegmentError::BlockfileWriteError),
-        }
-
-        Ok(())
-    }
-
     pub(crate) async fn set_metadata(
         &self,
         prefix: &str,
@@ -693,6 +634,65 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
             }
         }
         tracing::info!("Applied {} records to metadata segment", count,);
+        Ok(())
+    }
+
+    async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        let mut full_text_index_writer = match self.full_text_index_writer.take() {
+            Some(writer) => writer,
+            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
+        };
+        let res = full_text_index_writer.write_to_blockfiles().await;
+        self.full_text_index_writer = Some(full_text_index_writer);
+        match res {
+            Ok(_) => {}
+            Err(_) => return Err(Box::new(MetadataSegmentError::BlockfileWriteError)),
+        }
+
+        let mut string_metadata_index_writer = match self.string_metadata_index_writer.take() {
+            Some(writer) => writer,
+            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
+        };
+        let res = string_metadata_index_writer.write_to_blockfile().await;
+        self.string_metadata_index_writer = Some(string_metadata_index_writer);
+        match res {
+            Ok(_) => {}
+            Err(_) => return Err(Box::new(MetadataSegmentError::BlockfileWriteError)),
+        }
+
+        let mut bool_metadata_index_writer = match self.bool_metadata_index_writer.take() {
+            Some(writer) => writer,
+            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
+        };
+        let res = bool_metadata_index_writer.write_to_blockfile().await;
+        self.bool_metadata_index_writer = Some(bool_metadata_index_writer);
+        match res {
+            Ok(_) => {}
+            Err(_) => return Err(Box::new(MetadataSegmentError::BlockfileWriteError)),
+        }
+
+        let mut f32_metadata_index_writer = match self.f32_metadata_index_writer.take() {
+            Some(writer) => writer,
+            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
+        };
+        let res = f32_metadata_index_writer.write_to_blockfile().await;
+        self.f32_metadata_index_writer = Some(f32_metadata_index_writer);
+        match res {
+            Ok(_) => {}
+            Err(_) => return Err(Box::new(MetadataSegmentError::BlockfileWriteError)),
+        }
+
+        let mut u32_metadata_index_writer = match self.u32_metadata_index_writer.take() {
+            Some(writer) => writer,
+            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
+        };
+        let res = u32_metadata_index_writer.write_to_blockfile().await;
+        self.u32_metadata_index_writer = Some(u32_metadata_index_writer);
+        match res {
+            Ok(_) => {}
+            Err(_) => return Err(Box::new(MetadataSegmentError::BlockfileWriteError)),
+        }
+
         Ok(())
     }
 
@@ -1197,7 +1197,7 @@ mod test {
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
-                .write_to_blockfiles()
+                .finish()
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
@@ -1268,7 +1268,7 @@ mod test {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         segment_writer
@@ -1349,7 +1349,7 @@ mod test {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         segment_writer
@@ -1478,7 +1478,7 @@ mod test {
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
-                .write_to_blockfiles()
+                .finish()
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
@@ -1556,7 +1556,7 @@ mod test {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         segment_writer
@@ -1719,7 +1719,7 @@ mod test {
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
-                .write_to_blockfiles()
+                .finish()
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
@@ -1779,7 +1779,7 @@ mod test {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         segment_writer
@@ -1929,7 +1929,7 @@ mod test {
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
-                .write_to_blockfiles()
+                .finish()
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
@@ -1987,7 +1987,7 @@ mod test {
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Write to blockfiles for metadata writer failed");
         segment_writer

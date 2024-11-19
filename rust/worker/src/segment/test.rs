@@ -40,7 +40,7 @@ impl TestSegment {
             .await
             .expect("Should be able to apply materialized logs.");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Should be able to write to blockfile.");
         self.metadata_segment.file_path = metadata_writer

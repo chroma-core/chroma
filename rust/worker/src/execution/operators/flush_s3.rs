@@ -67,7 +67,7 @@ impl Operator<FlushS3Input, FlushS3Output> for FlushS3Operator {
         // so we will get rid of this write_to_blockfile() extravaganza.
         let mut metadata_segment_writer = input.metadata_segment_writer.clone();
         match metadata_segment_writer
-            .write_to_blockfiles()
+            .finish()
             .instrument(tracing::info_span!("Writing to blockfiles"))
             .await
         {
