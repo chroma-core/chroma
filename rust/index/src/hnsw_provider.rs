@@ -217,9 +217,14 @@ impl HnswIndexProvider {
         file_path: &PathBuf,
         buf: Arc<Vec<u8>>,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
-        // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for write to local disk")).await;
-        let file_handle = tokio::fs::File::create(&file_path).await;
+        let random_file_path = self
+            .temporary_storage_path
+            .join(Path::new(uuid::Uuid::new_v4().to_string().as_str()));
+
+        // First write to a random file path and then rename to the actual file path.
+        // this defends against potentially concurrent writes to the same file. But still
+        // allows concurrent writes to different files.
+        let file_handle = tokio::fs::File::create(&random_file_path).await;
         let mut file_handle = match file_handle {
             Ok(file) => file,
             Err(e) => {
@@ -236,12 +241,41 @@ impl HnswIndexProvider {
             }
         }
         match file_handle.flush().await {
-            Ok(_) => Ok(()),
+            Ok(_) => {}
             Err(e) => {
                 tracing::error!("Failed to flush file: {}", e);
-                Err(Box::new(HnswIndexProviderFileError::IOError(e)))
+                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
+
+        async fn remove_temporary_files(
+            path: &Path,
+        ) -> Result<(), Box<HnswIndexProviderFileError>> {
+            // Remove the random file path.
+            match tokio::fs::remove_file(path).await {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    tracing::error!("Failed to remove file: {}", e);
+                    Err(Box::new(HnswIndexProviderFileError::IOError(e)))
+                }
+            }
+        }
+
+        // Synchronize concurrent writes to the same file.
+        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for write to local disk")).await;
+        // Do nothing if the file exists, we assume the concurrent writer wrote the same data.
+        // This is a safe assumption because the data is immutable from our perspective.
+        if !file_path.exists() {
+            match tokio::fs::rename(&random_file_path, file_path).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to rename file: {}", e);
+                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+                }
+            }
+        }
+        // Remove the random file path.
+        remove_temporary_files(&random_file_path).await
     }
 
     #[instrument]
@@ -324,21 +358,21 @@ impl HnswIndexProvider {
             }
         };
 
-        match HnswIndex::load(index_storage_path_str, &index_config, *id) {
-            Ok(index) => {
-                let _guard = self.write_mutex.lock().await;
-                match self.get(id, cache_key).await {
-                    Some(index) => Ok(index.clone()),
-                    None => {
-                        let index = HnswIndexRef {
-                            inner: Arc::new(RwLock::new(index)),
-                        };
-                        self.cache.insert(*cache_key, index.clone()).await;
-                        Ok(index)
-                    }
+        let _guard = self.write_mutex.lock().await;
+        // Check if the entry is in the cache, if it is, we assume
+        // another thread has loaded the index and we return it.
+        match self.get(id, cache_key).await {
+            Some(index) => Ok(index.clone()),
+            None => match HnswIndex::load(index_storage_path_str, &index_config, *id) {
+                Ok(index) => {
+                    let index = HnswIndexRef {
+                        inner: Arc::new(RwLock::new(index)),
+                    };
+                    self.cache.insert(*cache_key, index.clone()).await;
+                    Ok(index)
                 }
-            }
-            Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
+                Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
+            },
         }
     }
 
