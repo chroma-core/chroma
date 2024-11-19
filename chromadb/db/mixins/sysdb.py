@@ -191,7 +191,9 @@ class SqlSysDB(SqlDB, SysDB):
                     segment["metadata"],
                 )
             except Exception as e:
+                logger.error(f"Error inserting segment metadata: {e}")
                 raise
+
 
     # TODO(rohit): Investigate and remove this method completely.
     @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
@@ -503,8 +505,8 @@ class SqlSysDB(SqlDB, SysDB):
             .delete()
         )
         with self.tx() as cur:
-            sql, params = get_sql(q, self.parameter_format())
             # no need for explicit del from metadata table because of ON DELETE CASCADE
+            sql, params = get_sql(q, self.parameter_format())
             sql = sql + " RETURNING id"
             result = cur.execute(sql, params).fetchone()
             if not result:
