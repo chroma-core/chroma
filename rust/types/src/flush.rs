@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SegmentFlushInfo {
     pub segment_id: SegmentUuid,
     pub file_paths: HashMap<String, Vec<String>>,

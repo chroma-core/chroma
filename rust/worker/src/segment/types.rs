@@ -3,7 +3,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
     MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, OperationRecord,
-    UpdateMetadata, UpdateMetadataValue,
+    SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -12,8 +12,11 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
+use super::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
+use super::metadata_segment::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::record_segment::{
-    ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
+    ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader,
+    RecordSegmentReaderCreationError, RecordSegmentWriter,
 };
 
 // Materializes metadata from update metadata, populating the delete list
@@ -763,21 +766,120 @@ pub async fn materialize_logs<'me>(
 // This needs to be public for testing
 #[allow(async_fn_in_trait)]
 pub trait SegmentWriter {
+    type Flusher: SegmentFlusher + Sync + Send;
+
+    fn get_id(&self) -> SegmentUuid;
     fn get_name(&self) -> &'static str;
     fn apply_materialized_log_chunk(
         &self,
         records: Chunk<MaterializedLogRecord>,
     ) -> impl Future<Output = Result<(), ApplyMaterializedLogError>> + Send;
-    async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        Ok(())
+    fn finish(&mut self) -> impl Future<Output = Result<(), Box<dyn ChromaError>>> + Send {
+        async { Ok(()) }
     }
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
+    fn commit(self) -> impl Future<Output = Result<Self::Flusher, Box<dyn ChromaError>>> + Send;
 }
 
 // This needs to be public for testing
 #[async_trait]
 pub trait SegmentFlusher {
+    fn get_id(&self) -> SegmentUuid;
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>>;
+}
+
+#[derive(Clone, Debug)]
+pub enum ChromaSegmentWriter<'a> {
+    RecordSegment(RecordSegmentWriter),
+    MetadataSegment(MetadataSegmentWriter<'a>),
+    DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>), // todo: should be boxed?
+}
+
+impl<'a> SegmentWriter for ChromaSegmentWriter<'a> {
+    type Flusher = ChromaSegmentFlusher;
+
+    fn get_id(&self) -> SegmentUuid {
+        match self {
+            ChromaSegmentWriter::RecordSegment(writer) => writer.get_id(),
+            ChromaSegmentWriter::MetadataSegment(writer) => writer.get_id(),
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => SegmentWriter::get_id(writer),
+        }
+    }
+
+    fn get_name(&self) -> &'static str {
+        match self {
+            ChromaSegmentWriter::RecordSegment(writer) => writer.get_name(),
+            ChromaSegmentWriter::MetadataSegment(writer) => writer.get_name(),
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.get_name(),
+        }
+    }
+
+    async fn apply_materialized_log_chunk(
+        &self,
+        records: Chunk<MaterializedLogRecord<'_>>,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        match self {
+            ChromaSegmentWriter::RecordSegment(writer) => {
+                writer.apply_materialized_log_chunk(records).await
+            }
+            ChromaSegmentWriter::MetadataSegment(writer) => {
+                writer.apply_materialized_log_chunk(records).await
+            }
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => {
+                writer.apply_materialized_log_chunk(records).await
+            }
+        }
+    }
+
+    async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            ChromaSegmentWriter::RecordSegment(writer) => writer.finish().await,
+            ChromaSegmentWriter::MetadataSegment(writer) => writer.finish().await,
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.finish().await,
+        }
+    }
+
+    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
+        match self {
+            ChromaSegmentWriter::RecordSegment(writer) => writer
+                .commit()
+                .await
+                .map(ChromaSegmentFlusher::RecordSegment),
+            ChromaSegmentWriter::MetadataSegment(writer) => writer
+                .commit()
+                .await
+                .map(ChromaSegmentFlusher::MetadataSegment),
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer
+                .commit()
+                .await
+                .map(ChromaSegmentFlusher::DistributedHNSWSegment),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ChromaSegmentFlusher {
+    RecordSegment(RecordSegmentFlusher),
+    MetadataSegment(MetadataSegmentFlusher),
+    DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>),
+}
+
+#[async_trait]
+impl SegmentFlusher for ChromaSegmentFlusher {
+    fn get_id(&self) -> SegmentUuid {
+        match self {
+            ChromaSegmentFlusher::RecordSegment(flusher) => flusher.get_id(),
+            ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.get_id(),
+            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => SegmentWriter::get_id(flusher),
+        }
+    }
+
+    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        match self {
+            ChromaSegmentFlusher::RecordSegment(flusher) => flusher.flush().await,
+            ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.flush().await,
+            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => flusher.flush().await,
+        }
+    }
 }
 
 #[cfg(test)]

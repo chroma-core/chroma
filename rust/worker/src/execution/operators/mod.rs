@@ -1,7 +1,9 @@
 pub(super) mod apply_log_to_segment_writer;
 pub(super) mod brute_force_knn;
+pub(super) mod commit_segment_writer;
 pub(super) mod count_records;
 pub(super) mod flush_s3;
+pub(super) mod flush_segment_writer;
 pub(super) mod get_vectors_operator;
 pub(super) mod hnsw_knn;
 pub(super) mod materialize_logs;

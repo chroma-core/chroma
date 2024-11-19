@@ -421,6 +421,7 @@ impl<'me> MetadataIndexWriter<'me> {
     }
 }
 
+#[derive(Clone)]
 pub enum MetadataIndexFlusher {
     StringMetadataIndexFlusher(BlockfileFlusher),
     U32MetadataIndexFlusher(BlockfileFlusher),

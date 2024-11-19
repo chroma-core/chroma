@@ -239,6 +239,12 @@ impl DistributedHNSWSegmentWriter {
 }
 
 impl SegmentWriter for DistributedHNSWSegmentWriter {
+    type Flusher = DistributedHNSWSegmentWriter;
+
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     fn get_name(&self) -> &'static str {
         "DistributedHNSWSegmentWriter"
     }
@@ -296,7 +302,7 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
         let res = self.hnsw_index_provider.commit(self.index.clone());
         match res {
             Ok(_) => Ok(self),
@@ -306,6 +312,12 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
 }
 
 impl SegmentWriter for Box<DistributedHNSWSegmentWriter> {
+    type Flusher = Box<DistributedHNSWSegmentWriter>;
+
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     fn get_name(&self) -> &'static str {
         self.as_ref().get_name()
     }
@@ -317,13 +329,19 @@ impl SegmentWriter for Box<DistributedHNSWSegmentWriter> {
         self.as_ref().apply_materialized_log_chunk(records).await
     }
 
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
-        DistributedHNSWSegmentWriter::commit(*self).await
+    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
+        DistributedHNSWSegmentWriter::commit(*self)
+            .await
+            .map(Box::new)
     }
 }
 
 #[async_trait]
 impl SegmentFlusher for DistributedHNSWSegmentWriter {
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.inner.read().id;
         match self.hnsw_index_provider.flush(&hnsw_index_id).await {
@@ -333,6 +351,17 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
         let mut flushed_files = HashMap::new();
         flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
         Ok(flushed_files)
+    }
+}
+
+#[async_trait]
+impl SegmentFlusher for Box<DistributedHNSWSegmentWriter> {
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
+    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        DistributedHNSWSegmentWriter::flush(*self).await
     }
 }
 

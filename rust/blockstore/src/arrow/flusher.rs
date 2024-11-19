@@ -8,6 +8,7 @@ use chroma_error::ChromaError;
 use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct ArrowBlockfileFlusher {
     block_manager: BlockManager,
     root_manager: RootManager,

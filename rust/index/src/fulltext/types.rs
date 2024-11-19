@@ -222,6 +222,7 @@ impl FullTextIndexWriter {
     }
 }
 
+#[derive(Clone)]
 pub struct FullTextIndexFlusher {
     posting_lists_blockfile_flusher: BlockfileFlusher,
 }

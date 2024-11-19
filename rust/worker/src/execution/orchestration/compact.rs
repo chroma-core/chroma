@@ -6,9 +6,14 @@ use crate::execution::operators::apply_log_to_segment_writer::{
     ApplyLogToSegmentWriterInput, ApplyLogToSegmentWriterOperator,
     ApplyLogToSegmentWriterOperatorError, ApplyLogToSegmentWriterOutput,
 };
-use crate::execution::operators::flush_s3::FlushS3Input;
-use crate::execution::operators::flush_s3::FlushS3Operator;
-use crate::execution::operators::flush_s3::FlushS3Output;
+use crate::execution::operators::commit_segment_writer::{
+    CommitSegmentWriterInput, CommitSegmentWriterOperator, CommitSegmentWriterOperatorError,
+    CommitSegmentWriterOutput,
+};
+use crate::execution::operators::flush_segment_writer::{
+    FlushSegmentWriterInput, FlushSegmentWriterOperator, FlushSegmentWriterOperatorError,
+    FlushSegmentWriterOutput,
+};
 use crate::execution::operators::materialize_logs::MaterializeLogInput;
 use crate::execution::operators::materialize_logs::MaterializeLogOperator;
 use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
@@ -32,7 +37,7 @@ use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::record_segment::RecordSegmentWriter;
-use crate::segment::SegmentWriter;
+use crate::segment::{ChromaSegmentFlusher, ChromaSegmentWriter};
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
@@ -114,6 +119,7 @@ pub struct CompactOrchestrator {
         Box<DistributedHNSWSegmentWriter>,
         MetadataSegmentWriter<'static>,
     )>,
+    flush_results: Vec<SegmentFlushInfo>,
 }
 
 #[derive(Error, Debug)]
@@ -199,6 +205,7 @@ impl CompactOrchestrator {
             max_partition_size,
             cached_segments: OnceCell::new(),
             writers: OnceCell::new(),
+            flush_results: Vec::new(),
         }
     }
 
@@ -335,15 +342,16 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn dispatch_apply_log_to_segment_writer_task<
-        Writer: SegmentWriter + Clone + Send + Sync + std::fmt::Debug + 'static,
-    >(
+    async fn dispatch_apply_log_to_segment_writer_task(
         &mut self,
-        segment_writer: Writer,
+        segment_writer: ChromaSegmentWriter<'static>,
         materialized_log: Arc<MaterializeLogOutput>,
         self_address: Box<
             dyn ReceiverForMessage<
-                TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
+                TaskResult<
+                    ApplyLogToSegmentWriterOutput<'static>,
+                    ApplyLogToSegmentWriterOperatorError,
+                >,
             >,
         >,
     ) {
@@ -365,27 +373,22 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn flush_s3(
+    async fn dispatch_segment_writer_commit(
         &mut self,
-        record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
-        metadata_segment_writer: MetadataSegmentWriter<'static>,
-        self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
+        segment_writer: ChromaSegmentWriter<'static>,
+        self_address: Box<
+            dyn ReceiverForMessage<
+                TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
+            >,
+        >,
     ) {
-        self.state = ExecutionState::Flush;
-
-        let operator = FlushS3Operator::new();
-        let input = FlushS3Input::new(
-            record_segment_writer,
-            hnsw_segment_writer,
-            metadata_segment_writer,
-        );
-
+        let operator = CommitSegmentWriterOperator::new();
+        let input = CommitSegmentWriterInput::new(segment_writer);
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
-                tracing::error!("Error dispatching flush to S3 for compaction {:?}", e);
+                tracing::error!("Error dispatching commit for compaction {:?}", e);
                 panic!(
                     "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
                     e
@@ -394,10 +397,62 @@ impl CompactOrchestrator {
         }
     }
 
+    async fn dispatch_segment_writer_flush(
+        &mut self,
+        segment_writer: ChromaSegmentFlusher, // todo: rename
+        self_address: Box<
+            dyn ReceiverForMessage<
+                TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
+            >,
+        >,
+    ) {
+        let operator = FlushSegmentWriterOperator::new();
+        let input = FlushSegmentWriterInput::new(segment_writer);
+        let task = wrap(operator, input, self_address);
+        match self.dispatcher.send(task, Some(Span::current())).await {
+            Ok(_) => (),
+            Err(e) => {
+                tracing::error!("Error dispatching flush for compaction {:?}", e);
+                panic!(
+                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                    e
+                );
+            }
+        }
+    }
+
+    // async fn flush_s3(
+    //     &mut self,
+    //     record_segment_writer: RecordSegmentWriter,
+    //     hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
+    //     metadata_segment_writer: MetadataSegmentWriter<'static>,
+    //     self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
+    // ) {
+    //     self.state = ExecutionState::Flush;
+
+    //     let operator = FlushS3Operator::new();
+    //     let input = FlushS3Input::new(
+    //         record_segment_writer,
+    //         hnsw_segment_writer,
+    //         metadata_segment_writer,
+    //     );
+
+    //     let task = wrap(operator, input, self_address);
+    //     match self.dispatcher.send(task, Some(Span::current())).await {
+    //         Ok(_) => (),
+    //         Err(e) => {
+    //             tracing::error!("Error dispatching flush to S3 for compaction {:?}", e);
+    //             panic!(
+    //                 "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+    //                 e
+    //             );
+    //         }
+    //     }
+    // }
+
     async fn register(
         &mut self,
         log_position: i64,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
         self_address: Box<dyn ReceiverForMessage<TaskResult<RegisterOutput, RegisterError>>>,
     ) {
         self.state = ExecutionState::Register;
@@ -407,7 +462,7 @@ impl CompactOrchestrator {
             self.compaction_job.collection_id,
             log_position,
             self.compaction_job.collection_version,
-            segment_flush_info,
+            self.flush_results.clone().into(),
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -681,21 +736,21 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             };
 
         self.dispatch_apply_log_to_segment_writer_task(
-            record_segment_writer,
+            ChromaSegmentWriter::RecordSegment(record_segment_writer),
             materialized_result.clone(),
             ctx.receiver(),
         )
         .await;
 
         self.dispatch_apply_log_to_segment_writer_task(
-            hnsw_segment_writer,
+            ChromaSegmentWriter::DistributedHNSWSegment(hnsw_segment_writer),
             materialized_result.clone(),
             ctx.receiver(),
         )
         .await;
 
         self.dispatch_apply_log_to_segment_writer_task(
-            metadata_segment_writer,
+            ChromaSegmentWriter::MetadataSegment(metadata_segment_writer),
             materialized_result,
             ctx.receiver(),
         )
@@ -704,39 +759,26 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>>
-    for CompactOrchestrator
+impl
+    Handler<
+        TaskResult<ApplyLogToSegmentWriterOutput<'static>, ApplyLogToSegmentWriterOperatorError>,
+    > for CompactOrchestrator
 {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
+        message: TaskResult<
+            ApplyLogToSegmentWriterOutput<'static>,
+            ApplyLogToSegmentWriterOperatorError,
+        >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         let message = message.into_inner();
         match message {
-            Ok(_) => {
-                self.num_write_tasks -= 1;
-                if self.num_write_tasks == 0 {
-                    let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
-                        match self.get_segment_writers().await {
-                            Ok(writers) => writers,
-                            Err(e) => {
-                                tracing::error!("Error getting segment writers: {:?}", e);
-                                terminate_with_error(self.result_channel.take(), e, ctx);
-                                return;
-                            }
-                        };
-
-                    self.flush_s3(
-                        record_segment_writer,
-                        hnsw_segment_writer,
-                        metadata_segment_writer,
-                        ctx.receiver(),
-                    )
+            Ok(message) => {
+                self.dispatch_segment_writer_commit(message.segment_writer, ctx.receiver())
                     .await;
-                }
             }
             Err(e) => {
                 tracing::error!("Error writing segments: {:?}", e);
@@ -747,28 +789,56 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
 }
 
 #[async_trait]
-impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchestrator {
+impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>>
+    for CompactOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<FlushS3Output, Box<dyn ChromaError>>,
+        message: TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         let message = message.into_inner();
         match message {
-            Ok(msg) => {
-                // Unwrap should be safe here as we are guaranteed to have a value by construction
-                self.register(
-                    self.pulled_log_offset.unwrap(),
-                    msg.segment_flush_info,
-                    ctx.receiver(),
-                )
-                .await;
+            Ok(message) => {
+                self.dispatch_segment_writer_flush(message.flusher, ctx.receiver())
+                    .await;
             }
             Err(e) => {
-                tracing::error!("Error flushing to S3: {:?}", e);
-                terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
+                tracing::error!("Error committing & flushing segment writer: {:?}", e);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>>
+    for CompactOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+    ) {
+        let message = message.into_inner();
+        match message {
+            Ok(message) => {
+                self.flush_results.push(message.flush_info);
+                self.num_write_tasks -= 1; // todo: rename
+
+                if self.num_write_tasks == 0 {
+                    // Unwrap should be safe here as we are guaranteed to have a value by construction
+                    self.register(self.pulled_log_offset.unwrap(), ctx.receiver())
+                        .await;
+                }
+            }
+            Err(e) => {
+                tracing::error!("Error committing & flushing segment writer: {:?}", e);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }

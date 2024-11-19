@@ -472,6 +472,12 @@ impl<'me> MetadataSegmentWriter<'me> {
 }
 
 impl SegmentWriter for MetadataSegmentWriter<'_> {
+    type Flusher = MetadataSegmentFlusher;
+
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     fn get_name(&self) -> &'static str {
         "MetadataSegmentWriter"
     }
@@ -696,7 +702,7 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
         Ok(())
     }
 
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
         let full_text_flusher = match self.full_text_index_writer {
             Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
@@ -738,6 +744,7 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
         };
 
         Ok(MetadataSegmentFlusher {
+            id: self.id,
             full_text_index_flusher: full_text_flusher,
             string_metadata_index_flusher: string_metadata_flusher,
             bool_metadata_index_flusher: bool_metadata_flusher,
@@ -747,7 +754,9 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
     }
 }
 
-pub(crate) struct MetadataSegmentFlusher {
+#[derive(Clone)]
+pub struct MetadataSegmentFlusher {
+    id: SegmentUuid,
     pub(crate) full_text_index_flusher: FullTextIndexFlusher,
     pub(crate) string_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
@@ -755,8 +764,18 @@ pub(crate) struct MetadataSegmentFlusher {
     pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher,
 }
 
+impl std::fmt::Debug for MetadataSegmentFlusher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MetadataSegmentFlusher")
+    }
+}
+
 #[async_trait]
 impl SegmentFlusher for MetadataSegmentFlusher {
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let full_text_pls_id = self.full_text_index_flusher.pls_id();
         let string_metadata_id = self.string_metadata_index_flusher.id();

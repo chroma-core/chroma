@@ -3,6 +3,7 @@ use crate::execution::operator::Operator;
 use crate::segment::metadata_segment::MetadataSegmentError;
 use crate::segment::record_segment::ApplyMaterializedLogError;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
+use crate::segment::ChromaSegmentWriter;
 use crate::segment::LogMaterializerError;
 use crate::segment::SegmentWriter;
 use async_trait::async_trait;
@@ -47,13 +48,16 @@ impl ApplyLogToSegmentWriterOperator {
 }
 
 #[derive(Debug)]
-pub struct ApplyLogToSegmentWriterInput<Writer: SegmentWriter> {
-    segment_writer: Writer,
+pub struct ApplyLogToSegmentWriterInput<'a> {
+    segment_writer: ChromaSegmentWriter<'a>,
     materialize_log_output: Arc<MaterializeLogOutput>,
 }
 
-impl<Writer: SegmentWriter> ApplyLogToSegmentWriterInput<Writer> {
-    pub fn new(segment_writer: Writer, materialize_log_output: Arc<MaterializeLogOutput>) -> Self {
+impl<'a> ApplyLogToSegmentWriterInput<'a> {
+    pub fn new(
+        segment_writer: ChromaSegmentWriter<'a>,
+        materialize_log_output: Arc<MaterializeLogOutput>,
+    ) -> Self {
         ApplyLogToSegmentWriterInput {
             segment_writer,
             materialize_log_output,
@@ -62,11 +66,12 @@ impl<Writer: SegmentWriter> ApplyLogToSegmentWriterInput<Writer> {
 }
 
 #[derive(Debug)]
-pub struct ApplyLogToSegmentWriterOutput {}
+pub struct ApplyLogToSegmentWriterOutput<'a> {
+    pub segment_writer: ChromaSegmentWriter<'a>,
+}
 
 #[async_trait]
-impl<Writer: SegmentWriter + Send + Sync + Clone>
-    Operator<ApplyLogToSegmentWriterInput<Writer>, ApplyLogToSegmentWriterOutput>
+impl<'a> Operator<ApplyLogToSegmentWriterInput<'a>, ApplyLogToSegmentWriterOutput<'a>>
     for ApplyLogToSegmentWriterOperator
 {
     type Error = ApplyLogToSegmentWriterOperatorError;
@@ -77,9 +82,10 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
 
     async fn run(
         &self,
-        input: &ApplyLogToSegmentWriterInput<Writer>,
-    ) -> Result<ApplyLogToSegmentWriterOutput, Self::Error> {
+        input: &ApplyLogToSegmentWriterInput<'a>,
+    ) -> Result<ApplyLogToSegmentWriterOutput<'a>, Self::Error> {
         let materialized_chunk = input.materialize_log_output.get_materialized_records();
+        tracing::debug!("Materializing {} records", materialized_chunk.len());
 
         // Apply materialized records.
         match input
@@ -101,6 +107,8 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
             }
         }
 
-        Ok(ApplyLogToSegmentWriterOutput {})
+        Ok(ApplyLogToSegmentWriterOutput {
+            segment_writer: input.segment_writer.clone(),
+        })
     }
 }

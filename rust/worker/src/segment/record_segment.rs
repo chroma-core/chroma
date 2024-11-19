@@ -331,6 +331,12 @@ impl ChromaError for ApplyMaterializedLogError {
 }
 
 impl SegmentWriter for RecordSegmentWriter {
+    type Flusher = RecordSegmentFlusher;
+
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     fn get_name(&self) -> &'static str {
         "RecordSegmentWriter"
     }
@@ -481,7 +487,7 @@ impl SegmentWriter for RecordSegmentWriter {
         Ok(())
     }
 
-    async fn commit(mut self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(mut self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
         // Commit all the blockfiles
         let flusher_user_id_to_id = self
             .user_id_to_id
@@ -538,6 +544,7 @@ impl SegmentWriter for RecordSegmentWriter {
 
         // Return a flusher that can be used to flush the blockfiles
         Ok(RecordSegmentFlusher {
+            id: self.id,
             user_id_to_id_flusher: flusher_user_id_to_id,
             id_to_user_id_flusher: flusher_id_to_user_id,
             id_to_data_flusher: flusher_id_to_data,
@@ -546,7 +553,9 @@ impl SegmentWriter for RecordSegmentWriter {
     }
 }
 
-pub(crate) struct RecordSegmentFlusher {
+#[derive(Clone)]
+pub struct RecordSegmentFlusher {
+    id: SegmentUuid,
     user_id_to_id_flusher: BlockfileFlusher,
     id_to_user_id_flusher: BlockfileFlusher,
     id_to_data_flusher: BlockfileFlusher,
@@ -561,6 +570,10 @@ impl Debug for RecordSegmentFlusher {
 
 #[async_trait]
 impl SegmentFlusher for RecordSegmentFlusher {
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
         let id_to_user_id_bf_id = self.id_to_user_id_flusher.id();
