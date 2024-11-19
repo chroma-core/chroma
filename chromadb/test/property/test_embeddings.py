@@ -872,16 +872,29 @@ def test_0dim_embedding_validation() -> None:
 def test_no_op_compaction(client: ClientAPI) -> None:
     reset(client)
     coll = client.create_collection(name="noop")
-    coll.delete(ids=[str(i) for i in range(5000)])
+    for batch in range(0, 5000, 100):
+        coll.delete(ids=[str(i) for i in range(batch, batch + 100)])
     wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
 
 def test_add_then_purge(client: ClientAPI) -> None:
     reset(client)
     record_count = 5000
-    record_id_vals = [i for i in range(record_count)]
-    record_ids = [str(i) for i in record_id_vals]
+    batch_count = 100
     coll = client.create_collection(name="add_then_purge")
-    coll.add(ids=record_ids, embeddings=[[2 * i, 2 * i + 1] for i in record_id_vals])
+
+    # Add records and wait for compaction
+    for batch in range(0, record_count, batch_count):
+        record_id_vals = [i for i in range(batch, batch + batch_count)]
+        record_ids = [str(i) for i in record_id_vals]
+        coll.add(ids=record_ids, embeddings=[[2 * i, 2 * i + 1] for i in record_id_vals])
     wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
-    coll.delete(ids=record_ids)
+
+    # Purge records and wait for compaction
+    for batch in range(0, record_count, batch_count):
+        record_id_vals = [i for i in range(batch, batch + batch_count)]
+        record_ids = [str(i) for i in record_id_vals]
+        coll.delete(ids=record_ids)
     wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+
+    # There should be no records left
+    assert len(coll.get()["ids"]) == 0
