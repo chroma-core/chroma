@@ -25,7 +25,6 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
-    validate_batch,
     convert_np_embeddings_to_list,
 )
 from chromadb.auth import UserIdentity
@@ -39,6 +38,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
+from chromadb.utils.validators import validate_batch
 
 logger = logging.getLogger(__name__)
 

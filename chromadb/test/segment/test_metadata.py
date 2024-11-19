@@ -13,7 +13,7 @@ from typing import (
     Sequence,
 )
 
-from chromadb.api.types import validate_metadata
+from chromadb.utils.validators import validate_metadata
 from chromadb.config import System, Settings
 from chromadb.db.base import ParameterValue, get_sql
 from chromadb.db.impl.sqlite import SqliteDB

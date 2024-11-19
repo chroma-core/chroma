@@ -38,11 +38,6 @@ from chromadb.api.types import (
     IncludeEnum,
     GetResult,
     QueryResult,
-    validate_metadata,
-    validate_update_metadata,
-    validate_where,
-    validate_where_document,
-    validate_batch,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -69,6 +64,14 @@ from functools import wraps
 import time
 import logging
 import re
+
+from chromadb.utils.validators import (
+    validate_batch,
+    validate_metadata,
+    validate_update_metadata,
+    validate_where,
+    validate_where_document,
+)
 
 T = TypeVar("T", bound=Callable[..., Any])
 
@@ -227,7 +230,7 @@ class SegmentAPI(ServerAPI):
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
-            segments=[], # Passing empty till backend changes are deployed.
+            segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
