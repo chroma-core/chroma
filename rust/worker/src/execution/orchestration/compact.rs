@@ -681,15 +681,26 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             Ok(_) => {
                 self.num_write_tasks -= 1;
                 if self.num_write_tasks == 0 {
-                    let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
-                        self.writers
-                            .clone()
-                            .expect("Invariant violation. Writers not set.");
-
-                    self.flush_s3(
+                    if let Some((
                         record_segment_writer,
                         hnsw_segment_writer,
                         metadata_segment_writer,
+                    )) = self.writers.clone()
+                    {
+                        self.flush_s3(
+                            record_segment_writer,
+                            hnsw_segment_writer,
+                            metadata_segment_writer,
+                            ctx.receiver(),
+                        )
+                        .await;
+                    };
+                } else {
+                    // The writer is uninitialized and there is no error. This implies
+                    // no records have been written, so there is no need to flush.
+                    self.register(
+                        self.pulled_log_offset.unwrap(),
+                        Arc::new([]),
                         ctx.receiver(),
                     )
                     .await;
