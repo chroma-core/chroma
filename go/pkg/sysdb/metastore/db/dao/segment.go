@@ -230,9 +230,9 @@ func (s *segmentDb) RegisterFilePaths(flushSegmentCompactions []*model.FlushSegm
 	return nil
 }
 
-func (s *segmentDb) GetSegmentsForCollection(collectionID types.UniqueID) ([]*dbmodel.Segment, error) {
+func (s *segmentDb) GetSegmentsByCollectionID(collectionID string) ([]*dbmodel.Segment, error) {
 	var segments []*dbmodel.Segment
-	err := s.db.Where("collection_id = ?", collectionID.String()).Find(&segments).Error
+	err := s.db.Where("collection_id = ?", collectionID).Find(&segments).Error
 	if err != nil {
 		return nil, err
 	}

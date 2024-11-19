@@ -363,6 +363,25 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 			log.Error("error deleting collection metadata during hard delete", zap.Error(err))
 			return err
 		}
+		// Delete segments.
+		segments, err := tc.metaDomain.SegmentDb(txCtx).GetSegmentsByCollectionID(collectionID.String())
+		if err != nil {
+			log.Error("error getting segments during hard delete", zap.Error(err))
+			return err
+		}
+		for _, segment := range segments {
+			err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segment.ID)
+			if err != nil {
+				log.Error("error deleting segment during hard delete", zap.Error(err))
+				return err
+			}
+			err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteBySegmentID(segment.ID)
+			if err != nil {
+				log.Error("error deleting segment metadata during hard delete", zap.Error(err))
+				return err
+			}
+		}
+
 		log.Info("collection hard deleted", zap.Any("collection", collectionID),
 			zap.Int("collectionDeletedCount", collectionDeletedCount),
 			zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
@@ -414,59 +433,6 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 		}
 		return nil
 	})
-}
-func (tc *Catalog) DeleteCollectionAndSegments(ctx context.Context, deleteCollection *model.DeleteCollection, segmentIDs []types.UniqueID) error {
-	log.Info("deleting collection along with any passed segments", zap.Any("deleteCollection", deleteCollection))
-	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// Create the collection using the refactored helper
-		err := tc.deleteCollectionImpl(txCtx, deleteCollection)
-		if err != nil {
-			log.Error("error deleting collection", zap.Error(err))
-			return err
-		}
-
-		// Delete any segments that have been passed.
-		for _, segmentIdToDelete := range segmentIDs {
-			err := tc.deleteSegmentImpl(txCtx, segmentIdToDelete, deleteCollection.ID)
-			if err != nil {
-				log.Error("error creating segment", zap.Error(err))
-				return err
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		log.Error("error deleting collection and segments", zap.Error(err))
-		return err
-	}
-
-	log.Info("collection and segments deleted")
-	return nil
-}
-
-func (tc *Catalog) deleteCollectionImpl(txCtx context.Context, deleteCollection *model.DeleteCollection) error {
-	collectionID := deleteCollection.ID
-	collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
-	if err != nil {
-		return err
-	}
-	if len(collectionAndMetadata) == 0 {
-		return common.ErrCollectionDeleteNonExistingCollection
-	}
-
-	collectionDeletedCount, err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
-	if err != nil {
-		return err
-	}
-	collectionMetadataDeletedCount, err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
-	if err != nil {
-		return err
-	}
-	log.Info("collection deleted", zap.Any("collection", collectionAndMetadata), zap.Int("collectionDeletedCount", collectionDeletedCount), zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
-
-	return nil
 }
 
 func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, collectionID *string, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
@@ -685,6 +651,7 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	return segments, nil
 }
 
+// TODO: Remove this once tests pass.
 func (tc *Catalog) deleteSegmentImpl(txCtx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
 	segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, collectionID)
 	if err != nil {
@@ -708,9 +675,7 @@ func (tc *Catalog) deleteSegmentImpl(txCtx context.Context, segmentID types.Uniq
 }
 
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
-	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		return tc.deleteSegmentImpl(txCtx, segmentID, collectionID)
-	})
+	return nil
 }
 
 func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment, ts types.Timestamp) (*model.Segment, error) {

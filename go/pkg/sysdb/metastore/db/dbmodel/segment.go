@@ -42,8 +42,8 @@ type UpdateSegment struct {
 //go:generate mockery --name=ISegmentDb
 type ISegmentDb interface {
 	GetSegments(id types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*SegmentAndMetadata, error)
-	GetSegmentsForCollection(collectionID types.UniqueID) ([]*Segment, error)
 	DeleteSegmentByID(id string) error
+	GetSegmentsByCollectionID(collectionID string) ([]*Segment, error)
 	Insert(*Segment) error
 	Update(*UpdateSegment) error
 	DeleteAll() error
