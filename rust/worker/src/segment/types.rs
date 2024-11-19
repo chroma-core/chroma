@@ -408,110 +408,85 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
     }
 }
 
-pub struct LogMaterializer<'me> {
-    // Is None when record segment is uninitialized.
-    pub(crate) record_segment_reader: Option<RecordSegmentReader<'me>>,
-    pub(crate) logs: Chunk<LogRecord>,
-    // Is None for readers. In that case, the materializer reads
-    // the current maximum from the record segment and uses that
-    // for materializing. Writers pass this value to the materializer
-    // because they need to share this across all log partitions.
-    pub(crate) curr_offset_id: Option<Arc<AtomicU32>>,
-}
-
-impl<'me> LogMaterializer<'me> {
-    pub fn new(
-        record_segment_reader: Option<RecordSegmentReader<'me>>,
-        logs: Chunk<LogRecord>,
-        curr_offset_id: Option<Arc<AtomicU32>>,
-    ) -> Self {
-        Self {
-            record_segment_reader,
-            logs,
-            curr_offset_id,
+pub async fn materialize_logs<'me>(
+    record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
+    logs: &'me Chunk<LogRecord>,
+    curr_offset_id: Option<Arc<AtomicU32>>,
+) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
+    // Trace the total_len since len() iterates over the entire chunk
+    // and we don't want to do that just to trace the length.
+    tracing::info!("Total length of logs in materializer: {}", logs.total_len());
+    // The offset ID that should be used for the next record
+    let next_offset_id = match curr_offset_id.as_ref() {
+        Some(curr_offset_id) => {
+            curr_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            curr_offset_id.clone()
         }
-    }
-    pub async fn materialize(
-        &'me self,
-    ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
-        // Trace the total_len since len() iterates over the entire chunk
-        // and we don't want to do that just to trace the length.
-        tracing::info!(
-            "Total length of logs in materializer: {}",
-            self.logs.total_len()
-        );
-        let next_offset_id;
-        match self.curr_offset_id.as_ref() {
-            Some(curr_offset_id) => {
-                next_offset_id = curr_offset_id.clone();
-                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        None => {
+            match record_segment_reader.as_ref() {
+                Some(reader) => {
+                    let offset_id = reader.get_current_max_offset_id();
+                    offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    offset_id
+                }
+                // This means that the segment is uninitialized so counting starts from 1.
+                None => Arc::new(AtomicU32::new(1)),
             }
-            None => {
-                match self.record_segment_reader.as_ref() {
-                    Some(reader) => {
-                        next_offset_id = reader.get_current_max_offset_id();
-                        next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    // This means that the segment is uninitialized so counting starts
-                    // from 1.
-                    None => {
-                        next_offset_id = Arc::new(AtomicU32::new(1));
+        }
+    };
+
+    // Populate entries that are present in the record segment.
+    let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
+    let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
+    if let Some(reader) = &record_segment_reader {
+        async {
+            for (log_record, _) in logs.iter() {
+                let exists = match reader
+                    .data_exists_for_user_id(log_record.record.id.as_str())
+                    .await
+                {
+                    Ok(res) => res,
+                    Err(e) => {
+                        return Err(LogMaterializerError::RecordSegment(e));
                     }
                 };
-            }
-        }
-        // Populate entries that are present in the record segment.
-        let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-        let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-        if let Some(reader) = &self.record_segment_reader {
-            async {
-                for (log_record, _) in self.logs.iter() {
-                    let exists = match reader
-                        .data_exists_for_user_id(log_record.record.id.as_str())
+                if exists {
+                    match reader
+                        .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
                         .await
                     {
-                        Ok(res) => res,
+                        Ok(Some((data_record, offset_id))) => {
+                            existing_id_to_materialized.insert(
+                                log_record.record.id.as_str(),
+                                MaterializedLogRecord::from((data_record, offset_id)),
+                            );
+                        }
+                        Ok(None) => {
+                            return Err(LogMaterializerError::RecordSegment(Box::new(
+                                RecordSegmentReaderCreationError::UserRecordNotFound(format!(
+                                    "not found: {}",
+                                    log_record.record.id,
+                                )),
+                            )
+                                as _));
+                        }
                         Err(e) => {
                             return Err(LogMaterializerError::RecordSegment(e));
                         }
-                    };
-                    if exists {
-                        match reader
-                            .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
-                            .await
-                        {
-                            Ok(Some((data_record, offset_id))) => {
-                                existing_id_to_materialized.insert(
-                                    log_record.record.id.as_str(),
-                                    MaterializedLogRecord::from((data_record, offset_id)),
-                                );
-                            }
-                            Ok(None) => {
-                                return Err(LogMaterializerError::RecordSegment(Box::new(
-                                    RecordSegmentReaderCreationError::UserRecordNotFound(format!(
-                                        "not found: {}",
-                                        log_record.record.id,
-                                    )),
-                                )
-                                    as _));
-                            }
-                            Err(e) => {
-                                return Err(LogMaterializerError::RecordSegment(e));
-                            }
-                        }
                     }
                 }
-                Ok(())
             }
-            .instrument(
-                tracing::info_span!(parent: Span::current(), "Materialization read from storage"),
-            )
-            .await?;
+            Ok(())
         }
-        // Populate updates to these and fresh records that are being
-        // inserted for the first time.
-        async {
-            for (log_record, _) in self.logs.iter() {
+        .instrument(
+            tracing::info_span!(parent: Span::current(), "Materialization read from storage"),
+        )
+        .await?;
+    }
+    // Populate updates to these and fresh records that are being
+    // inserted for the first time.
+    async {
+            for (log_record, _) in logs.iter() {
                 match log_record.record.operation {
                     Operation::Add => {
                         // If this is an add of a record present in the segment then add
@@ -769,20 +744,19 @@ impl<'me> LogMaterializer<'me> {
             }
             Ok(())
         }.instrument(tracing::info_span!(parent: Span::current(), "Materialization main iteration")).await?;
-        let mut res = vec![];
-        for (_key, value) in existing_id_to_materialized {
-            // Ignore records that only had invalid ADDS on the log.
-            if value.final_operation == MaterializedLogOperation::Initial {
-                continue;
-            }
-            res.push(value);
+    let mut res = vec![];
+    for (_key, value) in existing_id_to_materialized {
+        // Ignore records that only had invalid ADDS on the log.
+        if value.final_operation == MaterializedLogOperation::Initial {
+            continue;
         }
-        for (_key, value) in new_id_to_materialized {
-            res.push(value);
-        }
-        res.sort_by(|x, y| x.offset_id.cmp(&y.offset_id));
-        Ok(Chunk::new(res.into()))
+        res.push(value);
     }
+    for (_key, value) in new_id_to_materialized {
+        res.push(value);
+    }
+    res.sort_by(|x, y| x.offset_id.cmp(&y.offset_id));
+    Ok(Chunk::new(res.into()))
 }
 
 // This needs to be public for testing
@@ -908,9 +882,7 @@ mod tests {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             metadata_writer
@@ -972,13 +944,8 @@ mod tests {
         let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
             .await
             .expect("Error creating segment reader");
-        let materializer = LogMaterializer {
-            record_segment_reader: Some(reader),
-            logs: data,
-            curr_offset_id: None,
-        };
-        let res = materializer
-            .materialize()
+        let some_reader = Some(reader);
+        let res = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Error materializing logs");
         let mut res_vec = vec![];
@@ -1207,9 +1174,7 @@ mod tests {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             metadata_writer
@@ -1258,13 +1223,8 @@ mod tests {
         let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
             .await
             .expect("Error creating segment reader");
-        let materializer = LogMaterializer {
-            record_segment_reader: Some(reader),
-            logs: data,
-            curr_offset_id: None,
-        };
-        let res = materializer
-            .materialize()
+        let some_reader = Some(reader);
+        let res = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Error materializing logs");
         let mut res_vec = vec![];
@@ -1498,9 +1458,7 @@ mod tests {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             metadata_writer
@@ -1573,13 +1531,8 @@ mod tests {
         let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
             .await
             .expect("Error creating segment reader");
-        let materializer = LogMaterializer {
-            record_segment_reader: Some(reader),
-            logs: data,
-            curr_offset_id: None,
-        };
-        let res = materializer
-            .materialize()
+        let some_reader = Some(reader);
+        let res = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Error materializing logs");
         let mut res_vec = vec![];
@@ -1808,9 +1761,7 @@ mod tests {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .await
                 .expect("Log materialization failed");
             segment_writer
@@ -1871,13 +1822,8 @@ mod tests {
         let reader = RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
             .await
             .expect("Error creating segment reader");
-        let materializer = LogMaterializer {
-            record_segment_reader: Some(reader),
-            logs: data,
-            curr_offset_id: None,
-        };
-        let res = materializer
-            .materialize()
+        let some_reader = Some(reader);
+        let res = materialize_logs(&some_reader, &data, None)
             .await
             .expect("Error materializing logs");
         assert_eq!(3, res.len());

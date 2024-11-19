@@ -1,8 +1,9 @@
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         record_segment::{self, RecordSegmentReader},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializerError,
     },
 };
 use async_trait::async_trait;
@@ -120,17 +121,13 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
             },
         };
         // Step 1: Materialize the logs.
-        let materializer = LogMaterializer::new(
-            record_segment_reader.clone(),
-            input.log_records.clone(),
-            None,
-        );
-        let mat_records = match materializer.materialize().await {
-            Ok(records) => records,
-            Err(e) => {
-                return Err(GetVectorsOperatorError::LogMaterialization(e));
-            }
-        };
+        let mat_records =
+            match materialize_logs(&record_segment_reader, &input.log_records, None).await {
+                Ok(records) => records,
+                Err(e) => {
+                    return Err(GetVectorsOperatorError::LogMaterialization(e));
+                }
+            };
 
         // Search the log records for the user ids
         let mut remaining_search_user_ids: HashSet<String> =

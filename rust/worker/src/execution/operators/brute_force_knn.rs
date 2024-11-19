@@ -1,8 +1,7 @@
 use crate::execution::operator::Operator;
 use crate::execution::operators::normalize_vectors::normalize;
 use crate::segment::record_segment::RecordSegmentReader;
-use crate::segment::LogMaterializer;
-use crate::segment::LogMaterializerError;
+use crate::segment::{materialize_logs, LogMaterializerError};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
@@ -134,9 +133,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                 }
             }
         };
-        let log_materializer = LogMaterializer::new(record_segment_reader, input.log.clone(), None);
-        let logs = match log_materializer
-            .materialize()
+        let logs = match materialize_logs(&record_segment_reader, &input.log, None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {

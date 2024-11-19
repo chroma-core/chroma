@@ -1,5 +1,5 @@
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::{LogMaterializer, LogMaterializerError, MaterializedLogRecord};
+use crate::segment::{materialize_logs, LogMaterializerError, MaterializedLogRecord};
 use crate::{
     execution::operator::Operator,
     segment::{
@@ -147,13 +147,8 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
                 }
             },
         };
-        let log_materializer = LogMaterializer::new(
-            Some(record_segment_reader.clone()),
-            input.logs.clone(),
-            None,
-        );
-        let logs = match log_materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader.clone());
+        let logs = match materialize_logs(&some_reader, &input.logs, None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
