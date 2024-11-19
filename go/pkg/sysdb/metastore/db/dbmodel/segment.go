@@ -43,6 +43,7 @@ type UpdateSegment struct {
 type ISegmentDb interface {
 	GetSegments(id types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*SegmentAndMetadata, error)
 	DeleteSegmentByID(id string) error
+	GetSegmentsByCollectionID(collectionID string) ([]*Segment, error)
 	Insert(*Segment) error
 	Update(*UpdateSegment) error
 	DeleteAll() error

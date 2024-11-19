@@ -363,6 +363,25 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 			log.Error("error deleting collection metadata during hard delete", zap.Error(err))
 			return err
 		}
+		// Delete segments.
+		segments, err := tc.metaDomain.SegmentDb(txCtx).GetSegmentsByCollectionID(collectionID.String())
+		if err != nil {
+			log.Error("error getting segments during hard delete", zap.Error(err))
+			return err
+		}
+		for _, segment := range segments {
+			err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segment.ID)
+			if err != nil {
+				log.Error("error deleting segment during hard delete", zap.Error(err))
+				return err
+			}
+			err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteBySegmentID(segment.ID)
+			if err != nil {
+				log.Error("error deleting segment metadata during hard delete", zap.Error(err))
+				return err
+			}
+		}
+
 		log.Info("collection hard deleted", zap.Any("collection", collectionID),
 			zap.Int("collectionDeletedCount", collectionDeletedCount),
 			zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
@@ -632,28 +651,11 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	return segments, nil
 }
 
+// DeleteSegment is a no-op.
+// Segments are deleted as part of atomic delete of collection.
+// Keeping this API so that older clients continue to work.
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
-	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, collectionID)
-		if err != nil {
-			return err
-		}
-		if len(segment) == 0 {
-			return common.ErrSegmentDeleteNonExistingSegment
-		}
-
-		err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segmentID.String())
-		if err != nil {
-			log.Error("error deleting segment", zap.Error(err))
-			return err
-		}
-		err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteBySegmentID(segmentID.String())
-		if err != nil {
-			log.Error("error deleting segment metadata", zap.Error(err))
-			return err
-		}
-		return nil
-	})
+	return nil
 }
 
 func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment, ts types.Timestamp) (*model.Segment, error) {

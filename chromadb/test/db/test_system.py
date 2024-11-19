@@ -3,6 +3,7 @@ import functools
 import shutil
 import tempfile
 import pytest
+import sqlite3
 from typing import Generator, List, Callable, Dict, Union
 
 from chromadb.db.impl.grpc.client import GrpcSysDB
@@ -180,21 +181,16 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     logger.debug("Resetting state")
     sysdb.reset_state()
 
+    segments_created_with_collection = []
     for collection in sample_collections:
         logger.debug(f"Creating collection: {collection.name}")
+        segment = sample_segment(collection_id=collection.id)
+        segments_created_with_collection.append(segment)
         sysdb.create_collection(
             id=collection.id,
             name=collection.name,
             configuration=collection.get_configuration(),
-            segments=[
-                Segment(
-                    id=uuid.uuid4(),
-                    type="test_type_a",
-                    scope=SegmentScope.VECTOR,
-                    collection=collection.id,
-                    metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
-                )
-            ],
+            segments=[segment],
             metadata=collection["metadata"],
             dimension=collection["dimension"],
         )
@@ -213,15 +209,7 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
             name=sample_collections[0].name,
             id=sample_collections[0].id,
             configuration=sample_collections[0].get_configuration(),
-            segments=[
-                Segment(
-                    id=uuid.uuid4(),
-                    type="test_type_a",
-                    scope=SegmentScope.VECTOR,
-                    collection=sample_collections[0].id,
-                    metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
-                )
-            ],
+            segments=[segments_created_with_collection[0]],
         )
 
     # Find by name
@@ -236,7 +224,7 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
     # Delete
     c1 = sample_collections[0]
-    sysdb.delete_collection(c1.id)
+    sysdb.delete_collection(id=c1.id)
 
     results = sysdb.get_collections()
     assert c1 not in results
@@ -246,9 +234,32 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     by_id_result = sysdb.get_collections(id=c1["id"])
     assert by_id_result == []
 
+    # Check that the segment was deleted
+    by_collection_result = sysdb.get_segments(collection=c1.id)
+    assert by_collection_result == []
+
     # Duplicate delete throws an exception
     with pytest.raises(NotFoundError):
         sysdb.delete_collection(c1.id)
+
+
+    # Create a new collection with two segments that have same id.
+    # Creation should fail.
+    # Check that collection was not created.
+    # Check that segments were not created.
+    with pytest.raises((InternalError, UniqueConstraintError, sqlite3.IntegrityError)):
+        sysdb.create_collection(
+            name=sample_collections[0].name,
+            id=sample_collections[0].id,
+            configuration=sample_collections[0].get_configuration(),
+            segments=[segments_created_with_collection[0], segments_created_with_collection[0]],
+        )
+    # Check that collection was not created.
+    # Check that segments were not created.
+    by_id_result = sysdb.get_collections(id=sample_collections[0].id)
+    assert by_id_result == []
+    by_collection_result = sysdb.get_segments(collection=sample_collections[0].id)
+    assert by_collection_result == []
 
 
 def test_update_collections(sysdb: SysDB) -> None:
@@ -831,23 +842,11 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
     result = sysdb.get_segments(type="test_type_b", collection=sample_collections[0].id)
     assert len(result) == 0
 
-    # Delete
+    # Delete Segments will be a NoOp due to atomic delete of collection and segments.
+    # See comments in coordinator.go for more details.
+    # Execute the call and expect no error or exception.
     s1 = segments_created_with_collection[0]
     sysdb.delete_segment(s1["collection"], s1["id"])
-
-    results = []
-    for collection in sample_collections:
-        results.extend(sysdb.get_segments(collection=collection.id))
-    assert s1 not in results
-    assert len(results) == len(segments_created_with_collection) - 1
-    assert sorted(results, key=lambda c: c["id"]) == sorted(
-        segments_created_with_collection[1:], key=lambda c: c["id"]
-    )
-
-    # Duplicate delete throws an exception
-    with pytest.raises(NotFoundError):
-        sysdb.delete_segment(s1["collection"], s1["id"])
-
 
 def test_update_segment(sysdb: SysDB) -> None:
     metadata: Dict[str, Union[str, int, float]] = {

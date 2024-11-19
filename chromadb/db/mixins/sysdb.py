@@ -512,6 +512,19 @@ class SqlSysDB(SqlDB, SysDB):
             if not result:
                 raise NotFoundError(f"Segment {id} not found")
 
+    # Used by delete_collection to delete all segments for a collection along with
+    # the collection itself in a single transaction.
+    def delete_segments_for_collection(self, cur: Cursor, collection: UUID) -> None:
+        segments_t = Table("segments")
+        q = (
+            self.querybuilder()
+            .from_(segments_t)
+            .where(segments_t.collection == ParameterValue(self.uuid_to_db(collection)))
+            .delete()
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        cur.execute(sql, params)
+
     @trace_method("SqlSysDB.delete_collection", OpenTelemetryGranularity.ALL)
     @override
     def delete_collection(
@@ -550,6 +563,9 @@ class SqlSysDB(SqlDB, SysDB):
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
+            # Delete segments.
+            self.delete_segments_for_collection(cur, id)
+
         self._producer.delete_log(result[0])
 
     @trace_method("SqlSysDB.update_segment", OpenTelemetryGranularity.ALL)

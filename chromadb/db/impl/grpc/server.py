@@ -1,5 +1,5 @@
 from concurrent import futures
-from typing import Any, Dict, cast
+from typing import Any, Dict, List, cast
 from uuid import UUID
 from overrides import overrides
 from chromadb.api.configuration import CollectionConfigurationInternal
@@ -56,6 +56,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
     _server: grpc.Server
     _server_port: int
     _segments: Dict[str, Segment] = {}
+    _collection_to_segments: Dict[str, List[str]] = {}
     _tenants_to_databases_to_collections: Dict[
         str, Dict[str, Dict[str, Collection]]
     ] = {}
@@ -290,13 +291,24 @@ class GrpcMockSysDB(SysDBServicer, Component):
             tenant=tenant,
             version=0,
         )
-        collections[request.id] = new_collection
         
+        # Check that segments are unique and do not already exist
+        # Keep a track of the segments that are being added
+        segments_added = []
         # Create segments for the collection
         for segment_proto in request.segments:
             segment = from_proto_segment(segment_proto)
+            if segment["id"].hex in self._segments:
+                # Remove the already added segment since we need to roll back
+                for s in segments_added:
+                    self.DeleteSegment(DeleteSegmentRequest(id=s), context)
+                context.abort(grpc.StatusCode.ALREADY_EXISTS, f"Segment {segment['id']} already exists")
             self.CreateSegmentHelper(segment, context)
+            segments_added.append(segment["id"].hex)
 
+        collections[request.id] = new_collection
+        collection_unique_key = f"{tenant}:{database}:{request.id}"
+        self._collection_to_segments[collection_unique_key] = segments_added
         return CreateCollectionResponse(
             collection=to_proto_collection(new_collection),
             created=True,
@@ -316,6 +328,11 @@ class GrpcMockSysDB(SysDBServicer, Component):
         collections = self._tenants_to_databases_to_collections[tenant][database]
         if collection_id in collections:
             del collections[collection_id]
+            collection_unique_key = f"{tenant}:{database}:{collection_id}"
+            segment_ids = self._collection_to_segments[collection_unique_key]
+            if segment_ids: # Delete segments if provided.
+                for segment_id in segment_ids:
+                    del self._segments[segment_id]
             return DeleteCollectionResponse()
         else:
             context.abort(

@@ -288,7 +288,10 @@ class GrpcSysDB(SysDB):
 
     @overrides
     def delete_collection(
-        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         try:
             request = DeleteCollectionRequest(
