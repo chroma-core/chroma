@@ -37,7 +37,7 @@ use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::record_segment::RecordSegmentWriter;
-use crate::segment::{ChromaSegmentFlusher, ChromaSegmentWriter};
+use crate::segment::{ChromaSegmentFlusher, ChromaSegmentWriter, SegmentWriter};
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
@@ -51,9 +51,10 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::Chunk;
+use chroma_types::{Chunk, SegmentUuid};
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -69,13 +70,15 @@ than a flexible state machine abstraction, we just manually define the states th
 expect to encounter for a given query plan. This is a bit more rigid, but it's also simpler and easier to
 understand. We can always add more abstraction later if we need it.
 ```plaintext
-
-                                   ┌───► Write─────-------┐
-                                   │                      │
-  Pending ─► PullLogs ─► Partition │                      ├─► Flush ─► Finished
-                                   │                      │
-                                   └───► Write ───────────┘
-
+                                   ┌────────────────────────────┐
+                                   ├─► Apply logs to segment #1 │
+                                   │                            ├──► Commit segment #1 ──► Flush segment #1
+                                   ├─► Apply logs to segment #1 │
+Pending ──► PullLogs ──► Partition │                            │                                            ──► Register ─► Finished
+                                   ├─► Apply logs to segment #2 │
+                                   │                            ├──► Commit segment #2 ──► Flush segment #2
+                                   ├─► Apply logs to segment #2 │
+                                   └────────────────────────────┘
 ```
 */
 #[derive(Debug)]
@@ -83,8 +86,8 @@ enum ExecutionState {
     Pending,
     PullLogs,
     Partition,
-    MaterializeAndWrite,
-    Flush,
+    Materialize,
+    ApplyingCommittingFlushing,
     Register,
 }
 
@@ -105,8 +108,9 @@ pub struct CompactOrchestrator {
     pulled_log_offset: Option<i64>,
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
-    // number of write segments tasks
-    num_write_tasks: i32,
+    // number of write segments tasks // todo
+    num_uncompleted_log_apply_tasks: HashMap<SegmentUuid, usize>,
+    num_uncompleted_flush_tasks: usize,
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
@@ -199,7 +203,8 @@ impl CompactOrchestrator {
             hnsw_index_provider,
             pulled_log_offset: None,
             dispatcher,
-            num_write_tasks: 0,
+            num_uncompleted_log_apply_tasks: HashMap::new(),
+            num_uncompleted_flush_tasks: 0,
             result_channel,
             max_compaction_size,
             max_partition_size,
@@ -283,7 +288,7 @@ impl CompactOrchestrator {
         >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        self.state = ExecutionState::MaterializeAndWrite;
+        self.state = ExecutionState::Materialize;
 
         let record_segment = match self.get_segment(SegmentType::BlockfileRecord).await {
             Ok(segment) => segment,
@@ -317,7 +322,6 @@ impl CompactOrchestrator {
             },
         };
 
-        self.num_write_tasks = partitions.len() as i32 * 3; // 3 different segment types
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
@@ -356,10 +360,16 @@ impl CompactOrchestrator {
         >,
     ) {
         let operator = ApplyLogToSegmentWriterOperator::new();
+        let segment_id = segment_writer.get_id();
         let input = ApplyLogToSegmentWriterInput::new(segment_writer, materialized_log);
         let task = wrap(operator, input, self_address.clone());
         match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
+            Ok(_) => {
+                self.num_uncompleted_log_apply_tasks
+                    .entry(segment_id)
+                    .and_modify(|e| *e += 1)
+                    .or_insert(1);
+            }
             Err(e) => {
                 tracing::error!(
                     "Error dispatching apply log to segment writer task: {:?}",
@@ -410,7 +420,9 @@ impl CompactOrchestrator {
         let input = FlushSegmentWriterInput::new(segment_writer);
         let task = wrap(operator, input, self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
+            Ok(_) => {
+                self.num_uncompleted_flush_tasks += 1;
+            }
             Err(e) => {
                 tracing::error!("Error dispatching flush for compaction {:?}", e);
                 panic!(
@@ -777,8 +789,18 @@ impl
         let message = message.into_inner();
         match message {
             Ok(message) => {
-                self.dispatch_segment_writer_commit(message.segment_writer, ctx.receiver())
-                    .await;
+                self.num_uncompleted_log_apply_tasks
+                    .entry(message.segment_writer.get_id())
+                    .and_modify(|e| *e -= 1);
+
+                let num_tasks_left = self
+                    .num_uncompleted_log_apply_tasks
+                    .get(&message.segment_writer.get_id())
+                    .unwrap(); // todo
+                if *num_tasks_left == 0 {
+                    self.dispatch_segment_writer_commit(message.segment_writer, ctx.receiver())
+                        .await;
+                }
             }
             Err(e) => {
                 tracing::error!("Error writing segments: {:?}", e);
@@ -828,9 +850,9 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         match message {
             Ok(message) => {
                 self.flush_results.push(message.flush_info);
-                self.num_write_tasks -= 1; // todo: rename
+                self.num_uncompleted_flush_tasks -= 1;
 
-                if self.num_write_tasks == 0 {
+                if self.num_uncompleted_flush_tasks == 0 {
                     // Unwrap should be safe here as we are guaranteed to have a value by construction
                     self.register(self.pulled_log_offset.unwrap(), ctx.receiver())
                         .await;

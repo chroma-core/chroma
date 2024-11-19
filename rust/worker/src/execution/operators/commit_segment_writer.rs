@@ -1,12 +1,10 @@
 use crate::execution::operator::Operator;
-use crate::segment::types::SegmentFlusher;
 use crate::segment::ChromaSegmentFlusher;
 use crate::segment::ChromaSegmentWriter;
 use crate::segment::SegmentWriter;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
-use chroma_types::SegmentUuid;
 use thiserror::Error;
 use tracing::Instrument;
 
@@ -46,7 +44,6 @@ impl<'a> CommitSegmentWriterInput<'a> {
 
 #[derive(Debug)]
 pub struct CommitSegmentWriterOutput {
-    pub segment_id: SegmentUuid,
     pub flusher: ChromaSegmentFlusher,
 }
 
@@ -75,12 +72,8 @@ impl<'a> Operator<CommitSegmentWriterInput<'a>, CommitSegmentWriterOutput>
             .await
             .map_err(CommitSegmentWriterOperatorError::FinishSegmentWriterFailed)?;
 
-        let segment_id = segment_writer.get_id();
         let flusher = segment_writer.commit().await?;
 
-        Ok(CommitSegmentWriterOutput {
-            segment_id,
-            flusher,
-        })
+        Ok(CommitSegmentWriterOutput { flusher })
     }
 }

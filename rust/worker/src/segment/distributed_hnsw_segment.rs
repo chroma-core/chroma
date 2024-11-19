@@ -319,7 +319,7 @@ impl SegmentWriter for Box<DistributedHNSWSegmentWriter> {
     }
 
     fn get_name(&self) -> &'static str {
-        self.as_ref().get_name()
+        "DistributedHNSWSegmentWriter"
     }
 
     async fn apply_materialized_log_chunk(
@@ -342,6 +342,10 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
         self.id
     }
 
+    fn get_name(&self) -> &'static str {
+        "DistributedHNSWSegmentWriter"
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.inner.read().id;
         match self.hnsw_index_provider.flush(&hnsw_index_id).await {
@@ -358,6 +362,10 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 impl SegmentFlusher for Box<DistributedHNSWSegmentWriter> {
     fn get_id(&self) -> SegmentUuid {
         self.id
+    }
+
+    fn get_name(&self) -> &'static str {
+        "DistributedHNSWSegmentWriter"
     }
 
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {

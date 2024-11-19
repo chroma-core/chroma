@@ -776,6 +776,10 @@ impl SegmentFlusher for MetadataSegmentFlusher {
         self.id
     }
 
+    fn get_name(&self) -> &'static str {
+        "MetadataSegmentFlusher"
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let full_text_pls_id = self.full_text_index_flusher.pls_id();
         let string_metadata_id = self.string_metadata_index_flusher.id();

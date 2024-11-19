@@ -574,6 +574,10 @@ impl SegmentFlusher for RecordSegmentFlusher {
         self.id
     }
 
+    fn get_name(&self) -> &'static str {
+        "RecordSegmentFlusher"
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
         let id_to_user_id_bf_id = self.id_to_user_id_flusher.id();

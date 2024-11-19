@@ -1,12 +1,12 @@
 use crate::execution::operator::Operator;
 use crate::segment::types::SegmentFlusher;
 use crate::segment::ChromaSegmentFlusher;
-use crate::segment::SegmentWriter;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_types::SegmentFlushInfo;
 use thiserror::Error;
+use tracing::trace_span;
 use tracing::Instrument;
 
 #[derive(Error, Debug)]
@@ -60,21 +60,15 @@ impl Operator<FlushSegmentWriterInput, FlushSegmentWriterOutput> for FlushSegmen
         &self,
         input: &FlushSegmentWriterInput,
     ) -> Result<FlushSegmentWriterOutput, Self::Error> {
-        // let mut segment_writer = input.segment_writer.clone();
-
-        // segment_writer
-        //     .finish()
-        //     .instrument(tracing::info_span!(
-        //         "segment_writer.finish()",
-        //         segment = input.segment_writer.get_name()
-        //     ))
-        //     .await
-        //     .map_err(FlushSegmentWriterOperatorError::FinishSegmentWriterFailed)?;
-
-        // let segment_id = segment_writer.get_id();
-        // let flusher = segment_writer.commit().await?;
-
-        let file_paths = input.segment_flusher.clone().flush().await?;
+        let file_paths = input
+            .segment_flusher
+            .clone()
+            .flush()
+            .instrument(trace_span!(
+                "flush segment",
+                segment = input.segment_flusher.get_name()
+            ))
+            .await?;
 
         Ok(FlushSegmentWriterOutput {
             flush_info: SegmentFlushInfo {

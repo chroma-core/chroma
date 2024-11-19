@@ -784,6 +784,7 @@ pub trait SegmentWriter {
 #[async_trait]
 pub trait SegmentFlusher {
     fn get_id(&self) -> SegmentUuid;
+    fn get_name(&self) -> &'static str;
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>>;
 }
 
@@ -809,7 +810,7 @@ impl<'a> SegmentWriter for ChromaSegmentWriter<'a> {
         match self {
             ChromaSegmentWriter::RecordSegment(writer) => writer.get_name(),
             ChromaSegmentWriter::MetadataSegment(writer) => writer.get_name(),
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.get_name(),
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => SegmentWriter::get_name(writer),
         }
     }
 
@@ -870,6 +871,16 @@ impl SegmentFlusher for ChromaSegmentFlusher {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.get_id(),
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.get_id(),
             ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => SegmentWriter::get_id(flusher),
+        }
+    }
+
+    fn get_name(&self) -> &'static str {
+        match self {
+            ChromaSegmentFlusher::RecordSegment(flusher) => flusher.get_name(),
+            ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.get_name(),
+            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => {
+                SegmentFlusher::get_name(flusher)
+            }
         }
     }
 
