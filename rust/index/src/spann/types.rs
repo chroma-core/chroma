@@ -11,6 +11,7 @@ use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::CollectionUuid;
 use chroma_types::SpannPostingList;
+use rand::seq::SliceRandom;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -20,6 +21,8 @@ use crate::{
     },
     Index, IndexUuid,
 };
+
+use super::utils::{cluster, KMeansAlgorithmInput, KMeansError};
 
 pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
@@ -95,6 +98,8 @@ pub enum SpannIndexWriterError {
     MaxHeadIdFlushError,
     #[error("Error flushing hnsw index")]
     HnswIndexFlushError,
+    #[error("Error kmeans clustering {0}")]
+    KMeansClusteringError(#[from] KMeansError),
 }
 
 impl ChromaError for SpannIndexWriterError {
@@ -124,6 +129,7 @@ impl ChromaError for SpannIndexWriterError {
             Self::HnswIndexFlushError => ErrorCodes::Internal,
             Self::VersionsMapWriterCreateError => ErrorCodes::Internal,
             Self::MaxHeadIdWriterCreateError => ErrorCodes::Internal,
+            Self::KMeansClusteringError(e) => e.code(),
         }
     }
 }
@@ -137,6 +143,8 @@ const NUM_CENTROIDS_TO_SEARCH: u32 = 64;
 const RNG_FACTOR: f32 = 1.0;
 #[allow(dead_code)]
 const SPLIT_THRESHOLD: usize = 100;
+const NUM_SAMPLES_FOR_KMEANS: usize = 1000;
+const INITIAL_LAMBDA: f32 = 100.0;
 
 impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
@@ -350,7 +358,7 @@ impl SpannIndexWriter {
     async fn rng_query(
         &self,
         query: &[f32],
-    ) -> Result<(Vec<usize>, Vec<f32>), SpannIndexWriterError> {
+    ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannIndexWriterError> {
         let ids;
         let distances;
         let mut embeddings: Vec<Vec<f32>> = vec![];
@@ -381,8 +389,9 @@ impl SpannIndexWriter {
         // Apply the RNG rule to prune.
         let mut res_ids = vec![];
         let mut res_distances = vec![];
-        let mut res_embeddings: Vec<&Vec<f32>> = vec![];
-        for (id, (distance, embedding)) in ids.iter().zip(distances.iter().zip(embeddings.iter())) {
+        let mut res_embeddings: Vec<Vec<f32>> = vec![];
+        // Embeddings that were obtained are already normalized.
+        for (id, (distance, embedding)) in ids.iter().zip(distances.iter().zip(embeddings)) {
             let mut rng_accepted = true;
             for nbr_embedding in res_embeddings.iter() {
                 // Embeddings are already normalized so no need to normalize again.
@@ -402,7 +411,7 @@ impl SpannIndexWriter {
             res_embeddings.push(embedding);
         }
 
-        Ok((res_ids, res_distances))
+        Ok((res_ids, res_distances, res_embeddings))
     }
 
     #[allow(dead_code)]
@@ -412,59 +421,174 @@ impl SpannIndexWriter {
         id: u32,
         version: u32,
         embedding: &[f32],
+        head_embedding: Vec<f32>,
     ) -> Result<(), SpannIndexWriterError> {
         {
             let write_guard = self.posting_list_writer.lock().await;
             // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
             // deletes it.
-            let current_pl = write_guard
+            let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = write_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
                 .await
                 .map_err(|_| SpannIndexWriterError::PostingListGetError)?
                 .ok_or(SpannIndexWriterError::PostingListGetError)?;
-            // Cleanup this posting list and append the new point to it.
-            // TODO(Sanket): There is an order in which we are acquiring locks here. Need
-            // to ensure the same order in the other places as well.
-            let mut updated_doc_offset_ids = vec![];
-            let mut updated_versions = vec![];
-            let mut updated_embeddings = vec![];
+            // Append the new point to the posting list.
+            doc_offset_ids.reserve_exact(1);
+            doc_versions.reserve_exact(1);
+            doc_embeddings.reserve_exact(embedding.len());
+            doc_offset_ids.push(id);
+            doc_versions.push(version);
+            doc_embeddings.extend_from_slice(embedding);
+            // Cleanup this posting list.
+            // Note: There is an order in which we are acquiring locks here to prevent deadlocks.
+            // Note: This way of cleaning up takes less memory since we don't allocate
+            // memory for embeddings that are not outdated.
+            let mut local_indices = vec![0; doc_offset_ids.len()];
+            let mut up_to_date_index = 0;
             {
                 let version_map_guard = self.versions_map.read();
-                for (index, doc_version) in current_pl.1.iter().enumerate() {
+                for (index, doc_version) in doc_versions.iter().enumerate() {
                     let current_version = version_map_guard
                         .versions_map
-                        .get(&current_pl.0[index])
+                        .get(&doc_offset_ids[index])
                         .ok_or(SpannIndexWriterError::VersionNotFound)?;
                     // disregard if either deleted or on an older version.
                     if *current_version == 0 || doc_version < current_version {
                         continue;
                     }
-                    updated_doc_offset_ids.push(current_pl.0[index]);
-                    updated_versions.push(*doc_version);
-                    // Slice. index*dimensionality to index*dimensionality + dimensionality
-                    updated_embeddings.push(
-                        &current_pl.2[index * self.dimensionality
-                            ..index * self.dimensionality + self.dimensionality],
-                    );
+                    local_indices[up_to_date_index] = index;
+                    up_to_date_index += 1;
                 }
             }
-            // Add the new point.
-            updated_doc_offset_ids.push(id);
-            updated_versions.push(version);
-            updated_embeddings.push(embedding);
-            // TODO(Sanket): Trigger a split and reassign if the size exceeds threshold.
-            // Write the PL back to the blockfile and release the lock.
-            let posting_list = SpannPostingList {
-                doc_offset_ids: &updated_doc_offset_ids,
-                doc_versions: &updated_versions,
-                doc_embeddings: &updated_embeddings.concat(),
-            };
-            // TODO(Sanket): Split if the size exceeds threshold.
-            write_guard
-                .set("", head_id, &posting_list)
-                .await
-                .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+            // If size is within threshold, write the new posting back and return.
+            if up_to_date_index <= SPLIT_THRESHOLD {
+                for idx in 0..up_to_date_index {
+                    if local_indices[idx] == idx {
+                        continue;
+                    }
+                    doc_offset_ids[idx] = doc_offset_ids[local_indices[idx]];
+                    doc_versions[idx] = doc_versions[local_indices[idx]];
+                    doc_embeddings.copy_within(
+                        local_indices[idx] * self.dimensionality
+                            ..(local_indices[idx] + 1) * self.dimensionality,
+                        idx * self.dimensionality,
+                    );
+                }
+                doc_offset_ids.truncate(up_to_date_index);
+                doc_versions.truncate(up_to_date_index);
+                doc_embeddings.truncate(up_to_date_index * self.dimensionality);
+                let posting_list = SpannPostingList {
+                    doc_offset_ids: &doc_offset_ids,
+                    doc_versions: &doc_versions,
+                    doc_embeddings: &doc_embeddings,
+                };
+                write_guard
+                    .set("", head_id, &posting_list)
+                    .await
+                    .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+
+                return Ok(());
+            }
+            // Otherwise split the posting list.
+            local_indices.truncate(up_to_date_index);
+            // Shuffle local_indices.
+            local_indices.shuffle(&mut rand::thread_rng());
+            let last = local_indices.len();
+            // Prepare KMeans.
+            let mut kmeans_input = KMeansAlgorithmInput::new(
+                local_indices,
+                &doc_embeddings,
+                self.dimensionality,
+                /* k */ 2,
+                /* first */ 0,
+                last,
+                NUM_SAMPLES_FOR_KMEANS,
+                self.distance_function.clone(),
+                INITIAL_LAMBDA,
+            );
+            let clustering_output =
+                cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
+            // TODO(Sanket): Not sure how this can happen.
+            if clustering_output.num_clusters <= 1 {
+                tracing::warn!("Clustering split the posting list into only 1 cluster");
+                panic!("Clustering split the posting list into only 1 cluster");
+            } else {
+                let mut new_posting_lists: Vec<Vec<f32>> = Vec::with_capacity(2);
+                new_posting_lists[0]
+                    .reserve_exact(clustering_output.cluster_counts[0] * self.dimensionality);
+                new_posting_lists[1]
+                    .reserve_exact(clustering_output.cluster_counts[1] * self.dimensionality);
+                let mut new_doc_offset_ids: Vec<Vec<u32>> = Vec::with_capacity(2);
+                new_doc_offset_ids[0].reserve_exact(clustering_output.cluster_counts[0]);
+                new_doc_offset_ids[1].reserve_exact(clustering_output.cluster_counts[1]);
+                let mut new_doc_versions: Vec<Vec<u32>> = Vec::with_capacity(2);
+                new_doc_versions[0].reserve_exact(clustering_output.cluster_counts[0]);
+                new_doc_versions[1].reserve_exact(clustering_output.cluster_counts[1]);
+                for (index, cluster) in clustering_output.cluster_labels {
+                    new_doc_offset_ids[cluster as usize].push(doc_offset_ids[index]);
+                    new_doc_versions[cluster as usize].push(doc_versions[index]);
+                    new_posting_lists[cluster as usize].extend_from_slice(
+                        &doc_embeddings
+                            [index * self.dimensionality..(index + 1) * self.dimensionality],
+                    );
+                }
+                let mut same_head = false;
+                let mut new_head_ids = vec![-1; 2];
+                for k in 0..2 {
+                    // Update the existing head.
+                    if !same_head
+                        && self
+                            .distance_function
+                            .distance(&clustering_output.cluster_centers[k], &head_embedding)
+                            < 1e-6
+                    {
+                        tracing::info!("Same head after splitting");
+                        same_head = true;
+                        let posting_list = SpannPostingList {
+                            doc_offset_ids: &new_doc_offset_ids[k],
+                            doc_versions: &new_doc_versions[k],
+                            doc_embeddings: &new_posting_lists[k],
+                        };
+                        write_guard
+                            .set("", head_id, &posting_list)
+                            .await
+                            .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                        new_head_ids[k] = head_id as i32;
+                    } else {
+                        // Create new head.
+                        let next_id = self
+                            .next_head_id
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let posting_list = SpannPostingList {
+                            doc_offset_ids: &new_doc_offset_ids[k],
+                            doc_versions: &new_doc_versions[k],
+                            doc_embeddings: &new_posting_lists[k],
+                        };
+                        // Insert to postings list.
+                        write_guard
+                            .set("", next_id, &posting_list)
+                            .await
+                            .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                        new_head_ids[k] = next_id as i32;
+                        // Insert to hnsw now.
+                        // TODO(Sanket): Check for capacity and increase as needed.
+                        let hnsw_write_guard = self.hnsw_index.inner.write();
+                        hnsw_write_guard
+                            .add(next_id as usize, &clustering_output.cluster_centers[k])
+                            .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                    }
+                }
+                if !same_head {
+                    // Delete the old head
+                    let hnsw_write_guard = self.hnsw_index.inner.write();
+                    hnsw_write_guard
+                        .delete(head_id as usize)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                }
+            }
         }
+        // Reassign code.
+
         Ok(())
     }
 
@@ -475,7 +599,7 @@ impl SpannIndexWriter {
         version: u32,
         embeddings: &[f32],
     ) -> Result<(), SpannIndexWriterError> {
-        let (ids, _) = self.rng_query(embeddings).await?;
+        let (ids, _, head_embeddings) = self.rng_query(embeddings).await?;
         // The only cases when this can happen is initially when no data exists in the
         // index or if all the data that was added to the index was deleted later.
         // In both the cases, in the worst case, it can happen that ids is empty
@@ -513,8 +637,8 @@ impl SpannIndexWriter {
             return Ok(());
         }
         // Otherwise add to the posting list of these arrays.
-        for head_id in ids.iter() {
-            self.append(*head_id as u32, id, version, embeddings)
+        for (head_id, head_embedding) in ids.iter().zip(head_embeddings) {
+            self.append(*head_id as u32, id, version, embeddings, head_embedding)
                 .await?;
         }
 

@@ -31,7 +31,7 @@ const NUM_ITERS_NO_IMPROVEMENT: usize = 5;
 ///     to generate balanced clusters. The algorithm generate a lambda on the fly using this
 ///     initial_lambda as the starting point.
 pub struct KMeansAlgorithmInput<'referred_data> {
-    indices: Vec<u32>,
+    indices: Vec<usize>,
     embeddings: &'referred_data [f32],
     embedding_dimension: usize,
     k: usize,
@@ -46,7 +46,7 @@ pub struct KMeansAlgorithmInput<'referred_data> {
 impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        indices: Vec<u32>,
+        indices: Vec<usize>,
         embeddings: &'referred_data [f32],
         embedding_dimension: usize,
         k: usize,
@@ -79,9 +79,10 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct KMeansAlgorithmOutput {
-    cluster_centers: Vec<Vec<f32>>,
-    cluster_counts: Vec<usize>,
-    cluster_labels: HashMap<u32, i32>,
+    pub cluster_centers: Vec<Vec<f32>>,
+    pub cluster_counts: Vec<usize>,
+    pub cluster_labels: HashMap<usize, i32>,
+    pub num_clusters: usize,
 }
 
 #[derive(Debug)]
@@ -108,7 +109,7 @@ struct KMeansAssignFinishOutput {
     cluster_counts: Vec<usize>,
     cluster_nearest_point_idx: Vec<i32>,
     cluster_nearest_distance: Vec<f32>,
-    cluster_labels: HashMap<u32, i32>,
+    cluster_labels: HashMap<usize, i32>,
 }
 
 #[derive(Error, Debug)]
@@ -140,8 +141,8 @@ fn get_nearest_center(
 ) -> Result<(i32, f32), KMeansError> {
     let point_idx = input.indices[idx];
     let dim = input.embedding_dimension;
-    let start_idx = point_idx as usize * dim;
-    let end_idx = (point_idx + 1) as usize * dim;
+    let start_idx = point_idx * dim;
+    let end_idx = (point_idx + 1) * dim;
     let mut min_distance = MAX_DISTANCE;
     let mut min_center: i32 = -1;
     for center_idx in 0..input.k {
@@ -233,9 +234,9 @@ fn kmeansassign_for_main_loop(
             cluster_farthest_point_idx[min_center as usize] = point_idx as i32;
             cluster_farthest_distance[min_center as usize] = min_distance;
         }
-        let start_idx = point_idx * dim as u32;
-        let end_idx = (point_idx + 1) * dim as u32;
-        input.embeddings[start_idx as usize..end_idx as usize]
+        let start_idx = point_idx * dim;
+        let end_idx = (point_idx + 1) * dim;
+        input.embeddings[start_idx..end_idx]
             .iter()
             .enumerate()
             .for_each(|(index, emb)| cluster_new_centers[min_center as usize][index] += *emb);
@@ -485,11 +486,18 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
     let kmeans_assign =
         kmeansassign_finish(input, &previous_centers, /* generate_labels */ true)?;
     previous_counts = kmeans_assign.cluster_counts;
+    let mut total_non_zero_clusters = 0;
+    for count in previous_counts.iter() {
+        if *count > 0 {
+            total_non_zero_clusters += 1;
+        }
+    }
 
     Ok(KMeansAlgorithmOutput {
         cluster_centers: previous_centers,
         cluster_counts: previous_counts,
         cluster_labels: kmeans_assign.cluster_labels,
+        num_clusters: total_non_zero_clusters,
     })
 }
 
@@ -510,7 +518,7 @@ mod tests {
             -1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 10.0, 10.0, 11.0, 10.0, 10.0, 11.0,
             11.0, 11.0, 12.0, 12.0,
         ];
-        let indices: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let indices = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let kmeans_input = KMeansAlgorithmInput::new(
             indices,
             &embeddings,
@@ -538,7 +546,7 @@ mod tests {
             -1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 5.0, 5.0, 10.0, 10.0, 11.0, 10.0,
             10.0, 11.0, 11.0, 11.0, 12.0, 12.0, 13.0, 13.0,
         ];
-        let indices: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        let indices = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let kmeans_input = KMeansAlgorithmInput::new(
             indices,
             &embeddings,
@@ -573,7 +581,7 @@ mod tests {
         let embeddings = [
             0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 10.0, 10.0, 11.0, 10.0, 10.0, 11.0, 11.0, 11.0,
         ];
-        let indices: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 6, 7];
+        let indices = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let kmeans_algo = KMeansAlgorithmInput::new(
             indices,
             &embeddings,
@@ -614,7 +622,7 @@ mod tests {
         let embeddings = [
             0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 10.0, 10.0, 11.0, 10.0, 10.0, 11.0, 11.0, 11.0,
         ];
-        let indices: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 6, 7];
+        let indices = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let mut kmeans_algo = KMeansAlgorithmInput::new(
             indices,
             &embeddings,
