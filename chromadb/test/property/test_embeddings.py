@@ -868,3 +868,20 @@ def test_0dim_embedding_validation() -> None:
         "Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos"
         in str(e)
     )
+
+def test_no_op_compaction(client: ClientAPI) -> None:
+    reset(client)
+    coll = client.create_collection(name="noop")
+    coll.delete(ids=[str(i) for i in range(10000)])
+    wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+
+def test_add_then_purge(client: ClientAPI) -> None:
+    reset(client)
+    record_count = 10000
+    record_id_vals = [i for i in range(record_count)]
+    record_ids = [str(i) for i in record_id_vals]
+    coll = client.create_collection(name="add_then_purge")
+    coll.add(ids=record_ids, embeddings=[[2 * i, 2 * i + 1] for i in record_id_vals])
+    wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+    coll.delete(ids=record_ids)
+    wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)

@@ -694,16 +694,16 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
                             ctx.receiver(),
                         )
                         .await;
+                    } else {
+                        // The writer is uninitialized and there is no error. This implies
+                        // no records have been written, so there is no need to flush.
+                        self.register(
+                            self.pulled_log_offset.unwrap(),
+                            Arc::new([]),
+                            ctx.receiver(),
+                        )
+                        .await;
                     };
-                } else {
-                    // The writer is uninitialized and there is no error. This implies
-                    // no records have been written, so there is no need to flush.
-                    self.register(
-                        self.pulled_log_offset.unwrap(),
-                        Arc::new([]),
-                        ctx.receiver(),
-                    )
-                    .await;
                 }
             }
             Err(e) => {
