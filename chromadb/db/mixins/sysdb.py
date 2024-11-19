@@ -193,7 +193,7 @@ class SqlSysDB(SqlDB, SysDB):
             except Exception as e:
                 raise
 
-
+    # TODO(rohit): Investigate and remove this method completely.
     @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
     @override
     def create_segment(self, segment: Segment) -> None:
@@ -490,10 +490,6 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def delete_segment(self, collection: UUID, id: UUID) -> None:
         """Delete a segment from the SysDB"""
-        with self.tx() as cur:
-            self.delete_segment_with_tx(cur, collection, id)
-
-    def delete_segment_with_tx(self, cur: Cursor, collection: UUID, id: UUID) -> None:
         add_attributes_to_current_span(
             {
                 "segment_id": str(id),
@@ -506,12 +502,13 @@ class SqlSysDB(SqlDB, SysDB):
             .where(t.id == ParameterValue(self.uuid_to_db(id)))
             .delete()
         )
-        sql, params = get_sql(q, self.parameter_format())
-        # no need for explicit del from metadata table because of ON DELETE CASCADE
-        sql = sql + " RETURNING id"
-        result = cur.execute(sql, params).fetchone()
-        if not result:
-            raise NotFoundError(f"Segment {id} not found")
+        with self.tx() as cur:
+            sql, params = get_sql(q, self.parameter_format())
+            # no need for explicit del from metadata table because of ON DELETE CASCADE
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if not result:
+                raise NotFoundError(f"Segment {id} not found")
 
     # Used by delete_collection to delete all segments for a collection along with
     # the collection itself in a single transaction.
@@ -526,8 +523,6 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         cur.execute(sql, params)
 
-    # Deletes a collection and all associated segments from the SysDB.
-    # Deletes the log stream for this collection as well.
     @trace_method("SqlSysDB.delete_collection", OpenTelemetryGranularity.ALL)
     @override
     def delete_collection(

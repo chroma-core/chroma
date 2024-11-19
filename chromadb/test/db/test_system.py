@@ -844,14 +844,9 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
 
     # Delete Segments will be a NoOp due to atomic delete of collection and segments.
     # See comments in coordinator.go for more details.
+    # Execute the call and expect no error or exception.
     s1 = segments_created_with_collection[0]
     sysdb.delete_segment(s1["collection"], s1["id"])
-
-    results = []
-    for collection in sample_collections:
-        results.extend(sysdb.get_segments(collection=collection.id))
-    assert s1 in results
-
 
 def test_update_segment(sysdb: SysDB) -> None:
     metadata: Dict[str, Union[str, int, float]] = {

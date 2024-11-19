@@ -651,29 +651,6 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	return segments, nil
 }
 
-// TODO: Remove this once tests pass.
-func (tc *Catalog) deleteSegmentImpl(txCtx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
-	segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, collectionID)
-	if err != nil {
-		return err
-	}
-	if len(segment) == 0 {
-		return common.ErrSegmentDeleteNonExistingSegment
-	}
-
-	err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segmentID.String())
-	if err != nil {
-		log.Error("error deleting segment", zap.Error(err))
-		return err
-	}
-	err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteBySegmentID(segmentID.String())
-	if err != nil {
-		log.Error("error deleting segment metadata", zap.Error(err))
-		return err
-	}
-	return nil
-}
-
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
 	return nil
 }

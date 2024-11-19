@@ -292,14 +292,12 @@ class GrpcSysDB(SysDB):
         id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        segments: Optional[Sequence[UUID]] = None,
     ) -> None:
         try:
             request = DeleteCollectionRequest(
                 id=id.hex,
                 tenant=tenant,
                 database=database,
-                segment_ids=[segment.hex for segment in segments] if segments else None,
             )
             response = self._sys_db_stub.DeleteCollection(
                 request, timeout=self._request_timeout_seconds

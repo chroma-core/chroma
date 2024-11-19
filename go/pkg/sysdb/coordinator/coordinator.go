@@ -107,10 +107,6 @@ func (s *Coordinator) GetSoftDeletedCollections(ctx context.Context, collectionI
 	return s.catalog.GetSoftDeletedCollections(ctx, collectionID, tenantID, databaseName, limit)
 }
 
-// func (s *Coordinator) DeleteCollectionAndSegments(ctx context.Context, deleteCollection *model.DeleteCollection, segmentIDs []types.UniqueID) error {
-// 	return s.catalog.DeleteCollectionAndSegments(ctx, deleteCollection, segmentIDs)
-// }
-
 func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
 	if s.deleteMode == SoftDelete {
 		return s.catalog.DeleteCollection(ctx, deleteCollection, true)
