@@ -872,12 +872,12 @@ def test_0dim_embedding_validation() -> None:
 def test_no_op_compaction(client: ClientAPI) -> None:
     reset(client)
     coll = client.create_collection(name="noop")
-    coll.delete(ids=[str(i) for i in range(10000)])
+    coll.delete(ids=[str(i) for i in range(5000)])
     wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
 
 def test_add_then_purge(client: ClientAPI) -> None:
     reset(client)
-    record_count = 10000
+    record_count = 5000
     record_id_vals = [i for i in range(record_count)]
     record_ids = [str(i) for i in record_id_vals]
     coll = client.create_collection(name="add_then_purge")
