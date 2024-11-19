@@ -1,79 +1,76 @@
-use std::sync::Arc;
-
 use anyhow::Result;
+use chroma_benchmark::datasets::types::Record;
 use chroma_benchmark::datasets::{
     ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
 };
+use chroma_blockstore::BlockfileWriterOptions;
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::UnboundedCacheConfig;
-use chroma_index::fulltext::{
-    tokenizer::TantivyChromaTokenizer,
-    types::{FullTextIndexReader, FullTextIndexWriter},
-};
+use chroma_index::fulltext::types::{DocumentMutation, FullTextIndexReader, FullTextIndexWriter};
 use chroma_storage::{local::LocalStorage, Storage};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use futures::{StreamExt, TryStreamExt};
-use tantivy::tokenizer::NgramTokenizer;
-
+use std::sync::Arc;
 mod dataset_utilities;
 use dataset_utilities::{get_record_dataset, get_record_query_dataset_pair};
+use rayon::prelude::*;
+use tantivy::tokenizer::NgramTokenizer;
 
-async fn compact_log_and_get_reader<'a, T>(
-    blockfile_provider: &BlockfileProvider,
-    corpus: &T,
-) -> Result<FullTextIndexReader<'a>>
-where
-    T: RecordDataset,
-{
-    let postings_blockfile_writer = blockfile_provider.create::<u32, Vec<u32>>().await.unwrap();
-    let frequencies_blockfile_writer = blockfile_provider.create::<u32, u32>().await.unwrap();
-    let postings_blockfile_id = postings_blockfile_writer.id();
-    let frequencies_blockfile_id = frequencies_blockfile_writer.id();
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
 
-    let tokenizer = Box::new(TantivyChromaTokenizer::new(
-        NgramTokenizer::new(3, 3, false).unwrap(),
-    ));
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
-    let mut full_text_index_writer = FullTextIndexWriter::new(
-        None,
-        postings_blockfile_writer,
-        frequencies_blockfile_writer,
-        tokenizer,
-    );
+#[derive(Clone, Copy)]
+struct NumWorkersParameter {
+    num_workers: usize,
+}
 
-    let mut corpus_stream = corpus
-        .create_records_stream()
-        .await?
-        .enumerate()
-        .boxed_local();
-    while let Some((i, record)) = corpus_stream.next().await {
-        let record = record?;
-        full_text_index_writer
-            .add_document(&record.document, i as u32)
-            .await
-            .unwrap();
+impl std::fmt::Display for NumWorkersParameter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} workers", self.num_workers)
     }
+}
+
+impl From<NumWorkersParameter> for usize {
+    fn from(p: NumWorkersParameter) -> Self {
+        p.num_workers
+    }
+}
+
+async fn compact_log_and_get_reader<'a>(
+    blockfile_provider: &BlockfileProvider,
+    mut chunked_mutations: Vec<Vec<DocumentMutation<'a>>>,
+) -> Result<FullTextIndexReader<'a>> {
+    let postings_blockfile_writer = blockfile_provider
+        .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
+        .await
+        .unwrap();
+    let postings_blockfile_id = postings_blockfile_writer.id();
+
+    let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+
+    let mut full_text_index_writer = FullTextIndexWriter::new(postings_blockfile_writer, tokenizer);
+
+    chunked_mutations.par_drain(..).for_each(|chunk| {
+        full_text_index_writer.handle_batch(chunk).unwrap();
+    });
 
     full_text_index_writer.write_to_blockfiles().await.unwrap();
     let flusher = full_text_index_writer.commit().await.unwrap();
     flusher.flush().await.unwrap();
 
     let postings_blockfile_reader = blockfile_provider
-        .open::<u32, &[u32]>(&postings_blockfile_id)
-        .await
-        .unwrap();
-    let frequencies_blockfile_reader = blockfile_provider
-        .open::<u32, u32>(&frequencies_blockfile_id)
+        .read::<u32, &[u32]>(&postings_blockfile_id)
         .await
         .unwrap();
 
-    let tokenizer = Box::new(TantivyChromaTokenizer::new(
-        NgramTokenizer::new(3, 3, false).unwrap(),
-    ));
+    let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
 
     Ok(FullTextIndexReader::new(
         postings_blockfile_reader,
-        frequencies_blockfile_reader,
         tokenizer,
     ))
 }
@@ -117,19 +114,45 @@ pub fn bench_compaction(c: &mut Criterion) {
     let tmp_dir = tempfile::tempdir().unwrap();
     let blockfile_provider = create_blockfile_provider(tmp_dir.path().to_str().unwrap());
 
-    let record_corpus = Arc::new(record_corpus);
+    let records = runner.block_on(async {
+        let stream = record_corpus.create_records_stream().await.unwrap();
 
-    compaction_group.bench_function("scidocs", |b| {
-        b.to_async(&runner).iter_batched(
-            || (record_corpus.clone(), blockfile_provider.clone()),
-            |(record_corpus, blockfile_provider)| async move {
-                compact_log_and_get_reader(&blockfile_provider, black_box(&record_corpus))
-                    .await
-                    .unwrap();
-            },
-            criterion::BatchSize::LargeInput,
-        )
+        stream
+            .enumerate()
+            .map(|(i, record)| record.map(|r| (i, r)))
+            .boxed_local()
+            .try_collect::<Vec<(usize, Record)>>()
+            .await
+            .unwrap()
     });
+    let prepared_corpus = records
+        .iter()
+        .map(|(i, r)| DocumentMutation::Create {
+            offset_id: *i as u32,
+            new_document: &r.document,
+        })
+        .collect::<Vec<_>>();
+    let prepared_corpus = Arc::new(prepared_corpus);
+
+    for num_workers in (1..=4).map(|i| NumWorkersParameter { num_workers: i }) {
+        compaction_group.bench_function(BenchmarkId::from_parameter(num_workers), |b| {
+            b.to_async(&runner).iter_batched(
+                || {
+                    let chunked_corpus = prepared_corpus
+                        .chunks(prepared_corpus.len() / usize::from(num_workers))
+                        .map(|chunk| chunk.to_vec())
+                        .collect::<Vec<_>>();
+                    (chunked_corpus, blockfile_provider.clone())
+                },
+                |(chunked_mutations, blockfile_provider)| async move {
+                    compact_log_and_get_reader(&blockfile_provider, black_box(chunked_mutations))
+                        .await
+                        .unwrap();
+                },
+                criterion::BatchSize::LargeInput,
+            )
+        });
+    }
 }
 
 fn bench_querying(c: &mut Criterion) {
@@ -151,8 +174,27 @@ fn bench_querying(c: &mut Criterion) {
 
     let mut query_iter = query_subset.queries.iter().cycle();
 
+    let records = runner.block_on(async {
+        let stream = record_corpus.create_records_stream().await.unwrap();
+
+        stream
+            .enumerate()
+            .map(|(i, record)| record.map(|r| (i, r)))
+            .boxed_local()
+            .try_collect::<Vec<(usize, Record)>>()
+            .await
+            .unwrap()
+    });
+    let prepared_corpus = records
+        .iter()
+        .map(|(i, r)| DocumentMutation::Create {
+            offset_id: *i as u32,
+            new_document: &r.document,
+        })
+        .collect::<Vec<_>>();
+
     let index_reader = runner.block_on(async {
-        compact_log_and_get_reader(&blockfile_provider, &record_corpus)
+        compact_log_and_get_reader(&blockfile_provider, vec![prepared_corpus])
             .await
             .unwrap()
     });

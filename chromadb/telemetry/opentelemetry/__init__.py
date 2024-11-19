@@ -1,7 +1,9 @@
 import asyncio
+import os
 from functools import wraps
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Sequence, Union, TypeVar
+
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -9,6 +11,7 @@ from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
 )
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
 from chromadb.config import Component
 from chromadb.config import System
 
@@ -132,6 +135,9 @@ def trace_method(
                 if not tracer:
                     return await f(*args, **kwargs)
                 with tracer.start_as_current_span(trace_name, attributes=attributes):
+                    add_attributes_to_current_span(
+                        {"pod_name": os.environ.get("HOSTNAME")}
+                    )
                     return await f(*args, **kwargs)
 
             return async_wrapper  # type: ignore
@@ -145,6 +151,9 @@ def trace_method(
                 if not tracer:
                     return f(*args, **kwargs)
                 with tracer.start_as_current_span(trace_name, attributes=attributes):
+                    add_attributes_to_current_span(
+                        {"pod_name": os.environ.get("HOSTNAME")}
+                    )
                     return f(*args, **kwargs)
 
             return wrapper  # type: ignore

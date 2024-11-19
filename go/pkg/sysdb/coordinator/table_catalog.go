@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -216,74 +217,91 @@ func (tc *Catalog) GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*mo
 	return result, nil
 }
 
+func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
+	// insert collection
+	databaseName := createCollection.DatabaseName
+	tenantID := createCollection.TenantID
+	databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(tenantID, databaseName)
+	if err != nil {
+		log.Error("error getting database", zap.Error(err))
+		return nil, false, err
+	}
+	if len(databases) == 0 {
+		log.Error("database not found", zap.Error(err))
+		return nil, false, common.ErrDatabaseNotFound
+	}
+
+	collectionName := createCollection.Name
+	existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil)
+	if err != nil {
+		log.Error("error getting collection", zap.Error(err))
+		return nil, false, err
+	}
+	if len(existing) != 0 {
+		if createCollection.GetOrCreate {
+			collection := convertCollectionToModel(existing)[0]
+			return collection, false, nil
+		} else {
+			return nil, false, common.ErrCollectionUniqueConstraintViolation
+		}
+	} else {
+		// If collection is soft-deleted, then new collection will throw an error since name should be unique, so we need to rename it.
+		isSoftDeleted, sdCollectionID, err := tc.metaDomain.CollectionDb(txCtx).CheckCollectionIsSoftDeleted(createCollection.Name, tenantID, databaseName)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to create collection: %w", err)
+		}
+		if isSoftDeleted {
+			log.Info("new collection create request with same name as collection that was soft deleted", zap.Any("collection", createCollection))
+			// Rename the soft deleted collection to a new name with timestamp
+			err = tc.renameSoftDeletedCollection(txCtx, sdCollectionID, createCollection.Name, tenantID, databaseName)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to create collection: %w", err)
+			}
+		}
+	}
+
+	dbCollection := &dbmodel.Collection{
+		ID:                   createCollection.ID.String(),
+		Name:                 &createCollection.Name,
+		ConfigurationJsonStr: &createCollection.ConfigurationJsonStr,
+		Dimension:            createCollection.Dimension,
+		DatabaseID:           databases[0].ID,
+		Ts:                   ts,
+		LogPosition:          0,
+	}
+
+	err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
+	if err != nil {
+		log.Error("error inserting collection", zap.Error(err))
+		return nil, false, err
+	}
+	// insert collection metadata
+	metadata := createCollection.Metadata
+	dbCollectionMetadataList := convertCollectionMetadataToDB(createCollection.ID.String(), metadata)
+	if len(dbCollectionMetadataList) != 0 {
+		err = tc.metaDomain.CollectionMetadataDb(txCtx).Insert(dbCollectionMetadataList)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	// get collection
+	collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, tenantID, databaseName, nil, nil)
+	if err != nil {
+		log.Error("error getting collection", zap.Error(err))
+		return nil, false, err
+	}
+	result := convertCollectionToModel(collectionList)[0]
+	return result, true, nil
+
+}
+
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
 	var result *model.Collection
-
 	created := false
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// insert collection
-		databaseName := createCollection.DatabaseName
-		tenantID := createCollection.TenantID
-		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(tenantID, databaseName)
-		if err != nil {
-			log.Error("error getting database", zap.Error(err))
-			return err
-		}
-		if len(databases) == 0 {
-			log.Error("database not found", zap.Error(err))
-			return common.ErrDatabaseNotFound
-		}
-
-		collectionName := createCollection.Name
-		existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil)
-		if err != nil {
-			log.Error("error getting collection", zap.Error(err))
-			return err
-		}
-		if len(existing) != 0 {
-			if createCollection.GetOrCreate {
-				collection := convertCollectionToModel(existing)[0]
-				result = collection
-				return nil
-			} else {
-				return common.ErrCollectionUniqueConstraintViolation
-			}
-		} else {
-			created = true
-		}
-
-		dbCollection := &dbmodel.Collection{
-			ID:                   createCollection.ID.String(),
-			Name:                 &createCollection.Name,
-			ConfigurationJsonStr: &createCollection.ConfigurationJsonStr,
-			Dimension:            createCollection.Dimension,
-			DatabaseID:           databases[0].ID,
-			Ts:                   ts,
-			LogPosition:          0,
-		}
-
-		err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
-		if err != nil {
-			log.Error("error inserting collection", zap.Error(err))
-			return err
-		}
-		// insert collection metadata
-		metadata := createCollection.Metadata
-		dbCollectionMetadataList := convertCollectionMetadataToDB(createCollection.ID.String(), metadata)
-		if len(dbCollectionMetadataList) != 0 {
-			err = tc.metaDomain.CollectionMetadataDb(txCtx).Insert(dbCollectionMetadataList)
-			if err != nil {
-				return err
-			}
-		}
-		// get collection
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, tenantID, databaseName, nil, nil)
-		if err != nil {
-			log.Error("error getting collection", zap.Error(err))
-			return err
-		}
-		result = convertCollectionToModel(collectionList)[0]
-		return nil
+		var err error
+		result, created, err = tc.createCollectionImpl(txCtx, createCollection, ts)
+		return err
 	})
 	if err != nil {
 		log.Error("error creating collection", zap.Error(err))
@@ -308,30 +326,134 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return collections, nil
 }
 
-func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
-	log.Info("deleting collection", zap.Any("deleteCollection", deleteCollection))
+func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection, softDelete bool) error {
+	if softDelete {
+		return tc.softDeleteCollection(ctx, deleteCollection)
+	}
+	return tc.hardDeleteCollection(ctx, deleteCollection)
+}
+
+func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	log.Info("hard deleting collection", zap.Any("deleteCollection", deleteCollection), zap.String("databaseName", deleteCollection.DatabaseName))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
-		collectionAndMetadata, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(collectionID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
+
+		collectionEntry, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(types.FromUniqueID(collectionID), &deleteCollection.DatabaseName)
 		if err != nil {
 			return err
 		}
-		if len(collectionAndMetadata) == 0 {
+		if collectionEntry == nil {
+			log.Info("collection not found during hard delete", zap.Any("deleteCollection", deleteCollection))
 			return common.ErrCollectionDeleteNonExistingCollection
 		}
 
+		// Delete collection and collection metadata.
 		collectionDeletedCount, err := tc.metaDomain.CollectionDb(txCtx).DeleteCollectionByID(collectionID.String())
 		if err != nil {
+			log.Error("error deleting collection during hard delete", zap.Error(err))
 			return err
 		}
+		if collectionDeletedCount == 0 {
+			log.Info("collection not found during hard delete", zap.Any("deleteCollection", deleteCollection))
+			return common.ErrCollectionDeleteNonExistingCollection
+		}
+		// Delete collection metadata.
 		collectionMetadataDeletedCount, err := tc.metaDomain.CollectionMetadataDb(txCtx).DeleteByCollectionID(collectionID.String())
+		if err != nil {
+			log.Error("error deleting collection metadata during hard delete", zap.Error(err))
+			return err
+		}
+		// Delete segments.
+		segments, err := tc.metaDomain.SegmentDb(txCtx).GetSegmentsByCollectionID(collectionID.String())
+		if err != nil {
+			log.Error("error getting segments during hard delete", zap.Error(err))
+			return err
+		}
+		for _, segment := range segments {
+			err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segment.ID)
+			if err != nil {
+				log.Error("error deleting segment during hard delete", zap.Error(err))
+				return err
+			}
+			err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteBySegmentID(segment.ID)
+			if err != nil {
+				log.Error("error deleting segment metadata during hard delete", zap.Error(err))
+				return err
+			}
+		}
+
+		log.Info("collection hard deleted", zap.Any("collection", collectionID),
+			zap.Int("collectionDeletedCount", collectionDeletedCount),
+			zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
+		return nil
+	})
+}
+
+func (tc *Catalog) renameSoftDeletedCollection(ctx context.Context, collectionID string, collectionName string, tenantID string, databaseName string) error {
+	log.Info("Renaming soft deleted collection", zap.String("collectionID", collectionID), zap.String("collectionName", collectionName), zap.Any("tenantID", tenantID), zap.String("databaseName", databaseName))
+	// Generate new name with timestamp
+	newName := fmt.Sprintf("deleted_%s_%d", collectionName, time.Now().Unix())
+
+	dbCollection := &dbmodel.Collection{
+		ID:        collectionID,
+		Name:      &newName,
+		IsDeleted: true,
+	} // Not updating the timestamp or updated_at.
+
+	err := tc.metaDomain.CollectionDb(ctx).Update(dbCollection)
+	if err != nil {
+		log.Error("rename soft deleted collection failed", zap.Error(err))
+		return fmt.Errorf("collection rename failed due to update error: %w", err)
+	}
+	return nil
+}
+
+func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	log.Info("Soft deleting collection", zap.Any("softDeleteCollection", deleteCollection))
+	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Check if collection exists
+		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(deleteCollection.ID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
 		if err != nil {
 			return err
 		}
-		log.Info("collection deleted", zap.Any("collection", collectionAndMetadata), zap.Int("collectionDeletedCount", collectionDeletedCount), zap.Int("collectionMetadataDeletedCount", collectionMetadataDeletedCount))
+		if len(collections) == 0 {
+			return common.ErrCollectionDeleteNonExistingCollection
+		}
 
+		dbCollection := &dbmodel.Collection{
+			ID:        deleteCollection.ID.String(),
+			IsDeleted: true,
+			Ts:        deleteCollection.Ts,
+			UpdatedAt: time.Now(),
+		}
+		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
+		if err != nil {
+			log.Error("soft delete collection failed", zap.Error(err))
+			return fmt.Errorf("collection delete failed due to update error: %w", err)
+		}
 		return nil
 	})
+}
+
+func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, collectionID *string, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {
+	collections, err := tc.metaDomain.CollectionDb(ctx).GetSoftDeletedCollections(collectionID, tenantID, databaseName, limit)
+	if err != nil {
+		return nil, err
+	}
+	// Convert to model.Collection
+	collectionList := make([]*model.Collection, 0, len(collections))
+	for _, dbCollection := range collections {
+		collection := &model.Collection{
+			ID:           types.MustParse(dbCollection.Collection.ID),
+			Name:         *dbCollection.Collection.Name,
+			DatabaseName: dbCollection.DatabaseName,
+			TenantID:     dbCollection.TenantID,
+			Ts:           types.Timestamp(dbCollection.Collection.Ts),
+			UpdatedAt:    types.Timestamp(dbCollection.Collection.UpdatedAt.Unix()),
+		}
+		collectionList = append(collectionList, collection)
+	}
+	return collectionList, nil
 }
 
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {
@@ -403,40 +525,9 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 	var result *model.Segment
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// insert segment
-		collectionString := createSegment.CollectionID.String()
-		dbSegment := &dbmodel.Segment{
-			ID:           createSegment.ID.String(),
-			CollectionID: &collectionString,
-			Type:         createSegment.Type,
-			Scope:        createSegment.Scope,
-			Ts:           ts,
-		}
-		err := tc.metaDomain.SegmentDb(txCtx).Insert(dbSegment)
-		if err != nil {
-			log.Error("error inserting segment", zap.Error(err))
-			return err
-		}
-		// insert segment metadata
-		metadata := createSegment.Metadata
-		if metadata != nil {
-			dbSegmentMetadataList := convertSegmentMetadataToDB(createSegment.ID.String(), metadata)
-			if len(dbSegmentMetadataList) != 0 {
-				err = tc.metaDomain.SegmentMetadataDb(txCtx).Insert(dbSegmentMetadataList)
-				if err != nil {
-					log.Error("error inserting segment metadata", zap.Error(err))
-					return err
-				}
-			}
-		}
-		// get segment
-		segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(createSegment.ID, nil, nil, createSegment.CollectionID)
-		if err != nil {
-			log.Error("error getting segment", zap.Error(err))
-			return err
-		}
-		result = convertSegmentToModel(segmentList)[0]
-		return nil
+		var err error
+		result, err = tc.createSegmentImpl(txCtx, createSegment, ts)
+		return err
 	})
 	if err != nil {
 		log.Error("error creating segment", zap.Error(err))
@@ -444,6 +535,88 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 	}
 	log.Info("segment created", zap.Any("segment", result))
 	return result, nil
+}
+
+func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
+	var result *model.Segment
+
+	// insert segment
+	collectionString := createSegment.CollectionID.String()
+	dbSegment := &dbmodel.Segment{
+		ID:           createSegment.ID.String(),
+		CollectionID: &collectionString,
+		Type:         createSegment.Type,
+		Scope:        createSegment.Scope,
+		Ts:           ts,
+	}
+	err := tc.metaDomain.SegmentDb(txCtx).Insert(dbSegment)
+	if err != nil {
+		log.Error("error inserting segment", zap.Error(err))
+		return nil, err
+	}
+	// insert segment metadata
+	metadata := createSegment.Metadata
+	if metadata != nil {
+		dbSegmentMetadataList := convertSegmentMetadataToDB(createSegment.ID.String(), metadata)
+		if len(dbSegmentMetadataList) != 0 {
+			err = tc.metaDomain.SegmentMetadataDb(txCtx).Insert(dbSegmentMetadataList)
+			if err != nil {
+				log.Error("error inserting segment metadata", zap.Error(err))
+				return nil, err
+			}
+		}
+	}
+	// get segment
+	segmentList, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(createSegment.ID, nil, nil, createSegment.CollectionID)
+	if err != nil {
+		log.Error("error getting segment", zap.Error(err))
+		return nil, err
+	}
+	result = convertSegmentToModel(segmentList)[0]
+
+	return result, nil
+}
+
+func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (*model.Collection, bool, error) {
+	var resultCollection *model.Collection
+	created := false
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Create the collection using the refactored helper
+		var err error
+		resultCollection, created, err = tc.createCollectionImpl(txCtx, createCollection, ts)
+		if err != nil {
+			log.Error("error creating collection", zap.Error(err))
+			return err
+		}
+
+		// If collection already exists, then do not create segments.
+		// TODO: Should we check to see if segments does not exist? and create them?
+		if !created {
+			return nil
+		}
+
+		// Create the associated segments.
+		for _, createSegment := range createSegments {
+			createSegment.CollectionID = resultCollection.ID // Ensure the segment is linked to the newly created collection
+
+			_, err := tc.createSegmentImpl(txCtx, createSegment, ts)
+			if err != nil {
+				log.Error("error creating segment", zap.Error(err))
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Error("error creating collection and segments", zap.Error(err))
+		return nil, false, err
+	}
+
+	log.Info("collection and segments created", zap.Any("collection", resultCollection))
+	return resultCollection, created, nil
 }
 
 func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, segmentType *string, scope *string, collectionID types.UniqueID) ([]*model.Segment, error) {
@@ -478,28 +651,11 @@ func (tc *Catalog) GetSegments(ctx context.Context, segmentID types.UniqueID, se
 	return segments, nil
 }
 
+// DeleteSegment is a no-op.
+// Segments are deleted as part of atomic delete of collection.
+// Keeping this API so that older clients continue to work.
 func (tc *Catalog) DeleteSegment(ctx context.Context, segmentID types.UniqueID, collectionID types.UniqueID) error {
-	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		segment, err := tc.metaDomain.SegmentDb(txCtx).GetSegments(segmentID, nil, nil, collectionID)
-		if err != nil {
-			return err
-		}
-		if len(segment) == 0 {
-			return common.ErrSegmentDeleteNonExistingSegment
-		}
-
-		err = tc.metaDomain.SegmentDb(txCtx).DeleteSegmentByID(segmentID.String())
-		if err != nil {
-			log.Error("error deleting segment", zap.Error(err))
-			return err
-		}
-		err = tc.metaDomain.SegmentMetadataDb(txCtx).DeleteBySegmentID(segmentID.String())
-		if err != nil {
-			log.Error("error deleting segment metadata", zap.Error(err))
-			return err
-		}
-		return nil
-	})
+	return nil
 }
 
 func (tc *Catalog) UpdateSegment(ctx context.Context, updateSegment *model.UpdateSegment, ts types.Timestamp) (*model.Segment, error) {

@@ -14,6 +14,10 @@ use crate::{
             fetch_segment::{FetchSegmentError, FetchSegmentOperator, FetchSegmentOutput},
             filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
             limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
+            prefetch_record::{
+                PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator,
+                PrefetchRecordOutput,
+            },
             projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
         },
         orchestration::common::terminate_with_error,
@@ -76,6 +80,7 @@ type GetResult = Result<GetOutput, GetError>;
 /// a `<collection>.get(...)` query from the user
 ///
 /// # Pipeline
+/// ```text
 ///                       ┌────────────┐
 ///                       │            │
 ///           ┌───────────┤  on_start  ├────────────────┐
@@ -123,6 +128,7 @@ type GetResult = Result<GetOutput, GetError>;
 ///                     │  result_channel  │
 ///                     │                  │
 ///                     └──────────────────┘
+/// ```
 ///
 /// # State tracking
 /// As suggested by the pipeline diagram above, the orchestrator only need to
@@ -350,6 +356,35 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
                 return;
             }
         };
+
+        // Prefetch records before projection
+        let prefetch_task = wrap(
+            Box::new(PrefetchRecordOperator {}),
+            PrefetchRecordInput {
+                logs: self
+                    .fetch_log_output
+                    .as_ref()
+                    .expect("FetchLogOperator should have finished already")
+                    .clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                record_segment: self
+                    .fetch_segment_output
+                    .as_ref()
+                    .expect("FetchSegmentOperator should have finished already")
+                    .record_segment
+                    .clone(),
+                offset_ids: output.offset_ids.iter().collect(),
+            },
+            ctx.receiver(),
+        );
+        if let Err(err) = self
+            .dispatcher
+            .send(prefetch_task, Some(Span::current()))
+            .await
+        {
+            self.terminate_with_error(ctx, err);
+        }
+
         let task = wrap(
             Box::new(self.projection.clone()),
             ProjectionInput {
@@ -372,6 +407,19 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
             self.terminate_with_error(ctx, err);
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for GetOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _message: TaskResult<PrefetchRecordOutput, PrefetchRecordError>,
+        _ctx: &ComponentContext<Self>,
+    ) {
+        // The output and error from `PrefetchRecordOperator` are ignored
     }
 }
 

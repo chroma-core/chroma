@@ -14,8 +14,8 @@ import (
 )
 
 type IMemberlistStore interface {
-	GetMemberlist(ctx context.Context) (return_memberlist *Memberlist, resourceVersion string, err error)
-	UpdateMemberlist(ctx context.Context, memberlist *Memberlist, resourceVersion string) error
+	GetMemberlist(ctx context.Context) (_ Memberlist, resourceVersion string, err error)
+	UpdateMemberlist(ctx context.Context, _ Memberlist, resourceVersion string) error
 }
 
 type Member struct {
@@ -54,7 +54,7 @@ func NewCRMemberlistStore(dynamicClient dynamic.Interface, coordinatorNamespace 
 	}
 }
 
-func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlist *Memberlist, resourceVersion string, err error) {
+func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlist Memberlist, resourceVersion string, err error) {
 	gvr := getGvr()
 	unstrucuted, err := s.dynamicClient.Resource(gvr).Namespace(s.coordinatorNamespace).Get(ctx, s.memberlistCustomResource, metav1.GetOptions{})
 	if err != nil {
@@ -63,13 +63,14 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 	cr := unstrucuted.UnstructuredContent()
 	log.Debug("Got unstructured memberlist object", zap.Any("cr", cr))
 	members := cr["spec"].(map[string]interface{})["members"]
-	memberlist := Memberlist{}
 	if members == nil {
 		// Empty memberlist
 		log.Debug("Get memberlist received nil memberlist, returning empty")
-		return &memberlist, unstrucuted.GetResourceVersion(), nil
+		return nil, unstrucuted.GetResourceVersion(), nil
 	}
 	cast_members := members.([]interface{})
+	memberlist := make(Memberlist, 0, len(cast_members))
+
 	for _, member := range cast_members {
 		member_map, ok := member.(map[string]interface{})
 		if !ok {
@@ -79,18 +80,15 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 		if !ok {
 			return nil, "", errors.New("failed to cast member_id to string")
 		}
-		member := Member{
-			id: member_id,
-		}
-		memberlist = append(memberlist, member)
+		memberlist = append(memberlist, Member{member_id})
 	}
-	return &memberlist, unstrucuted.GetResourceVersion(), nil
+	return memberlist, unstrucuted.GetResourceVersion(), nil
 }
 
-func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist *Memberlist, resourceVersion string) error {
+func (s *CRMemberlistStore) UpdateMemberlist(ctx context.Context, memberlist Memberlist, resourceVersion string) error {
 	gvr := getGvr()
 	log.Debug("Updating memberlist store", zap.Any("memberlist", memberlist))
-	unstructured := memberlistToCr(memberlist, s.coordinatorNamespace, s.memberlistCustomResource, resourceVersion)
+	unstructured := memberlist.toCr(s.coordinatorNamespace, s.memberlistCustomResource, resourceVersion)
 	log.Debug("Setting memberlist to unstructured object", zap.Any("unstructured", unstructured))
 	_, err := s.dynamicClient.Resource(gvr).Namespace("chroma").Update(context.Background(), unstructured, metav1.UpdateOptions{})
 	if err != nil {
@@ -104,15 +102,15 @@ func getGvr() schema.GroupVersionResource {
 	return gvr
 }
 
-func memberlistToCr(memberlist *Memberlist, namespace string, memberlistName string, resourceVersion string) *unstructured.Unstructured {
-	members := []interface{}{}
-	for _, member := range *memberlist {
-		members = append(members, map[string]interface{}{
+func (list Memberlist) toCr(namespace string, memberlistName string, resourceVersion string) *unstructured.Unstructured {
+	members := make([]interface{}, len(list))
+	for i, member := range list {
+		members[i] = map[string]interface{}{
 			"member_id": member.id,
-		})
+		}
 	}
 
-	resource := &unstructured.Unstructured{
+	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "chroma.cluster/v1",
 			"kind":       "MemberList",
@@ -126,6 +124,4 @@ func memberlistToCr(memberlist *Memberlist, namespace string, memberlistName str
 			},
 		},
 	}
-
-	return resource
 }

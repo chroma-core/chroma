@@ -20,7 +20,7 @@ fn is_slow(attributes: &[opentelemetry::KeyValue]) -> bool {
             }
         }
     }
-    nanos > 1_000_000
+    nanos > 20_000_000
 }
 
 impl opentelemetry_sdk::trace::ShouldSample for ChromaShouldSample {
@@ -67,7 +67,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // Prepare trace config.
     let trace_config = opentelemetry_sdk::trace::Config::default()
         .with_sampler(ChromaShouldSample)
-        .with_resource(resource);
+        .with_resource(resource.clone());
     // Prepare exporter.
     let exporter = opentelemetry_otlp::new_exporter()
         .tonic()
@@ -166,6 +166,9 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
         .with_endpoint(otel_endpoint);
     let provider = opentelemetry_otlp::new_pipeline()
         .metrics(opentelemetry_sdk::runtime::Tokio)
+        .with_resource(opentelemetry_sdk::resource::Resource::new(vec![
+            opentelemetry::KeyValue::new("service.name", service_name.clone()),
+        ]))
         .with_exporter(exporter)
         .build()
         .expect("Failed to build metrics provider");

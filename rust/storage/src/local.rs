@@ -1,15 +1,9 @@
-use super::stream::ByteStream;
-use super::stream::ByteStreamItem;
-use super::{config::StorageConfig, s3::StorageConfigError};
-use crate::GetError;
+use super::config::StorageConfig;
+use super::StorageConfigError;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use futures::Stream;
-use futures::StreamExt;
 use std::sync::Arc;
-use tracing::Instrument;
-use tracing::Span;
 
 #[derive(Clone)]
 pub struct LocalStorage {
@@ -25,57 +19,10 @@ impl LocalStorage {
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, String> {
-        let mut stream = self
-            .get_stream(key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Local Storage get"))
-            .await?;
-        let read_block_span =
-            tracing::trace_span!(parent: Span::current(), "Local storage read bytes to end");
-        let buf = read_block_span
-            .in_scope(|| async {
-                let mut buf: Vec<u8> = Vec::new();
-                while let Some(res) = stream.next().await {
-                    match res {
-                        Ok(chunk) => {
-                            buf.extend(chunk);
-                        }
-                        Err(err) => {
-                            tracing::error!("Error reading from storage: {}", err);
-                            match err {
-                                GetError::LocalError(e) => {
-                                    return Err(e);
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                    }
-                }
-                tracing::info!("Read {:?} bytes from local storage", buf.len());
-                Ok(Some(buf))
-            })
-            .await?;
-
-        match buf {
-            Some(buf) => Ok(Arc::new(buf)),
-            None => {
-                // Buffer is empty. Nothing interesting to do.
-                Ok(Arc::new(vec![]))
-            }
-        }
-    }
-
-    pub(super) async fn get_stream(
-        &self,
-        key: &str,
-    ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, String> {
         let file_path = format!("{}/{}", self.root, key);
-        tracing::debug!("Reading from path: {}", file_path);
-        match std::fs::File::open(file_path) {
-            Ok(file) => {
-                let stream = file.byte_stream();
-                Ok(Box::new(stream))
-            }
-            Err(e) => Err::<_, String>(e.to_string()),
+        match std::fs::read(file_path) {
+            Ok(bytes_u8) => Ok(Arc::new(bytes_u8)),
+            Err(e) => Err::<Arc<Vec<u8>>, String>(e.to_string()),
         }
     }
 

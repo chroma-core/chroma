@@ -2,9 +2,11 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/pingcap/log"
@@ -50,7 +52,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.db)
+	c, err := NewCoordinator(ctx, suite.db, SoftDelete)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -81,7 +83,7 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db)
+	c, err := NewCoordinator(ctx, db, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -134,7 +136,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db)
+	c, err := NewCoordinator(ctx, db, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -254,6 +256,75 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 	return sampleCollections
 }
 
+func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
+	ctx := context.Background()
+
+	// Create a new collection with segments
+	newCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_and_segments",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	segments := []*model.CreateSegment{
+		{
+			ID:           types.NewUniqueID(),
+			Type:         "test_type",
+			Scope:        "VECTOR",
+			CollectionID: newCollection.ID,
+		},
+		{
+			ID:           types.NewUniqueID(),
+			Type:         "test_type",
+			Scope:        "VECTOR",
+			CollectionID: newCollection.ID,
+		},
+	}
+
+	// Create collection and segments
+	createdCollection, created, err := suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
+	suite.NoError(err)
+	suite.True(created)
+	suite.Equal(newCollection.ID, createdCollection.ID)
+	suite.Equal(newCollection.Name, createdCollection.Name)
+	// suite.Equal(len(segments), len(createdSegments))
+
+	// Verify the collection was created
+	result, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(result, 1)
+	suite.Equal(newCollection.ID, result[0].ID)
+	suite.Equal(newCollection.Name, result[0].Name)
+
+	// Verify the segments were created
+	for _, segment := range segments {
+		segmentResult, err := suite.coordinator.GetSegments(ctx, segment.ID, &segment.Type, &segment.Scope, newCollection.ID)
+		suite.NoError(err)
+		suite.Len(segmentResult, 1)
+		suite.Equal(segment.ID, segmentResult[0].ID)
+	}
+
+	// Attempt to create a duplicate collection (should fail)
+	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
+	suite.Error(err)
+
+	// Create a new collection with new name and ID, so that the segment creation will fail
+	newCollection.ID = types.NewUniqueID()
+	newCollection.Name = "test_collection_and_segments_2"
+	segments[0].ID = segments[1].ID // Ensure the segment ID is the same as the existing one, so that the segment creation will fail
+	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
+	suite.Error(err)
+
+	// Check that the collection was not created
+	collections, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(collections)
+}
+
+// TestCreateGetDeleteCollections tests the create, get and delete collection APIs.
+// Test does not check for soft delete and hard delete scenarios, but checks that
+// the APIs are working as expected. i.e. Get does not return deleted collections.
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	ctx := context.Background()
 	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -336,6 +407,74 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	// Duplicate delete throws an exception
 	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
 	suite.Error(err)
+
+	// Re-create the deleted collection
+	// Recreating the deleted collection with new ID since the old ID is already in use by the soft deleted collection.
+	createCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         suite.sampleCollections[0].Name,
+		Dimension:    suite.sampleCollections[0].Dimension,
+		Metadata:     suite.sampleCollections[0].Metadata,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		Ts:           types.Timestamp(time.Now().Unix()),
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, createCollection)
+	suite.NoError(err)
+
+	// Verify collection was re-created
+	results, err = suite.coordinator.GetCollections(ctx, createCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(results, 1)
+	suite.Equal(createCollection.ID, results[0].ID)
+	suite.Equal(createCollection.Name, results[0].Name)
+	suite.Equal(createCollection.Dimension, results[0].Dimension)
+	suite.Equal(createCollection.Metadata, results[0].Metadata)
+
+	// Create segments associated with collection
+	segment := &model.CreateSegment{
+		ID:           types.MustParse("00000000-0000-0000-0000-000000000001"),
+		CollectionID: createCollection.ID,
+		Type:         "test_segment",
+		Scope:        "test_scope",
+		Ts:           types.Timestamp(time.Now().Unix()),
+	}
+	err = suite.coordinator.CreateSegment(ctx, segment)
+	suite.NoError(err)
+
+	// Verify segment was created
+	segments, err := suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
+	suite.NoError(err)
+	suite.Len(segments, 1)
+	suite.Equal(segment.ID, segments[0].ID)
+	suite.Equal(segment.CollectionID, segments[0].CollectionID)
+	suite.Equal(segment.Type, segments[0].Type)
+	suite.Equal(segment.Scope, segments[0].Scope)
+
+	// Delete the re-created collection with segments
+	deleteCollection = &model.DeleteCollection{
+		ID:           createCollection.ID,
+		DatabaseName: suite.databaseName,
+		TenantID:     suite.tenantName,
+	}
+	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
+	suite.NoError(err)
+
+	// Verify collection and segment were deleted
+	results, err = suite.coordinator.GetCollections(ctx, createCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(results)
+	// Segments will not be deleted since the collection is only soft deleted.
+	// Hard deleting the collection will also delete the segments.
+	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
+	suite.NoError(err)
+	suite.NotEmpty(segments)
+	suite.coordinator.deleteMode = HardDelete
+	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
+	suite.NoError(err)
+	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
+	suite.NoError(err)
+	suite.Empty(segments)
 }
 
 func (suite *APIsTestSuite) TestUpdateCollections() {
@@ -820,24 +959,17 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	suite.NoError(err)
 	suite.Empty(result)
 
-	// Delete
+	// Delete Segments will not delete the collection, hence no tests for that.
+	// Reason - After introduction of Atomic delete of collection & segments,
+	// the DeleteSegment API will not delete the collection. See comments in
+	// coordinator.go/DeleteSegment for more details.
 	s1 := sampleSegments[0]
 	err = c.DeleteSegment(ctx, s1.ID, s1.CollectionID)
 	suite.NoError(err)
 
 	results, err = c.GetSegments(ctx, types.NilUniqueID(), nil, nil, s1.CollectionID)
 	suite.NoError(err)
-	suite.NotContains(results, s1)
-	suite.Len(results, 0)
-
-	// Duplicate delete throws an exception
-	err = c.DeleteSegment(ctx, s1.ID, s1.CollectionID)
-	suite.Error(err)
-
-	// clean up segments
-	for _, segment := range sampleSegments {
-		_ = c.DeleteSegment(ctx, segment.ID, segment.CollectionID)
-	}
+	suite.Contains(results, s1)
 }
 
 func (suite *APIsTestSuite) TestUpdateSegment() {
@@ -937,6 +1069,104 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	result, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, segment.CollectionID)
 	suite.NoError(err)
 	suite.Equal([]*model.Segment{segment}, result)
+}
+
+// TestSoftAndHardDeleteCollection tests the soft and hard delete scenarios for collections.
+func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
+	ctx := context.Background()
+
+	// Test Hard Delete scenario
+	suite.coordinator.deleteMode = HardDelete
+	// Create test collection
+	testCollection2 := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_hard_delete_collection",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	// Create the collection
+	_, _, err := suite.coordinator.CreateCollection(ctx, testCollection2)
+	suite.NoError(err)
+
+	// Hard delete the collection
+	err = suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           testCollection2.ID,
+		TenantID:     testCollection2.TenantID,
+		DatabaseName: testCollection2.DatabaseName,
+	})
+	suite.NoError(err)
+
+	// Verify collection is not returned in normal get
+	results, err := suite.coordinator.GetCollections(ctx, testCollection2.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(results)
+
+	// Verify collection does not appear in soft deleted list
+	id := testCollection2.ID.String()
+	softDeletedResults, err := suite.coordinator.GetSoftDeletedCollections(ctx, &id, suite.tenantName, suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Empty(softDeletedResults)
+
+	// Test Soft Delete scenario
+	suite.coordinator.deleteMode = SoftDelete
+	// Create a test collection
+	testCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_soft_delete_collection",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	// Create the collection
+	_, _, err = suite.coordinator.CreateCollection(ctx, testCollection)
+	suite.NoError(err)
+
+	// Soft delete the collection
+	err = suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           testCollection.ID,
+		TenantID:     testCollection.TenantID,
+		DatabaseName: testCollection.DatabaseName,
+	})
+	suite.NoError(err)
+
+	// Verify collection is not returned in normal get
+	results, err = suite.coordinator.GetCollections(ctx, testCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(results)
+
+	// Verify collection appears in soft deleted list
+	id = testCollection.ID.String()
+	softDeletedResults, err = suite.coordinator.GetSoftDeletedCollections(ctx, &id, suite.tenantName, suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Len(softDeletedResults, 1)
+	suite.Equal(testCollection.ID, softDeletedResults[0].ID)
+
+	// Create a new collection with the same name as the soft deleted one.
+	// This should pass, and create a new soft deleted collection whose name is
+	// of the form "deleted_<name>_<timestamp>"
+	newTestCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         testCollection.Name,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, newTestCollection)
+	suite.NoError(err)
+
+	// Get the newly created collection to verify it exists
+	results, err = suite.coordinator.GetCollections(ctx, newTestCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Len(results, 1)
+	suite.Equal(newTestCollection.Name, results[0].Name)
+
+	// Verify the soft deleted collection still appears in the soft deleted list but with a different name.
+	softDeletedResults, err = suite.coordinator.GetSoftDeletedCollections(ctx, nil, suite.tenantName, suite.databaseName, 10)
+	suite.NoError(err)
+	suite.Len(softDeletedResults, 1)
+	suite.Equal(id, softDeletedResults[0].ID.String())
+	renamedCollectionNamePrefix := fmt.Sprintf("deleted_%s_", testCollection.Name)
+	suite.Contains(softDeletedResults[0].Name, renamedCollectionNamePrefix)
 }
 
 func TestAPIsTestSuite(t *testing.T) {

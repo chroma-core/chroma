@@ -4,11 +4,12 @@ use crate::{
     arrow::{
         block::delta::{
             single_column_size_tracker::SingleColumnSizeTracker,
-            single_column_storage::SingleColumnStorage, BlockDelta, BlockStorage,
+            single_column_storage::SingleColumnStorage, BlockStorage, UnorderedBlockDelta,
         },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{Array, BinaryArray, BinaryBuilder},
@@ -31,8 +32,8 @@ impl ArrowWriteableValue for RoaringBitmap {
         0 // We don't support None values for RoaringBitmap
     }
 
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        match &delta.builder {
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
+        match &delta {
             BlockStorage::RoaringBitmap(builder) => {
                 builder.add(prefix, key, value);
             }
@@ -40,7 +41,7 @@ impl ArrowWriteableValue for RoaringBitmap {
         }
     }
 
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
         match &delta.builder {
             BlockStorage::RoaringBitmap(builder) => {
                 builder.delete(prefix, key);
@@ -49,8 +50,8 @@ impl ArrowWriteableValue for RoaringBitmap {
         }
     }
 
-    fn get_delta_builder() -> BlockStorage {
-        BlockStorage::RoaringBitmap(SingleColumnStorage::new())
+    fn get_delta_builder(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> BlockStorage {
+        BlockStorage::RoaringBitmap(SingleColumnStorage::new(mutation_ordering_hint))
     }
 
     fn get_arrow_builder(size_tracker: Self::SizeTracker) -> Self::ArrowBuilder {
@@ -71,11 +72,22 @@ impl ArrowWriteableValue for RoaringBitmap {
         builder.append_value(value);
     }
 
-    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder, _: &Self::SizeTracker) -> (Field, Arc<dyn Array>) {
         let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
         let value_arr = builder.finish();
         let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
         (value_field, value_arr)
+    }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
+        match &delta.builder {
+            BlockStorage::RoaringBitmap(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type"),
+        }
     }
 }
 
@@ -91,8 +103,8 @@ impl ArrowReadableValue<'_> for RoaringBitmap {
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockDelta,
+        storage: &mut BlockStorage,
     ) {
-        delta.add(prefix, key, value);
+        RoaringBitmap::add(prefix, key.into(), value, storage);
     }
 }

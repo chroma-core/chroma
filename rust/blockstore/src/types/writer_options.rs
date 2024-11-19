@@ -1,13 +1,13 @@
 use uuid::Uuid;
 
-#[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) enum BlockfileWriterMutationOrdering {
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub enum BlockfileWriterMutationOrdering {
     #[default]
     Unordered,
     Ordered,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct BlockfileWriterOptions {
     pub(crate) mutation_ordering: BlockfileWriterMutationOrdering,
     pub(crate) fork_from: Option<Uuid>,
@@ -29,6 +29,11 @@ impl BlockfileWriterOptions {
     /// - a key is provided more than once (e.g. a key is provided to both `.set()` and `.delete()`)
     pub fn ordered_mutations(mut self) -> Self {
         self.mutation_ordering = BlockfileWriterMutationOrdering::Ordered;
+        self
+    }
+
+    pub fn set_mutation_ordering(mut self, ordering: BlockfileWriterMutationOrdering) -> Self {
+        self.mutation_ordering = ordering;
         self
     }
 

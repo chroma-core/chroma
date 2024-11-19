@@ -31,7 +31,7 @@ impl<
         &'referred_data self,
         prefix: &str,
         key: K,
-    ) -> Result<V, Box<dyn ChromaError>> {
+    ) -> Result<Option<V>, Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get(prefix, key),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get(prefix, key).await,
@@ -93,8 +93,8 @@ impl<
         key_range: KeyRange,
     ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone + 'referred_data,
-        KeyRange: RangeBounds<K> + Clone + 'referred_data,
+        PrefixRange: RangeBounds<&'prefix str> + Clone,
+        KeyRange: RangeBounds<K> + Clone,
     {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader
@@ -109,7 +109,7 @@ impl<
     pub async fn get_at_index(
         &'referred_data self,
         index: usize,
-    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+    ) -> Result<(&'referred_data str, K, V), Box<dyn ChromaError>> {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.get_at_index(index),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.get_at_index(index).await,

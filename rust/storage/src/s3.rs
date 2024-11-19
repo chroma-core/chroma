@@ -11,6 +11,7 @@
 use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
+use super::StorageConfigError;
 use crate::GetError;
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
@@ -132,7 +133,7 @@ impl S3Storage {
         }
     }
 
-    pub(super) async fn get_stream(
+    async fn get_stream(
         &self,
         key: &str,
     ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, S3GetError> {
@@ -252,6 +253,12 @@ impl S3Storage {
 
     pub(super) async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
         let (content_length, ranges) = self.get_key_ranges(key).await?;
+
+        // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
+        if content_length == 0 {
+            return Ok(Arc::new(Vec::new()));
+        }
+
         let part_size = self.download_part_size_bytes;
         let mut output_buffer: Vec<u8> = vec![0; content_length as usize];
         let mut output_slices = output_buffer.chunks_mut(part_size).collect::<Vec<_>>();
@@ -305,6 +312,9 @@ impl S3Storage {
                         Err(err) => {
                             tracing::error!("Error reading from S3: {}", err);
                             match err {
+                                GetError::ObjectStoreError(e) => {
+                                    return Err(S3GetError::S3GetError(e.to_string()));
+                                }
                                 GetError::S3Error(e) => {
                                     return Err(e);
                                 }
@@ -486,23 +496,6 @@ impl S3Storage {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum StorageConfigError {
-    #[error("Invalid storage config")]
-    InvalidStorageConfig,
-    #[error("Failed to create bucket: {0}")]
-    FailedToCreateBucket(String),
-}
-
-impl ChromaError for StorageConfigError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            StorageConfigError::InvalidStorageConfig => ErrorCodes::InvalidArgument,
-            StorageConfigError::FailedToCreateBucket(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
 #[async_trait]
 impl Configurable<StorageConfig> for S3Storage {
     async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
@@ -577,8 +570,7 @@ impl Configurable<StorageConfig> for S3Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::StreamExt;
-    use rand::{Rng, SeedableRng};
+    use rand::{distributions::Alphanumeric, Rng, SeedableRng};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -661,22 +653,52 @@ mod tests {
             .await
             .unwrap();
 
-        let mut stream = storage.get_stream("test").await.unwrap();
-
-        let mut buf = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(data) => {
-                    buf.extend_from_slice(&data);
-                }
-                Err(e) => {
-                    panic!("Error reading stream: {}", e);
-                }
-            }
-        }
-
+        let buf = storage.get("test").await.unwrap();
         let file_contents = std::fs::read(temp_file.path()).unwrap();
-        assert_eq!(buf, file_contents);
+        assert_eq!(buf, file_contents.into());
+    }
+
+    async fn test_multipart_get_for_size(value_size: usize) {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
+            client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
+            download_part_size_bytes: 1024 * 1024 * 8,
+        };
+        storage.create_bucket().await.unwrap();
+
+        // Randomly generate a 16 byte utf8 string.
+        let test_data_key: String = rand::thread_rng()
+            .sample_iter(Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        // Randomly generate data of size equaling value_size.
+        let test_data_value_string: String = rand::thread_rng()
+            .sample_iter(Alphanumeric)
+            .take(value_size)
+            .map(char::from)
+            .collect();
+        storage
+            .put_bytes(
+                test_data_key.as_str(),
+                test_data_value_string.as_bytes().to_vec(),
+            )
+            .await
+            .unwrap();
+        println!(
+            "Wrote key {} with value of size {}",
+            test_data_key,
+            test_data_value_string.len()
+        );
+
+        // Parallel fetch.
+        let buf = storage.get_parallel(&test_data_key).await.unwrap();
+
+        let buf = String::from_utf8(Arc::unwrap_or_clone(buf)).unwrap();
+        assert_eq!(buf, test_data_value_string);
     }
 
     #[tokio::test]
@@ -706,5 +728,23 @@ mod tests {
             test_download_part_size_bytes,
         )
         .await;
+    }
+
+    #[tokio::test]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_multipart_get() {
+        // At 8 MB.
+        test_multipart_get_for_size(1024 * 1024 * 8).await;
+        // At < 8 MB.
+        test_multipart_get_for_size(1024 * 1024 * 7).await;
+        // At > 8 MB.
+        test_multipart_get_for_size(1024 * 1024 * 10).await;
+        // Greater than NAC limit i.e. > 2*8 MB = 16 MB.
+        test_multipart_get_for_size(1024 * 1024 * 18).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_empty_file() {
+        test_multipart_get_for_size(0).await;
     }
 }

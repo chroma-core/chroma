@@ -88,13 +88,13 @@ impl<
         }
     }
 
-    pub(crate) fn get(&'storage self, prefix: &str, key: K) -> Result<V, Box<dyn ChromaError>> {
+    pub(crate) fn get(
+        &'storage self,
+        prefix: &str,
+        key: K,
+    ) -> Result<Option<V>, Box<dyn ChromaError>> {
         let key = key.into();
-        let value = V::read_from_storage(prefix, key, &self.storage);
-        match value {
-            Some(value) => Ok(value),
-            None => Err(Box::new(BlockfileError::NotFoundError)),
-        }
+        Ok(V::read_from_storage(prefix, key, &self.storage))
     }
 
     pub(crate) fn get_range_iter<'prefix, PrefixRange, KeyRange>(
@@ -126,7 +126,7 @@ impl<
     pub(crate) fn get_at_index(
         &'storage self,
         index: usize,
-    ) -> Result<(&str, K, V), Box<dyn ChromaError>> {
+    ) -> Result<(&'storage str, K, V), Box<dyn ChromaError>> {
         let res = V::get_at_index(&self.storage, index);
         let (key, value) = match res {
             Some((key, value)) => (key, value),
@@ -164,7 +164,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<&str, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let value = reader.get("prefix", "key1").unwrap();
+        let value = reader.get("prefix", "key1").unwrap().unwrap();
         assert_eq!(value, "value1");
     }
 
@@ -181,7 +181,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<&str, roaring::RoaringBitmap> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
-        let value = reader.get("prefix", "bitmap1").unwrap();
+        let value = reader.get("prefix", "bitmap1").unwrap().unwrap();
         assert!(value.contains(1));
         assert!(value.contains(2));
         assert!(value.contains(3));
@@ -256,7 +256,7 @@ mod tests {
 
         let reader: MemoryBlockfileReader<&str, DataRecord> =
             MemoryBlockfileReader::open(id, storage_manager);
-        let record = reader.get("prefix", "embedding_id_1").unwrap();
+        let record = reader.get("prefix", "embedding_id_1").unwrap().unwrap();
         assert_eq!(record.id, "embedding_id_1");
         assert_eq!(record.embedding, vec![1.0, 2.0, 3.0]);
     }
@@ -271,7 +271,7 @@ mod tests {
         let reader: MemoryBlockfileReader<bool, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", true).unwrap();
-        assert_eq!(value, "value1");
+        assert_eq!(value, Some("value1"));
     }
 
     #[test]
@@ -284,7 +284,7 @@ mod tests {
         let reader: MemoryBlockfileReader<u32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", 1).unwrap();
-        assert_eq!(value, "value1");
+        assert_eq!(value, Some("value1"));
     }
 
     #[test]
@@ -297,7 +297,7 @@ mod tests {
         let reader: MemoryBlockfileReader<f32, &str> =
             MemoryBlockfileReader::open(writer.id, storage_manager);
         let value = reader.get("prefix", 1.0).unwrap();
-        assert_eq!(value, "value1");
+        assert_eq!(value, Some("value1"));
     }
 
     #[test]
@@ -851,12 +851,12 @@ mod tests {
         let reader: MemoryBlockfileReader<&str, &str> =
             MemoryBlockfileReader::open(id, storage_manager.clone());
         let key_2 = reader.get("prefix", "key2").unwrap();
-        assert_eq!(key_2, "value2");
+        assert_eq!(key_2, Some("value2"));
         let key_3 = reader.get("different_prefix", "key3").unwrap();
-        assert_eq!(key_3, "value3");
+        assert_eq!(key_3, Some("value3"));
 
         let key_1 = reader.get("prefix", "key1");
-        assert!(key_1.is_err());
+        assert!(matches!(key_1, Ok(None)));
     }
 
     #[tokio::test]

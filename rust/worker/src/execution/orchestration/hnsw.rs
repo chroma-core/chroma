@@ -26,7 +26,8 @@ use crate::execution::operators::record_segment_prefetch::{
 };
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
-    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
+    distance_function_from_segment, DistributedHNSWSegmentFromSegmentError,
+    DistributedHNSWSegmentReader,
 };
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, ComponentHandle, System};
@@ -44,10 +45,7 @@ use chroma_types::{Chunk, Collection, CollectionUuid, LogRecord, Segment, Vector
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::{
-    cmp::min,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::{trace, Span};
 use uuid::Uuid;
@@ -68,6 +66,7 @@ understand. We can always add more abstraction later if we need it.
 ```
 */
 #[derive(Debug)]
+#[allow(dead_code)]
 enum ExecutionState {
     Pending,
     PullLogs,
@@ -78,6 +77,7 @@ enum ExecutionState {
 }
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 enum HnswSegmentQueryError {
     #[error(transparent)]
     GetByIdError(#[from] super::common::GetHnswSegmentByIdError),
@@ -149,6 +149,7 @@ pub(crate) struct HnswQueryOrchestrator {
     log_position: u64,
 }
 
+#[allow(dead_code)]
 impl HnswQueryOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -620,21 +621,21 @@ impl Component for HnswQueryOrchestrator {
                 }
             };
 
-        match IndexConfig::from_segment(&hnsw_segment, collection.dimension.unwrap()) {
-            Ok(index_config) => {
-                self.index_config = Some(index_config);
-
-                // Normalize the query vectors if we are using the cosine similarity
-                if self.index_config.as_ref().unwrap().distance_function == DistanceFunction::Cosine
-                {
-                    for query_vector in self.query_vectors.iter_mut() {
-                        *query_vector = normalize(query_vector);
-                    }
-                }
-            }
+        let distance_function = match distance_function_from_segment(&hnsw_segment) {
+            Ok(distance_function) => distance_function,
             Err(e) => {
                 terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
+            }
+        };
+        self.index_config = Some(IndexConfig::new(
+            collection.dimension.unwrap(),
+            distance_function,
+        ));
+        // Normalize the query vectors if we are using the cosine similarity
+        if self.index_config.as_ref().unwrap().distance_function == DistanceFunction::Cosine {
+            for query_vector in self.query_vectors.iter_mut() {
+                *query_vector = normalize(query_vector);
             }
         }
 

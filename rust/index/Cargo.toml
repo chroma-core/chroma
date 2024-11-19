@@ -28,13 +28,17 @@ chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-distance = { workspace = true }
+itertools = { workspace = true }
 
 [dev-dependencies]
 rayon = { workspace = true }
 criterion = { workspace = true }
 chroma-benchmark = { workspace = true }
+proptest = { workspace = true }
 indicatif = "0.17.8"
 anyhow = "1.0.89"
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"
 
 
 [build-dependencies]

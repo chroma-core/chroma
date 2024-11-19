@@ -160,15 +160,14 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 	if err != nil {
 		return nil, err
 	}
-	memberlist := Memberlist{}
+	memberlist := make(Memberlist, 0, len(pods))
 	for _, pod := range pods {
-		conditions := pod.Status.Conditions
-		for _, condition := range conditions {
-			if condition.Type == v1.PodReady && condition.Status == v1.ConditionTrue {
-				member := Member{
-					id: pod.Name,
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == v1.PodReady {
+				if condition.Status == v1.ConditionTrue {
+					memberlist = append(memberlist, Member{pod.Name})
 				}
-				memberlist = append(memberlist, member)
+				break
 			}
 		}
 	}

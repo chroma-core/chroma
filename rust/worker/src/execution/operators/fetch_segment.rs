@@ -1,6 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::IndexUuid;
-use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType};
+use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType, SegmentUuid};
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::trace;
@@ -32,9 +31,9 @@ pub struct FetchSegmentOperator {
     pub collection_uuid: CollectionUuid,
     pub collection_version: u32,
     // TODO: Enforce segments uuid
-    pub metadata_uuid: Option<IndexUuid>,
-    pub record_uuid: Option<IndexUuid>,
-    pub vector_uuid: Option<IndexUuid>,
+    pub metadata_uuid: Option<SegmentUuid>,
+    pub record_uuid: Option<SegmentUuid>,
+    pub vector_uuid: Option<SegmentUuid>,
 }
 
 type FetchSegmentInput = ();
@@ -92,22 +91,21 @@ impl FetchSegmentOperator {
     }
     async fn get_segment(&self, scope: SegmentScope) -> Result<Segment, FetchSegmentError> {
         let segment_type = match scope {
-            SegmentScope::VECTOR => SegmentType::HnswDistributed,
             SegmentScope::METADATA => SegmentType::BlockfileMetadata,
             SegmentScope::RECORD => SegmentType::BlockfileRecord,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
+            SegmentScope::VECTOR => SegmentType::HnswDistributed,
         };
-        // TODO: Add segment uuid
         let segment_id = match scope {
-            SegmentScope::VECTOR => self.vector_uuid,
             SegmentScope::METADATA => self.metadata_uuid,
             SegmentScope::RECORD => self.record_uuid,
             SegmentScope::SQLITE => unimplemented!("Unexpected Sqlite segment"),
+            SegmentScope::VECTOR => self.vector_uuid,
         };
         self.sysdb
             .clone()
             .get_segments(
-                segment_id.map(|id| id.0),
+                segment_id,
                 Some(segment_type.into()),
                 Some(scope),
                 self.collection_uuid,

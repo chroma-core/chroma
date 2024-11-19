@@ -90,7 +90,7 @@ impl DataRecordSizeTracker {
     ) {
         let (id, embedding, metadata, document) = value;
         self.id_size += id.len();
-        self.embedding_size += embedding.len() * std::mem::size_of::<f32>();
+        self.embedding_size += embedding.len() * 4;
         self.metadata_size += metadata.as_ref().map(|m| m.len()).unwrap_or(0);
         self.document_size += document.as_ref().map(|d| d.len()).unwrap_or(0);
         self.embedding_dimension = Some(embedding.len()); // todo: return error if embedding size has changed
@@ -102,7 +102,7 @@ impl DataRecordSizeTracker {
     ) {
         let (id, embedding, metadata, document) = value;
         self.id_size -= id.len();
-        self.embedding_size -= embedding.len() * std::mem::size_of::<f32>();
+        self.embedding_size -= embedding.len() * 4;
         self.metadata_size -= metadata.as_ref().map(|m| m.len()).unwrap_or(0);
         self.document_size -= document.as_ref().map(|d| d.len()).unwrap_or(0);
     }

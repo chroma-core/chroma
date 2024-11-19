@@ -1,14 +1,17 @@
+use std::iter::once;
+
 use crate::config::QueryServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operators::fetch_log::FetchLogOperator;
 use crate::execution::operators::fetch_segment::FetchSegmentOperator;
 use crate::execution::operators::filter::FilterOperator;
+use crate::execution::operators::knn::KnnOperator;
+use crate::execution::operators::knn_projection::KnnProjectionOperator;
 use crate::execution::operators::limit::LimitOperator;
 use crate::execution::operators::projection::ProjectionOperator;
 use crate::execution::orchestration::get::GetOrchestrator;
-use crate::execution::orchestration::{
-    CountQueryOrchestrator, GetVectorsOrchestrator, HnswQueryOrchestrator,
-};
+use crate::execution::orchestration::knn::{KnnError, KnnFilterOrchestrator, KnnOrchestrator};
+use crate::execution::orchestration::{CountQueryOrchestrator, GetVectorsOrchestrator};
 use crate::log::log::Log;
 use crate::sysdb::sysdb::SysDb;
 use crate::system::{ComponentHandle, System};
@@ -18,14 +21,15 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_index::IndexUuid;
 use chroma_types::chroma_proto::{
     self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
+    RequestVersionContext,
 };
 use chroma_types::chroma_proto::{
     GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
 };
-use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, Where};
+use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, SegmentUuid, Where};
+use futures::future::try_join_all;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -121,6 +125,7 @@ impl WorkerServer {
         });
 
         server.await?;
+
         Ok(())
     }
 
@@ -137,79 +142,60 @@ impl WorkerServer {
         request: Request<QueryVectorsRequest>,
     ) -> Result<Response<QueryVectorsResponse>, Status> {
         let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Segment UUID"));
-            }
-        };
+        let segment_uuid = to_segment_uuid(&request.segment_id)?;
+        let collection_uuid = to_collection_uuid(&request.collection_id)?;
+        let (collection_version, log_position) = get_version_context(&request.version_context)?;
+        let system = self.clone_system()?;
+        let dispatcher = self.clone_dispatcher()?;
 
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
-            }
-        };
-        let collection_uuid = CollectionUuid(collection_uuid);
-
-        let (collection_version, log_position) = match request.version_context {
-            Some(version_context) => (
-                version_context.collection_version,
-                version_context.log_position,
-            ),
-            None => {
-                return Err(Status::invalid_argument("No version context provided"));
-            }
-        };
-
-        let mut proto_results_for_all = Vec::new();
-
-        let mut query_vectors = Vec::new();
+        let mut query_vectors = Vec::with_capacity(request.vectors.len());
         for proto_query_vector in request.vectors {
-            let (query_vector, _encoding) = match proto_query_vector.try_into() {
-                Ok((vector, encoding)) => (vector, encoding),
-                Err(e) => {
-                    return Err(Status::internal(format!("Error converting vector: {}", e)));
-                }
-            };
+            let (query_vector, _encoding) = proto_query_vector
+                .try_into()
+                .map_err(|e| Status::internal(format!("Error converting vector: {}", e)))?;
+
             query_vectors.push(query_vector);
         }
 
-        let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher.clone(),
-            None => {
-                return Err(Status::internal("No dispatcher found"));
-            }
-        };
+        let knn_filter_orchestrator = KnnFilterOrchestrator::new(
+            self.blockfile_provider.clone(),
+            dispatcher.clone(),
+            self.hnsw_index_provider.clone(),
+            // TODO: Load the configuration for this
+            1000,
+            FetchLogOperator {
+                log_client: self.log.clone(),
+                batch_size: 100,
+                start_log_offset_id: log_position as u32 + 1,
+                maximum_fetch_count: None,
+                collection_uuid,
+            },
+            FetchSegmentOperator {
+                sysdb: self.sysdb.clone(),
+                collection_uuid,
+                collection_version,
+                metadata_uuid: None,
+                record_uuid: None,
+                vector_uuid: Some(SegmentUuid(segment_uuid)),
+            },
+            FilterOperator {
+                query_ids: (!request.allowed_ids.is_empty()).then_some(request.allowed_ids),
+                where_clause: None,
+            },
+        );
 
-        let result = match self.system {
-            Some(ref system) => {
-                let orchestrator = HnswQueryOrchestrator::new(
-                    // TODO: Should not have to clone query vectors here
-                    system.clone(),
-                    query_vectors.clone(),
-                    request.k,
-                    request.allowed_ids,
-                    request.include_embeddings,
-                    segment_uuid,
-                    collection_uuid,
-                    self.log.clone(),
-                    self.sysdb.clone(),
-                    self.hnsw_index_provider.clone(),
-                    self.blockfile_provider.clone(),
-                    dispatcher,
-                    collection_version,
-                    log_position,
-                );
-                orchestrator.run().await
+        let knn_filter_output = match knn_filter_orchestrator.run(system.clone()).await {
+            Ok(output) => output,
+            Err(KnnError::EmptyCollection) => {
+                return Ok(Response::new(chroma_proto::QueryVectorsResponse {
+                    results: once(chroma_proto::VectorQueryResults {
+                        results: Vec::new(),
+                    })
+                    .cycle()
+                    .take(query_vectors.len())
+                    .collect(),
+                }));
             }
-            None => {
-                return Err(Status::internal("No system found"));
-            }
-        };
-
-        let result = match result {
-            Ok(result) => result,
             Err(e) => {
                 tracing::error!("Error running orchestrator: {}", e);
                 return Err(Status::new(
@@ -219,17 +205,59 @@ impl WorkerServer {
             }
         };
 
+        let embedding_dim = query_vectors[0].len();
+
+        let knn_orchestrators: Vec<_> = query_vectors
+            .into_iter()
+            .map(|embedding| {
+                KnnOrchestrator::new(
+                    self.blockfile_provider.clone(),
+                    dispatcher.clone(),
+                    // TODO: Load the configuration for this
+                    1000,
+                    knn_filter_output.clone(),
+                    KnnOperator {
+                        embedding,
+                        fetch: request.k as u32,
+                    },
+                    KnnProjectionOperator {
+                        projection: ProjectionOperator {
+                            document: false,
+                            embedding: request.include_embeddings,
+                            metadata: false,
+                        },
+                        distance: true,
+                    },
+                )
+            })
+            .collect();
+
+        let result = try_join_all(
+            knn_orchestrators
+                .into_iter()
+                .map(|knn| knn.run(system.clone())),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Error running orchestrator: {}", e);
+            Status::new(
+                e.code().into(),
+                format!("Error running orchestrator: {}", e),
+            )
+        })?;
+
+        let mut proto_results_for_all = Vec::with_capacity(result.len());
         for result_set in result {
-            let mut proto_results = Vec::new();
-            for query_result in result_set {
+            let mut proto_results = Vec::with_capacity(result_set.records.len());
+            for query_result in result_set.records {
                 let proto_result = chroma_proto::VectorQueryResult {
-                    id: query_result.id,
-                    distance: query_result.distance,
-                    vector: match query_result.vector {
+                    id: query_result.record.id,
+                    distance: query_result
+                        .distance
+                        .expect("The distance should be present"),
+                    vector: match query_result.record.embedding {
                         Some(vector) => {
-                            match (vector, ScalarEncoding::FLOAT32, query_vectors[0].len())
-                                .try_into()
-                            {
+                            match (vector, ScalarEncoding::FLOAT32, embedding_dim).try_into() {
                                 Ok(proto_vector) => Some(proto_vector),
                                 Err(e) => {
                                     return Err(Status::internal(format!(
@@ -261,74 +289,32 @@ impl WorkerServer {
         request: Request<GetVectorsRequest>,
     ) -> Result<Response<GetVectorsResponse>, Status> {
         let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Segment UUID"));
-            }
-        };
-
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
-            }
-        };
-        let collection_uuid = CollectionUuid(collection_uuid);
-
-        let (collection_version, log_position) = match request.version_context {
-            Some(version_context) => (
-                version_context.collection_version,
-                version_context.log_position,
-            ),
-            None => {
-                return Err(Status::invalid_argument("No version context provided"));
-            }
-        };
-
-        let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher.clone(),
-            None => {
-                return Err(Status::internal("No dispatcher found"));
-            }
-        };
-
-        let system = match self.system {
-            Some(ref system) => system,
-            None => {
-                return Err(Status::internal("No system found"));
-            }
-        };
+        let segment_uuid = to_segment_uuid(&request.segment_id)?;
+        let collection_uuid = to_collection_uuid(&request.collection_id)?;
+        let (collection_version, log_position) = get_version_context(&request.version_context)?;
 
         let orchestrator = GetVectorsOrchestrator::new(
-            system.clone(),
+            self.clone_system()?,
             request.ids,
             segment_uuid,
             collection_uuid,
             self.log.clone(),
             self.sysdb.clone(),
-            dispatcher,
+            self.clone_dispatcher()?,
             self.blockfile_provider.clone(),
             collection_version,
             log_position,
         );
-        let result = orchestrator.run().await;
-        let mut result = match result {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::error!("Error running orchestrator: {}", e);
-                return Err(Status::new(
-                    e.code().into(),
-                    format!("Error running orchestrator: {}", e),
-                ));
-            }
-        };
+        let result = orchestrator.run().await.map_err(|e| {
+            tracing::error!("Error running orchestrator: {}", e);
+            Status::new(
+                e.code().into(),
+                format!("Error running orchestrator: {}", e),
+            )
+        })?;
 
-        let mut output = Vec::new();
-        let id_drain = result.ids.drain(..);
-        let vector_drain = result.vectors.drain(..);
-
-        for (id, vector) in id_drain.zip(vector_drain) {
+        let mut output = Vec::with_capacity(result.ids.len());
+        for (id, vector) in result.ids.into_iter().zip(result.vectors.into_iter()) {
             let vector_len = vector.len();
             let proto_vector = match (vector, ScalarEncoding::FLOAT32, vector_len).try_into() {
                 Ok(vector) => vector,
@@ -353,47 +339,9 @@ impl WorkerServer {
         request: Request<QueryMetadataRequest>,
     ) -> Result<Response<QueryMetadataResponse>, Status> {
         let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                tracing::error!("Invalid Segment UUID");
-                return Err(Status::invalid_argument("Invalid Segment UUID"));
-            }
-        };
-
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
-            }
-        };
-        let collection_uuid = CollectionUuid(collection_uuid);
-
-        let (collection_version, log_position) = match request.version_context {
-            Some(version_context) => (
-                version_context.collection_version,
-                version_context.log_position,
-            ),
-            None => {
-                return Err(Status::invalid_argument("No version context provided"));
-            }
-        };
-
-        let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
-            None => {
-                tracing::error!("No dispatcher found");
-                return Err(Status::internal("No dispatcher found"));
-            }
-        };
-
-        let system = match self.system {
-            Some(ref system) => system,
-            None => {
-                tracing::error!("No system found");
-                return Err(Status::internal("No system found"));
-            }
-        };
+        let segment_uuid = to_segment_uuid(&request.segment_id)?;
+        let collection_uuid = to_collection_uuid(&request.collection_id)?;
+        let (collection_version, log_position) = get_version_context(&request.version_context)?;
 
         // If no ids are provided, pass None to the orchestrator
         let query_ids = request.ids.map(|uids| uids.ids);
@@ -432,7 +380,7 @@ impl WorkerServer {
 
         let orchestrator = GetOrchestrator::new(
             self.blockfile_provider.clone(),
-            dispatcher.clone(),
+            self.clone_dispatcher()?,
             // TODO: Load the configuration for this
             1000,
             FetchLogOperator {
@@ -445,7 +393,7 @@ impl WorkerServer {
             FetchSegmentOperator {
                 sysdb: self.sysdb.clone(),
                 vector_uuid: None,
-                metadata_uuid: Some(IndexUuid(segment_uuid)),
+                metadata_uuid: Some(SegmentUuid(segment_uuid)),
                 record_uuid: None,
                 collection_uuid,
                 collection_version,
@@ -465,19 +413,16 @@ impl WorkerServer {
             },
         );
 
-        let result = orchestrator.run(system.clone()).await;
-        let result = match result {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::error!("Error running orchestrator: {}", e);
-                return Err(Status::new(
-                    e.code().into(),
-                    format!("Error running orchestrator: {}", e),
-                ));
-            }
-        };
+        let system = self.clone_system()?;
+        let result = orchestrator.run(system).await.map_err(|e| {
+            tracing::error!("Error running orchestrator: {}", e);
+            Status::new(
+                e.code().into(),
+                format!("Error running orchestrator: {}", e),
+            )
+        })?;
 
-        let mut output = Vec::new();
+        let mut output = Vec::with_capacity(result.records.len());
         for record in result.records {
             let metadata = if request.include_metadata {
                 let mut meta = record.metadata.unwrap_or_default();
@@ -501,6 +446,22 @@ impl WorkerServer {
         // This is an implementation stub
         let response = chroma_proto::QueryMetadataResponse { records: output };
         Ok(Response::new(response))
+    }
+
+    fn clone_dispatcher(&self) -> Result<ComponentHandle<Dispatcher>, Status> {
+        let dispatcher = self
+            .dispatcher
+            .as_ref()
+            .ok_or_else(|| Status::internal("No dispatcher found"))?;
+        Ok(dispatcher.clone())
+    }
+
+    fn clone_system(&self) -> Result<System, Status> {
+        let system = self
+            .system
+            .as_ref()
+            .ok_or_else(|| Status::internal("No system found"))?;
+        Ok(system.clone())
     }
 }
 
@@ -661,6 +622,28 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
     }
 }
 
+fn to_collection_uuid(uuid: &str) -> Result<CollectionUuid, Status> {
+    parse_uuid(uuid, "Invalid Collection UUID").map(CollectionUuid)
+}
+
+fn to_segment_uuid(segment_id: &str) -> Result<Uuid, Status> {
+    parse_uuid(segment_id, "Invalid Segment UUID")
+}
+
+fn parse_uuid(uuid: &str, error_msg: &str) -> Result<Uuid, Status> {
+    let uuid = Uuid::parse_str(uuid)
+        .map_err(|_| Status::invalid_argument(format!("{}: {}", error_msg, uuid)))?;
+
+    Ok(uuid)
+}
+
+fn get_version_context(ctx: &Option<RequestVersionContext>) -> Result<(u32, u64), Status> {
+    let ctx = ctx
+        .as_ref()
+        .ok_or_else(|| Status::invalid_argument("No version context provided"))?;
+    Ok((ctx.collection_version, ctx.log_position))
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(debug_assertions)]
@@ -684,9 +667,15 @@ mod tests {
     #[cfg(debug_assertions)]
     use tempfile::tempdir;
 
-    #[tokio::test]
     #[cfg(debug_assertions)]
-    async fn gracefully_handles_panics() {
+    const COLLECTION_UUID: &str = "00000000-0000-0000-0000-000000000001";
+    #[cfg(debug_assertions)]
+    const SEGMENT_UUID: &str = "00000000-0000-0000-0000-000000000003";
+    #[cfg(debug_assertions)]
+    const INVALID_UUID: &str = "00000000";
+
+    #[cfg(debug_assertions)]
+    fn run_server() -> String {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
         let tmp_dir = tempdir().unwrap();
@@ -695,7 +684,8 @@ mod tests {
         let sparse_index_cache = new_cache_for_test();
         let hnsw_index_cache = new_non_persistent_cache_for_test();
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
-        let port = random_port::PortPicker::new().pick().unwrap();
+        let port = random_port::PortPicker::new().random(true).pick().unwrap();
+
         let mut server = WorkerServer {
             dispatcher: None,
             system: None,
@@ -720,16 +710,20 @@ mod tests {
         let dispatcher = dispatcher::Dispatcher::new(4, 10, 10);
         let dispatcher_handle = system.start_component(dispatcher);
 
-        server.set_system(system.clone());
+        server.set_system(system);
         server.set_dispatcher(dispatcher_handle);
 
         tokio::spawn(async move {
             let _ = crate::server::WorkerServer::run(server).await;
         });
 
-        let mut client = DebugClient::connect(format!("http://localhost:{}", port))
-            .await
-            .unwrap();
+        format!("http://localhost:{}", port)
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn gracefully_handles_panics() {
+        let mut client = DebugClient::connect(run_server()).await.unwrap();
 
         // Test response when handler panics
         let err_response = client.trigger_panic(Request::new(())).await.unwrap_err();
@@ -738,5 +732,200 @@ mod tests {
         // The server should still work, even after a panic was thrown
         let response = client.get_info(Request::new(())).await;
         assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn validate_get_vectors_request() {
+        use chroma_proto::vector_reader_client::VectorReaderClient as Client;
+        use chroma_types::chroma_proto::GetVectorsRequest as Request;
+
+        let mut reader = Client::connect(run_server()).await.unwrap();
+
+        let first_request = Request {
+            ids: vec![],
+            segment_id: SEGMENT_UUID.to_string(),
+            collection_id: COLLECTION_UUID.to_string(),
+            version_context: Some(RequestVersionContext {
+                collection_version: 0,
+                log_position: 0,
+            }),
+        };
+        // segment or collection not found
+        let request = first_request.clone();
+        let response = reader.get_vectors(request).await;
+        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+
+        // invalid collection uuid
+        let mut request = first_request.clone();
+        request.collection_id = INVALID_UUID.into();
+        let response = reader.get_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Collection UUID"));
+
+        // invalid segment uuid
+        let mut request = first_request.clone();
+        request.segment_id = INVALID_UUID.into();
+        let response = reader.get_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Segment UUID"));
+
+        // invalid version context
+        let mut request = first_request.clone();
+        request.version_context = None;
+        let response = reader.get_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("context"));
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn validate_query_vectors_request() {
+        use chroma_proto::vector_reader_client::VectorReaderClient as Client;
+        use chroma_types::chroma_proto::QueryVectorsRequest as Request;
+        use chroma_types::chroma_proto::Vector;
+
+        let mut reader = Client::connect(run_server()).await.unwrap();
+
+        let floats: Vec<f32> = vec![1.0, 2.0];
+
+        let first_request = Request {
+            vectors: vec![Vector {
+                vector: to_byte_slice(&floats).into(),
+                encoding: chroma_proto::ScalarEncoding::Float32 as i32,
+                dimension: 2,
+            }],
+            k: 1,
+            collection_id: COLLECTION_UUID.to_string(),
+            segment_id: SEGMENT_UUID.into(),
+            version_context: Some(RequestVersionContext {
+                collection_version: 0,
+                log_position: 0,
+            }),
+            ..Default::default()
+        };
+        let response = reader.query_vectors(first_request.clone()).await;
+
+        assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+
+        // invalid collection uuid
+        let mut request = first_request.clone();
+        request.collection_id = INVALID_UUID.into();
+        let response = reader.query_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Collection UUID"));
+
+        // invalid segment uuid
+        let mut request = first_request.clone();
+        request.segment_id = INVALID_UUID.into();
+        let response = reader.query_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Segment UUID"));
+
+        // invalid version context
+        let mut request = first_request.clone();
+        request.version_context = None;
+        let response = reader.query_vectors(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("context"));
+
+        // invalid vector
+        let mut request = first_request.clone();
+        request.vectors = vec![Vector {
+            dimension: 1,
+            vector: vec![0],
+            encoding: 0,
+        }];
+
+        let response = reader.query_vectors(request).await;
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        let sub_str = "converting vector";
+        assert!(
+            err.message().contains(sub_str),
+            "message: {}, sub_str: {}",
+            err.message(),
+            sub_str
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(debug_assertions)]
+    async fn validate_query_metadata_request() {
+        use chroma_proto::metadata_reader_client::MetadataReaderClient as Client;
+        use chroma_types::chroma_proto::QueryMetadataRequest as Request;
+
+        let mut reader = Client::connect(run_server()).await.unwrap();
+
+        let first_request = Request {
+            collection_id: COLLECTION_UUID.to_string(),
+            segment_id: SEGMENT_UUID.into(),
+            version_context: Some(RequestVersionContext {
+                collection_version: 0,
+                log_position: 0,
+            }),
+            ..Default::default()
+        };
+
+        // segment or collection
+        let response = reader.query_metadata(first_request.clone()).await;
+        assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+
+        // invalid collection uuid
+        let mut request = first_request.clone();
+        request.collection_id = INVALID_UUID.into();
+        let response = reader.query_metadata(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Collection UUID"));
+
+        // invalid segment uuid
+        let mut request = first_request.clone();
+        request.segment_id = INVALID_UUID.into();
+        let response = reader.query_metadata(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("Segment UUID"));
+
+        // invalid version context
+        let mut request = first_request.clone();
+        request.version_context = None;
+        let response = reader.query_metadata(request).await;
+
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("context"));
+    }
+
+    #[cfg(debug_assertions)]
+    fn to_byte_slice(v: &[f32]) -> &[u8] {
+        let raw_ptr = v.as_ptr() as *const u8;
+        unsafe { std::slice::from_raw_parts(raw_ptr, std::mem::size_of_val(v)) }
     }
 }

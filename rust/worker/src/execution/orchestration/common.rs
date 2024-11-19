@@ -3,7 +3,7 @@ use crate::{
     system::{Component, ComponentContext},
 };
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Collection, CollectionUuid, Segment, SegmentType};
+use chroma_types::{Collection, CollectionUuid, Segment, SegmentType, SegmentUuid};
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 use uuid::Uuid;
@@ -31,7 +31,12 @@ pub(super) async fn get_hnsw_segment_by_id(
     collection_id: &CollectionUuid,
 ) -> Result<Segment, Box<GetHnswSegmentByIdError>> {
     let segments = sysdb
-        .get_segments(Some(*hnsw_segment_id), None, None, *collection_id)
+        .get_segments(
+            Some(SegmentUuid(*hnsw_segment_id)),
+            None,
+            None,
+            *collection_id,
+        )
         .await;
     let segment = match segments {
         Ok(segments) => {

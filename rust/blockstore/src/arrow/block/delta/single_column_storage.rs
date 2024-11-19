@@ -1,12 +1,17 @@
-use super::{single_column_size_tracker::SingleColumnSizeTracker, BlockKeyArrowBuilder};
+use super::{
+    builder_storage::{BTreeBuilderStorage, BuilderStorage, VecBuilderStorage},
+    single_column_size_tracker::SingleColumnSizeTracker,
+    BlockKeyArrowBuilder,
+};
 use crate::{
     arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
+    BlockfileWriterMutationOrdering,
 };
 use arrow::util::bit_util;
 use arrow::{array::Array, datatypes::Schema};
 use parking_lot::RwLock;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use std::{collections::HashMap, vec};
 
 #[derive(Clone)]
@@ -14,12 +19,12 @@ pub struct SingleColumnStorage<T: ArrowWriteableValue> {
     inner: Arc<RwLock<Inner<T>>>,
 }
 
-struct Inner<T: ArrowWriteableValue> {
-    storage: BTreeMap<CompositeKey, T>,
+struct Inner<V: ArrowWriteableValue> {
+    storage: BuilderStorage<V>,
     size_tracker: SingleColumnSizeTracker,
 }
 
-impl<T: ArrowWriteableValue> std::fmt::Debug for Inner<T> {
+impl<V: ArrowWriteableValue> std::fmt::Debug for Inner<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Inner")
             .field("size_tracker", &self.size_tracker)
@@ -27,11 +32,20 @@ impl<T: ArrowWriteableValue> std::fmt::Debug for Inner<T> {
     }
 }
 
-impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumnStorage<T> {
-    pub(in crate::arrow) fn new() -> Self {
+impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumnStorage<V> {
+    pub(in crate::arrow) fn new(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> Self {
+        let storage = match mutation_ordering_hint {
+            BlockfileWriterMutationOrdering::Unordered => {
+                BuilderStorage::BTreeBuilderStorage(BTreeBuilderStorage::default())
+            }
+            BlockfileWriterMutationOrdering::Ordered => {
+                BuilderStorage::VecBuilderStorage(VecBuilderStorage::default())
+            }
+        };
+
         Self {
             inner: Arc::new(RwLock::new(Inner {
-                storage: BTreeMap::new(),
+                storage,
                 size_tracker: SingleColumnSizeTracker::new(),
             })),
         }
@@ -54,7 +68,7 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
 
     pub fn get_min_key(&self) -> Option<CompositeKey> {
         let inner = self.inner.read();
-        inner.storage.keys().next().cloned()
+        inner.storage.min_key().cloned()
     }
 
     pub(super) fn get_size<K: ArrowWriteableKey>(&self) -> usize {
@@ -70,8 +84,8 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
 
-        let value_offset_bytes = T::offset_size(self.len());
-        let value_validity_bytes = T::validity_size(self.len());
+        let value_offset_bytes = V::offset_size(self.len());
+        let value_validity_bytes = V::validity_size(self.len());
 
         prefix_size
             + key_size
@@ -82,7 +96,7 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             + value_validity_bytes
     }
 
-    pub fn add(&self, prefix: &str, key: KeyWrapper, value: T) {
+    pub fn add(&self, prefix: &str, key: KeyWrapper, value: V) {
         let mut inner = self.inner.write();
         let key_len = key.get_size();
 
@@ -91,18 +105,19 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             key,
         };
 
-        if inner.storage.contains_key(&composite_key) {
+        if let Some(old_value) = inner.storage.delete(&composite_key) {
             // subtract the old value size
             // unwrap is safe here because we just checked if the key exists
-            let old_value_size = inner.storage.remove(&composite_key).unwrap().get_size();
+            let old_value_size = old_value.get_size();
             inner.size_tracker.subtract_value_size(old_value_size);
             inner.size_tracker.subtract_key_size(key_len);
             inner.size_tracker.subtract_prefix_size(prefix.len());
             inner.size_tracker.decrement_item_count();
         }
+
         let value_size = value.get_size();
 
-        inner.storage.insert(composite_key, value);
+        inner.storage.add(composite_key, value);
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(value_size);
@@ -113,7 +128,7 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         let mut inner = self.inner.write();
         let maybe_removed_prefix_len = prefix.len();
         let maybe_removed_key_len = key.get_size();
-        let maybe_removed_value = inner.storage.remove(&CompositeKey {
+        let maybe_removed_value = inner.storage.delete(&CompositeKey {
             prefix: prefix.to_string(),
             key,
         });
@@ -131,7 +146,7 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
     pub(super) fn split<K: ArrowWriteableKey>(
         &self,
         split_size: usize,
-    ) -> (CompositeKey, SingleColumnStorage<T>) {
+    ) -> (CompositeKey, SingleColumnStorage<V>) {
         let mut num_items = 0;
         let mut prefix_size = 0;
         let mut key_size = 0;
@@ -157,7 +172,7 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 let value_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
                 // validitiy sizing
-                let value_validity_bytes = T::validity_size(item_count);
+                let value_validity_bytes = V::validity_size(item_count);
 
                 let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
                     + bit_util::round_upto_multiple_of_64(key_size)
@@ -235,16 +250,16 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             )
             .into_inner();
 
-        let mut value_builder = T::get_arrow_builder(inner.size_tracker);
+        let mut value_builder = V::get_arrow_builder(inner.size_tracker.clone());
 
         let storage = inner.storage;
         for (key, value) in storage.into_iter() {
             key_builder.add_key(key);
-            T::append(T::prepare(value), &mut value_builder);
+            V::append(V::prepare(value), &mut value_builder);
         }
 
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-        let (value_field, value_arr) = T::finish(value_builder);
+        let (value_field, value_arr) = V::finish(value_builder, &inner.size_tracker);
         let schema = arrow::datatypes::Schema::new(vec![prefix_field, key_field, value_field]);
 
         if let Some(metadata) = metadata {
@@ -253,5 +268,13 @@ impl<T: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         }
 
         (schema.into(), vec![prefix_arr, key_arr, value_arr])
+    }
+
+    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<V::PreparedValue> {
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        self.inner.read().storage.get(&composite_key)
     }
 }

@@ -259,6 +259,7 @@ class GrpcSysDB(SysDB):
         id: UUID,
         name: str,
         configuration: CollectionConfigurationInternal,
+        segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -275,6 +276,7 @@ class GrpcSysDB(SysDB):
                 get_or_create=get_or_create,
                 tenant=tenant,
                 database=database,
+                segments=[to_proto_segment(segment) for segment in segments],
             )
             response = self._sys_db_stub.CreateCollection(
                 request, timeout=self._request_timeout_seconds
@@ -291,7 +293,10 @@ class GrpcSysDB(SysDB):
 
     @overrides
     def delete_collection(
-        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         try:
             request = DeleteCollectionRequest(
@@ -306,6 +311,8 @@ class GrpcSysDB(SysDB):
             logger.error(
                 f"Failed to delete collection id {id} for database {database} and tenant {tenant} due to error: {e}"
             )
+            e = cast(grpc.Call, e)
+            logger.error(f"Error code: {e.code()}, NotFoundError: {grpc.StatusCode.NOT_FOUND}")
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 raise NotFoundError()
             raise InternalError()
@@ -398,6 +405,7 @@ class GrpcSysDB(SysDB):
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:
+            e = cast(grpc.Call, e)
             logger.error(
                 f"Failed to update collection id {id}, name {name} due to error: {e}"
             )

@@ -11,7 +11,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::record_segment::{
+    ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
+};
 
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
@@ -478,11 +480,20 @@ impl<'me> LogMaterializer<'me> {
                             .get_data_and_offset_id_for_user_id(log_record.record.id.as_str())
                             .await
                         {
-                            Ok((data_record, offset_id)) => {
+                            Ok(Some((data_record, offset_id))) => {
                                 existing_id_to_materialized.insert(
                                     log_record.record.id.as_str(),
                                     MaterializedLogRecord::from((data_record, offset_id)),
                                 );
+                            }
+                            Ok(None) => {
+                                return Err(LogMaterializerError::RecordSegment(Box::new(
+                                    RecordSegmentReaderCreationError::UserRecordNotFound(format!(
+                                        "not found: {}",
+                                        log_record.record.id,
+                                    )),
+                                )
+                                    as _));
                             }
                             Err(e) => {
                                 return Err(LogMaterializerError::RecordSegment(e));
@@ -806,11 +817,10 @@ mod tests {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        CollectionUuid, DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator, Where,
-        WhereComparison,
+        CollectionUuid, DirectDocumentComparison, DirectWhereComparison, PrimitiveOperator,
+        SegmentUuid, Where, WhereComparison,
     };
     use std::{collections::HashMap, str::FromStr};
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_materializer_add_delete_upsert() {
@@ -827,7 +837,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -836,7 +846,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -887,6 +897,12 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
                         }
@@ -1120,7 +1136,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1129,7 +1145,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1180,6 +1196,12 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
                         }
@@ -1405,7 +1427,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1414,7 +1436,7 @@ mod tests {
             file_path: HashMap::new(),
         };
         let mut metadata_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileMetadata,
             scope: chroma_types::SegmentScope::METADATA,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1465,6 +1487,12 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
                         }
@@ -1709,7 +1737,7 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
             collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
@@ -1769,6 +1797,12 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
                         }

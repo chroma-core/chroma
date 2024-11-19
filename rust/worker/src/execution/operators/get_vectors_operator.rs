@@ -111,6 +111,12 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                 record_segment::RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                     return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
                 }
+                record_segment::RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
+                }
+                record_segment::RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                    return Err(GetVectorsOperatorError::RecordSegmentReaderCreation(*e))
+                }
             },
         };
         // Step 1: Materialize the logs.
@@ -151,9 +157,10 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
                 for user_id in remaining_search_user_ids.iter() {
                     let read_data = reader.get_data_and_offset_id_for_user_id(user_id).await;
                     match read_data {
-                        Ok((record, _)) => {
+                        Ok(Some((record, _))) => {
                             output_vectors.insert(record.id.to_string(), record.embedding.to_vec());
                         }
+                        Ok(None) => {}
                         Err(_) => {
                             // If the user id is not found in the record segment, we do not add it to the output
                         }

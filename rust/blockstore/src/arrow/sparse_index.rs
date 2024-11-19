@@ -479,7 +479,6 @@ impl SparseIndexReader {
         }
     }
 
-    #[cfg(test)]
     /// Check if the sparse index is valid by ensuring that the keys are in order
     pub(super) fn is_valid(&self) -> bool {
         let data = &self.data;

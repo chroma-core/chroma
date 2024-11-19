@@ -1,8 +1,4 @@
-use opentelemetry::global;
-use std::hash::Hash;
-use std::sync::Arc;
-use std::time::Duration;
-
+use super::{CacheError, Weighted};
 use chroma_error::ChromaError;
 use clap::Parser;
 use foyer::{
@@ -10,9 +6,11 @@ use foyer::{
     InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
     StorageKey, StorageValue, TracingOptions,
 };
+use opentelemetry::global;
 use serde::{Deserialize, Serialize};
-
-use super::{CacheError, Weighted};
+use std::hash::Hash;
+use std::sync::Arc;
+use std::time::Duration;
 
 const MIB: usize = 1024 * 1024;
 
@@ -90,12 +88,12 @@ pub struct FoyerCacheConfig {
     #[arg(short, long)]
     pub dir: Option<String>,
 
-    /// In-memory cache capacity. (items)
+    /// In-memory cache capacity. (weighted units)
     #[arg(long, default_value_t = 1048576)]
     #[serde(default = "default_capacity")]
     pub capacity: usize,
 
-    /// In-memory cache capacity. (MiB)
+    /// In-memory cache capacity. (weighted units)
     #[arg(long, default_value_t = 1024)]
     #[serde(default = "default_mem")]
     pub mem: usize,
@@ -273,7 +271,7 @@ where
 
         let builder = HybridCacheBuilder::<K, V>::new()
             .with_tracing_options(tracing_options)
-            .memory(config.mem * MIB)
+            .memory(config.mem)
             .with_shards(config.shards);
 
         let builder = match config.eviction.as_str() {
@@ -327,6 +325,10 @@ where
                 e
             ))) as _
         })?;
+        cache.enable_tracing();
+        cache.update_tracing_options(
+            TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)),
+        );
         let meter = global::meter("chroma");
         let get_latency = meter.u64_histogram("get_latency").init();
         let insert_latency = meter.u64_histogram("insert_latency").init();
@@ -404,6 +406,7 @@ where
     ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
+            .with_weighter(|_: &_, v: &V| v.weight())
             .build();
         let meter = global::meter("chroma");
         let insert_latency = meter.u64_histogram("insert_latency").init();
@@ -449,6 +452,7 @@ where
 
         let cache = CacheBuilder::new(config.capacity)
             .with_shards(config.shards)
+            .with_weighter(|_: &_, v: &V| v.weight())
             .with_event_listener(Arc::new(evl))
             .build();
         let get_latency = global::meter("chroma").u64_histogram("get_latency").init();

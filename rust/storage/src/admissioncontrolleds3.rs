@@ -1,12 +1,12 @@
+use crate::StorageConfigError;
 use crate::{
     config::{RateLimitingConfig, StorageConfig},
-    s3::{S3GetError, S3PutError, S3Storage, StorageConfigError},
-    stream::ByteStreamItem,
+    s3::{S3GetError, S3PutError, S3Storage},
 };
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::{future::Shared, stream, FutureExt, Stream, StreamExt};
+use futures::{future::Shared, stream, FutureExt, StreamExt};
 use parking_lot::Mutex;
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use thiserror::Error;
@@ -76,28 +76,6 @@ impl AdmissionControlledS3Storage {
         }
     }
 
-    // TODO: Remove this once the upstream consumers switch to non-streaming APIs.
-    pub async fn get_stream(
-        &self,
-        key: &str,
-    ) -> Result<
-        Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
-        AdmissionControlledS3StorageError,
-    > {
-        match self
-            .storage
-            .get_stream(key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Storage get"))
-            .await
-        {
-            Ok(res) => Ok(res),
-            Err(e) => {
-                tracing::error!("Error reading from storage: {}", e);
-                Err(AdmissionControlledS3StorageError::S3GetError(e))
-            }
-        }
-    }
-
     async fn parallel_fetch(
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
@@ -110,6 +88,12 @@ impl AdmissionControlledS3Storage {
                 return Err(AdmissionControlledS3StorageError::S3GetError(e));
             }
         };
+
+        // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
+        if content_length == 0 {
+            return Ok(Arc::new(Vec::new()));
+        }
+
         let part_size = storage.download_part_size_bytes;
         tracing::info!(
             "[AdmissionControlledS3][Parallel fetch] Content length: {}, key ranges: {:?}",
@@ -455,5 +439,10 @@ mod tests {
         test_multipart_get_for_size(1024 * 1024 * 10).await;
         // Greater than NAC limit i.e. > 2*8 MB = 16 MB.
         test_multipart_get_for_size(1024 * 1024 * 18).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_empty_file() {
+        test_multipart_get_for_size(0).await;
     }
 }

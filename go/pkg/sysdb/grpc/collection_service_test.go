@@ -12,6 +12,8 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
+	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/genproto/googleapis/rpc/code"
@@ -191,6 +193,80 @@ func validateDatabase(suite *CollectionServiceTestSuite, collectionId string, co
 			suite.True(proto.Equal(value, filePaths[segment.Id][key]))
 		}
 	}
+}
+
+func (suite *CollectionServiceTestSuite) TestCreateCollection() {
+	// Create a collection request
+	collectionName := "test_create_collection"
+	collectionID := types.UniqueID(uuid.New())
+	getOrCreate := false
+
+	segments := []*coordinatorpb.Segment{
+		{
+			Id:         types.UniqueID(uuid.New()).String(),
+			Collection: collectionID.String(),
+			Type:       "test_type_a",
+		},
+	}
+	req := &coordinatorpb.CreateCollectionRequest{
+		Id:       collectionID.String(),
+		Name:     collectionName,
+		Database: suite.databaseName,
+		Tenant:   suite.tenantName,
+		Metadata: &coordinatorpb.UpdateMetadata{
+			Metadata: map[string]*coordinatorpb.UpdateMetadataValue{
+				"string_key": {
+					Value: &coordinatorpb.UpdateMetadataValue_StringValue{
+						StringValue: "test_value",
+					},
+				},
+				"int_key": {
+					Value: &coordinatorpb.UpdateMetadataValue_IntValue{
+						IntValue: 42,
+					},
+				},
+				"float_key": {
+					Value: &coordinatorpb.UpdateMetadataValue_FloatValue{
+						FloatValue: 3.14,
+					},
+				},
+			},
+		},
+		GetOrCreate: &getOrCreate,
+		Segments:    segments,
+	}
+
+	// Create the collection
+	resp, err := suite.s.CreateCollection(context.Background(), req)
+	suite.NoError(err)
+	suite.NotNil(resp)
+	suite.Equal(collectionID.String(), resp.Collection.Id)
+	suite.Equal(collectionName, resp.Collection.Name)
+
+	// Verify the collection exists by getting it
+	collectionIDStr := collectionID.String()
+	getReq := &coordinatorpb.GetCollectionsRequest{
+		Id: &collectionIDStr,
+	}
+	getResp, err := suite.s.GetCollections(context.Background(), getReq)
+	suite.NoError(err)
+	suite.Len(getResp.Collections, 1)
+	suite.Equal(collectionID.String(), getResp.Collections[0].Id)
+	suite.Equal(collectionName, getResp.Collections[0].Name)
+
+	// Verify the segments exist
+	getSegmentsResp, err := suite.s.GetSegments(context.Background(), &coordinatorpb.GetSegmentsRequest{
+		Collection: collectionID.String(),
+	})
+	suite.NoError(err)
+	suite.Len(getSegmentsResp.Segments, 1)
+	suite.Equal(segments[0].Id, getSegmentsResp.Segments[0].Id)
+	suite.Equal(segments[0].Collection, getSegmentsResp.Segments[0].Collection)
+	suite.Equal(segments[0].Type, getSegmentsResp.Segments[0].Type)
+
+	// Clean up
+	err = dao.CleanUpTestCollection(suite.db, collectionID.String())
+	suite.NoError(err)
 }
 
 func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() {

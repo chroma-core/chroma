@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::delta::BlockDelta;
+use super::delta::UnorderedBlockDelta;
 
 const ARROW_ALIGNMENT: usize = 64;
 
@@ -101,8 +101,8 @@ impl Block {
     /// Converts the block to a block delta for writing to a new block
     pub fn to_block_delta<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
-        mut delta: BlockDelta,
-    ) -> BlockDelta {
+        mut delta: UnorderedBlockDelta,
+    ) -> UnorderedBlockDelta {
         let prefix_arr = self
             .data
             .column(0)
@@ -114,7 +114,7 @@ impl Block {
             let key = K::get(self.data.column(1), i);
             let value = V::get(self.data.column(2), i);
 
-            K::add_to_delta(prefix, key, value, &mut delta);
+            K::add_to_delta(prefix, key, value, &mut delta.builder);
         }
         delta
     }
@@ -136,7 +136,12 @@ impl Block {
     /// the index where a matching element could be inserted while maintaining
     /// sorted order.
     ///
-    /// Based on std::slice::binary_search_by with minimal modifications (https://doc.rust-lang.org/src/core/slice/mod.rs.html#2770).
+    // The implementation is a binary search based on [`std::slice::binary_search_by`]
+    //
+    // [`std::slice::binary_search_by`]: https://github.com/rust-lang/rust/blob/705cfe0e966399e061d64dd3661bfbc57553ed87/library/core/src/slice/mod.rs#L2731-L2827
+    // Retrieval timestamp: Nov 1, 2024
+    // Source commit hash: a0215d8e46aab41219dea0bb1cbaaf97dafe2f89
+    // Source license: Apache-2.0 or MIT
     #[inline]
     fn binary_search_by<'me, K: ArrowReadableKey<'me>, F>(
         &'me self,
@@ -422,7 +427,7 @@ impl Block {
     pub fn get_at_index<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me self,
         index: usize,
-    ) -> Option<(&str, K, V)> {
+    ) -> Option<(&'me str, K, V)> {
         if index >= self.data.num_rows() {
             return None;
         }
@@ -443,8 +448,7 @@ impl Block {
     */
 
     /// Returns the size of the block in bytes
-    #[allow(dead_code)]
-    pub(crate) fn get_size(&self) -> usize {
+    pub fn get_size(&self) -> usize {
         let mut total_size = 0;
         for column in self.data.columns() {
             let array_data = column.to_data();
@@ -626,7 +630,7 @@ impl Block {
 
 impl chroma_cache::Weighted for Block {
     fn weight(&self) -> usize {
-        1
+        8 // A block is at most 8 MB
     }
 }
 

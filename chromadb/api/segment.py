@@ -4,7 +4,7 @@ from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
-from chromadb.quota import QuotaEnforcer
+from chromadb.quota import QuotaEnforcer, Action
 from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.segment import SegmentManager
 from chromadb.execution.executor.abstract import Executor
@@ -141,6 +141,12 @@ class SegmentAPI(ServerAPI):
         if len(name) < 3:
             raise InvalidArgumentError("Database name must be at least 3 characters long")
 
+        self._quota_enforcer.enforce(
+            action=Action.CREATE_DATABASE,
+            tenant=tenant,
+            name=name,
+        )
+
         self._sysdb.create_database(
             id=uuid4(),
             name=name,
@@ -196,6 +202,13 @@ class SegmentAPI(ServerAPI):
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
 
+        self._quota_enforcer.enforce(
+            action=Action.CREATE_COLLECTION,
+            tenant=tenant,
+            name=name,
+            metadata=metadata,
+        )
+
         id = uuid4()
 
         model = CollectionModel(
@@ -209,11 +222,13 @@ class SegmentAPI(ServerAPI):
             database=database,
             dimension=None,
         )
+
         # TODO: Let sysdb create the collection directly from the model
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
+            segments=[], # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -221,9 +236,8 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
-        # TODO: wrap sysdb call in try except and log error if it fails
         if created:
-            segments = self._manager.create_segments(coll)
+            segments = self._manager.prepare_segments_for_new_collection(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
         else:
@@ -296,6 +310,12 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
+        self._quota_enforcer.enforce(
+            action=Action.LIST_COLLECTIONS,
+            tenant=tenant,
+            limit=limit,
+        )
+
         return self._sysdb.get_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
         )
@@ -335,6 +355,13 @@ class SegmentAPI(ServerAPI):
         # Ensure the collection exists
         _ = self._get_collection(id)
 
+        self._quota_enforcer.enforce(
+            action=Action.UPDATE_COLLECTION,
+            tenant=tenant,
+            name=new_name,
+            metadata=new_metadata,
+        )
+
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
         if new_name and new_metadata:
@@ -361,8 +388,7 @@ class SegmentAPI(ServerAPI):
             self._sysdb.delete_collection(
                 existing[0].id, tenant=tenant, database=database
             )
-            for s in self._manager.delete_segments(existing[0].id):
-                self._sysdb.delete_segment(existing[0].id, s)
+            self._manager.delete_segments(existing[0].id)
         else:
             raise InvalidArgumentError(f"Collection {name} does not exist.")
 
@@ -397,6 +423,17 @@ class SegmentAPI(ServerAPI):
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
+
+        self._quota_enforcer.enforce(
+            action=Action.ADD,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+        )
+
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -441,6 +478,17 @@ class SegmentAPI(ServerAPI):
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
+
+        self._quota_enforcer.enforce(
+            action=Action.UPDATE,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+        )
+
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -487,6 +535,17 @@ class SegmentAPI(ServerAPI):
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
+
+        self._quota_enforcer.enforce(
+            action=Action.UPSERT,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+        )
+
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         return True
@@ -530,6 +589,15 @@ class SegmentAPI(ServerAPI):
 
         if where_document is not None:
             validate_where_document(where_document)
+
+        self._quota_enforcer.enforce(
+            action=Action.GET,
+            tenant=tenant,
+            ids=ids,
+            where=where,
+            where_document=where_document,
+            limit=limit,
+        )
 
         if sort is not None:
             raise NotImplementedError("Sorting is not yet supported")
@@ -610,6 +678,15 @@ class SegmentAPI(ServerAPI):
             )
 
         coll = self._get_collection(collection_id)
+
+        self._quota_enforcer.enforce(
+            action=Action.DELETE,
+            tenant=tenant,
+            ids=ids,
+            where=where,
+            where_document=where_document,
+        )
+
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
         if (where or where_document) or not ids:
@@ -712,6 +789,15 @@ class SegmentAPI(ServerAPI):
         coll = self._get_collection(collection_id)
         for embedding in query_embeddings:
             self._validate_dimension(coll, len(embedding), update=False)
+
+        self._quota_enforcer.enforce(
+            action=Action.QUERY,
+            tenant=tenant,
+            where=where,
+            where_document=where_document,
+            query_embeddings=query_embeddings,
+            n_results=n_results,
+        )
 
         return self._executor.knn(
             KNNPlan(

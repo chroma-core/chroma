@@ -44,6 +44,8 @@ class SysDB(Component):
         """Get a tenant by name. Raises an Error if the Tenant does not exist."""
         pass
 
+    # TODO: Investigate and remove this method, as segment creation is done as
+    # part of collection creation.
     @abstractmethod
     def create_segment(self, segment: Segment) -> None:
         """Create a new segment in the System database. Raises an Error if the ID
@@ -84,6 +86,7 @@ class SysDB(Component):
         id: UUID,
         name: str,
         configuration: CollectionConfigurationInternal,
+        segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -103,7 +106,10 @@ class SysDB(Component):
 
     @abstractmethod
     def delete_collection(
-        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         """Delete a collection, all associated segments and any associate resources (log stream)
         from the SysDB and the system at large."""

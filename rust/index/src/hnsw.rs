@@ -1,16 +1,17 @@
 use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Metadata, MetadataValue, MetadataValueConversionError, Segment};
+use chroma_types::MetadataValueConversionError;
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
+use std::path::Path;
 use std::str::Utf8Error;
 use thiserror::Error;
 use tracing::instrument;
 
-const DEFAULT_MAX_ELEMENTS: usize = 10000;
-const DEFAULT_HNSW_M: usize = 16;
-const DEFAULT_HNSW_EF_CONSTRUCTION: usize = 100;
-const DEFAULT_HNSW_EF_SEARCH: usize = 10;
+pub const DEFAULT_MAX_ELEMENTS: usize = 10000;
+pub const DEFAULT_HNSW_M: usize = 16;
+pub const DEFAULT_HNSW_EF_CONSTRUCTION: usize = 100;
+pub const DEFAULT_HNSW_EF_SEARCH: usize = 10;
 
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]
@@ -50,10 +51,12 @@ impl ChromaError for HnswIndexFromSegmentError {
 }
 
 impl HnswIndexConfig {
-    pub fn from_segment(
-        segment: &Segment,
-        persist_path: &std::path::Path,
-    ) -> Result<HnswIndexConfig, Box<HnswIndexFromSegmentError>> {
+    pub fn new(
+        m: usize,
+        ef_construction: usize,
+        ef_search: usize,
+        persist_path: &Path,
+    ) -> Result<Self, Box<HnswIndexFromSegmentError>> {
         let persist_path = match persist_path.to_str() {
             Some(persist_path) => persist_path,
             None => {
@@ -62,53 +65,11 @@ impl HnswIndexConfig {
                 )))
             }
         };
-        let metadata = match &segment.metadata {
-            Some(metadata) => metadata,
-            None => {
-                // TODO: This should error, but the configuration is not stored correctly
-                // after the configuration is refactored to be always stored and doesn't rely on defaults we can fix this
-                return Ok(HnswIndexConfig {
-                    max_elements: DEFAULT_MAX_ELEMENTS,
-                    m: DEFAULT_HNSW_M,
-                    ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
-                    ef_search: DEFAULT_HNSW_EF_SEARCH,
-                    random_seed: 0,
-                    persist_path: persist_path.to_string(),
-                });
-            }
-        };
-
-        fn get_metadata_value_as<'a, T>(
-            metadata: &'a Metadata,
-            key: &str,
-        ) -> Result<T, Box<HnswIndexFromSegmentError>>
-        where
-            T: TryFrom<&'a MetadataValue, Error = MetadataValueConversionError>,
-        {
-            let res = match metadata.get(key) {
-                Some(value) => T::try_from(value),
-                None => {
-                    return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
-                        key.to_string(),
-                    )))
-                }
-            };
-            match res {
-                Ok(value) => Ok(value),
-                Err(e) => Err(Box::new(HnswIndexFromSegmentError::MetadataValueError(e))),
-            }
-        }
-
-        let m = get_metadata_value_as::<i64>(metadata, "hnsw:M").unwrap_or(DEFAULT_HNSW_M as i64);
-        let ef_construction = get_metadata_value_as::<i64>(metadata, "hnsw:construction_ef")
-            .unwrap_or(DEFAULT_HNSW_EF_CONSTRUCTION as i64);
-        let ef_search = get_metadata_value_as::<i64>(metadata, "hnsw:search_ef")
-            .unwrap_or(DEFAULT_HNSW_EF_SEARCH as i64);
         Ok(HnswIndexConfig {
             max_elements: DEFAULT_MAX_ELEMENTS,
-            m: m as usize,
-            ef_construction: ef_construction as usize,
-            ef_search: ef_search as usize,
+            m,
+            ef_construction,
+            ef_search,
             random_seed: 0,
             persist_path: persist_path.to_string(),
         })
@@ -428,11 +389,9 @@ pub mod test {
     use super::*;
     use crate::utils;
     use chroma_distance::DistanceFunction;
-    use chroma_types::CollectionUuid;
     use rand::seq::IteratorRandom;
     use rayon::prelude::*;
     use rayon::ThreadPoolBuilder;
-    use std::collections::HashMap;
     use tempfile::tempdir;
     use uuid::Uuid;
 
@@ -823,52 +782,6 @@ pub mod test {
             let data = &data[i * d..(i + 1) * d];
             index.add(ids[i], data).expect("Should not error");
         });
-    }
-
-    #[test]
-    fn parameter_defaults() {
-        let segment = Segment {
-            id: Uuid::new_v4(),
-            r#type: chroma_types::SegmentType::HnswDistributed,
-            scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(HashMap::new()),
-            collection: CollectionUuid(Uuid::new_v4()),
-            file_path: HashMap::new(),
-        };
-
-        let persist_path = tempdir().unwrap().path().to_owned();
-        let config = HnswIndexConfig::from_segment(&segment, &persist_path)
-            .expect("Failed to create config from segment");
-
-        assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
-        assert_eq!(config.m, DEFAULT_HNSW_M);
-        assert_eq!(config.ef_construction, DEFAULT_HNSW_EF_CONSTRUCTION);
-        assert_eq!(config.ef_search, DEFAULT_HNSW_EF_SEARCH);
-        assert_eq!(config.random_seed, 0);
-        assert_eq!(config.persist_path, persist_path.to_str().unwrap());
-
-        // Try partial metadata
-        let mut metadata = HashMap::new();
-        metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10_i64));
-
-        let segment = Segment {
-            id: Uuid::new_v4(),
-            r#type: chroma_types::SegmentType::HnswDistributed,
-            scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(metadata),
-            collection: CollectionUuid(Uuid::new_v4()),
-            file_path: HashMap::new(),
-        };
-
-        let config = HnswIndexConfig::from_segment(&segment, &persist_path)
-            .expect("Failed to create config from segment");
-
-        assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
-        assert_eq!(config.m, 10);
-        assert_eq!(config.ef_construction, DEFAULT_HNSW_EF_CONSTRUCTION);
-        assert_eq!(config.ef_search, DEFAULT_HNSW_EF_SEARCH);
-        assert_eq!(config.random_seed, 0);
-        assert_eq!(config.persist_path, persist_path.to_str().unwrap());
     }
 
     #[test]

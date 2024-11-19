@@ -58,11 +58,11 @@ class DistributedSegmentManager(SegmentManager):
         self._lock = Lock()
 
     @trace_method(
-        "DistributedSegmentManager.create_segments",
+        "DistributedSegmentManager.prepare_segments_for_new_collection",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
     @override
-    def create_segments(self, collection: Collection) -> Sequence[Segment]:
+    def prepare_segments_for_new_collection(self, collection: Collection) -> Sequence[Segment]:
         vector_segment = _segment(
             SegmentType.HNSW_DISTRIBUTED, SegmentScope.VECTOR, collection
         )

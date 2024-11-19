@@ -2,11 +2,12 @@ use crate::{
     arrow::{
         block::delta::{
             data_record::DataRecordStorage, data_record_size_tracker::DataRecordSizeTracker,
-            BlockDelta, BlockStorage,
+            BlockStorage, UnorderedBlockDelta,
         },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
+    BlockfileWriterMutationOrdering,
 };
 use arrow::{
     array::{
@@ -30,11 +31,13 @@ pub struct ValueBuilderWrapper {
     document_builder: StringBuilder,
 }
 
+pub type DataRecordStorageEntry = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+
 impl ArrowWriteableValue for &DataRecord<'_> {
     type ReadableValue<'referred_data> = DataRecord<'referred_data>;
     type ArrowBuilder = ValueBuilderWrapper;
     type SizeTracker = DataRecordSizeTracker;
-    type PreparedValue = (String, Vec<f32>, Option<Vec<u8>>, Option<String>);
+    type PreparedValue = DataRecordStorageEntry;
 
     fn offset_size(item_count: usize) -> usize {
         let id_offset = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
@@ -50,21 +53,21 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         validity_bytes * 2
     }
 
-    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockDelta) {
-        match &delta.builder {
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
+        match &delta {
             BlockStorage::DataRecord(builder) => builder.add(prefix, key, value),
             _ => panic!("Invalid builder type"),
         }
     }
 
-    fn delete(prefix: &str, key: KeyWrapper, delta: &BlockDelta) {
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
         match &delta.builder {
             BlockStorage::DataRecord(builder) => builder.delete(prefix, key),
             _ => panic!("Invalid builder type"),
         }
     }
 
-    fn get_delta_builder() -> BlockStorage {
+    fn get_delta_builder(_: BlockfileWriterMutationOrdering) -> BlockStorage {
         BlockStorage::DataRecord(DataRecordStorage::new())
     }
 
@@ -125,7 +128,7 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         builder.document_builder.append_option(document);
     }
 
-    fn finish(mut builder: Self::ArrowBuilder) -> (Field, Arc<dyn Array>) {
+    fn finish(mut builder: Self::ArrowBuilder, _: &Self::SizeTracker) -> (Field, Arc<dyn Array>) {
         let id_field = Field::new("id", arrow::datatypes::DataType::Utf8, true);
         let embedding_field = Field::new(
             "embedding",
@@ -176,6 +179,17 @@ impl ArrowWriteableValue for &DataRecord<'_> {
         let value_arr = (&struct_arr as &dyn Array).slice(0, struct_arr.len());
 
         (struct_field, value_arr)
+    }
+
+    fn get_owned_value_from_delta(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &UnorderedBlockDelta,
+    ) -> Option<Self::PreparedValue> {
+        match &delta.builder {
+            BlockStorage::DataRecord(builder) => builder.get_owned_value(prefix, key),
+            _ => panic!("Invalid builder type"),
+        }
     }
 }
 
@@ -246,8 +260,8 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for DataRecord<'referred
         prefix: &str,
         key: K,
         value: Self,
-        delta: &mut BlockDelta,
+        storage: &mut BlockStorage,
     ) {
-        delta.add(prefix, key, &value);
+        <&DataRecord>::add(prefix, key.into(), &value, storage);
     }
 }

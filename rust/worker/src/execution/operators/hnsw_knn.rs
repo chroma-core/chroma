@@ -81,7 +81,10 @@ impl HnswKnnOperator {
                     .get_offset_id_for_user_id(log.merged_user_id_ref())
                     .await;
                 match offset_id {
-                    Ok(offset_id) => disallowed_ids.push(offset_id),
+                    Ok(Some(offset_id)) => disallowed_ids.push(offset_id),
+                    Ok(None) => {
+                        return Err(Box::new(HnswKnnOperatorError::RecordSegmentReadError));
+                    }
                     Err(e) => {
                         return Err(e);
                     }
@@ -180,7 +183,10 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
                 .get_offset_id_for_user_id(user_id)
                 .await;
             match offset_id {
-                Ok(offset_id) => allowed_offset_ids.push(offset_id),
+                Ok(Some(offset_id)) => allowed_offset_ids.push(offset_id),
+                Ok(None) => {
+                    return Err(Box::new(HnswKnnOperatorError::RecordSegmentReadError));
+                }
                 Err(e) => {
                     tracing::error!(
                         "[HnswKnnOperation]: Record segment read error for allowed ids {:?}",

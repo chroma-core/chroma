@@ -1,15 +1,17 @@
-use crate::fulltext::tokenizer::ChromaTokenizer;
+use super::util::TokenInstance;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::StreamExt;
+use itertools::Itertools;
+use parking_lot::Mutex;
 use roaring::RoaringBitmap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
-use tantivy::tokenizer::Token;
+use tantivy::tokenizer::NgramTokenizer;
+use tantivy::tokenizer::TokenStream;
+use tantivy::tokenizer::Tokenizer;
 use thiserror::Error;
 use uuid::Uuid;
-
-use super::tokenizer::ChromaTokenStream;
 
 #[derive(Error, Debug)]
 pub enum FullTextIndexError {
@@ -27,318 +29,201 @@ impl ChromaError for FullTextIndexError {
     }
 }
 
-#[derive(Debug)]
-pub struct UncommittedPostings {
-    // token -> {doc -> [start positions]}
-    positional_postings: HashMap<String, HashMap<u32, Vec<u32>>>,
-    // (token, doc) pairs that should be deleted from storage.
-    deleted_token_doc_pairs: HashSet<(String, i32)>,
-}
-
-impl Default for UncommittedPostings {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl UncommittedPostings {
-    pub fn new() -> Self {
-        Self {
-            positional_postings: HashMap::new(),
-            deleted_token_doc_pairs: HashSet::new(),
-        }
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum DocumentMutation<'text> {
+    Create {
+        offset_id: u32,
+        new_document: &'text str,
+    },
+    Update {
+        offset_id: u32,
+        old_document: &'text str,
+        new_document: &'text str,
+    },
+    Delete {
+        offset_id: u32,
+        old_document: &'text str,
+    },
 }
 
 #[derive(Clone)]
-pub struct FullTextIndexWriter<'me> {
-    full_text_index_reader: Option<FullTextIndexReader<'me>>,
+pub struct FullTextIndexWriter {
+    tokenizer: NgramTokenizer,
+    /// Deletes for a given trigram/offset ID pair are represented by a `None` position on the token instance.
+    token_instances: Arc<Mutex<Vec<Vec<TokenInstance>>>>,
     posting_lists_blockfile_writer: BlockfileWriter,
-    frequencies_blockfile_writer: BlockfileWriter,
-    tokenizer: Arc<Box<dyn ChromaTokenizer>>,
-
-    // TODO(Sanket): Move off this tokio::sync::mutex and use
-    // a lightweight lock instead. This is needed currently to
-    // keep holding the lock across an await point.
-    // term -> positional posting list builder for that term
-    uncommitted_postings: Arc<tokio::sync::Mutex<UncommittedPostings>>,
-    // TODO(Sanket): Move off this tokio::sync::mutex and use
-    // a lightweight lock instead. This is needed currently to
-    // keep holding the lock across an await point.
-    // Value of this map is a tuple (old freq and new freq)
-    // because we also need to keep the old frequency
-    // around. The reason is (token, freq) is the key in the blockfile hence
-    // when freq changes, we need to delete the old (token, freq) key.
-    uncommitted_frequencies: Arc<tokio::sync::Mutex<HashMap<String, (i32, i32)>>>,
 }
 
-impl<'me> FullTextIndexWriter<'me> {
-    pub fn new(
-        full_text_index_reader: Option<FullTextIndexReader<'me>>,
-        posting_lists_blockfile_writer: BlockfileWriter,
-        frequencies_blockfile_writer: BlockfileWriter,
-        tokenizer: Box<dyn ChromaTokenizer>,
-    ) -> Self {
+impl FullTextIndexWriter {
+    pub fn new(posting_lists_blockfile_writer: BlockfileWriter, tokenizer: NgramTokenizer) -> Self {
         FullTextIndexWriter {
-            full_text_index_reader,
+            tokenizer,
             posting_lists_blockfile_writer,
-            frequencies_blockfile_writer,
-            tokenizer: Arc::new(tokenizer),
-            uncommitted_postings: Arc::new(tokio::sync::Mutex::new(UncommittedPostings::new())),
-            uncommitted_frequencies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            token_instances: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    async fn populate_frequencies_and_posting_lists_from_previous_version(
+    /// Processes a batch of mutations to the full-text index
+    /// This assumes that there will never be mutations with the same offset ID across all calls to `handle_batch()` for the lifetime of a `FullTextIndexWriter` struct.
+    ///
+    /// Recommended usage is running this in several threads at once, each over a chunk of mutations.
+    ///
+    /// Note that this is a blocking method and may take on the order of hundreds of milliseconds to complete (depending on the batch size) so be careful when calling this from an async context.
+    pub fn handle_batch<'documents, M: IntoIterator<Item = DocumentMutation<'documents>>>(
         &self,
-        tokens: &[Token],
+        mutations: M,
     ) -> Result<(), FullTextIndexError> {
-        // (Scoped to limit the lifetime of the lock)
-        {
-            let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-            for token in tokens {
-                if uncommitted_frequencies.contains_key(&token.text) {
-                    continue;
+        let mut token_instances = vec![];
+
+        for mutation in mutations {
+            match mutation {
+                DocumentMutation::Create {
+                    offset_id,
+                    new_document,
+                } => {
+                    self.tokenizer
+                        .clone()
+                        .token_stream(new_document)
+                        .process(&mut |token| {
+                            token_instances.push(TokenInstance::encode(
+                                token.text.as_str(),
+                                offset_id,
+                                Some(token.offset_from as u32),
+                            ));
+                        });
                 }
 
-                let frequency = match &self.full_text_index_reader {
-                    // Readers are uninitialized until the first compaction finishes
-                    // so there is a case when this is none hence not an error.
-                    None => 0,
-                    Some(reader) => {
-                        (reader.get_frequencies_for_token(token.text.as_str()).await).unwrap_or(0)
-                    }
-                };
-                uncommitted_frequencies
-                    .insert(token.text.clone(), (frequency as i32, frequency as i32));
-            }
-        }
+                DocumentMutation::Update {
+                    offset_id,
+                    old_document,
+                    new_document,
+                } => {
+                    // Remove old version
+                    let mut trigrams_to_delete = HashSet::new(); // (need to filter out duplicates, each trigram may appear multiple times in a document)
+                    self.tokenizer
+                        .clone()
+                        .token_stream(old_document)
+                        .process(&mut |token| {
+                            trigrams_to_delete.insert(TokenInstance::encode(
+                                token.text.as_str(),
+                                offset_id,
+                                None,
+                            ));
+                        });
 
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-        for token in tokens {
-            if uncommitted_postings
-                .positional_postings
-                .contains_key(&token.text)
-            {
-                continue;
-            }
+                    // Add doc
+                    self.tokenizer
+                        .clone()
+                        .token_stream(new_document)
+                        .process(&mut |token| {
+                            trigrams_to_delete.remove(&TokenInstance::encode(
+                                token.text.as_str(),
+                                offset_id,
+                                None,
+                            ));
 
-            let results = match &self.full_text_index_reader {
-                // Readers are uninitialized until the first compaction finishes
-                // so there is a case when this is none hence not an error.
-                None => vec![],
-                Some(reader) => reader
-                    .get_all_results_for_token(&token.text)
-                    .await
-                    .unwrap_or_default(),
-            };
-            let mut doc_and_positions = HashMap::new();
-            for result in results {
-                doc_and_positions.insert(result.0, result.1);
-            }
-            uncommitted_postings
-                .positional_postings
-                .insert(token.text.clone(), doc_and_positions);
-        }
-        Ok(())
-    }
+                            token_instances.push(TokenInstance::encode(
+                                token.text.as_str(),
+                                offset_id,
+                                Some(token.offset_from as u32),
+                            ));
+                        });
 
-    pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
-        self.tokenizer.encode(document)
-    }
-
-    pub async fn add_document(
-        &self,
-        document: &str,
-        offset_id: u32,
-    ) -> Result<(), FullTextIndexError> {
-        let tokens = self.encode_tokens(document);
-        let tokens = tokens.get_tokens();
-        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
-            .await?;
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-
-        for token in tokens {
-            // The entry should always exist because self.populate_frequencies_and_posting_lists_from_previous_version
-            // will have created it if this token is new to the system.
-            uncommitted_frequencies
-                .entry(token.text.clone())
-                .and_modify(|e| e.0 += 1);
-
-            // For a new token, the uncommitted list will not contain any entry so insert
-            // an empty builder in that case.
-            let builder = uncommitted_postings
-                .positional_postings
-                .entry(token.text.to_string())
-                .or_insert(HashMap::new());
-
-            // Store starting positions of tokens. These are NOT affected by token filters.
-            // For search, we can use the start and end positions to compute offsets to
-            // check full string match.
-            //
-            // See https://docs.rs/tantivy/latest/tantivy/tokenizer/struct.Token.html
-            if let std::collections::hash_map::Entry::Vacant(e) = builder.entry(offset_id) {
-                // Casting to i32 is safe since we limit the size of the document.
-                e.insert(vec![token.offset_from as u32]);
-            } else {
-                // unwrap() is safe since we already verified that the key exists.
-                builder
-                    .get_mut(&offset_id)
-                    .unwrap()
-                    .push(token.offset_from as u32);
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn delete_document(
-        &self,
-        document: &str,
-        offset_id: u32,
-    ) -> Result<(), FullTextIndexError> {
-        let tokens = self.encode_tokens(document);
-        let tokens = tokens.get_tokens();
-
-        self.populate_frequencies_and_posting_lists_from_previous_version(tokens)
-            .await?;
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-
-        for token in tokens {
-            match uncommitted_frequencies.get_mut(token.text.as_str()) {
-                Some(frequency) => {
-                    frequency.0 -= 1;
+                    token_instances.extend(trigrams_to_delete.into_iter());
                 }
-                None => {
-                    // Invariant violation -- we just populated this.
-                    tracing::error!("Error decrementing frequency for token: {:?}", token.text);
-                    return Err(FullTextIndexError::InvariantViolation);
+
+                DocumentMutation::Delete {
+                    offset_id,
+                    old_document,
+                } => {
+                    let mut trigrams_to_delete = HashSet::new(); // (need to filter out duplicates, each trigram may appear multiple times in a document)
+
+                    // Delete doc
+                    self.tokenizer
+                        .clone()
+                        .token_stream(old_document)
+                        .process(&mut |token| {
+                            trigrams_to_delete.insert(TokenInstance::encode(
+                                token.text.as_str(),
+                                offset_id,
+                                None,
+                            ));
+                        });
+
+                    token_instances.extend(trigrams_to_delete.into_iter());
                 }
             }
-            if let Some(builder) = uncommitted_postings
-                .positional_postings
-                .get_mut(token.text.as_str())
-            {
-                builder.remove(&offset_id);
-                if builder.is_empty() {
-                    uncommitted_postings
-                        .positional_postings
-                        .remove(token.text.as_str());
-                }
-                // Track all the deleted (token, doc) pairs. This is needed
-                // to remove the old postings list for this pair from storage.
-                uncommitted_postings
-                    .deleted_token_doc_pairs
-                    .insert((token.text.clone(), offset_id as i32));
-            }
         }
-        Ok(())
-    }
 
-    pub async fn update_document(
-        &self,
-        old_document: &str,
-        new_document: &str,
-        offset_id: u32,
-    ) -> Result<(), FullTextIndexError> {
-        self.delete_document(old_document, offset_id).await?;
-        self.add_document(new_document, offset_id).await?;
+        token_instances.sort_unstable();
+        self.token_instances.lock().push(token_instances);
+
         Ok(())
     }
 
     pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
-        let mut uncommitted_postings = self.uncommitted_postings.lock().await;
-        // Delete (token, doc) pairs from blockfile first. Note that the ordering is
-        // important here i.e. we need to delete before inserting the new postings
-        // list otherwise we could incorrectly delete posting lists that shouldn't be deleted.
-        for (token, offset_id) in uncommitted_postings.deleted_token_doc_pairs.drain() {
-            match self
-                .posting_lists_blockfile_writer
-                .delete::<u32, Vec<u32>>(token.as_str(), offset_id as u32)
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(FullTextIndexError::BlockfileWriteError(e));
+        let mut last_key = TokenInstance::MAX;
+        let mut posting_list: Vec<u32> = vec![];
+
+        let token_instances = std::mem::take(&mut *self.token_instances.lock());
+
+        for encoded_instance in token_instances.into_iter().kmerge() {
+            match encoded_instance.get_position() {
+                Some(offset) => {
+                    let this_key = encoded_instance.omit_position();
+                    if last_key != this_key {
+                        if last_key != TokenInstance::MAX {
+                            let token = last_key.get_token();
+                            let document_id = last_key.get_offset_id();
+                            self.posting_lists_blockfile_writer
+                                .set(&token, document_id, posting_list.clone())
+                                .await
+                                .unwrap();
+                            posting_list.clear();
+                        }
+                        last_key = this_key;
+                    }
+
+                    posting_list.push(offset);
+                }
+                None => {
+                    // Trigram & offset ID pair is a delete
+                    self.posting_lists_blockfile_writer
+                        .delete::<u32, Vec<u32>>(
+                            &encoded_instance.get_token(),
+                            encoded_instance.get_offset_id(),
+                        )
+                        .await
+                        .unwrap();
                 }
             }
         }
 
-        for (key, mut value) in uncommitted_postings.positional_postings.drain() {
-            for (doc_id, positions) in value.drain() {
-                // Don't add if postings list is empty for this (token, doc) combo.
-                // This can happen with deletes.
-                if !positions.is_empty() {
-                    match self
-                        .posting_lists_blockfile_writer
-                        .set(key.as_str(), doc_id, positions)
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return Err(FullTextIndexError::BlockfileWriteError(e));
-                        }
-                    }
-                }
-            }
+        if last_key != TokenInstance::MAX {
+            let token = last_key.get_token();
+            let document_id = last_key.get_offset_id();
+            self.posting_lists_blockfile_writer
+                .set(&token, document_id, posting_list.clone())
+                .await
+                .unwrap();
         }
-        let mut uncommitted_frequencies = self.uncommitted_frequencies.lock().await;
-        for (key, value) in uncommitted_frequencies.drain() {
-            // Delete only if the token existed previously.
-            if value.1 > 0 {
-                // Delete the old frequency.
-                match self
-                    .frequencies_blockfile_writer
-                    .delete::<u32, u32>(key.as_str(), value.1 as u32)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(FullTextIndexError::BlockfileWriteError(e));
-                    }
-                }
-            }
-            // Insert the new frequency.
-            // Add only if the frequency is not zero. This can happen in case of document
-            // deletes.
-            // TODO we just have token -> frequency here. Should frequency be the key or should we use an empty key and make it the value?
-            if value.0 > 0 {
-                match self
-                    .frequencies_blockfile_writer
-                    .set(key.as_str(), value.0 as u32, 0)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(FullTextIndexError::BlockfileWriteError(e));
-                    }
-                }
-            }
-        }
+
         Ok(())
     }
 
     pub async fn commit(self) -> Result<FullTextIndexFlusher, FullTextIndexError> {
-        // TODO should we be `await?`ing these? Or can we just return the futures?
         let posting_lists_blockfile_flusher = self
             .posting_lists_blockfile_writer
             .commit::<u32, Vec<u32>>()
             .await?;
-        let frequencies_blockfile_flusher = self
-            .frequencies_blockfile_writer
-            .commit::<u32, String>()
-            .await?;
         Ok(FullTextIndexFlusher {
             posting_lists_blockfile_flusher,
-            frequencies_blockfile_flusher,
         })
     }
 }
 
 pub struct FullTextIndexFlusher {
     posting_lists_blockfile_flusher: BlockfileFlusher,
-    frequencies_blockfile_flusher: BlockfileFlusher,
 }
 
 impl FullTextIndexFlusher {
@@ -353,55 +238,40 @@ impl FullTextIndexFlusher {
                 return Err(FullTextIndexError::BlockfileWriteError(e));
             }
         };
-        match self
-            .frequencies_blockfile_flusher
-            .flush::<u32, String>()
-            .await
-        {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(FullTextIndexError::BlockfileWriteError(e));
-            }
-        };
+
         Ok(())
     }
 
     pub fn pls_id(&self) -> Uuid {
         self.posting_lists_blockfile_flusher.id()
     }
-
-    pub fn freqs_id(&self) -> Uuid {
-        self.frequencies_blockfile_flusher.id()
-    }
 }
 
 #[derive(Clone)]
 pub struct FullTextIndexReader<'me> {
     posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [u32]>,
-    frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
-    tokenizer: Arc<Box<dyn ChromaTokenizer>>,
+    tokenizer: NgramTokenizer,
 }
 
 impl<'me> FullTextIndexReader<'me> {
     pub fn new(
         posting_lists_blockfile_reader: BlockfileReader<'me, u32, &'me [u32]>,
-        frequencies_blockfile_reader: BlockfileReader<'me, u32, u32>,
-        tokenizer: Box<dyn ChromaTokenizer>,
+        tokenizer: NgramTokenizer,
     ) -> Self {
         FullTextIndexReader {
             posting_lists_blockfile_reader,
-            frequencies_blockfile_reader,
-            tokenizer: Arc::new(tokenizer),
+            tokenizer,
         }
     }
 
-    pub fn encode_tokens(&self, document: &str) -> Box<dyn ChromaTokenStream> {
-        self.tokenizer.encode(document)
-    }
-
     pub async fn search(&self, query: &str) -> Result<RoaringBitmap, FullTextIndexError> {
-        let binding = self.encode_tokens(query);
-        let tokens = binding.get_tokens();
+        let mut tokens = vec![];
+        self.tokenizer
+            .clone()
+            .token_stream(query)
+            .process(&mut |token| {
+                tokens.push(token.clone());
+            });
 
         if tokens.is_empty() {
             return Ok(RoaringBitmap::new());
@@ -409,7 +279,7 @@ impl<'me> FullTextIndexReader<'me> {
 
         // Retrieve posting lists for each token.
         let posting_lists = futures::stream::iter(tokens)
-            .then(|token| async {
+            .then(|token| async move {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
                     .get_range(token.text.as_str()..=token.text.as_str(), ..)
@@ -505,9 +375,7 @@ impl<'me> FullTextIndexReader<'me> {
         Ok(results)
     }
 
-    // We use this to implement deletes in the Writer. A delete() is implemented
-    // by copying all the data from the old blockfile to a new one but skipping
-    // the deleted offset id.
+    #[cfg(test)]
     async fn get_all_results_for_token(
         &self,
         token: &str,
@@ -522,99 +390,78 @@ impl<'me> FullTextIndexReader<'me> {
         }
         Ok(results)
     }
-
-    // Also used to implement deletes in the Writer. When we delete a document,
-    // we have to decrement the frequencies of all its tokens.
-    async fn get_frequencies_for_token(&self, token: &str) -> Result<u32, FullTextIndexError> {
-        let res = self
-            .frequencies_blockfile_reader
-            .get_range(token..=token, ..)
-            .await?;
-        if res.is_empty() {
-            return Ok(0);
-        }
-        if res.len() > 1 {
-            panic!("Invariant violation. Multiple frequency values found for a token.");
-        }
-        Ok(res[0].0)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fulltext::tokenizer::TantivyChromaTokenizer;
-    use chroma_blockstore::provider::BlockfileProvider;
+    use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
+    use chroma_cache::new_cache_for_test;
+    use chroma_storage::{local::LocalStorage, Storage};
     use tantivy::tokenizer::NgramTokenizer;
+    use tempfile::tempdir;
 
     #[tokio::test]
     async fn test_new_writer() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let _index =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let _index = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
     }
 
     #[tokio::test]
     async fn test_new_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_id = freq_blockfile_writer.id();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let _ = FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let _ = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
     }
 
     #[tokio::test]
     async fn test_index_and_search_single_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).await.unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello world",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1]));
@@ -629,31 +476,30 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_query() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("helo", 1).await.unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "helo",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert!(res.is_empty());
@@ -662,32 +508,36 @@ mod tests {
     #[tokio::test]
     async fn test_query_of_repeating_character() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("aaa", 1).await.unwrap();
-        index_writer.add_document("aaaaa", 2).await.unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "aaa",
+            }])
+            .unwrap();
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 2,
+                new_document: "aaaaa",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("aaaa").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([2]));
@@ -696,31 +546,30 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello", 1).await.unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("helo").await.unwrap();
         assert!(res.is_empty());
@@ -729,31 +578,30 @@ mod tests {
     #[tokio::test]
     async fn test_search_absent_token() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).await.unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello world",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("chroma").await;
         assert!(res.is_err());
@@ -762,35 +610,36 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_candidates_within_document() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
-
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer
-            .add_document("hello world hello", 1)
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        index_writer.add_document("    hello ", 2).await.unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello world hello",
+            }])
+            .unwrap();
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 2,
+                new_document: "    hello ",
+            }])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2]));
@@ -802,32 +651,36 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_simple_documents() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+            ])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2]));
@@ -839,34 +692,44 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_complex_documents() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
-        index_writer.add_document("world hello", 4).await.unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 4,
+                    new_document: "world hello",
+                },
+            ])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2, 4]));
@@ -884,38 +747,48 @@ mod tests {
     #[tokio::test]
     async fn test_index_multiple_character_repeating() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
-
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("aaa", 1).await.unwrap();
-        index_writer.add_document("aaaa", 2).await.unwrap();
-        index_writer.add_document("bbb", 3).await.unwrap();
-        index_writer.add_document("aaabbb", 4).await.unwrap();
-        index_writer
-            .add_document("aabbbbaaaaabbb", 5)
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "aaa",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "aaaa",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "bbb",
+                },
+                DocumentMutation::Create {
+                    offset_id: 4,
+                    new_document: "aaabbb",
+                },
+                DocumentMutation::Create {
+                    offset_id: 5,
+                    new_document: "aabbbbaaaaabbb",
+                },
+            ])
             .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("aaa").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2, 4, 5]));
@@ -930,36 +803,40 @@ mod tests {
     #[tokio::test]
     async fn test_index_special_characters() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
-
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-        index_writer.add_document("!!!!!", 1).await.unwrap();
-        index_writer
-            .add_document("hello world!!!", 2)
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
             .unwrap();
-        index_writer.add_document(".!.!.!", 3).await.unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "!!!!!",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello world!!!",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: ".!.!.!",
+                },
+            ])
+            .unwrap();
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("!!!!!").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1]));
@@ -972,80 +849,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_frequencies_for_token() {
-        let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
-
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
-
-        index_writer.write_to_blockfiles().await.unwrap();
-        let flusher = index_writer.commit().await.unwrap();
-        flusher.flush().await.unwrap();
-
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
-        let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
-
-        let res = index_reader.get_frequencies_for_token("h").await.unwrap();
-        assert_eq!(res, 2);
-
-        let res = index_reader.get_frequencies_for_token("e").await.unwrap();
-        assert_eq!(res, 2);
-
-        let res = index_reader.get_frequencies_for_token("l").await.unwrap();
-        assert_eq!(res, 6);
-    }
-
-    #[tokio::test]
     async fn test_get_all_results_for_token() {
         let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
 
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+            ])
+            .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
         let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+            .read::<u32, &[u32]>(&pl_blockfile_id)
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.get_all_results_for_token("h").await.unwrap();
         assert_eq!(res.len(), 2);
@@ -1059,40 +900,66 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_document() {
-        let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
-        let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
-
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
-
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
-        index_writer
-            .update_document("world", "hello", 3)
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
             .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
+
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+            ])
             .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
-        let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+        // Update document 3
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().fork(pl_blockfile_id))
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Update {
+                offset_id: 3,
+                old_document: "world",
+                new_document: "hello",
+            }])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        let pl_blockfile_reader = provider
+            .read::<u32, &[u32]>(&pl_blockfile_id)
+            .await
+            .unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("hello").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1, 2, 3]));
@@ -1103,37 +970,65 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_document() {
-        let provider = BlockfileProvider::new_memory();
-        let pl_blockfile_writer = provider.create::<u32, Vec<u32>>().await.unwrap();
-        let freq_blockfile_writer = provider.create::<u32, String>().await.unwrap();
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
-        let freq_blockfile_id = freq_blockfile_writer.id();
 
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let mut index_writer =
-            FullTextIndexWriter::new(None, pl_blockfile_writer, freq_blockfile_writer, tokenizer);
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
 
-        index_writer.add_document("hello world", 1).await.unwrap();
-        index_writer.add_document("hello", 2).await.unwrap();
-        index_writer.add_document("world", 3).await.unwrap();
-        index_writer.delete_document("world", 3).await.unwrap();
+        index_writer
+            .handle_batch([
+                DocumentMutation::Create {
+                    offset_id: 1,
+                    new_document: "hello world",
+                },
+                DocumentMutation::Create {
+                    offset_id: 2,
+                    new_document: "hello",
+                },
+                DocumentMutation::Create {
+                    offset_id: 3,
+                    new_document: "world",
+                },
+            ])
+            .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let freq_blockfile_reader = provider.open::<u32, u32>(&freq_blockfile_id).await.unwrap();
-        let pl_blockfile_reader = provider
-            .open::<u32, &[u32]>(&pl_blockfile_id)
+        // Delete document 3
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().fork(pl_blockfile_id))
             .await
             .unwrap();
-        let tokenizer = Box::new(TantivyChromaTokenizer::new(
-            NgramTokenizer::new(1, 1, false).unwrap(),
-        ));
-        let index_reader =
-            FullTextIndexReader::new(pl_blockfile_reader, freq_blockfile_reader, tokenizer);
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Delete {
+                offset_id: 3,
+                old_document: "world",
+            }])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        let pl_blockfile_reader = provider
+            .read::<u32, &[u32]>(&pl_blockfile_id)
+            .await
+            .unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
         let res = index_reader.search("world").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1]));

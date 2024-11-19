@@ -9,12 +9,36 @@ use serde::Deserialize;
 /// config files to configure the worker.
 pub enum StorageConfig {
     // case-insensitive
+    #[serde(alias = "object_store")]
+    ObjectStore(ObjectStoreConfig),
     #[serde(alias = "s3")]
     S3(S3StorageConfig),
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
     #[serde(alias = "admissioncontrolleds3")]
     AdmissionControlledS3(AdmissionControlledS3StorageConfig),
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub enum ObjectStoreType {
+    #[serde(alias = "minio")]
+    Minio,
+    #[serde(alias = "s3")]
+    S3,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ObjectStoreBucketConfig {
+    pub name: String,
+    pub r#type: ObjectStoreType,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ObjectStoreConfig {
+    pub bucket: ObjectStoreBucketConfig,
+    pub upload_part_size_bytes: u64,
+    pub download_part_size_bytes: u64,
+    pub max_concurrent_requests: usize,
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]

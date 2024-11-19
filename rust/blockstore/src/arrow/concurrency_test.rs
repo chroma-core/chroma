@@ -67,14 +67,16 @@ mod tests {
                 });
 
                 let reader = future::block_on(async {
-                    blockfile_provider.open::<&str, u32>(&id).await.unwrap()
+                    blockfile_provider.read::<&str, u32>(&id).await.unwrap()
                 });
                 // Read the data back
                 for i in 0..n {
                     let key_string = format!("key{}", i);
                     let value =
                         future::block_on(async { reader.get("", key_string.as_str()).await });
-                    let value = value.expect("Expect key to exist and there to be no error");
+                    let value = value
+                        .expect("Expect key to exist and there to be no error")
+                        .expect("Key should have a value");
                     assert_eq!(value, i as u32);
                 }
             },
