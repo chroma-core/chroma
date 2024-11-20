@@ -28,6 +28,7 @@ opentelemetry-otlp = "0.26"
 opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
 regex = "1.10.5"
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
+ouroboros = "0.18.4"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
