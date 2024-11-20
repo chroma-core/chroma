@@ -123,7 +123,6 @@ impl CompactionManager {
                     self.hnsw_index_provider.clone(),
                     dispatcher,
                     None,
-                    None,
                     Arc::new(AtomicU32::new(0)),
                     self.max_compaction_size,
                     self.max_partition_size,
