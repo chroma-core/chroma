@@ -299,6 +299,24 @@ impl CompactOrchestrator {
             }
         };
 
+        let hnsw_segment = match self.get_segment(SegmentType::HnswDistributed).await {
+            Ok(segment) => segment,
+            Err(e) => {
+                tracing::error!("Error getting hnsw segment: {:?}", e);
+                terminate_with_error(self.result_channel.take(), e, ctx);
+                return;
+            }
+        };
+
+        let metadata_segment = match self.get_segment(SegmentType::BlockfileMetadata).await {
+            Ok(segment) => segment,
+            Err(e) => {
+                tracing::error!("Error getting metadata segment: {:?}", e);
+                terminate_with_error(self.result_channel.take(), e, ctx);
+                return;
+            }
+        };
+
         let current_max_offset_id = match RecordSegmentReader::from_segment(
             &record_segment,
             &self.blockfile_provider,
@@ -321,6 +339,14 @@ impl CompactOrchestrator {
                 }
             },
         };
+
+        self.num_uncompleted_log_apply_tasks
+            .insert(record_segment.id, partitions.len());
+        self.num_uncompleted_log_apply_tasks
+            .insert(hnsw_segment.id, partitions.len());
+        self.num_uncompleted_log_apply_tasks
+            .insert(metadata_segment.id, partitions.len());
+        self.num_uncompleted_flush_tasks = 3;
 
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
@@ -360,7 +386,6 @@ impl CompactOrchestrator {
         >,
     ) {
         let operator = ApplyLogToSegmentWriterOperator::new();
-        let segment_id = segment_writer.get_id();
         let input = ApplyLogToSegmentWriterInput::new(segment_writer, materialized_log);
         let task = wrap(operator, input, self_address.clone());
         match self.dispatcher.send(task, Some(Span::current())).await {
