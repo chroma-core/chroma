@@ -213,8 +213,6 @@ class GrpcSysDB(SysDB):
             logger.info(
                 f"Failed to get segment id {id}, type {type}, scope {scope} for collection {collection} due to error: {e}"
             )
-            if cast(grpc.Call, e).code() == grpc.StatusCode.NOT_FOUND:
-                raise NotFoundError()
             raise InternalError()
 
     @overrides
