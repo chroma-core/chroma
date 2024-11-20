@@ -17,7 +17,7 @@ The log exposes separate reader and writer interfaces.  The core idea is that a 
 multiple distinct streams of data into a single log.  Each stream is identified by a stream ID.
 When append completes, all data available written is readable.
 
-```rust
+```text
 pub struct LogWriter<O: ObjectStore> { ... }
 
 impl<O: ObjectStore> LogWriter<O> {

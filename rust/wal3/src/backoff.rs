@@ -27,7 +27,7 @@
 //!
 //! Here is an example that shows how to use this struct:
 //!
-//! ```rust
+//! ```ignore
 //! let exp_backoff = ExponentialBackoff::new(1_000.0, 100.0);
 //! loop {
 //!     let result = match try_some_operation().await {
@@ -39,8 +39,8 @@
 //!                 return Err(e);
 //!             }
 //!         }
-//!     }
-//!     ... // process the result
+//!     };
+//!     // process the result
 //! }
 //! ```
 
