@@ -36,7 +36,7 @@ from chromadb.api.types import (
     CollectionMetadata,
     convert_np_embeddings_to_list,
 )
-from chromadb.utils.validators import validate_batch
+from chromadb.utils.validators import validate_batch_size
 
 
 logger = logging.getLogger(__name__)
@@ -464,7 +464,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents,
             uris,
         )
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
+        validate_batch_size(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(
             batch,
             f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/add",
@@ -493,7 +493,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents,
             uris,
         )
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
+        validate_batch_size(batch, {"max_batch_size": await self.get_max_batch_size()})
 
         await self._submit_batch(
             batch,
@@ -522,7 +522,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents,
             uris,
         )
-        validate_batch(batch, {"max_batch_size": await self.get_max_batch_size()})
+        validate_batch_size(batch, {"max_batch_size": await self.get_max_batch_size()})
         await self._submit_batch(
             batch,
             f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/upsert",

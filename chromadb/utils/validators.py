@@ -193,6 +193,31 @@ def validate_insert_record_set(record_set: InsertRecordSet) -> None:
         validate_metadatas(record_set["metadatas"])
 
 
+def validate_get_request(
+    include: Include, ids: Optional[IDs], filters: FilterSet
+) -> None:
+    if ids is not None:
+        validate_ids(ids=ids)
+
+    validate_filter_set(filter_set=filters)
+    validate_include(include=include, dissalowed=[IncludeEnum.distances])
+
+
+def validate_query_request(
+    n_results: int, include: Include, query_records: BaseRecordSet, filters: FilterSet
+) -> None:
+    validate_base_record_set(record_set=query_records)
+    validate_filter_set(filter_set=filters)
+    validate_include(include=include)
+    validate_n_results(n_results=n_results)
+
+
+def validate_delete_request(ids: Optional[IDs], filters: FilterSet) -> None:
+    if ids is not None:
+        validate_ids(ids=ids)
+    validate_filter_set(filter_set=filters)
+
+
 def get_default_embeddable_record_set_fields() -> Set[str]:
     """
     Returns the set of fields that can be embedded on a Record Set.
@@ -485,7 +510,7 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
-def validate_batch(
+def validate_batch_size(
     batch: Tuple[
         IDs,
         Optional[Union[Embeddings, PyEmbeddings]],
