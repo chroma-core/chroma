@@ -8,7 +8,7 @@ from chromadb.test.conftest import _fastapi_fixture
 from chromadb.api import ServerAPI
 from chromadb.test.utils.cross_version import switch_to_version, install_version
 
-VERSIONED_MODULES = ["pydantic", "numpy"]
+VERSIONED_MODULES = ["numpy"]
 
 
 def try_old_client(old_version: str, port: int, conn: Connection) -> None:
