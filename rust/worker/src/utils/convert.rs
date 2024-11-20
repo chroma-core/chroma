@@ -1,8 +1,7 @@
 use chroma_types::{
     chroma_proto::{self, GetResult, KnnBatchResult, KnnResult},
-    ScalarEncoding, Where,
+    ConversionError, ScalarEncoding, Where,
 };
-use tonic::Status;
 
 use crate::execution::operators::{
     filter::FilterOperator,
@@ -13,24 +12,19 @@ use crate::execution::operators::{
 };
 
 impl TryFrom<chroma_proto::FilterOperator> for FilterOperator {
-    type Error = Status;
+    type Error = ConversionError;
 
-    fn try_from(value: chroma_proto::FilterOperator) -> Result<Self, Status> {
-        let where_metadata_clause =
-            value
-                .r#where
-                .map(|w| w.try_into())
-                .transpose()
-                .map_err(|err| {
-                    Status::invalid_argument(format!("Invalid Where Metadata Clause: {err:?}"))
-                })?;
+    fn try_from(value: chroma_proto::FilterOperator) -> Result<Self, ConversionError> {
+        let where_metadata_clause = value
+            .r#where
+            .map(|w| w.try_into())
+            .transpose()
+            .map_err(|_| ConversionError::DecodeError)?;
         let where_document_clause = value
             .where_document
             .map(|w| w.try_into())
             .transpose()
-            .map_err(|err| {
-                Status::invalid_argument(format!("Invalid Where Document Clause: {err:?}"))
-            })?;
+            .map_err(|_| ConversionError::DecodeError)?;
         let where_clause = match (where_metadata_clause, where_document_clause) {
             (Some(wc), Some(wdc)) => Some(Where::conjunction(vec![wc, wdc])),
             (Some(c), None) | (None, Some(c)) => Some(c),
@@ -64,23 +58,20 @@ impl From<chroma_proto::ProjectionOperator> for ProjectionOperator {
 }
 
 impl TryFrom<chroma_proto::KnnProjectionOperator> for KnnProjectionOperator {
-    type Error = Status;
+    type Error = ConversionError;
 
-    fn try_from(value: chroma_proto::KnnProjectionOperator) -> Result<Self, Status> {
+    fn try_from(value: chroma_proto::KnnProjectionOperator) -> Result<Self, ConversionError> {
         Ok(Self {
-            projection: value
-                .projection
-                .ok_or(Status::invalid_argument("Invalid Projection Operator"))?
-                .into(),
+            projection: value.projection.ok_or(ConversionError::DecodeError)?.into(),
             distance: value.distance,
         })
     }
 }
 
 impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
-    type Error = Status;
+    type Error = ConversionError;
 
-    fn try_from(value: ProjectionRecord) -> Result<Self, Status> {
+    fn try_from(value: ProjectionRecord) -> Result<Self, ConversionError> {
         Ok(Self {
             id: value.id,
             document: value.document,
@@ -95,16 +86,16 @@ impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
                     ))
                 })
                 .transpose()
-                .map_err(|err| Status::internal(err.to_string()))?,
+                .map_err(|_| ConversionError::DecodeError)?,
             metadata: value.metadata.map(|metadata| metadata.into()),
         })
     }
 }
 
 impl TryFrom<ProjectionOutput> for GetResult {
-    type Error = Status;
+    type Error = ConversionError;
 
-    fn try_from(value: ProjectionOutput) -> Result<Self, Status> {
+    fn try_from(value: ProjectionOutput) -> Result<Self, ConversionError> {
         Ok(Self {
             records: value
                 .records
@@ -116,9 +107,9 @@ impl TryFrom<ProjectionOutput> for GetResult {
 }
 
 impl TryFrom<KnnProjectionRecord> for chroma_proto::KnnProjectionRecord {
-    type Error = Status;
+    type Error = ConversionError;
 
-    fn try_from(value: KnnProjectionRecord) -> Result<Self, Status> {
+    fn try_from(value: KnnProjectionRecord) -> Result<Self, ConversionError> {
         Ok(chroma_proto::KnnProjectionRecord {
             record: Some(value.record.try_into()?),
             distance: value.distance,
@@ -127,9 +118,9 @@ impl TryFrom<KnnProjectionRecord> for chroma_proto::KnnProjectionRecord {
 }
 
 impl TryFrom<KnnProjectionOutput> for KnnResult {
-    type Error = Status;
+    type Error = ConversionError;
 
-    fn try_from(value: KnnProjectionOutput) -> Result<Self, Status> {
+    fn try_from(value: KnnProjectionOutput) -> Result<Self, ConversionError> {
         Ok(KnnResult {
             records: value
                 .records
@@ -140,7 +131,7 @@ impl TryFrom<KnnProjectionOutput> for KnnResult {
     }
 }
 
-pub fn from_proto_knn(knn: chroma_proto::KnnOperator) -> Result<Vec<KnnOperator>, Status> {
+pub fn from_proto_knn(knn: chroma_proto::KnnOperator) -> Result<Vec<KnnOperator>, ConversionError> {
     knn.embeddings
         .into_iter()
         .map(|embedding| match embedding.try_into() {
@@ -148,14 +139,14 @@ pub fn from_proto_knn(knn: chroma_proto::KnnOperator) -> Result<Vec<KnnOperator>
                 embedding,
                 fetch: knn.fetch,
             }),
-            Err(err) => Err(Status::invalid_argument(err.to_string())),
+            Err(_) => Err(ConversionError::DecodeError),
         })
         .collect()
 }
 
 pub fn to_proto_knn_batch_result(
     results: Vec<KnnProjectionOutput>,
-) -> Result<KnnBatchResult, Status> {
+) -> Result<KnnBatchResult, ConversionError> {
     Ok(KnnBatchResult {
         results: results
             .into_iter()
