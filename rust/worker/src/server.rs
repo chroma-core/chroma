@@ -11,10 +11,11 @@ use chroma_types::{
     },
     CollectionUuid, SegmentUuid,
 };
-use futures::future::try_join_all;
+use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
+use uuid::Uuid;
 
 use crate::{
     config::QueryServiceConfig,
@@ -155,6 +156,8 @@ impl WorkerServer {
                 log_client: self.log.clone(),
                 // TODO: Make this configurable
                 batch_size: 100,
+                // The collection log position is inclusive, and we want to start from the next log
+                // Note that we query using the incoming log position this is critical for correctness
                 start_log_offset_id: collection.log_position as u32 + 1,
                 maximum_fetch_count: None,
                 collection_uuid,
@@ -178,22 +181,26 @@ impl WorkerServer {
             .into_inner()
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
-        let (fetch_log_operator, fetch_segment_operator) = self.decompose_proto_scan(scan)?;
 
-        // TODO: Update Count Orchestractor
-        let counter = CountQueryOrchestrator::new(
+        let collection = &scan
+            .collection
+            .ok_or(Status::invalid_argument("Invalid collection"))?;
+
+        let count_orchestrator = CountQueryOrchestrator::new(
             self.clone_system()?,
-            &fetch_segment_operator.metadata_uuid.0,
-            &fetch_log_operator.collection_uuid,
-            fetch_log_operator.log_client,
-            fetch_segment_operator.sysdb,
+            &Uuid::parse_str(&scan.metadata_id)
+                .map_err(|e| Status::invalid_argument(e.to_string()))?,
+            &CollectionUuid::from_str(&collection.id)
+                .map_err(|e| Status::invalid_argument(e.to_string()))?,
+            self.log.clone(),
+            self.sysdb.clone(),
             self.clone_dispatcher()?,
             self.blockfile_provider.clone(),
-            fetch_segment_operator.collection_version,
-            fetch_log_operator.start_log_offset_id as u64 - 1,
+            collection.version as u32,
+            collection.log_position as u64,
         );
 
-        match counter.run().await {
+        match count_orchestrator.run().await {
             Ok(count) => Ok(Response::new(CountResult {
                 count: count as u32,
             })),
@@ -217,7 +224,7 @@ impl WorkerServer {
             .projection
             .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
 
-        let getter = GetOrchestrator::new(
+        let get_orchestrator = GetOrchestrator::new(
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
             // TODO: Make this configurable
@@ -229,7 +236,7 @@ impl WorkerServer {
             projection.into(),
         );
 
-        match getter.run(self.clone_system()?).await {
+        match get_orchestrator.run(self.clone_system()?).await {
             Ok(result) => Ok(Response::new(result.try_into()?)),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
@@ -253,7 +260,7 @@ impl WorkerServer {
             .knn
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let sieve = KnnFilterOrchestrator::new(
+        let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
             self.hnsw_index_provider.clone(),
@@ -264,7 +271,7 @@ impl WorkerServer {
             filter.try_into()?,
         );
 
-        let matching_records = match sieve.run(system.clone()).await {
+        let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
             Ok(output) => output,
             Err(KnnError::EmptyCollection) => {
                 return Ok(Response::new(to_proto_knn_batch_result(
@@ -284,23 +291,25 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
         let knn_projection = KnnProjectionOperator::try_from(projection)?;
 
-        match try_join_all(
-            from_proto_knn(knn)?
-                .into_iter()
-                .map(|knn| {
-                    KnnOrchestrator::new(
-                        self.blockfile_provider.clone(),
-                        dispatcher.clone(),
-                        // TODO: Make this configurable
-                        1000,
-                        matching_records.clone(),
-                        knn,
-                        knn_projection.clone(),
-                    )
-                })
-                .map(|knner| knner.run(system.clone())),
-        )
-        .await
+        let knn_orchestrator_futures = from_proto_knn(knn)?
+            .into_iter()
+            .map(|knn| {
+                KnnOrchestrator::new(
+                    self.blockfile_provider.clone(),
+                    dispatcher.clone(),
+                    // TODO: Make this configurable
+                    1000,
+                    matching_records.clone(),
+                    knn,
+                    knn_projection.clone(),
+                )
+            })
+            .map(|knner| knner.run(system.clone()));
+
+        match stream::iter(knn_orchestrator_futures)
+            .buffered(32)
+            .try_collect::<Vec<_>>()
+            .await
         {
             Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
@@ -474,33 +483,56 @@ mod tests {
 
     #[tokio::test]
     async fn validate_count_plan() {
-        let mut reader = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
         let mut scan_operator = scan();
         let request = chroma_proto::CountPlan {
             scan: Some(scan_operator.clone()),
         };
 
         // segment or collection not found
-        let response = reader.count(request).await;
+        let response = executor.count(request).await;
         assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
 
-        // invalid segment uuid
-        scan_operator.record_id = "invalid_segment_id".to_string();
+        scan_operator.metadata_id = "invalid_segment_id".to_string();
         let request = chroma_proto::CountPlan {
             scan: Some(scan_operator.clone()),
         };
-        let response = reader.count(request).await;
 
+        // invalid segment uuid
+        let response = executor.count(request).await;
         assert!(response.is_err());
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
     #[tokio::test]
     async fn validate_get_plan() {
-        let mut reader = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan_operator = scan();
         let request = chroma_proto::GetPlan {
-            scan: Some(scan()),
-            // error parsing filter
+            scan: Some(scan_operator.clone()),
+            filter: Some(chroma_proto::FilterOperator {
+                ids: None,
+                r#where: None,
+                where_document: None,
+            }),
+            limit: Some(chroma_proto::LimitOperator {
+                skip: 0,
+                fetch: None,
+            }),
+            projection: Some(chroma_proto::ProjectionOperator {
+                document: false,
+                embedding: false,
+                metadata: false,
+            }),
+        };
+
+        // segment or collection not found
+        let response = executor.get(request.clone()).await;
+        assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+
+        let request = chroma_proto::GetPlan {
+            scan: Some(scan_operator.clone()),
             filter: None,
             limit: Some(chroma_proto::LimitOperator {
                 skip: 0,
@@ -512,8 +544,43 @@ mod tests {
                 metadata: false,
             }),
         };
-        let response = reader.get(request.clone()).await;
 
+        // error parsing filter
+        let response = executor.get(request.clone()).await;
+        assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
+
+        scan_operator.collection = Some(chroma_proto::Collection {
+            id: "Invalid-Collection-ID".to_string(),
+            name: "Broken-Collection".to_string(),
+            configuration_json_str: String::new(),
+            metadata: None,
+            dimension: None,
+            tenant: "Test-Tenant".to_string(),
+            database: "Test-Database".to_string(),
+            log_position: 0,
+            version: 0,
+        });
+        let request = chroma_proto::GetPlan {
+            scan: Some(scan_operator.clone()),
+            filter: Some(chroma_proto::FilterOperator {
+                ids: None,
+                r#where: None,
+                where_document: None,
+            }),
+            limit: Some(chroma_proto::LimitOperator {
+                skip: 0,
+                fetch: None,
+            }),
+            projection: Some(chroma_proto::ProjectionOperator {
+                document: false,
+                embedding: false,
+                metadata: false,
+            }),
+        };
+
+        // invalid collection uuid
+        let response = executor.get(request.clone()).await;
         assert!(response.is_err());
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }

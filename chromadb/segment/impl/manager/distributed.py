@@ -86,7 +86,7 @@ class DistributedSegmentManager(SegmentManager):
     )
     def get_segment(self, collection_id: UUID, scope: SegmentScope) -> Segment:
         if scope not in self._segment_cache[collection_id]:
-            # There should be exactly one segment per scope for a collection
+            # For now, there is exactly one segment per scope for a given collection
             segment = self._sysdb.get_segments(collection=collection_id, scope=scope)[0]
             # TODO: Register a callback to update the segment when it gets moved
             # self._segment_directory.register_updated_segment_callback()
