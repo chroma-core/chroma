@@ -97,6 +97,8 @@ pub struct CompactOrchestrator {
     pulled_log_offset: Option<i64>,
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
+    // whether the materialized log is empty
+    dirty: bool,
     // number of write segments tasks
     num_write_tasks: i32,
     // Result Channel
@@ -188,6 +190,7 @@ impl CompactOrchestrator {
             hnsw_index_provider,
             pulled_log_offset: None,
             dispatcher,
+            dirty: false,
             num_write_tasks: 0,
             result_channel,
             curr_max_offset_id,
@@ -653,7 +656,38 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             }
         };
 
-        self.write(materialized_result, ctx.receiver(), ctx).await;
+        if materialized_result.get_materialized_records().is_empty() {
+            // There is no delta after materialization, so there is no need to write
+            self.num_write_tasks -= 1;
+            if self.num_write_tasks == 0 {
+                if self.dirty {
+                    let writer_res = self.get_segment_writers().await;
+                    let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
+                        match writer_res {
+                            Ok(writers) => writers,
+                            Err(e) => {
+                                tracing::error!("Error creating writers for compaction {:?}", e);
+                                terminate_with_error(self.result_channel.take(), e, ctx);
+                                return;
+                            }
+                        };
+                    self.flush_s3(
+                        record_segment_writer,
+                        hnsw_segment_writer,
+                        metadata_segment_writer,
+                        ctx.receiver(),
+                    )
+                    .await;
+                } else {
+                    // There is no delta across all partition, so there is no need to flush
+                    self.register(self.pulled_log_offset.unwrap(), [].into(), ctx.receiver())
+                        .await;
+                }
+            }
+        } else {
+            self.dirty = true;
+            self.write(materialized_result, ctx.receiver(), ctx).await;
+        }
     }
 }
 

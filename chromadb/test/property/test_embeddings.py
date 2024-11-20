@@ -868,3 +868,36 @@ def test_0dim_embedding_validation() -> None:
         "Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos"
         in str(e)
     )
+
+def test_no_op_compaction(client: ClientAPI) -> None:
+    reset(client)
+    coll = client.create_collection(name="noop")
+    for batch in range(0, 5000, 100):
+        coll.delete(ids=[str(i) for i in range(batch, batch + 100)])
+    if not NOT_CLUSTER_ONLY:
+        wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+
+def test_add_then_purge(client: ClientAPI) -> None:
+    reset(client)
+    record_count = 5000
+    batch_count = 100
+    coll = client.create_collection(name="add_then_purge")
+
+    # Add records and wait for compaction
+    for batch in range(0, record_count, batch_count):
+        record_id_vals = [i for i in range(batch, batch + batch_count)]
+        record_ids = [str(i) for i in record_id_vals]
+        coll.add(ids=record_ids, embeddings=[[2 * i, 2 * i + 1] for i in record_id_vals])
+    if not NOT_CLUSTER_ONLY:
+        wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+
+    # Purge records and wait for compaction
+    for batch in range(0, record_count, batch_count):
+        record_id_vals = [i for i in range(batch, batch + batch_count)]
+        record_ids = [str(i) for i in record_id_vals]
+        coll.delete(ids=record_ids)
+    if not NOT_CLUSTER_ONLY:
+        wait_for_version_increase(client, coll.name, get_collection_version(client, coll.name), 240)
+
+    # There should be no records left
+    assert len(coll.get()["ids"]) == 0
