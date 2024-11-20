@@ -13,8 +13,6 @@ use chroma_types::{
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -332,10 +330,14 @@ impl ChromaError for ApplyMaterializedLogError {
     }
 }
 
-impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
-    async fn apply_materialized_log_chunk(
+impl SegmentWriter for RecordSegmentWriter {
+    fn get_name(&self) -> &'static str {
+        "RecordSegmentWriter"
+    }
+
+    async fn apply_materialized_log_chunk<'referred_data>(
         &self,
-        records: Chunk<MaterializedLogRecord<'a>>,
+        records: Chunk<MaterializedLogRecord<'referred_data>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         let mut count = 0u64;
         for (log_record, _) in records.iter() {
@@ -628,7 +630,7 @@ pub struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
-    curr_max_offset_id: Arc<AtomicU32>,
+    max_offset_id: u32,
 }
 
 #[derive(Error, Debug)]
@@ -637,6 +639,8 @@ pub enum RecordSegmentReaderCreationError {
     UninitializedSegment,
     #[error("Blockfile Open Error")]
     BlockfileOpenError(#[from] Box<OpenError>),
+    #[error("Error reading blockfile: {0}")]
+    BlockfileReadError(#[from] Box<dyn ChromaError>),
     #[error("Segment has invalid number of files")]
     InvalidNumberOfFiles,
     // This case should never happen, so it's internal, but until our APIs rule it out, we have it.
@@ -651,6 +655,7 @@ impl ChromaError for RecordSegmentReaderCreationError {
     fn code(&self) -> ErrorCodes {
         match self {
             RecordSegmentReaderCreationError::BlockfileOpenError(e) => e.code(),
+            RecordSegmentReaderCreationError::BlockfileReadError(e) => e.code(),
             RecordSegmentReaderCreationError::InvalidNumberOfFiles => ErrorCodes::InvalidArgument,
             RecordSegmentReaderCreationError::UninitializedSegment => ErrorCodes::InvalidArgument,
             RecordSegmentReaderCreationError::DataRecordNotFound(_) => ErrorCodes::Internal,
@@ -691,10 +696,15 @@ impl RecordSegmentReader<'_> {
                 };
                 let exising_max_offset_id = match max_offset_id_bf_reader {
                     Some(reader) => match reader.get("", MAX_OFFSET_ID).await {
-                        Ok(Some(max_offset_id)) => Arc::new(AtomicU32::new(max_offset_id)),
-                        Ok(None) | Err(_) => Arc::new(AtomicU32::new(0)),
+                        Ok(Some(max_offset_id)) => max_offset_id,
+                        Ok(None) => 0,
+                        Err(e) => {
+                            return Err(Box::new(
+                                RecordSegmentReaderCreationError::BlockfileReadError(e),
+                            ))
+                        }
                     },
-                    None => Arc::new(AtomicU32::new(0)),
+                    None => 0,
                 };
 
                 let user_id_to_id = match blockfile_provider
@@ -756,12 +766,12 @@ impl RecordSegmentReader<'_> {
             user_id_to_id,
             id_to_user_id,
             id_to_data,
-            curr_max_offset_id: existing_max_offset_id,
+            max_offset_id: existing_max_offset_id,
         })
     }
 
-    pub(crate) fn get_current_max_offset_id(&self) -> Arc<AtomicU32> {
-        self.curr_max_offset_id.clone()
+    pub(crate) fn get_max_offset_id(&self) -> u32 {
+        self.max_offset_id
     }
 
     pub(crate) async fn get_user_id_for_offset_id(
