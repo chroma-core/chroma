@@ -58,17 +58,15 @@ import logging
 
 from chromadb.utils.validators import (
     get_default_embeddable_record_set_fields,
-    validate_base_record_set,
     validate_embedding_function,
     validate_embeddings,
-    validate_filter_set,
-    validate_ids,
-    validate_include,
     validate_insert_record_set,
     validate_metadata,
-    validate_n_results,
     validate_record_set_for_embedding,
     validate_record_set_contains_any,
+    validate_query_request,
+    validate_get_request,
+    validate_delete_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,11 +237,7 @@ class CollectionCommon(Generic[ClientT]):
         filters = FilterSet(where=where, where_document=where_document)
 
         # Validate
-        if unpacked_ids is not None:
-            validate_ids(ids=unpacked_ids)
-
-        validate_filter_set(filter_set=filters)
-        validate_include(include=include, dissalowed=[IncludeEnum.distances])
+        validate_get_request(include, unpacked_ids, filters)
 
         if IncludeEnum.data in include and self._data_loader is None:
             raise ValueError(
@@ -294,10 +288,12 @@ class CollectionCommon(Generic[ClientT]):
         )
 
         # Validate
-        validate_base_record_set(record_set=query_records)
-        validate_filter_set(filter_set=filters)
-        validate_include(include=include)
-        validate_n_results(n_results=n_results)
+        validate_query_request(
+            n_results=n_results,
+            include=include,
+            query_records=query_records,
+            filters=filters,
+        )
 
         # Prepare
         if query_records["embeddings"] is None:
@@ -438,7 +434,12 @@ class CollectionCommon(Generic[ClientT]):
     ) -> DeleteRequest:
         if ids is None and where is None and where_document is None:
             raise ValueError(
-                "At least one of ids, where, or where_document must be provided"
+                """
+                You must provide either ids, where, or where_document to delete. If
+                you want to delete all data in a collection you can delete the
+                collection itself using the delete_collection method. Or alternatively,
+                you can get() all the relevant ids and then delete them.
+                """
             )
 
         # Unpack
@@ -449,9 +450,7 @@ class CollectionCommon(Generic[ClientT]):
         filters = FilterSet(where=where, where_document=where_document)
 
         # Validate
-        if request_ids is not None:
-            validate_ids(ids=request_ids)
-        validate_filter_set(filter_set=filters)
+        validate_delete_request(request_ids, filters)
 
         return DeleteRequest(
             ids=request_ids, where=where, where_document=where_document

@@ -38,7 +38,7 @@ from chromadb.telemetry.opentelemetry import (
     trace_method,
 )
 from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.utils.validators import validate_batch
+from chromadb.utils.validators import validate_batch_size
 
 logger = logging.getLogger(__name__)
 
@@ -431,7 +431,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             documents,
             uris,
         )
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        validate_batch_size(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(
             batch,
             f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/add",
@@ -464,7 +464,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             documents,
             uris,
         )
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        validate_batch_size(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(
             batch,
             f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/update",
@@ -495,7 +495,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             documents,
             uris,
         )
-        validate_batch(batch, {"max_batch_size": self.get_max_batch_size()})
+        validate_batch_size(batch, {"max_batch_size": self.get_max_batch_size()})
         self._submit_batch(
             batch,
             f"/tenants/{tenant}/databases/{database}/collections/{str(collection_id)}/upsert",

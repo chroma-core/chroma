@@ -26,9 +26,12 @@ from chromadb.errors import (
     VersionMismatchError,
 )
 from chromadb.api.types import (
+    BaseRecordSet,
     CollectionMetadata,
+    FilterSet,
     IDs,
     Embeddings,
+    InsertRecordSet,
     Metadatas,
     Documents,
     URIs,
@@ -66,11 +69,13 @@ import logging
 import re
 
 from chromadb.utils.validators import (
-    validate_batch,
+    validate_batch_size,
+    validate_delete_request,
+    validate_get_request,
+    validate_insert_record_set,
     validate_metadata,
     validate_update_metadata,
-    validate_where,
-    validate_where_document,
+    validate_query_request,
 )
 
 T = TypeVar("T", bound=Callable[..., Any])
@@ -411,10 +416,25 @@ class SegmentAPI(ServerAPI):
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
-        validate_batch(
+
+        # Validation
+        validate_batch_size(
             (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.get_max_batch_size()},
         )
+
+        # TODO: Unify RecordSet Interfaces
+        insert_record_set = InsertRecordSet(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            images=None,
+        )
+
+        validate_insert_record_set(insert_record_set)
+
         records_to_submit = list(
             _records(
                 t.Operation.ADD,
@@ -425,7 +445,7 @@ class SegmentAPI(ServerAPI):
                 uris=uris,
             )
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
+        self._validate_embeddings_dimensions(coll, records_to_submit)
 
         self._quota_enforcer.enforce(
             action=Action.ADD,
@@ -466,10 +486,22 @@ class SegmentAPI(ServerAPI):
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
-        validate_batch(
+        validate_batch_size(
             (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.get_max_batch_size()},
         )
+
+        # TODO: Unify RecordSet Interfaces
+        insert_record_set = InsertRecordSet(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            images=None,
+        )
+        validate_insert_record_set(insert_record_set)
+
         records_to_submit = list(
             _records(
                 t.Operation.UPDATE,
@@ -480,7 +512,7 @@ class SegmentAPI(ServerAPI):
                 uris=uris,
             )
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
+        self._validate_embeddings_dimensions(coll, records_to_submit)
 
         self._quota_enforcer.enforce(
             action=Action.UPDATE,
@@ -523,10 +555,23 @@ class SegmentAPI(ServerAPI):
     ) -> bool:
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
-        validate_batch(
+
+        # Validation
+        validate_batch_size(
             (ids, embeddings, metadatas, documents, uris),
             {"max_batch_size": self.get_max_batch_size()},
         )
+
+        insert_record_set = InsertRecordSet(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            images=None,
+        )
+        validate_insert_record_set(insert_record_set)
+
         records_to_submit = list(
             _records(
                 t.Operation.UPSERT,
@@ -537,7 +582,7 @@ class SegmentAPI(ServerAPI):
                 uris=uris,
             )
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
+        self._validate_embeddings_dimensions(coll, records_to_submit)
 
         self._quota_enforcer.enforce(
             action=Action.UPSERT,
@@ -584,14 +629,15 @@ class SegmentAPI(ServerAPI):
             }
         )
 
+        # Validate
+        # TODO: Unify FilterSet and RecordSet interfaces
+        filters = FilterSet(
+            where=where,
+            where_document=where_document,
+        )
+        validate_get_request(ids=ids, include=include, filters=filters)
+
         coll = self._get_collection(collection_id)
-
-        # TODO: Replace with unified validation
-        if where is not None:
-            validate_where(where)
-
-        if where_document is not None:
-            validate_where_document(where_document)
 
         self._quota_enforcer.enforce(
             action=Action.GET,
@@ -655,22 +701,8 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        # TODO: Replace with unified validation
-        if where is not None:
-            validate_where(where)
-
-        if where_document is not None:
-            validate_where_document(where_document)
-
         # You must have at least one of non-empty ids, where, or where_document.
-        if (
-            (ids is None or (ids is not None and len(ids) == 0))
-            and (where is None or (where is not None and len(where) == 0))
-            and (
-                where_document is None
-                or (where_document is not None and len(where_document) == 0)
-            )
-        ):
+        if ids is None and where is None and where_document is None:
             raise ValueError(
                 """
                 You must provide either ids, where, or where_document to delete. If
@@ -679,6 +711,12 @@ class SegmentAPI(ServerAPI):
                 you can get() all the relevant ids and then delete them.
                 """
             )
+
+        filters = FilterSet(
+            where=where,
+            where_document=where_document,
+        )
+        validate_delete_request(ids=ids, filters=filters)
 
         coll = self._get_collection(collection_id)
 
@@ -705,7 +743,7 @@ class SegmentAPI(ServerAPI):
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
+        self._validate_embeddings_dimensions(coll, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -768,6 +806,25 @@ class SegmentAPI(ServerAPI):
             }
         )
 
+        # Validate
+        query_records = BaseRecordSet(
+            embeddings=query_embeddings,
+            documents=None,
+            uris=None,
+            images=None,
+        )
+        filters = FilterSet(
+            where=where,
+            where_document=where_document,
+        )
+        validate_query_request(
+            n_results=n_results,
+            include=include,
+            query_records=query_records,
+            filters=filters,
+        )
+
+        # Process
         query_amount = len(query_embeddings)
         self._product_telemetry_client.capture(
             CollectionQueryEvent(
@@ -783,15 +840,9 @@ class SegmentAPI(ServerAPI):
             )
         )
 
-        # TODO: Replace with unified validation
-        if where is not None:
-            validate_where(where)
-        if where_document is not None:
-            validate_where_document(where_document)
-
         coll = self._get_collection(collection_id)
         for embedding in query_embeddings:
-            self._validate_dimension(coll, len(embedding), update=False)
+            self._validate_embedding_dimension(coll, len(embedding), update=False)
 
         self._quota_enforcer.enforce(
             action=Action.QUERY,
@@ -858,19 +909,19 @@ class SegmentAPI(ServerAPI):
     @trace_method(
         "SegmentAPI._validate_embedding_record_set", OpenTelemetryGranularity.ALL
     )
-    def _validate_embedding_record_set(
+    def _validate_embeddings_dimensions(
         self, collection: t.Collection, records: List[t.OperationRecord]
     ) -> None:
         """Validate the dimension of an embedding record before submitting it to the system."""
         add_attributes_to_current_span({"collection_id": str(collection["id"])})
         for record in records:
             if record["embedding"] is not None:
-                self._validate_dimension(
+                self._validate_embedding_dimension(
                     collection, len(record["embedding"]), update=True
                 )
 
     # This method is intentionally left untraced because otherwise it can emit thousands of spans for requests containing many embeddings.
-    def _validate_dimension(
+    def _validate_embedding_dimension(
         self, collection: t.Collection, dim: int, update: bool
     ) -> None:
         """Validate that a collection supports records of the given dimension. If update
