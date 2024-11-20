@@ -384,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn manager_staging() {
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.0"),
+            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
             snapshots: vec![],
@@ -454,7 +454,7 @@ mod tests {
         assert!(staging.deltas.is_empty());
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST.42"),
+                path: String::from("manifest/MANIFEST.ffffffffffffffd5"),
                 writer: "manifest writer 1".to_string(),
                 setsum: sst::Setsum::default(),
                 snapshots: vec![],
