@@ -305,7 +305,8 @@ impl ArrowOrderedBlockfileWriter {
                 .current_block_delta
                 .take()
                 .expect("We already checked above that there is a current delta");
-            let new_delta = current_delta.split_off_half::<K, V>();
+
+            let new_delta = current_delta.split_off_last_key().expect("This returns None only if the delta is empty. We just added to the delta, so it is not empty.");
 
             self.root
                 .sparse_index
@@ -484,11 +485,11 @@ mod tests {
             assert_eq!(value, [i]);
         }
 
-        // Sparse index should have 3 blocks
+        // Sparse index should have 2 blocks
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
-                assert_eq!(reader.root.sparse_index.len(), 3);
-                assert!(reader.root.sparse_index.is_valid());
+                assert_eq!(reader.root.sparse_index.len(), 2);
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }
@@ -554,8 +555,8 @@ mod tests {
         // Sparse index should have 6 blocks
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
-                assert_eq!(reader.root.sparse_index.len(), 6);
-                assert!(reader.root.sparse_index.is_valid());
+                assert_eq!(reader.root.sparse_index.len(), 5);
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }
