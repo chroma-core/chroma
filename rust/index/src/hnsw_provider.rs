@@ -194,24 +194,32 @@ impl HnswIndexProvider {
             }
         };
 
-        match HnswIndex::load(storage_path_str, &index_config, new_id) {
-            Ok(index) => {
-                let _guard = self.write_mutex.lock().await;
-                match self.get(&new_id, cache_key).await {
-                    Some(index) => Ok(index.clone()),
-                    None => {
-                        let index = HnswIndexRef {
-                            inner: Arc::new(RwLock::new(index)),
-                        };
-                        self.cache.insert(*cache_key, index.clone()).await;
-                        Ok(index)
-                    }
+        // See the comment in open() for why we lock the write mutex here.
+        let _guard = self
+            .write_mutex
+            .lock()
+            .instrument(
+                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
+            )
+            .await;
+        // Check if the entry is in the cache, if it is, we assume
+        // another thread has loaded the index and we return it.
+        match self.get(&new_id, cache_key).await {
+            Some(index) => Ok(index.clone()),
+            None => match HnswIndex::load(storage_path_str, &index_config, new_id) {
+                Ok(index) => {
+                    let index = HnswIndexRef {
+                        inner: Arc::new(RwLock::new(index)),
+                    };
+                    self.cache.insert(*cache_key, index.clone()).await;
+                    Ok(index)
                 }
-            }
-            Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
+                Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
+            },
         }
     }
 
+    #[instrument]
     async fn copy_bytes_to_local_file(
         &self,
         file_path: &Path,
@@ -252,7 +260,7 @@ impl HnswIndexProvider {
         let mut file_handle = match file_handle {
             Ok(file) => file,
             Err(e) => {
-                tracing::error!("Failed to create file: {}", e);
+                tracing::error!("Failed to create temporary file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         };
@@ -260,14 +268,14 @@ impl HnswIndexProvider {
         match res {
             Ok(_) => {}
             Err(e) => {
-                tracing::error!("Failed to copy file: {}", e);
+                tracing::error!("Failed to copy temporary file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
         match file_handle.flush().await {
             Ok(_) => {}
             Err(e) => {
-                tracing::error!("Failed to flush file: {}", e);
+                tracing::error!("Failed to flush temporary file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
@@ -279,14 +287,14 @@ impl HnswIndexProvider {
             match tokio::fs::remove_dir_all(path).await {
                 Ok(_) => Ok(()),
                 Err(e) => {
-                    tracing::error!("Failed to remove directory: {}", e);
+                    tracing::error!("Failed to remove temporary directory: {}", e);
                     Err(Box::new(HnswIndexProviderFileError::IOError(e)))
                 }
             }
         }
 
         // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for write to local disk")).await;
+        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for actual write to local disk")).await;
         // Do nothing if the file exists, we assume the concurrent writer wrote the same data.
         // This is a safe assumption because the data is immutable from our perspective.
         if !file_path.exists() {
@@ -382,7 +390,15 @@ impl HnswIndexProvider {
             }
         };
 
-        let _guard = self.write_mutex.lock().await;
+        // We choose to lock the write mutex here because we want to check if a concurrent writer has already loaded the index
+        // and then load it. This is not great if we want concurrent loads, but we can optimize this later.
+        let _guard = self
+            .write_mutex
+            .lock()
+            .instrument(
+                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
+            )
+            .await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(id, cache_key).await {
