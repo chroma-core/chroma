@@ -37,7 +37,7 @@ use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::record_segment::RecordSegmentWriter;
-use crate::segment::{ChromaSegmentFlusher, ChromaSegmentWriter, SegmentWriter};
+use crate::segment::{ChromaSegmentFlusher, ChromaSegmentWriter, SegmentFlusher, SegmentWriter};
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
@@ -124,6 +124,7 @@ pub struct CompactOrchestrator {
         MetadataSegmentWriter<'static>,
     )>,
     flush_results: Vec<SegmentFlushInfo>,
+    segment_spans: HashMap<SegmentUuid, Span>,
 }
 
 #[derive(Error, Debug)]
@@ -211,6 +212,7 @@ impl CompactOrchestrator {
             cached_segments: OnceCell::new(),
             writers: OnceCell::new(),
             flush_results: Vec::new(),
+            segment_spans: HashMap::new(),
         }
     }
 
@@ -372,6 +374,25 @@ impl CompactOrchestrator {
         }
     }
 
+    fn get_segment_writer_span(&mut self, writer: &ChromaSegmentWriter<'static>) -> Span {
+        let span = self
+            .segment_spans
+            .entry(writer.get_id())
+            .or_insert_with(|| {
+                tracing::span!(
+                    tracing::Level::INFO,
+                    "Segment",
+                    otel.name = format!("Segment: {:?}", writer.get_name())
+                )
+            });
+        span.clone()
+    }
+
+    fn get_segment_flusher_span(&mut self, flusher: &ChromaSegmentFlusher) -> Span {
+        let span = self.segment_spans.get(&flusher.get_id()).unwrap(); // todo
+        span.clone()
+    }
+
     async fn dispatch_apply_log_to_segment_writer_task(
         &mut self,
         segment_writer: ChromaSegmentWriter<'static>,
@@ -385,10 +406,11 @@ impl CompactOrchestrator {
             >,
         >,
     ) {
+        let span = self.get_segment_writer_span(&segment_writer);
         let operator = ApplyLogToSegmentWriterOperator::new();
         let input = ApplyLogToSegmentWriterInput::new(segment_writer, materialized_log);
         let task = wrap(operator, input, self_address.clone());
-        match self.dispatcher.send(task, Some(Span::current())).await {
+        match self.dispatcher.send(task, Some(span)).await {
             Ok(_) => {}
             Err(e) => {
                 tracing::error!(
@@ -412,10 +434,11 @@ impl CompactOrchestrator {
             >,
         >,
     ) {
+        let span = self.get_segment_writer_span(&segment_writer);
         let operator = CommitSegmentWriterOperator::new();
         let input = CommitSegmentWriterInput::new(segment_writer);
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
+        match self.dispatcher.send(task, Some(span)).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching commit for compaction {:?}", e);
@@ -427,19 +450,20 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn dispatch_segment_writer_flush(
+    async fn dispatch_segment_flush(
         &mut self,
-        segment_writer: ChromaSegmentFlusher, // todo: rename
+        segment_flusher: ChromaSegmentFlusher, // todo: rename
         self_address: Box<
             dyn ReceiverForMessage<
                 TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
             >,
         >,
     ) {
+        let span = self.get_segment_flusher_span(&segment_flusher);
         let operator = FlushSegmentWriterOperator::new();
-        let input = FlushSegmentWriterInput::new(segment_writer);
+        let input = FlushSegmentWriterInput::new(segment_flusher);
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
+        match self.dispatcher.send(task, Some(span)).await {
             Ok(_) => {}
             Err(e) => {
                 tracing::error!("Error dispatching flush for compaction {:?}", e);
@@ -813,7 +837,7 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
         let message = message.into_inner();
         match message {
             Ok(message) => {
-                self.dispatch_segment_writer_flush(message.flusher, ctx.receiver())
+                self.dispatch_segment_flush(message.flusher, ctx.receiver())
                     .await;
             }
             Err(e) => {
@@ -838,6 +862,10 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         let message = message.into_inner();
         match message {
             Ok(message) => {
+                self.segment_spans
+                    .remove(&message.flush_info.segment_id)
+                    .unwrap(); // todo
+
                 self.flush_results.push(message.flush_info);
                 self.num_uncompleted_flush_tasks -= 1;
 
