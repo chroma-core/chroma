@@ -100,7 +100,7 @@ impl UnorderedBlockDelta {
         let mut first_iter: bool = true;
         // iterate over all blocks to split until its empty
         while let Some(curr_block) = blocks_to_split.pop() {
-            let (new_start_key, new_delta) = curr_block.builder.split_after_size::<K>(half_size);
+            let (new_start_key, new_delta) = curr_block.builder.split::<K>(half_size);
             let new_block = UnorderedBlockDelta {
                 builder: new_delta,
                 id: Uuid::new_v4(),

@@ -196,17 +196,14 @@ impl BlockStorage {
         }
     }
 
-    pub fn split_before_size<K: ArrowWriteableKey>(
-        &self,
-        split_size: usize,
-    ) -> (CompositeKey, BlockStorage) {
+    pub fn split<K: ArrowWriteableKey>(&self, split_size: usize) -> (CompositeKey, BlockStorage) {
         match self {
             BlockStorage::String(builder) => {
-                let (split_key, storage) = builder.split_before_size::<K>(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::String(storage))
             }
             BlockStorage::UInt32(builder) => {
-                let (split_key, storage) = builder.split_before_size::<K>(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::UInt32(storage))
             }
             BlockStorage::DataRecord(builder) => {
@@ -214,71 +211,16 @@ impl BlockStorage {
                 (split_key, BlockStorage::DataRecord(storage))
             }
             BlockStorage::VecUInt32(builder) => {
-                let (split_key, storage) = builder.split_before_size::<K>(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::VecUInt32(storage))
             }
             BlockStorage::RoaringBitmap(builder) => {
-                let (split_key, storage) = builder.split_before_size::<K>(split_size);
+                let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::RoaringBitmap(storage))
             }
             BlockStorage::SpannPostingListDelta(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::SpannPostingListDelta(storage))
-            }
-        }
-    }
-
-    pub fn split_after_size<K: ArrowWriteableKey>(
-        &self,
-        split_size: usize,
-    ) -> (CompositeKey, BlockStorage) {
-        match self {
-            BlockStorage::String(builder) => {
-                let (split_key, storage) = builder.split_after_size::<K>(split_size);
-                (split_key, BlockStorage::String(storage))
-            }
-            BlockStorage::UInt32(builder) => {
-                let (split_key, storage) = builder.split_after_size::<K>(split_size);
-                (split_key, BlockStorage::UInt32(storage))
-            }
-            BlockStorage::DataRecord(builder) => {
-                let (split_key, storage) = builder.split::<K>(split_size);
-                (split_key, BlockStorage::DataRecord(storage))
-            }
-            BlockStorage::VecUInt32(builder) => {
-                let (split_key, storage) = builder.split_after_size::<K>(split_size);
-                (split_key, BlockStorage::VecUInt32(storage))
-            }
-            BlockStorage::RoaringBitmap(builder) => {
-                let (split_key, storage) = builder.split_after_size::<K>(split_size);
-                (split_key, BlockStorage::RoaringBitmap(storage))
-            }
-        }
-    }
-
-    /// Splits the block delta into two block deltas. The split point is the last key.
-    /// Returns None if the block delta is empty.
-    pub fn split_off_last_key(&mut self) -> Option<(CompositeKey, BlockStorage)> {
-        match self {
-            BlockStorage::String(builder) => {
-                let (key, storage) = builder.split_off_last_key()?;
-                Some((key, BlockStorage::String(storage)))
-            }
-            BlockStorage::UInt32(builder) => {
-                let (key, storage) = builder.split_off_last_key()?;
-                Some((key, BlockStorage::UInt32(storage)))
-            }
-            BlockStorage::DataRecord(builder) => {
-                let (key, storage) = builder.split_off_last_key()?;
-                Some((key, BlockStorage::DataRecord(storage)))
-            }
-            BlockStorage::VecUInt32(builder) => {
-                let (key, storage) = builder.split_off_last_key()?;
-                Some((key, BlockStorage::VecUInt32(storage)))
-            }
-            BlockStorage::RoaringBitmap(builder) => {
-                let (key, storage) = builder.split_off_last_key()?;
-                Some((key, BlockStorage::RoaringBitmap(storage)))
             }
         }
     }
