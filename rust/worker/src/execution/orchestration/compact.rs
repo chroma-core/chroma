@@ -5,6 +5,10 @@ use crate::execution::operator::TaskResult;
 use crate::execution::operators::flush_s3::FlushS3Input;
 use crate::execution::operators::flush_s3::FlushS3Operator;
 use crate::execution::operators::flush_s3::FlushS3Output;
+use crate::execution::operators::materialize_logs::MaterializeLogInput;
+use crate::execution::operators::materialize_logs::MaterializeLogOperator;
+use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
+use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
@@ -103,6 +107,12 @@ pub struct CompactOrchestrator {
     curr_max_offset_id: Arc<AtomicU32>,
     max_compaction_size: usize,
     max_partition_size: usize,
+    // Populated during the compaction process
+    writers: Option<(
+        RecordSegmentWriter,
+        Box<DistributedHNSWSegmentWriter>,
+        MetadataSegmentWriter<'static>,
+    )>,
 }
 
 #[derive(Error, Debug)]
@@ -196,6 +206,7 @@ impl CompactOrchestrator {
             curr_max_offset_id,
             max_compaction_size,
             max_partition_size,
+            writers: None,
         }
     }
 
@@ -265,16 +276,50 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn write(
+    async fn materialize_log(
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
+        self_address: Box<
+            dyn ReceiverForMessage<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>,
+        >,
+    ) {
+        self.state = ExecutionState::Write;
+
+        self.get_segment_writers().await.unwrap(); // todo: this populates self.record_segment, should be a cleaner way
+
+        self.num_write_tasks = partitions.len() as i32;
+        for partition in partitions.iter() {
+            let operator = MaterializeLogOperator::new();
+            let input = MaterializeLogInput::new(
+                partition.clone(),
+                self.blockfile_provider.clone(),
+                self.record_segment
+                    .as_ref()
+                    .expect("WriteSegmentsInput: Record segment not set in the input") // todo
+                    .clone(),
+                self.curr_max_offset_id.clone(),
+            );
+            let task = wrap(operator, input, self_address.clone());
+            match self.dispatcher.send(task, Some(Span::current())).await {
+                Ok(_) => (),
+                Err(e) => {
+                    tracing::error!("Error dispatching writers for compaction {:?}", e); // todo
+                    panic!(
+                        "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                        e)
+                }
+            }
+        }
+    }
+
+    async fn write(
+        &mut self,
+        materialized_log: MaterializeLogOutput,
         self_address: Box<
             dyn ReceiverForMessage<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
         >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        self.state = ExecutionState::Write;
-
         let writer_res = self.get_segment_writers().await;
         let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) = match writer_res
         {
@@ -286,30 +331,22 @@ impl CompactOrchestrator {
             }
         };
 
-        self.num_write_tasks = partitions.len() as i32;
-        for parition in partitions.iter() {
-            let operator = WriteSegmentsOperator::new();
-            let input = WriteSegmentsInput::new(
-                record_segment_writer.clone(),
-                hnsw_segment_writer.clone(),
-                metadata_segment_writer.clone(),
-                parition.clone(),
-                self.blockfile_provider.clone(),
-                self.record_segment
-                    .as_ref()
-                    .expect("WriteSegmentsInput: Record segment not set in the input")
-                    .clone(),
-                self.curr_max_offset_id.clone(),
-            );
-            let task = wrap(operator, input, self_address.clone());
-            match self.dispatcher.send(task, Some(Span::current())).await {
-                Ok(_) => (),
-                Err(e) => {
-                    tracing::error!("Error dispatching writers for compaction {:?}", e);
-                    panic!(
-                        "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
-                        e)
-                }
+        let operator = WriteSegmentsOperator::new();
+        let input = WriteSegmentsInput::new(
+            record_segment_writer,
+            hnsw_segment_writer,
+            metadata_segment_writer,
+            materialized_log,
+        );
+        let task = wrap(operator, input, self_address);
+        match self.dispatcher.send(task, Some(Span::current())).await {
+            Ok(_) => (),
+            Err(e) => {
+                tracing::error!("Error dispatching write segments for compaction {:?}", e);
+                panic!(
+                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                    e
+                );
             }
         }
     }
@@ -389,6 +426,9 @@ impl CompactOrchestrator {
         // Nor should we create new writers across different tasks
         // This method is for convenience to create the writers in a single place
         // It is not meant to be called multiple times in the same compaction job
+        if let Some(writers) = &self.writers {
+            return Ok(writers.clone());
+        }
 
         let segments = self
             .sysdb
@@ -507,6 +547,12 @@ impl CompactOrchestrator {
             }
         };
 
+        self.writers = Some((
+            record_segment_writer.clone(),
+            hnsw_segment_writer.clone(),
+            mt_segment_writer.clone(),
+        ));
+
         Ok((
             record_segment_writer,
             hnsw_segment_writer,
@@ -597,7 +643,32 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
                 return;
             }
         };
-        self.write(records, ctx.receiver(), ctx).await;
+        self.materialize_log(records, ctx.receiver()).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
+    for CompactOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+    ) {
+        let message = message.into_inner();
+        let materialized_result = match message {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::error!("Error materializing log: {:?}", e);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
+                return;
+            }
+        };
+
+        self.write(materialized_result, ctx.receiver(), ctx).await;
     }
 }
 
