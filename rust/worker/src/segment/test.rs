@@ -10,7 +10,7 @@ use chroma_types::{
 use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
 
 use super::{
-    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter, LogMaterializer,
+    materialize_logs, metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter,
     SegmentFlusher, SegmentWriter,
 };
 
@@ -26,12 +26,10 @@ pub struct TestSegment {
 impl TestSegment {
     // WARN: The size of the log chunk should not be too large
     async fn compact_log(&mut self, logs: Chunk<LogRecord>, offset: usize) {
-        let materializer =
-            LogMaterializer::new(None, logs, Some(AtomicU32::new(offset as u32).into()));
-        let materialized_logs = materializer
-            .materialize()
-            .await
-            .expect("Should be able to materialize log.");
+        let materialized_logs =
+            materialize_logs(&None, &logs, Some(AtomicU32::new(offset as u32).into()))
+                .await
+                .expect("Should be able to materialize log.");
 
         let mut metadata_writer =
             MetadataSegmentWriter::from_segment(&self.metadata_segment, &self.blockfile_provider)
