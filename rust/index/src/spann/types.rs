@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{atomic::AtomicU32, Arc},
 };
 
@@ -145,6 +145,7 @@ const RNG_FACTOR: f32 = 1.0;
 const SPLIT_THRESHOLD: usize = 100;
 const NUM_SAMPLES_FOR_KMEANS: usize = 1000;
 const INITIAL_LAMBDA: f32 = 100.0;
+const REASSIGN_NBR_COUNT: usize = 8;
 
 impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
@@ -414,6 +415,131 @@ impl SpannIndexWriter {
         Ok((res_ids, res_distances, res_embeddings))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn collect_and_reassign(
+        &self,
+        new_head_ids: &[i32],
+        new_head_embeddings: &Vec<Option<&Vec<f32>>>,
+        old_head_id: u32,
+        old_head_embedding: &[f32],
+        split_doc_offset_ids: &[Vec<u32>],
+        split_doc_versions: &[Vec<u32>],
+        split_doc_embeddings: &[Vec<f32>],
+    ) -> Result<(), SpannIndexWriterError> {
+        let mut unique_ids = HashSet::new();
+        for (k, (((doc_offset_ids, doc_versions), doc_embeddings), new_head)) in
+            split_doc_offset_ids
+                .iter()
+                .zip(split_doc_versions.iter())
+                .zip(split_doc_embeddings.iter())
+                .zip(new_head_ids.iter())
+                .enumerate()
+        {
+            for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
+                if unique_ids.contains(doc_offset_id) {
+                    continue;
+                }
+                {
+                    let version_map_guard = self.versions_map.read();
+                    let current_version = version_map_guard
+                        .versions_map
+                        .get(doc_offset_id)
+                        .ok_or(SpannIndexWriterError::VersionNotFound)?;
+                    if *current_version == 0 || doc_versions[index] < *current_version {
+                        continue;
+                    }
+                }
+                let old_dist = self.distance_function.distance(
+                    old_head_embedding,
+                    &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
+                );
+                let new_dist = self.distance_function.distance(
+                    new_head_embeddings[k].unwrap(),
+                    &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
+                );
+                if new_dist >= old_dist {
+                    // TODO(Sanket): Implement reassign.
+                    // reassign();
+                    unique_ids.insert(doc_offset_id);
+                }
+            }
+        }
+        // Reassign neighbors of this center if applicable.
+        if REASSIGN_NBR_COUNT > 0 {
+            let nearest_ids;
+            let nearest_distances;
+            let mut nearest_embeddings: Vec<Vec<f32>> = vec![];
+            {
+                let read_guard = self.hnsw_index.inner.read();
+                let allowed_ids = vec![];
+                let disallowed_ids = vec![];
+                (nearest_ids, nearest_distances) = read_guard
+                    .query(
+                        old_head_embedding,
+                        REASSIGN_NBR_COUNT,
+                        &allowed_ids,
+                        &disallowed_ids,
+                    )
+                    .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+                // Get the embeddings also for distance computation.
+                for id in nearest_ids.iter() {
+                    let emb = read_guard
+                        .get(*id)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
+                        .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
+                    nearest_embeddings.push(emb);
+                }
+            }
+            // Get posting list of each neighbour and check for reassignment criteria.
+            for (head_idx, nearest_id) in nearest_ids.iter().enumerate() {
+                let write_guard = self.posting_list_writer.lock().await;
+                // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
+                // deletes it.
+                let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = write_guard
+                    .get_owned::<u32, &SpannPostingList<'_>>("", *nearest_id as u32)
+                    .await
+                    .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                    .ok_or(SpannIndexWriterError::PostingListGetError)?;
+                for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
+                    if unique_ids.contains(doc_offset_id) {
+                        continue;
+                    }
+                    {
+                        let version_map_guard = self.versions_map.read();
+                        let current_version = version_map_guard
+                            .versions_map
+                            .get(doc_offset_id)
+                            .ok_or(SpannIndexWriterError::VersionNotFound)?;
+                        if *current_version == 0 || doc_versions[index] < *current_version {
+                            continue;
+                        }
+                    }
+                    let distance_from_curr_center = self.distance_function.distance(
+                        &doc_embeddings
+                            [index * self.dimensionality..(index + 1) * self.dimensionality],
+                        &nearest_embeddings[head_idx],
+                    );
+                    let distance_from_split_center1 = self.distance_function.distance(
+                        &doc_embeddings
+                            [index * self.dimensionality..(index + 1) * self.dimensionality],
+                        new_head_embeddings[0].unwrap(),
+                    );
+                    let distance_from_split_center2 = self.distance_function.distance(
+                        &doc_embeddings
+                            [index * self.dimensionality..(index + 1) * self.dimensionality],
+                        new_head_embeddings[1].unwrap(),
+                    );
+                    if distance_from_curr_center <= distance_from_split_center1
+                        && distance_from_curr_center <= distance_from_split_center2
+                    {
+                        continue;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[allow(dead_code)]
     async fn append(
         &self,
@@ -423,6 +549,12 @@ impl SpannIndexWriter {
         embedding: &[f32],
         head_embedding: Vec<f32>,
     ) -> Result<(), SpannIndexWriterError> {
+        let mut new_posting_lists: Vec<Vec<f32>> = Vec::with_capacity(2);
+        let mut new_doc_offset_ids: Vec<Vec<u32>> = Vec::with_capacity(2);
+        let mut new_doc_versions: Vec<Vec<u32>> = Vec::with_capacity(2);
+        let mut new_head_ids = vec![-1; 2];
+        let mut new_head_embeddings = vec![None; 2];
+        let clustering_output;
         {
             let write_guard = self.posting_list_writer.lock().await;
             // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
@@ -508,22 +640,22 @@ impl SpannIndexWriter {
             );
             let clustering_output =
                 cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
-            // TODO(Sanket): Not sure how this can happen.
+            // TODO(Sanket): Not sure how this can happen. The reference implementation
+            // just includes one point from the entire list in this case.
             if clustering_output.num_clusters <= 1 {
                 tracing::warn!("Clustering split the posting list into only 1 cluster");
                 panic!("Clustering split the posting list into only 1 cluster");
             } else {
-                let mut new_posting_lists: Vec<Vec<f32>> = Vec::with_capacity(2);
-                new_posting_lists[0]
-                    .reserve_exact(clustering_output.cluster_counts[0] * self.dimensionality);
-                new_posting_lists[1]
-                    .reserve_exact(clustering_output.cluster_counts[1] * self.dimensionality);
-                let mut new_doc_offset_ids: Vec<Vec<u32>> = Vec::with_capacity(2);
-                new_doc_offset_ids[0].reserve_exact(clustering_output.cluster_counts[0]);
-                new_doc_offset_ids[1].reserve_exact(clustering_output.cluster_counts[1]);
-                let mut new_doc_versions: Vec<Vec<u32>> = Vec::with_capacity(2);
-                new_doc_versions[0].reserve_exact(clustering_output.cluster_counts[0]);
-                new_doc_versions[1].reserve_exact(clustering_output.cluster_counts[1]);
+                new_posting_lists.push(Vec::with_capacity(
+                    clustering_output.cluster_counts[0] * self.dimensionality,
+                ));
+                new_posting_lists.push(Vec::with_capacity(
+                    clustering_output.cluster_counts[1] * self.dimensionality,
+                ));
+                new_doc_offset_ids.push(Vec::with_capacity(clustering_output.cluster_counts[0]));
+                new_doc_offset_ids.push(Vec::with_capacity(clustering_output.cluster_counts[1]));
+                new_doc_versions.push(Vec::with_capacity(clustering_output.cluster_counts[0]));
+                new_doc_versions.push(Vec::with_capacity(clustering_output.cluster_counts[1]));
                 for (index, cluster) in clustering_output.cluster_labels {
                     new_doc_offset_ids[cluster as usize].push(doc_offset_ids[index]);
                     new_doc_versions[cluster as usize].push(doc_versions[index]);
@@ -533,7 +665,6 @@ impl SpannIndexWriter {
                     );
                 }
                 let mut same_head = false;
-                let mut new_head_ids = vec![-1; 2];
                 for k in 0..2 {
                     // Update the existing head.
                     if !same_head
@@ -554,6 +685,7 @@ impl SpannIndexWriter {
                             .await
                             .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
                         new_head_ids[k] = head_id as i32;
+                        new_head_embeddings[k] = Some(&head_embedding);
                     } else {
                         // Create new head.
                         let next_id = self
@@ -570,9 +702,17 @@ impl SpannIndexWriter {
                             .await
                             .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
                         new_head_ids[k] = next_id as i32;
+                        new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
-                        // TODO(Sanket): Check for capacity and increase as needed.
-                        let hnsw_write_guard = self.hnsw_index.inner.write();
+                        let mut hnsw_write_guard = self.hnsw_index.inner.write();
+                        let hnsw_len = hnsw_write_guard.len();
+                        let hnsw_capacity = hnsw_write_guard.capacity();
+                        if hnsw_len + 1 > hnsw_capacity {
+                            tracing::info!("Resizing hnsw index");
+                            hnsw_write_guard.resize(hnsw_capacity * 2).map_err(|_| {
+                                SpannIndexWriterConstructionError::HnswIndexResizeError
+                            })?;
+                        }
                         hnsw_write_guard
                             .add(next_id as usize, &clustering_output.cluster_centers[k])
                             .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
@@ -588,8 +728,16 @@ impl SpannIndexWriter {
             }
         }
         // Reassign code.
-
-        Ok(())
+        self.collect_and_reassign(
+            &new_head_ids,
+            &new_head_embeddings,
+            head_id,
+            &head_embedding,
+            &new_doc_offset_ids,
+            &new_doc_versions,
+            &new_posting_lists,
+        )
+        .await
     }
 
     #[allow(dead_code)]
