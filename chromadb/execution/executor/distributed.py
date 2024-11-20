@@ -1,21 +1,21 @@
-# WARN: This is a placeholder impl copied from LocalExecutor.
-# TODO: This will be refactored after grpc defs have been updated for query pushdown
+from typing import Dict, Optional
 
-from typing import Optional, Sequence
-
-from chromadb.api.types import (
-    GetResult,
-    IncludeEnum,
-    Metadata,
-    QueryResult,
-)
-from chromadb.config import System
-from chromadb.execution.executor.abstract import Executor
-from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
-from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
-from chromadb.segment import MetadataReader, VectorReader
-from chromadb.types import VectorQuery, VectorQueryResult, Collection
+import grpc
 from overrides import overrides
+
+from chromadb.api.types import GetResult, Metadata, QueryResult
+from chromadb.config import System
+from chromadb.errors import VersionMismatchError
+from chromadb.execution.executor.abstract import Executor
+from chromadb.execution.expression.operator import Scan, SegmentScan
+from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
+from chromadb.proto import convert
+
+from chromadb.proto.query_executor_pb2_grpc import QueryExecutorStub
+from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
+from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
+from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
+from chromadb.types import SegmentScope
 
 
 def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
@@ -31,14 +31,6 @@ def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
     return result
 
 
-def _doc(metadata: Optional[Metadata]) -> Optional[str]:
-    """Retrieve the document (if any) from a Metadata map"""
-
-    if metadata and "chroma:document" in metadata:
-        return str(metadata["chroma:document"])
-    return None
-
-
 def _uri(metadata: Optional[Metadata]) -> Optional[str]:
     """Retrieve the uri (if any) from a Metadata map"""
 
@@ -48,150 +40,134 @@ def _uri(metadata: Optional[Metadata]) -> Optional[str]:
 
 
 class DistributedExecutor(Executor):
+    _grpc_stub_pool: Dict[str, QueryExecutorStub]
     _manager: DistributedSegmentManager
+    _request_timeout_seconds: int
 
     def __init__(self, system: System):
         super().__init__(system)
+        self._grpc_stub_pool = dict()
         self._manager = self.require(DistributedSegmentManager)
+        self._request_timeout_seconds = system.settings.require(
+            "chroma_query_request_timeout_seconds"
+        )
 
     @overrides
     def count(self, plan: CountPlan) -> int:
-        return self._metadata_segment(plan.scan.collection).count(plan.scan.version)
+        executor = self._grpc_executuor_stub(plan.scan)
+        plan.scan = self._segment_scan(plan.scan)
+        try:
+            count_result = executor.Count(convert.to_proto_count_plan(plan))
+        except grpc.RpcError as rpc_error:
+            if (
+                rpc_error.code() == grpc.StatusCode.INTERNAL
+                and "version mismatch" in rpc_error.details()
+            ):
+                raise VersionMismatchError()
+            raise rpc_error
+        return convert.from_proto_count_result(count_result)
 
     @overrides
     def get(self, plan: GetPlan) -> GetResult:
-        records = self._metadata_segment(plan.scan.collection).get_metadata(
-            request_version_context=plan.scan.version,
-            where=plan.filter.where,
-            where_document=plan.filter.where_document,
-            ids=plan.filter.user_ids,
-            limit=plan.limit.fetch,
-            offset=plan.limit.skip,
-            include_metadata=True,
+        executor = self._grpc_executuor_stub(plan.scan)
+        plan.scan = self._segment_scan(plan.scan)
+        try:
+            get_result = executor.Get(convert.to_proto_get_plan(plan))
+        except grpc.RpcError as rpc_error:
+            if (
+                rpc_error.code() == grpc.StatusCode.INTERNAL
+                and "version mismatch" in rpc_error.details()
+            ):
+                raise VersionMismatchError()
+            raise rpc_error
+        records = convert.from_proto_get_result(get_result)
+
+        ids = [record["id"] for record in records]
+        embeddings = (
+            [record["embedding"] for record in records]
+            if plan.projection.embedding
+            else None
         )
-
-        ids = [r["id"] for r in records]
-        embeddings = None
-        documents = None
-        uris = None
-        metadatas = None
-        included = list()
-
-        if plan.projection.embedding:
-            if len(records) > 0:
-                vectors = self._vector_segment(plan.scan.collection).get_vectors(
-                    ids=ids, request_version_context=plan.scan.version
-                )
-                embeddings = [v["embedding"] for v in vectors]
-            else:
-                embeddings = list()
-            included.append(IncludeEnum.embeddings)
-
-        if plan.projection.document:
-            documents = [_doc(r["metadata"]) for r in records]
-            included.append(IncludeEnum.documents)
-
-        if plan.projection.uri:
-            uris = [_uri(r["metadata"]) for r in records]
-            included.append(IncludeEnum.uris)
-
-        if plan.projection.metadata:
-            metadatas = [_clean_metadata(r["metadata"]) for r in records]
-            included.append(IncludeEnum.metadatas)
+        documents = (
+            [record["document"] for record in records]
+            if plan.projection.document
+            else None
+        )
+        uris = (
+            [_uri(record["metadata"]) for record in records]
+            if plan.projection.uri
+            else None
+        )
+        metadatas = (
+            [_clean_metadata(record["metadata"]) for record in records]
+            if plan.projection.metadata
+            else None
+        )
 
         # TODO: Fix typing
         return GetResult(
             ids=ids,
-            embeddings=embeddings,
+            embeddings=embeddings,  # type: ignore[typeddict-item]
             documents=documents,  # type: ignore[typeddict-item]
             uris=uris,  # type: ignore[typeddict-item]
             data=None,
             metadatas=metadatas,  # type: ignore[typeddict-item]
-            included=included,
+            included=plan.projection.included,
         )
 
     @overrides
     def knn(self, plan: KNNPlan) -> QueryResult:
-        prefiltered_ids = None
-        if plan.filter.user_ids or plan.filter.where or plan.filter.where_document:
-            records = self._metadata_segment(plan.scan.collection).get_metadata(
-                request_version_context=plan.scan.version,
-                where=plan.filter.where,
-                where_document=plan.filter.where_document,
-                ids=plan.filter.user_ids,
-                limit=None,
-                offset=0,
-                include_metadata=False,
-            )
-            prefiltered_ids = [r["id"] for r in records]
+        executor = self._grpc_executuor_stub(plan.scan)
+        plan.scan = self._segment_scan(plan.scan)
+        try:
+            knn_result = executor.KNN(convert.to_proto_knn_plan(plan))
+        except grpc.RpcError as rpc_error:
+            if (
+                rpc_error.code() == grpc.StatusCode.INTERNAL
+                and "version mismatch" in rpc_error.details()
+            ):
+                raise VersionMismatchError()
+            raise rpc_error
+        results = convert.from_proto_knn_batch_result(knn_result)
 
-        knns: Sequence[Sequence[VectorQueryResult]] = [[]] * len(plan.knn.embeddings)
-
-        # Query vectors only when the user did not specify a filter or when the filter
-        # yields non-empty ids. Otherwise, the user specified a filter but it yields
-        # no matching ids, in which case we can return an empty result.
-        if prefiltered_ids is None or len(prefiltered_ids) > 0:
-            query = VectorQuery(
-                vectors=plan.knn.embeddings,
-                k=plan.knn.fetch,
-                allowed_ids=prefiltered_ids,
-                include_embeddings=plan.projection.embedding,
-                options=None,
-                request_version_context=plan.scan.version,
-            )
-            knns = self._vector_segment(plan.scan.collection).query_vectors(query)
-
-        ids = [[r["id"] for r in result] for result in knns]
-        embeddings = None
-        documents = None
-        uris = None
-        metadatas = None
-        distances = None
-        included = list()
-
-        if plan.projection.embedding:
-            embeddings = [[r["embedding"] for r in result] for result in knns]
-            included.append(IncludeEnum.embeddings)
-
-        if plan.projection.rank:
-            distances = [[r["distance"] for r in result] for result in knns]
-            included.append(IncludeEnum.distances)
-
-        if plan.projection.document or plan.projection.metadata or plan.projection.uri:
-            merged_ids = list(set([id for result in ids for id in result]))
-            hydrated_records = self._metadata_segment(
-                plan.scan.collection
-            ).get_metadata(
-                request_version_context=plan.scan.version,
-                where=None,
-                where_document=None,
-                ids=merged_ids,
-                limit=None,
-                offset=0,
-                include_metadata=True,
-            )
-            metadata_by_id = {r["id"]: r["metadata"] for r in hydrated_records}
-
-            if plan.projection.document:
-                documents = [
-                    [_doc(metadata_by_id.get(id, None)) for id in result]
-                    for result in ids
-                ]
-                included.append(IncludeEnum.documents)
-
-            if plan.projection.uri:
-                uris = [
-                    [_uri(metadata_by_id.get(id, None)) for id in result]
-                    for result in ids
-                ]
-                included.append(IncludeEnum.uris)
-
-            if plan.projection.metadata:
-                metadatas = [
-                    [_clean_metadata(metadata_by_id.get(id, None)) for id in result]
-                    for result in ids
-                ]
-                included.append(IncludeEnum.metadatas)
+        ids = [[record["record"]["id"] for record in records] for records in results]
+        embeddings = (
+            [
+                [record["record"]["embedding"] for record in records]
+                for records in results
+            ]
+            if plan.projection.embedding
+            else None
+        )
+        documents = (
+            [
+                [record["record"]["document"] for record in records]
+                for records in results
+            ]
+            if plan.projection.document
+            else None
+        )
+        uris = (
+            [
+                [_uri(record["record"]["metadata"]) for record in records]
+                for records in results
+            ]
+            if plan.projection.uri
+            else None
+        )
+        metadatas = (
+            [
+                [_clean_metadata(record["record"]["metadata"]) for record in records]
+                for records in results
+            ]
+            if plan.projection.metadata
+            else None
+        )
+        distances = (
+            [[record["distance"] for record in records] for records in results]
+            if plan.projection.rank
+            else None
+        )
 
         # TODO: Fix typing
         return QueryResult(
@@ -201,12 +177,27 @@ class DistributedExecutor(Executor):
             uris=uris,  # type: ignore[typeddict-item]
             data=None,
             metadatas=metadatas,  # type: ignore[typeddict-item]
-            distances=distances,
-            included=included,
+            distances=distances,  # type: ignore[typeddict-item]
+            included=plan.projection.included,
         )
 
-    def _metadata_segment(self, collection: Collection) -> MetadataReader:
-        return self._manager.get_segment(collection.id, MetadataReader)
+    def _segment_scan(self, scan: Scan) -> SegmentScan:
+        knn = self._manager.get_segment(scan.collection.id, SegmentScope.VECTOR)
+        metadata = self._manager.get_segment(scan.collection.id, SegmentScope.METADATA)
+        record = self._manager.get_segment(scan.collection.id, SegmentScope.RECORD)
+        return SegmentScan(
+            collection=scan.collection,
+            knn_id=knn["id"],
+            metadata_id=metadata["id"],
+            record_id=record["id"],
+        )
 
-    def _vector_segment(self, collection: Collection) -> VectorReader:
-        return self._manager.get_segment(collection.id, VectorReader)
+    def _grpc_executuor_stub(self, scan: Scan) -> QueryExecutorStub:
+        grpc_url = self._manager.get_endpoint(scan.collection.id)
+        if grpc_url not in self._grpc_stub_pool:
+            channel = grpc.insecure_channel(grpc_url)
+            interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
+            channel = grpc.intercept_channel(channel, *interceptors)
+            self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)  # type: ignore[no-untyped-call]
+
+        return self._grpc_stub_pool[grpc_url]
