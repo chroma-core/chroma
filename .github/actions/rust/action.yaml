@@ -8,6 +8,7 @@ runs:
       with:
         repository: chroma-core/hnswlib
         path: hnswlib
+        ref: sicheng/cand
     # (actions/checkout doesn't allow cloning above the workspace root)
     - name: Symlink hnswlib to parent
       run: ln -s "$(pwd)/hnswlib" ../hnswlib
