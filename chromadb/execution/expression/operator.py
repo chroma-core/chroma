@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from typing import Optional
+from uuid import UUID
 
-from chromadb.api.types import Embeddings, IDs
-from chromadb.types import RequestVersionContext, Where, WhereDocument, Collection
+from chromadb.api.types import Embeddings, IDs, Include, IncludeEnum
+from chromadb.types import Collection, RequestVersionContext, Where, WhereDocument
 
 
 @dataclass
@@ -15,6 +16,13 @@ class Scan:
             collection_version=self.collection.version,
             log_position=self.collection.log_position,
         )
+
+
+@dataclass
+class SegmentScan(Scan):
+    knn_id: UUID
+    metadata_id: UUID
+    record_id: UUID
 
 
 @dataclass
@@ -43,3 +51,18 @@ class Projection:
     metadata: bool = False
     rank: bool = False
     uri: bool = False
+
+    @property
+    def included(self) -> Include:
+        includes = list()
+        if self.document:
+            includes.append(IncludeEnum.documents)
+        if self.embedding:
+            includes.append(IncludeEnum.embeddings)
+        if self.metadata:
+            includes.append(IncludeEnum.metadatas)
+        if self.rank:
+            includes.append(IncludeEnum.distances)
+        if self.uri:
+            includes.append(IncludeEnum.uris)
+        return includes

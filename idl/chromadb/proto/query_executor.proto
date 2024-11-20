@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package chroma;
+
+import "chromadb/proto/chroma.proto";
+
+message ScanOperator {
+    Collection collection = 1;
+    string knn_id = 2;
+    string metadata_id = 3;
+    string record_id = 4;
+}
+
+message FilterOperator {
+    optional UserIds ids = 1;
+    optional Where where = 2;
+    optional WhereDocument where_document = 3;
+}
+
+message KNNOperator {
+    repeated Vector embeddings = 1;
+    uint32 fetch = 2;
+}
+
+message LimitOperator {
+    uint32 skip = 1;
+    optional uint32 fetch = 2;
+}
+
+message ProjectionOperator {
+    bool document = 1;
+    bool embedding = 2;
+    bool metadata = 3;
+}
+
+message KNNProjectionOperator {
+    ProjectionOperator projection = 1;
+    bool distance = 2;
+}
+
+message CountPlan {
+    ScanOperator scan = 1;
+}
+
+message CountResult {
+    uint32 count = 1;
+}
+
+message GetPlan {
+    ScanOperator scan = 1;
+    FilterOperator filter = 2;
+    LimitOperator limit = 3;
+    ProjectionOperator projection = 4;
+}
+
+message ProjectionRecord {
+    string id = 1;
+    optional string document = 2;
+    optional Vector embedding = 3;
+    optional UpdateMetadata metadata = 4;
+}
+
+message GetResult {
+    repeated ProjectionRecord records = 1;
+}
+
+message KNNPlan {
+    ScanOperator scan = 1;
+    FilterOperator filter = 2;
+    KNNOperator knn = 3;
+    KNNProjectionOperator projection = 4;
+}
+
+message KNNProjectionRecord {
+    ProjectionRecord record = 1;
+    optional float distance = 2;
+}
+
+message KNNResult {
+    repeated KNNProjectionRecord records = 1;
+}
+
+message KNNBatchResult {
+    repeated KNNResult results = 1;
+}
+
+service QueryExecutor {
+    rpc Count(CountPlan) returns (CountResult) {}
+    rpc Get(GetPlan) returns (GetResult) {}
+    rpc KNN(KNNPlan) returns (KNNBatchResult) {}
+}
+

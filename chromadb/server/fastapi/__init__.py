@@ -366,7 +366,7 @@ class FastAPI(Server):
         self, request: Request, exc: QuotaError
     ) -> JSONResponse:
         return JSONResponse(
-            status_code=429,
+            status_code=400,
             content={"message": exc.message()},
         )
 
