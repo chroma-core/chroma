@@ -137,11 +137,13 @@ jobs:
         with:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
+          verbose: 'true'
       - name: Publish to PyPI
         if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: 'true'
 
   release-thin-pypi:
     name: Publish thin client to PyPI
