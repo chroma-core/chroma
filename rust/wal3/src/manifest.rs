@@ -5,7 +5,10 @@ use futures::StreamExt;
 use object_store::path::Path;
 use object_store::{ObjectStore, PutMode, PutOptions, PutPayload, Result};
 
-use crate::{Error, LogPosition, LogWriterOptions, ScrubError, ThrottleOptions, MANIFEST_UPLOADED};
+use crate::{
+    Error, LogPosition, LogWriterOptions, ScrubError, ThrottleOptions, MANIFEST_UPLOADED,
+    SNAPSHOT_UPLOADED,
+};
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
@@ -21,6 +24,20 @@ pub fn manifest_timestamp(path: &str) -> Result<u128, Error> {
         Error::CorruptManifest(format!("unparseable manifest timestamp in {}: {e}", path,))
     })?;
     Ok(timestamp)
+}
+
+pub fn snapshot_path(setsum: sst::Setsum) -> String {
+    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
+}
+
+pub fn snapshot_setsum(path: &str) -> Result<sst::Setsum, Error> {
+    let setsum = path
+        .strip_prefix("snapshot/SNAPSHOT.")
+        .ok_or_else(|| Error::CorruptManifest(format!("unparseable snapshot path: {}", path,)))?;
+    let setsum = sst::Setsum::from_hexdigest(setsum).ok_or_else(|| {
+        Error::CorruptManifest(format!("unparseable snapshot setsum in {}", path,))
+    })?;
+    Ok(setsum)
 }
 
 ////////////////////////////////////////////// ShardID /////////////////////////////////////////////
@@ -76,6 +93,8 @@ pub struct ShardFragment {
 }
 
 impl ShardFragment {
+    pub const JSON_SIZE_ESTIMATE: usize = 256;
+
     pub fn contains_position(&self, position: LogPosition) -> bool {
         self.start <= position && position < self.limit
     }
@@ -119,6 +138,171 @@ impl NextPointer {
     }
 }
 
+//////////////////////////////////////////// SnapPointer ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct SnapPointer {
+    #[serde(
+        deserialize_with = "super::deserialize_setsum",
+        serialize_with = "super::serialize_setsum"
+    )]
+    pub setsum: sst::Setsum,
+    pub path_to_snapshot: String,
+    pub depth: u8,
+}
+
+impl SnapPointer {
+    pub const JSON_SIZE_ESTIMATE: usize = 142;
+}
+
+///////////////////////////////////////////// Snapshot /////////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct Snapshot {
+    pub path: String,
+    pub depth: u8,
+    #[serde(
+        deserialize_with = "super::deserialize_setsum",
+        serialize_with = "super::serialize_setsum"
+    )]
+    pub setsum: sst::Setsum,
+    pub writer: String,
+    pub snapshots: Vec<SnapPointer>,
+    pub fragments: Vec<ShardFragment>,
+}
+
+impl Snapshot {
+    pub fn scrub(&self) -> Result<sst::Setsum, ScrubError> {
+        if !self.fragments.is_empty() && !self.snapshots.is_empty() {
+            return Err(ScrubError::CorruptManifest {
+                manifest: self.path.to_string(),
+                what: format!(
+                "snapshot contains both fragments and snapshots in {}: fragments:{} snapshots:{}",
+                self.path,
+                self.fragments.len(),
+                self.snapshots.len(),
+            ),
+            });
+        }
+        let mut acc = sst::Setsum::default();
+        for snapshot in self.snapshots.iter() {
+            acc += snapshot.setsum;
+        }
+        let depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
+        if depth + 1 != self.depth {
+            return Err(ScrubError::CorruptManifest{
+                manifest: self.path.to_string(),
+                what: format!(
+                "expected snapshot depth does not match observed contents in {}: expected:{} != observed:{}",
+                self.path,
+                self.depth,
+                depth + 1,
+            )});
+        }
+        for frag in self.fragments.iter() {
+            acc += frag.setsum;
+        }
+        if acc != self.setsum {
+            return Err(ScrubError::CorruptManifest{
+                manifest: self.path.to_string(),
+                what: format!(
+                "expected snapshot setsum does not match observed contents in {}: expected:{} != observed:{}",
+                self.path,
+                self.setsum.hexdigest(),
+                acc.hexdigest()
+            )});
+        }
+        let path_setsum = snapshot_setsum(&self.path).map_err(|_| ScrubError::CorruptManifest {
+            manifest: self.path.to_string(),
+            what: format!(
+                "expected snapshot setsum does not match observed path in {}: expected:{}",
+                self.path,
+                self.setsum.hexdigest(),
+            ),
+        })?;
+        if path_setsum != self.setsum {
+            return Err(ScrubError::CorruptManifest{
+                manifest: self.path.to_string(),
+                what: format!(
+                "expected snapshot setsum does not match observed path in {}: expected:{} != observed:{}",
+                self.path,
+                self.setsum.hexdigest(),
+                path_setsum.hexdigest(),
+            )});
+        }
+        Ok(acc)
+    }
+
+    pub async fn install(
+        &self,
+        options: &ThrottleOptions,
+        object_store: &impl ObjectStore,
+    ) -> Result<(), Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let payload = serde_json::to_string(self).map_err(|e| {
+                Error::CorruptManifest(format!("could not encode JSON snapshot: {e:?}"))
+            })?;
+            let payload = PutPayload::from_bytes(payload.into());
+            let opts: PutOptions = PutMode::Create.into();
+            match object_store
+                .put_opts(&Path::from(self.path.as_str()), payload, opts.clone())
+                .await
+            {
+                Ok(_) => {
+                    SNAPSHOT_UPLOADED.click();
+                    println!("uploaded snapshot to {}", self.path);
+                    return Ok(());
+                }
+                // NOTE(rescrv):  Silence precondition and already-exists errors.  Snapshots are
+                // content-addressable by setsum.  If a manifest snapshot is already present, we
+                // can safely ignore the upload request and act as if it succeeded.
+                Err(object_store::Error::Precondition { .. })
+                | Err(object_store::Error::AlreadyExists { .. }) => {
+                    return Ok(());
+                }
+                Err(e) => {
+                    println!("error uploading snapshot: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+}
+
+////////////////////////////////////////// SnapshotOptions /////////////////////////////////////////
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Deserialize,
+    serde::Serialize,
+    arrrg_derive::CommandLine,
+)]
+pub struct SnapshotOptions {
+    pub snapshot_rollover_threshold: usize,
+    pub fragment_rollover_threshold: usize,
+}
+
+impl Default for SnapshotOptions {
+    fn default() -> Self {
+        SnapshotOptions {
+            snapshot_rollover_threshold: (1 << 18) / SnapPointer::JSON_SIZE_ESTIMATE,
+            fragment_rollover_threshold: (1 << 19) / ShardFragment::JSON_SIZE_ESTIMATE,
+        }
+    }
+}
+
 ///////////////////////////////////////////// Manifest /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -130,6 +314,7 @@ pub struct Manifest {
     )]
     pub setsum: sst::Setsum,
     pub writer: String,
+    pub snapshots: Vec<SnapPointer>,
     pub fragments: Vec<ShardFragment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prev: Option<PrevPointer>,
@@ -137,6 +322,84 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    pub fn generate_snapshot(&self, snapshot_options: SnapshotOptions) -> Option<Snapshot> {
+        // TODO(rescrv):  A real, random string.
+        let writer = "TODO".to_string();
+        let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
+            >= snapshot_options.snapshot_rollover_threshold;
+        let can_snapshot_fragments =
+            self.fragments.len() >= snapshot_options.fragment_rollover_threshold;
+        if can_snapshot_snapshots || can_snapshot_fragments {
+            // NOTE(rescrv):  We _either_ compact a snapshot of snapshots or a snapshot of log
+            // fragments.  We don't do both as interior snapshot nodes only refer to objects of the
+            // same type.  Manifests are the only objects to refer to both fragments and shards.
+            let mut snapshots = vec![];
+            let mut fragments = vec![];
+            let mut setsum = sst::Setsum::default();
+            let depth = if can_snapshot_snapshots {
+                for snapshot in self.snapshots.iter() {
+                    if snapshot.depth < 2
+                        && snapshots.len() < snapshot_options.snapshot_rollover_threshold
+                    {
+                        setsum += snapshot.setsum;
+                        snapshots.push(snapshot.clone());
+                    }
+                }
+                2
+            } else if can_snapshot_fragments {
+                for fragment in self.fragments.iter() {
+                    if fragments.len() < snapshot_options.fragment_rollover_threshold {
+                        setsum += fragment.setsum;
+                        fragments.push(fragment.clone());
+                    }
+                }
+                1
+            } else {
+                unreachable!();
+            };
+            let path = snapshot_path(setsum);
+            Some(Snapshot {
+                path,
+                depth,
+                setsum,
+                writer,
+                snapshots,
+                fragments,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn apply_snapshot(&mut self, snapshot: &Snapshot) -> Result<(), Error> {
+        if snapshot.fragments.len() > self.fragments.len() {
+            return Err(Error::CorruptManifest(format!(
+                "snapshot has more fragments than manifest: {} > {}",
+                snapshot.fragments.len(),
+                self.fragments.len()
+            )));
+        }
+        for (idx, (lhs, rhs)) in
+            std::iter::zip(self.fragments.iter(), snapshot.fragments.iter()).enumerate()
+        {
+            if lhs != rhs {
+                return Err(Error::CorruptManifest(format!(
+                    "fragment {} does not match: {:?} != {:?}",
+                    idx, lhs, rhs
+                )));
+            }
+        }
+        self.snapshots
+            .retain(|s| !snapshot.snapshots.iter().any(|t| t.setsum == s.setsum));
+        self.fragments = self.fragments.split_off(snapshot.fragments.len());
+        self.snapshots.push(SnapPointer {
+            setsum: snapshot.setsum,
+            path_to_snapshot: snapshot.path.clone(),
+            depth: snapshot.depth,
+        });
+        Ok(())
+    }
+
     pub fn can_apply_fragment(&self, fragment: &ShardFragment) -> bool {
         let ShardFragment {
             path: _,
@@ -161,6 +424,16 @@ impl Manifest {
         self.fragments.push(fragment);
     }
 
+    pub fn estimate_size(&self) -> usize {
+        let mut acc = 0;
+        for fragment in self.fragments.iter() {
+            acc += std::mem::size_of::<ShardFragment>();
+            acc += fragment.path.len();
+        }
+        acc += std::mem::size_of::<Manifest>();
+        acc
+    }
+
     pub fn generate_pointers(&mut self, prev: &Manifest) -> Result<(), Error> {
         let timestamp = manifest_timestamp(&self.next.path_to_manifest)?;
         self.prev = Some(PrevPointer {
@@ -178,6 +451,9 @@ impl Manifest {
 
     pub fn scrub(&self) -> Result<sst::Setsum, ScrubError> {
         let mut acc = sst::Setsum::default();
+        for snapshot in self.snapshots.iter() {
+            acc += snapshot.setsum;
+        }
         for frag in self.fragments.iter() {
             acc += frag.setsum;
         }
@@ -219,6 +495,7 @@ impl Manifest {
         let manifest = Manifest {
             path: String::from("manifest/MANIFEST.0"),
             setsum: sst::Setsum::default(),
+            snapshots: vec![],
             fragments: vec![],
             prev: None,
             next,
@@ -455,6 +732,7 @@ mod tests {
             path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
+            snapshots: vec![],
             fragments: vec![shard_fragment1, shard_fragment2],
             prev: None,
             next: NextPointer {
@@ -500,6 +778,7 @@ mod tests {
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
             )
             .unwrap(),
+            snapshots: vec![],
             fragments: vec![shard_fragment1.clone(), shard_fragment2.clone()],
             prev: None,
             next: NextPointer {
@@ -514,6 +793,7 @@ mod tests {
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
             )
             .unwrap(),
+            snapshots: vec![],
             fragments: vec![shard_fragment1, shard_fragment2],
             prev: None,
             next: NextPointer {
@@ -551,6 +831,7 @@ mod tests {
             path: String::from("manifest/MANIFEST.0"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
+            snapshots: vec![],
             fragments: vec![],
             prev: None,
             next: NextPointer {
@@ -570,6 +851,7 @@ mod tests {
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
                 )
                 .unwrap(),
+                snapshots: vec![],
                 fragments: vec![
                     ShardFragment {
                         path: "path1".to_string(),
@@ -617,6 +899,7 @@ mod tests {
                 path: String::from("manifest/MANIFEST.0"),
                 writer: "log initializer".to_string(),
                 setsum: sst::Setsum::default(),
+                snapshots: vec![],
                 fragments: vec![],
                 next: NextPointer {
                     path_to_manifest: "manifest/MANIFEST.1".to_string(),

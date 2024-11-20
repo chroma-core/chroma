@@ -27,7 +27,7 @@ use stream_manager::StreamManager;
 
 pub use cursor::{Cursor, CursorStore};
 pub use latency_simulator::{LatencyControlledObjectStore, SimulationOptions};
-pub use manifest::{Manifest, ShardFragment, ShardID, ShardSeqNo};
+pub use manifest::{Manifest, ShardFragment, ShardID, ShardSeqNo, SnapshotOptions};
 pub use manifest_manager::{DeltaSeqNo, ManifestManager};
 pub use robust_object_store::RobustObjectStore;
 
@@ -35,12 +35,15 @@ pub use robust_object_store::RobustObjectStore;
 
 static LOG_UPLOADED: Counter = Counter::new("wal3.log_uploaded");
 static MANIFEST_UPLOADED: Counter = Counter::new("wal3.manifest_uploaded");
+static SNAPSHOT_UPLOADED: Counter = Counter::new("wal3.snapshot_uploaded");
 
 pub static LOG_TTFB_LATENCY: Moments = Moments::new("wal3.log_ttfb_latency");
 pub static LOG_FETCH_LATENCY: Moments = Moments::new("wal3.log_fetch_latency");
 
 static BATCH_SIZE: Moments = Moments::new("wal3.batch_size");
 
+static APPLY_SNAPSHOT_FAILED: Counter =
+    Counter::new("wal3__manifest_manager__apply_snapshot_failed");
 static APPLY_DELTA: Counter = Counter::new("wal3__manifest_manager__apply_delta");
 static PUSH_DELTA: Counter = Counter::new("wal3__manifest_manager__push_delta");
 static PULL_WORK: Counter = Counter::new("wal3__manifest_manager__pull_work");
@@ -57,12 +60,14 @@ static STORE_MANIFEST_BACKOFF: Counter = Counter::new("wal3.store_manifest_backo
 pub fn register_biometrics(collector: &Collector) {
     collector.register_counter(&LOG_UPLOADED);
     collector.register_counter(&MANIFEST_UPLOADED);
+    collector.register_counter(&SNAPSHOT_UPLOADED);
 
     collector.register_moments(&LOG_TTFB_LATENCY);
     collector.register_moments(&LOG_FETCH_LATENCY);
 
     collector.register_moments(&BATCH_SIZE);
 
+    collector.register_counter(&APPLY_SNAPSHOT_FAILED);
     collector.register_counter(&APPLY_DELTA);
     collector.register_counter(&PUSH_DELTA);
     collector.register_counter(&PULL_WORK);
@@ -265,6 +270,8 @@ pub struct LogWriterOptions {
     pub throttle_shard: ThrottleOptions,
     #[arrrg(nested)]
     pub throttle_manifest: ThrottleOptions,
+    #[arrrg(nested)]
+    pub snapshot_manifest: SnapshotOptions,
     #[arrrg(optional, "The alpha for manifest load.")]
     pub load_alpha: usize,
     #[arrrg(optional, "The alpha for manifest store.")]
@@ -280,7 +287,10 @@ impl Default for LogWriterOptions {
             shards: 1,
             // Default throttling options for shards.
             throttle_shard: ThrottleOptions::default(),
+            // Default throttling options for manifest.
             throttle_manifest: ThrottleOptions::default(),
+            // Default snapshot options for manifest.
+            snapshot_manifest: SnapshotOptions::default(),
             // Default alpha for manifest load.
             load_alpha: 1,
             // Default alpha for manifest store.
@@ -338,6 +348,7 @@ impl<O: ObjectStore> LogWriter<O> {
         let shard_manager = ShardManager::new(options.throttle_shard, &manifest, options.shards);
         let manifest_manager = ManifestManager::new(
             options.throttle_manifest,
+            options.snapshot_manifest,
             manifest,
             Arc::clone(&object_store),
         )
