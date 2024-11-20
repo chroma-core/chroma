@@ -353,7 +353,10 @@ impl CompactOrchestrator {
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
-                tracing::error!("Error dispatching writers for compaction {:?}", e);
+                tracing::error!(
+                    "Error dispatching apply log to segment writer task: {:?}",
+                    e
+                );
                 panic!(
                     "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
                     e
@@ -671,7 +674,14 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
         let materialized_result = Arc::new(materialized_result);
 
         let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
-            self.get_segment_writers().await.unwrap(); // todo
+            match self.get_segment_writers().await {
+                Ok(writers) => writers,
+                Err(e) => {
+                    tracing::error!("Error getting segment writers: {:?}", e);
+                    terminate_with_error(self.result_channel.take(), e, ctx);
+                    return;
+                }
+            };
 
         self.dispatch_apply_log_to_segment_writer_task(
             record_segment_writer,

@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use super::materialize_logs::MaterializeLogOutput;
 use crate::execution::operator::Operator;
 use crate::segment::metadata_segment::MetadataSegmentError;
 use crate::segment::record_segment::ApplyMaterializedLogError;
@@ -9,10 +8,9 @@ use crate::segment::SegmentWriter;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::Instrument;
-
-use super::materialize_logs::MaterializeLogOutput;
 
 #[derive(Error, Debug)]
 pub enum ApplyLogToSegmentWriterOperatorError {
@@ -88,7 +86,8 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
             .segment_writer
             .apply_materialized_log_chunk(materialized_chunk.clone())
             .instrument(tracing::trace_span!(
-                "Apply materialized logs to record segment"
+                "Apply materialized logs",
+                segment = input.segment_writer.get_name()
             ))
             .await
         {
