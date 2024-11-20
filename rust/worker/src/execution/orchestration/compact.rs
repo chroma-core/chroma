@@ -30,6 +30,7 @@ use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::RecordSegmentReader;
+use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::record_segment::RecordSegmentWriter;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
@@ -292,10 +293,20 @@ impl CompactOrchestrator {
         .await
         {
             Ok(reader) => reader.get_current_max_offset_id(),
-            Err(_) => {
-                // todo: explain
-                Arc::new(AtomicU32::new(0))
-            }
+            Err(err) => match *err {
+                RecordSegmentReaderCreationError::UninitializedSegment => {
+                    Arc::new(AtomicU32::new(0))
+                }
+                _ => {
+                    tracing::error!("Error getting current max offset id: {:?}", err);
+                    terminate_with_error(
+                        self.result_channel.take(),
+                        err as Box<dyn ChromaError>,
+                        ctx,
+                    );
+                    return;
+                }
+            },
         };
 
         self.num_write_tasks = partitions.len() as i32;
@@ -475,20 +486,9 @@ impl CompactOrchestrator {
         let hnsw_provider = self.hnsw_index_provider.clone();
         let mut sysdb = self.sysdb.clone();
 
-        let record_segment = self
-            .get_segment(SegmentType::BlockfileRecord)
-            .await
-            .unwrap(); // todo
-
-        let mt_segment = self
-            .get_segment(SegmentType::BlockfileMetadata)
-            .await
-            .unwrap(); // todo
-
-        let hnsw_segment = self
-            .get_segment(SegmentType::HnswDistributed)
-            .await
-            .unwrap(); // todo
+        let record_segment = self.get_segment(SegmentType::BlockfileRecord).await?;
+        let mt_segment = self.get_segment(SegmentType::BlockfileMetadata).await?;
+        let hnsw_segment = self.get_segment(SegmentType::HnswDistributed).await?;
 
         let borrowed_writers = self
             .writers
