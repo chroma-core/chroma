@@ -108,7 +108,7 @@ pub struct CompactOrchestrator {
     max_compaction_size: usize,
     max_partition_size: usize,
     // Populated during the compaction process
-    cached_segments: Option<Vec<Segment>>,
+    cached_segments: OnceCell<Vec<Segment>>,
     writers: OnceCell<(
         RecordSegmentWriter,
         Box<DistributedHNSWSegmentWriter>,
@@ -197,7 +197,7 @@ impl CompactOrchestrator {
             result_channel,
             max_compaction_size,
             max_partition_size,
-            cached_segments: None,
+            cached_segments: OnceCell::new(),
             writers: OnceCell::new(),
         }
     }
@@ -310,7 +310,7 @@ impl CompactOrchestrator {
             },
         };
 
-        self.num_write_tasks = partitions.len() as i32;
+        self.num_write_tasks = partitions.len() as i32 * 3; // 3 different segment types
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
@@ -426,17 +426,14 @@ impl CompactOrchestrator {
     }
 
     async fn get_all_segments(&mut self) -> Result<Vec<Segment>, GetSegmentsError> {
-        if let Some(segments) = &self.cached_segments {
-            return Ok(segments.clone());
-        }
-
-        let segments = self
-            .sysdb
-            .get_segments(None, None, None, self.collection_id)
-            .await?;
-
-        self.cached_segments = Some(segments.clone());
-        Ok(segments)
+        self.cached_segments
+            .get_or_try_init(|| async {
+                self.sysdb
+                    .get_segments(None, None, None, self.collection_id)
+                    .await
+            })
+            .await
+            .cloned()
     }
 
     async fn get_segment(
