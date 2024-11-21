@@ -45,30 +45,33 @@ impl ManagerState {
         options: &ThrottleOptions,
         manifest_manager: &ManifestManager,
         record_count: usize,
-    ) -> Option<(ShardID, ShardSeqNo, LogPosition, DeltaSeqNo)> {
-        let shard_state = self
+    ) -> Result<Option<(ShardID, ShardSeqNo, LogPosition, DeltaSeqNo)>, Error> {
+        let Some(shard_state) = self
             .shards
             .iter_mut()
             .filter(|x| x.writers_active < options.outstanding)
-            .min_by_key(|x| x.next_write)?;
+            .min_by_key(|x| x.next_write)
+        else {
+            return Ok(None);
+        };
         if shard_state.next_write > Instant::now() {
-            return None;
+            return Ok(None);
         }
         let (log_position, delta_seq_no) = match manifest_manager.assign_timestamp(record_count) {
             Some(log_position) => log_position,
             None => {
-                panic!("log full");
+                return Err(Error::LogFull);
             }
         };
         let next_seq_no = shard_state.next_seq_no;
         shard_state.writers_active += 1;
         shard_state.set_next_write(options);
-        Some((
+        Ok(Some((
             shard_state.shard_id,
             next_seq_no,
             log_position,
             delta_seq_no,
-        ))
+        )))
     }
 
     fn finish_write(&mut self, shard_id: ShardID) {
@@ -196,8 +199,17 @@ impl ShardManager {
         }
         let (shard_id, shard_seq_no, log_position, delta_seq_no) =
             match state.select_shard_for_write(&self.options, manifest_manager, batch_size) {
-                Some(x) => x,
-                None => return None,
+                Ok(Some(x)) => x,
+                Ok(None) => return None,
+                Err(e) => {
+                    // NOTE(rescrv):  I don't like this, but the only way that
+                    // select_shard_for_write can /fail/ is to have a full log, which will never
+                    // really happen.  So we error and leave the log full.
+                    for (_, _, tx) in state.enqueued.drain(..) {
+                        let _ = tx.send(Err(e.clone()));
+                    }
+                    return None;
+                }
             };
         BATCH_SIZE.add(batch_size as f64);
         let mut work = std::mem::take(&mut state.enqueued);
