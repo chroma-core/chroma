@@ -25,7 +25,7 @@ pub struct HnswIndexParamsFromSegment {
 }
 
 #[derive(Clone)]
-pub(crate) struct DistributedHNSWSegmentWriter {
+pub struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
     pub(crate) id: SegmentUuid,

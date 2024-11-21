@@ -67,6 +67,7 @@ impl<'a> Operator<CommitSegmentWriterInput<'a>, CommitSegmentWriterOutput>
             .finish()
             .instrument(tracing::info_span!(
                 "segment_writer.finish()",
+                otel.name = format!(".finish() on {:?}", input.segment_writer.get_name()),
                 segment = input.segment_writer.get_name()
             ))
             .await

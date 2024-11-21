@@ -86,8 +86,7 @@ enum ExecutionState {
     Pending,
     PullLogs,
     Partition,
-    Materialize,
-    ApplyingCommittingFlushing,
+    MaterializeApplyCommitFlush,
     Register,
 }
 
@@ -108,8 +107,9 @@ pub struct CompactOrchestrator {
     pulled_log_offset: Option<i64>,
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
-    // number of write segments tasks // todo
+    // Tracks the total remaining number of ApplyLogToSegmentWriter tasks per segment
     num_uncompleted_log_apply_tasks: HashMap<SegmentUuid, usize>,
+    // Tracks the total remaining number of FlushSegmentWriter tasks
     num_uncompleted_flush_tasks: usize,
     // Result Channel
     result_channel:
@@ -124,6 +124,7 @@ pub struct CompactOrchestrator {
         MetadataSegmentWriter<'static>,
     )>,
     flush_results: Vec<SegmentFlushInfo>,
+    // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
 }
 
@@ -157,6 +158,8 @@ enum CompactionError {
     SystemTimeError(#[from] std::time::SystemTimeError),
     #[error("Result channel dropped")]
     ResultChannelDropped,
+    #[error("Invariant violation: {}", .0)]
+    InvariantViolation(&'static str),
 }
 
 impl ChromaError for CompactionError {
@@ -290,7 +293,7 @@ impl CompactOrchestrator {
         >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        self.state = ExecutionState::Materialize;
+        self.state = ExecutionState::MaterializeApplyCommitFlush;
 
         let record_segment = match self.get_segment(SegmentType::BlockfileRecord).await {
             Ok(segment) => segment,
@@ -389,8 +392,16 @@ impl CompactOrchestrator {
     }
 
     fn get_segment_flusher_span(&mut self, flusher: &ChromaSegmentFlusher) -> Span {
-        let span = self.segment_spans.get(&flusher.get_id()).unwrap(); // todo
-        span.clone()
+        match self.segment_spans.get(&flusher.get_id()) {
+            Some(span) => span.clone(),
+            None => {
+                tracing::error!(
+                    "No span found for segment: {:?}. This should never happen because get_segment_writer_span() should have previously created a span.",
+                    flusher.get_name()
+                );
+                Span::current()
+            }
+        }
     }
 
     async fn dispatch_apply_log_to_segment_writer_task(
@@ -452,7 +463,7 @@ impl CompactOrchestrator {
 
     async fn dispatch_segment_flush(
         &mut self,
-        segment_flusher: ChromaSegmentFlusher, // todo: rename
+        segment_flusher: ChromaSegmentFlusher,
         self_address: Box<
             dyn ReceiverForMessage<
                 TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
@@ -806,10 +817,23 @@ impl
                     .entry(message.segment_writer.get_id())
                     .and_modify(|e| *e -= 1);
 
-                let num_tasks_left = self
+                let num_tasks_left = match self
                     .num_uncompleted_log_apply_tasks
                     .get(&message.segment_writer.get_id())
-                    .unwrap(); // todo
+                {
+                    Some(num_tasks_left) => num_tasks_left,
+                    None => {
+                        terminate_with_error(
+                            self.result_channel.take(),
+                            Box::new(CompactionError::InvariantViolation(
+                                "Segment writer not found",
+                            )),
+                            ctx,
+                        );
+                        return;
+                    }
+                };
+
                 if *num_tasks_left == 0 {
                     self.dispatch_segment_writer_commit(message.segment_writer, ctx.receiver())
                         .await;
@@ -862,9 +886,8 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         let message = message.into_inner();
         match message {
             Ok(message) => {
-                self.segment_spans
-                    .remove(&message.flush_info.segment_id)
-                    .unwrap(); // todo
+                // Drops the span so that the end timestamp is accurate
+                let _ = self.segment_spans.remove(&message.flush_info.segment_id);
 
                 self.flush_results.push(message.flush_info);
                 self.num_uncompleted_flush_tasks -= 1;

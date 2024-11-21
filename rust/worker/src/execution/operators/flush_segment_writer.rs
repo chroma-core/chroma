@@ -69,7 +69,8 @@ impl Operator<FlushSegmentWriterInput, FlushSegmentWriterOutput> for FlushSegmen
             .clone()
             .flush()
             .instrument(trace_span!(
-                "flush segment",
+                "Flush segment",
+                otel.name = format!("Flush {:?}", input.segment_flusher.get_name()),
                 segment = input.segment_flusher.get_name()
             ))
             .await?;

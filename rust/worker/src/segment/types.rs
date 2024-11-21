@@ -792,7 +792,7 @@ pub trait SegmentFlusher {
 pub enum ChromaSegmentWriter<'a> {
     RecordSegment(RecordSegmentWriter),
     MetadataSegment(MetadataSegmentWriter<'a>),
-    DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>), // todo: should be boxed?
+    DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>),
 }
 
 impl<'a> SegmentWriter for ChromaSegmentWriter<'a> {
