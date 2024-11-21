@@ -260,6 +260,10 @@ impl WorkerServer {
             .knn
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
+        if knn.embeddings.is_empty() {
+            return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
+        }
+
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
