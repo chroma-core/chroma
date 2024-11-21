@@ -7,6 +7,7 @@ use chroma_error::ChromaError;
 
 use super::{Key, Value};
 
+#[derive(Clone)]
 pub enum BlockfileFlusher {
     MemoryBlockfileFlusher(MemoryBlockfileFlusher),
     ArrowBlockfileFlusher(ArrowBlockfileFlusher),

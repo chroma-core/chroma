@@ -6,9 +6,14 @@ use crate::execution::operators::apply_log_to_segment_writer::{
     ApplyLogToSegmentWriterInput, ApplyLogToSegmentWriterOperator,
     ApplyLogToSegmentWriterOperatorError, ApplyLogToSegmentWriterOutput,
 };
-use crate::execution::operators::flush_s3::FlushS3Input;
-use crate::execution::operators::flush_s3::FlushS3Operator;
-use crate::execution::operators::flush_s3::FlushS3Output;
+use crate::execution::operators::commit_segment_writer::{
+    CommitSegmentWriterInput, CommitSegmentWriterOperator, CommitSegmentWriterOperatorError,
+    CommitSegmentWriterOutput,
+};
+use crate::execution::operators::flush_segment_writer::{
+    FlushSegmentWriterInput, FlushSegmentWriterOperator, FlushSegmentWriterOperatorError,
+    FlushSegmentWriterOutput,
+};
 use crate::execution::operators::materialize_logs::MaterializeLogInput;
 use crate::execution::operators::materialize_logs::MaterializeLogOperator;
 use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
@@ -32,7 +37,7 @@ use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::record_segment::RecordSegmentWriter;
-use crate::segment::SegmentWriter;
+use crate::segment::{ChromaSegmentFlusher, ChromaSegmentWriter, SegmentFlusher, SegmentWriter};
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
@@ -46,9 +51,10 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::Chunk;
+use chroma_types::{Chunk, SegmentUuid};
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -64,13 +70,15 @@ than a flexible state machine abstraction, we just manually define the states th
 expect to encounter for a given query plan. This is a bit more rigid, but it's also simpler and easier to
 understand. We can always add more abstraction later if we need it.
 ```plaintext
-
-                                   ┌───► Write─────-------┐
-                                   │                      │
-  Pending ─► PullLogs ─► Partition │                      ├─► Flush ─► Finished
-                                   │                      │
-                                   └───► Write ───────────┘
-
+                                   ┌────────────────────────────┐
+                                   ├─► Apply logs to segment #1 │
+                                   │                            ├──► Commit segment #1 ──► Flush segment #1
+                                   ├─► Apply logs to segment #1 │
+Pending ──► PullLogs ──► Partition │                            │                                            ──► Register ─► Finished
+                                   ├─► Apply logs to segment #2 │
+                                   │                            ├──► Commit segment #2 ──► Flush segment #2
+                                   ├─► Apply logs to segment #2 │
+                                   └────────────────────────────┘
 ```
 */
 #[derive(Debug)]
@@ -78,8 +86,7 @@ enum ExecutionState {
     Pending,
     PullLogs,
     Partition,
-    MaterializeAndWrite,
-    Flush,
+    MaterializeApplyCommitFlush,
     Register,
 }
 
@@ -100,8 +107,10 @@ pub struct CompactOrchestrator {
     pulled_log_offset: Option<i64>,
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
-    // number of write segments tasks
-    num_write_tasks: i32,
+    // Tracks the total remaining number of ApplyLogToSegmentWriter tasks per segment
+    num_uncompleted_log_apply_tasks: HashMap<SegmentUuid, usize>,
+    // Tracks the total remaining number of FlushSegmentWriter tasks
+    num_uncompleted_flush_tasks: usize,
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
@@ -114,6 +123,9 @@ pub struct CompactOrchestrator {
         Box<DistributedHNSWSegmentWriter>,
         MetadataSegmentWriter<'static>,
     )>,
+    flush_results: Vec<SegmentFlushInfo>,
+    // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
+    segment_spans: HashMap<SegmentUuid, Span>,
 }
 
 #[derive(Error, Debug)]
@@ -146,6 +158,8 @@ enum CompactionError {
     SystemTimeError(#[from] std::time::SystemTimeError),
     #[error("Result channel dropped")]
     ResultChannelDropped,
+    #[error("Invariant violation: {}", .0)]
+    InvariantViolation(&'static str),
 }
 
 impl ChromaError for CompactionError {
@@ -193,12 +207,15 @@ impl CompactOrchestrator {
             hnsw_index_provider,
             pulled_log_offset: None,
             dispatcher,
-            num_write_tasks: 0,
+            num_uncompleted_log_apply_tasks: HashMap::new(),
+            num_uncompleted_flush_tasks: 0,
             result_channel,
             max_compaction_size,
             max_partition_size,
             cached_segments: OnceCell::new(),
             writers: OnceCell::new(),
+            flush_results: Vec::new(),
+            segment_spans: HashMap::new(),
         }
     }
 
@@ -276,12 +293,30 @@ impl CompactOrchestrator {
         >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        self.state = ExecutionState::MaterializeAndWrite;
+        self.state = ExecutionState::MaterializeApplyCommitFlush;
 
         let record_segment = match self.get_segment(SegmentType::BlockfileRecord).await {
             Ok(segment) => segment,
             Err(e) => {
                 tracing::error!("Error getting record segment: {:?}", e);
+                terminate_with_error(self.result_channel.take(), e, ctx);
+                return;
+            }
+        };
+
+        let hnsw_segment = match self.get_segment(SegmentType::HnswDistributed).await {
+            Ok(segment) => segment,
+            Err(e) => {
+                tracing::error!("Error getting hnsw segment: {:?}", e);
+                terminate_with_error(self.result_channel.take(), e, ctx);
+                return;
+            }
+        };
+
+        let metadata_segment = match self.get_segment(SegmentType::BlockfileMetadata).await {
+            Ok(segment) => segment,
+            Err(e) => {
+                tracing::error!("Error getting metadata segment: {:?}", e);
                 terminate_with_error(self.result_channel.take(), e, ctx);
                 return;
             }
@@ -310,7 +345,14 @@ impl CompactOrchestrator {
             },
         };
 
-        self.num_write_tasks = partitions.len() as i32 * 3; // 3 different segment types
+        self.num_uncompleted_log_apply_tasks
+            .insert(record_segment.id, partitions.len());
+        self.num_uncompleted_log_apply_tasks
+            .insert(hnsw_segment.id, partitions.len());
+        self.num_uncompleted_log_apply_tasks
+            .insert(metadata_segment.id, partitions.len());
+        self.num_uncompleted_flush_tasks = 3;
+
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
@@ -335,23 +377,52 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn dispatch_apply_log_to_segment_writer_task<
-        Writer: SegmentWriter + Clone + Send + Sync + std::fmt::Debug + 'static,
-    >(
+    fn get_segment_writer_span(&mut self, writer: &ChromaSegmentWriter<'static>) -> Span {
+        let span = self
+            .segment_spans
+            .entry(writer.get_id())
+            .or_insert_with(|| {
+                tracing::span!(
+                    tracing::Level::INFO,
+                    "Segment",
+                    otel.name = format!("Segment: {:?}", writer.get_name())
+                )
+            });
+        span.clone()
+    }
+
+    fn get_segment_flusher_span(&mut self, flusher: &ChromaSegmentFlusher) -> Span {
+        match self.segment_spans.get(&flusher.get_id()) {
+            Some(span) => span.clone(),
+            None => {
+                tracing::error!(
+                    "No span found for segment: {:?}. This should never happen because get_segment_writer_span() should have previously created a span.",
+                    flusher.get_name()
+                );
+                Span::current()
+            }
+        }
+    }
+
+    async fn dispatch_apply_log_to_segment_writer_task(
         &mut self,
-        segment_writer: Writer,
+        segment_writer: ChromaSegmentWriter<'static>,
         materialized_log: Arc<MaterializeLogOutput>,
         self_address: Box<
             dyn ReceiverForMessage<
-                TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
+                TaskResult<
+                    ApplyLogToSegmentWriterOutput<'static>,
+                    ApplyLogToSegmentWriterOperatorError,
+                >,
             >,
         >,
     ) {
+        let span = self.get_segment_writer_span(&segment_writer);
         let operator = ApplyLogToSegmentWriterOperator::new();
         let input = ApplyLogToSegmentWriterInput::new(segment_writer, materialized_log);
         let task = wrap(operator, input, self_address.clone());
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
+        match self.dispatcher.send(task, Some(span)).await {
+            Ok(_) => {}
             Err(e) => {
                 tracing::error!(
                     "Error dispatching apply log to segment writer task: {:?}",
@@ -365,27 +436,48 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn flush_s3(
+    async fn dispatch_segment_writer_commit(
         &mut self,
-        record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
-        metadata_segment_writer: MetadataSegmentWriter<'static>,
-        self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
+        segment_writer: ChromaSegmentWriter<'static>,
+        self_address: Box<
+            dyn ReceiverForMessage<
+                TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
+            >,
+        >,
     ) {
-        self.state = ExecutionState::Flush;
-
-        let operator = FlushS3Operator::new();
-        let input = FlushS3Input::new(
-            record_segment_writer,
-            hnsw_segment_writer,
-            metadata_segment_writer,
-        );
-
+        let span = self.get_segment_writer_span(&segment_writer);
+        let operator = CommitSegmentWriterOperator::new();
+        let input = CommitSegmentWriterInput::new(segment_writer);
         let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
+        match self.dispatcher.send(task, Some(span)).await {
             Ok(_) => (),
             Err(e) => {
-                tracing::error!("Error dispatching flush to S3 for compaction {:?}", e);
+                tracing::error!("Error dispatching commit for compaction {:?}", e);
+                panic!(
+                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
+                    e
+                );
+            }
+        }
+    }
+
+    async fn dispatch_segment_flush(
+        &mut self,
+        segment_flusher: ChromaSegmentFlusher,
+        self_address: Box<
+            dyn ReceiverForMessage<
+                TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
+            >,
+        >,
+    ) {
+        let span = self.get_segment_flusher_span(&segment_flusher);
+        let operator = FlushSegmentWriterOperator::new();
+        let input = FlushSegmentWriterInput::new(segment_flusher);
+        let task = wrap(operator, input, self_address);
+        match self.dispatcher.send(task, Some(span)).await {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("Error dispatching flush for compaction {:?}", e);
                 panic!(
                     "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
                     e
@@ -397,7 +489,6 @@ impl CompactOrchestrator {
     async fn register(
         &mut self,
         log_position: i64,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
         self_address: Box<dyn ReceiverForMessage<TaskResult<RegisterOutput, RegisterError>>>,
     ) {
         self.state = ExecutionState::Register;
@@ -407,7 +498,7 @@ impl CompactOrchestrator {
             self.compaction_job.collection_id,
             log_position,
             self.compaction_job.collection_version,
-            segment_flush_info,
+            self.flush_results.clone().into(),
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -681,21 +772,21 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             };
 
         self.dispatch_apply_log_to_segment_writer_task(
-            record_segment_writer,
+            ChromaSegmentWriter::RecordSegment(record_segment_writer),
             materialized_result.clone(),
             ctx.receiver(),
         )
         .await;
 
         self.dispatch_apply_log_to_segment_writer_task(
-            hnsw_segment_writer,
+            ChromaSegmentWriter::DistributedHNSWSegment(hnsw_segment_writer),
             materialized_result.clone(),
             ctx.receiver(),
         )
         .await;
 
         self.dispatch_apply_log_to_segment_writer_task(
-            metadata_segment_writer,
+            ChromaSegmentWriter::MetadataSegment(metadata_segment_writer),
             materialized_result,
             ctx.receiver(),
         )
@@ -704,38 +795,48 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>>
-    for CompactOrchestrator
+impl
+    Handler<
+        TaskResult<ApplyLogToSegmentWriterOutput<'static>, ApplyLogToSegmentWriterOperatorError>,
+    > for CompactOrchestrator
 {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
+        message: TaskResult<
+            ApplyLogToSegmentWriterOutput<'static>,
+            ApplyLogToSegmentWriterOperatorError,
+        >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         let message = message.into_inner();
         match message {
-            Ok(_) => {
-                self.num_write_tasks -= 1;
-                if self.num_write_tasks == 0 {
-                    let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
-                        match self.get_segment_writers().await {
-                            Ok(writers) => writers,
-                            Err(e) => {
-                                tracing::error!("Error getting segment writers: {:?}", e);
-                                terminate_with_error(self.result_channel.take(), e, ctx);
-                                return;
-                            }
-                        };
+            Ok(message) => {
+                self.num_uncompleted_log_apply_tasks
+                    .entry(message.segment_writer.get_id())
+                    .and_modify(|e| *e -= 1);
 
-                    self.flush_s3(
-                        record_segment_writer,
-                        hnsw_segment_writer,
-                        metadata_segment_writer,
-                        ctx.receiver(),
-                    )
-                    .await;
+                let num_tasks_left = match self
+                    .num_uncompleted_log_apply_tasks
+                    .get(&message.segment_writer.get_id())
+                {
+                    Some(num_tasks_left) => num_tasks_left,
+                    None => {
+                        terminate_with_error(
+                            self.result_channel.take(),
+                            Box::new(CompactionError::InvariantViolation(
+                                "Segment writer not found",
+                            )),
+                            ctx,
+                        );
+                        return;
+                    }
+                };
+
+                if *num_tasks_left == 0 {
+                    self.dispatch_segment_writer_commit(message.segment_writer, ctx.receiver())
+                        .await;
                 }
             }
             Err(e) => {
@@ -747,28 +848,59 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
 }
 
 #[async_trait]
-impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchestrator {
+impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>>
+    for CompactOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<FlushS3Output, Box<dyn ChromaError>>,
+        message: TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         let message = message.into_inner();
         match message {
-            Ok(msg) => {
-                // Unwrap should be safe here as we are guaranteed to have a value by construction
-                self.register(
-                    self.pulled_log_offset.unwrap(),
-                    msg.segment_flush_info,
-                    ctx.receiver(),
-                )
-                .await;
+            Ok(message) => {
+                self.dispatch_segment_flush(message.flusher, ctx.receiver())
+                    .await;
             }
             Err(e) => {
-                tracing::error!("Error flushing to S3: {:?}", e);
-                terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
+                tracing::error!("Error committing & flushing segment writer: {:?}", e);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>>
+    for CompactOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+    ) {
+        let message = message.into_inner();
+        match message {
+            Ok(message) => {
+                // Drops the span so that the end timestamp is accurate
+                let _ = self.segment_spans.remove(&message.flush_info.segment_id);
+
+                self.flush_results.push(message.flush_info);
+                self.num_uncompleted_flush_tasks -= 1;
+
+                if self.num_uncompleted_flush_tasks == 0 {
+                    // Unwrap should be safe here as we are guaranteed to have a value by construction
+                    self.register(self.pulled_log_offset.unwrap(), ctx.receiver())
+                        .await;
+                }
+            }
+            Err(e) => {
+                tracing::error!("Error committing & flushing segment writer: {:?}", e);
+                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
             }
         }
     }

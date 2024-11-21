@@ -14,6 +14,7 @@ pub struct MemoryBlockfileWriter {
     id: uuid::Uuid,
 }
 
+#[derive(Clone)]
 pub struct MemoryBlockfileFlusher {
     id: uuid::Uuid,
 }
