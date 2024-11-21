@@ -56,7 +56,7 @@ jobs:
           python-version: 3.12
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_embeddings.py::test_embeddings_state"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "chromadb/test/property/test_add.py"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: normal
