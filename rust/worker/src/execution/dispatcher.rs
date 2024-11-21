@@ -96,7 +96,7 @@ impl Dispatcher {
     async fn enqueue_task(&mut self, task: TaskMessage) {
         match task.get_type() {
             OperatorType::IO => {
-                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
+                let child_span = trace_span!(parent: Span::current(), "IO task execution", otel.name = format!("IO task execution: {}", task.get_name()), name = task.get_name());
                 tokio::spawn(async move {
                     task.run().instrument(child_span).await;
                 });
