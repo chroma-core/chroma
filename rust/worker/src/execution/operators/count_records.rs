@@ -106,6 +106,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                     RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
+                    RecordSegmentReaderCreationError::BlockfileReadError(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
@@ -279,6 +282,11 @@ mod tests {
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
                                 panic!(
                                     "Error creating record segment reader. Blockfile open error."
+                                );
+                            }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
+                                panic!(
+                                    "Error creating record segment reader. Blockfile read error."
                                 );
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {

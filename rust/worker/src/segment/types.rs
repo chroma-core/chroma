@@ -6,6 +6,7 @@ use chroma_types::{
     UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
@@ -425,7 +426,7 @@ pub async fn materialize_logs<'me>(
         None => {
             match record_segment_reader.as_ref() {
                 Some(reader) => {
-                    let offset_id = reader.get_current_max_offset_id();
+                    let offset_id = Arc::new(AtomicU32::new(reader.get_max_offset_id()));
                     offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     offset_id
                 }
@@ -761,11 +762,12 @@ pub async fn materialize_logs<'me>(
 
 // This needs to be public for testing
 #[allow(async_fn_in_trait)]
-pub trait SegmentWriter<'a> {
-    async fn apply_materialized_log_chunk(
+pub trait SegmentWriter {
+    fn get_name(&self) -> &'static str;
+    fn apply_materialized_log_chunk(
         &self,
-        records: Chunk<MaterializedLogRecord<'a>>,
-    ) -> Result<(), ApplyMaterializedLogError>;
+        records: Chunk<MaterializedLogRecord>,
+    ) -> impl Future<Output = Result<(), ApplyMaterializedLogError>> + Send;
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
 }
 
@@ -868,6 +870,9 @@ mod tests {
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
@@ -1162,6 +1167,9 @@ mod tests {
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                                 panic!("Error creating record segment reader");
                             }
@@ -1444,6 +1452,9 @@ mod tests {
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
@@ -1747,6 +1758,9 @@ mod tests {
                             // segment is not yet initialized in storage.
                             RecordSegmentReaderCreationError::UninitializedSegment => None,
                             RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::BlockfileReadError(_) => {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {

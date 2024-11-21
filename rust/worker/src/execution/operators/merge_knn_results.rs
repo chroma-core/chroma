@@ -149,6 +149,9 @@ impl Operator<MergeKnnResultsOperatorInput, MergeKnnResultsOperatorOutput>
                     RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
                         return Err(e);
                     }
+                    RecordSegmentReaderCreationError::BlockfileReadError(e) => {
+                        return Err(e);
+                    }
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
                         return Err(e);
                     }

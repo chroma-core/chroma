@@ -1,3 +1,4 @@
+pub(super) mod apply_log_to_segment_writer;
 pub(super) mod brute_force_knn;
 pub(super) mod count_records;
 pub(super) mod flush_s3;
@@ -10,7 +11,6 @@ pub(super) mod partition;
 pub(super) mod pull_log;
 pub(super) mod record_segment_prefetch;
 pub(super) mod register;
-pub(super) mod write_segments;
 
 // Required for benchmark
 pub mod fetch_log;
