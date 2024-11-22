@@ -528,13 +528,13 @@ impl SpannIndexWriter {
         }
         // Increment version and trigger append.
         {
-            let version_map_guard = self.versions_map.write();
+            let mut version_map_guard = self.versions_map.write();
             let current_version = version_map_guard
                 .versions_map
                 .get(&doc_offset_id)
                 .ok_or(SpannIndexWriterError::VersionNotFound)?;
             if doc_version < *current_version {
-                Ok(())
+                return Ok(());
             }
             let next_version = *current_version + 1;
             version_map_guard
@@ -858,7 +858,9 @@ impl SpannIndexWriter {
             }
         }
         // Reassign code.
-        self.collect_and_reassign(
+        // The Box::pin is to make compiler happy since this code is
+        // async recursive.
+        Box::pin(self.collect_and_reassign(
             &new_head_ids,
             &new_head_embeddings,
             head_id,
@@ -866,7 +868,7 @@ impl SpannIndexWriter {
             &new_doc_offset_ids,
             &new_doc_versions,
             &new_posting_lists,
-        )
+        ))
         .await
     }
 
