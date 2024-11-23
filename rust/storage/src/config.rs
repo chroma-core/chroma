@@ -25,6 +25,8 @@ pub enum ObjectStoreType {
     Minio,
     #[serde(alias = "s3")]
     S3,
+    #[serde(alias = "local")]
+    Local,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -39,6 +41,7 @@ pub struct ObjectStoreConfig {
     pub upload_part_size_bytes: u64,
     pub download_part_size_bytes: u64,
     pub max_concurrent_requests: usize,
+    pub cache: Option<Box<ObjectStoreConfig>>,
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]

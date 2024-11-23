@@ -3,15 +3,17 @@ use std::sync::Arc;
 
 use chroma_error::ChromaError;
 use object_store::path::Path;
-use object_store::{GetOptions, GetRange, ObjectStore as ObjectStoreTrait, PutOptions};
+use object_store::{GetOptions, GetRange, PutOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::Mutex;
 
-use super::{GetError, PutError, StorageConfigError};
+use crate::caching::CachingObjectStore;
+use crate::non_destructive::NonDestructiveObjectStore;
+use crate::{GetError, PutError, SafeObjectStore, StorageConfigError};
 
 #[derive(Clone)]
 pub struct ObjectStore {
-    object_store: Arc<dyn ObjectStoreTrait>,
+    object_store: Arc<dyn SafeObjectStore>,
     upload_part_size_bytes: u64,
     #[allow(dead_code)]
     download_part_size_bytes: u64,
@@ -21,7 +23,7 @@ impl ObjectStore {
     pub async fn try_from_config(
         config: &super::config::ObjectStoreConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        match &config.bucket.r#type {
+        let object_store = match &config.bucket.r#type {
             super::config::ObjectStoreType::Minio => {
                 let object_store = object_store::aws::AmazonS3Builder::new()
                     .with_region("us-east-1")
@@ -34,10 +36,6 @@ impl ObjectStore {
                         tracing::error! {"Failed to create object store: {:?}", err};
                         Box::new(StorageConfigError::InvalidStorageConfig) as _
                     })?;
-                let object_store = object_store::limit::LimitStore::new(
-                    object_store,
-                    config.max_concurrent_requests,
-                );
                 Ok(ObjectStore {
                     object_store: Arc::new(object_store),
                     upload_part_size_bytes: config.upload_part_size_bytes,
@@ -52,16 +50,50 @@ impl ObjectStore {
                         tracing::error! {"Failed to create object store: {:?}", err};
                         Box::new(StorageConfigError::InvalidStorageConfig) as _
                     })?;
-                let object_store = object_store::limit::LimitStore::new(
-                    object_store,
-                    config.max_concurrent_requests,
-                );
                 Ok(ObjectStore {
                     object_store: Arc::new(object_store),
                     upload_part_size_bytes: config.upload_part_size_bytes,
                     download_part_size_bytes: config.download_part_size_bytes,
                 })
             }
+            super::config::ObjectStoreType::Local => {
+                let object_store =
+                    object_store::local::LocalFileSystem::new_with_prefix(&config.bucket.name)
+                        .map_err(|err| {
+                            tracing::error! {"Failed to create object store: {:?}", err};
+                            Box::new(StorageConfigError::InvalidStorageConfig) as _
+                        })?;
+                Ok(ObjectStore {
+                    object_store: Arc::new(object_store),
+                    upload_part_size_bytes: config.upload_part_size_bytes,
+                    download_part_size_bytes: config.download_part_size_bytes,
+                })
+            }
+        }?;
+        if let Some(cache) = config.cache.as_ref() {
+            let cache = Box::pin(Self::try_from_config(cache)).await?;
+            // If the backing object store supports delete, wrap it.
+            if object_store.object_store.supports_delete() {
+                let non_destructive_backing =
+                    Arc::new(NonDestructiveObjectStore::new(object_store.object_store));
+                let caching_object_store =
+                    CachingObjectStore::new(cache.object_store, non_destructive_backing);
+                Ok(ObjectStore {
+                    object_store: Arc::new(caching_object_store),
+                    upload_part_size_bytes: config.upload_part_size_bytes,
+                    download_part_size_bytes: config.download_part_size_bytes,
+                })
+            } else {
+                let caching_object_store =
+                    CachingObjectStore::new(cache.object_store, object_store.object_store);
+                Ok(ObjectStore {
+                    object_store: Arc::new(caching_object_store),
+                    upload_part_size_bytes: config.upload_part_size_bytes,
+                    download_part_size_bytes: config.download_part_size_bytes,
+                })
+            }
+        } else {
+            Ok(object_store)
         }
     }
 
@@ -163,10 +195,18 @@ impl ObjectStore {
             .await?;
         Ok(())
     }
+
+    pub fn supports_delete(&self) -> bool {
+        self.object_store.supports_delete()
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::config::{
+        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
+    };
+
     use super::*;
 
     #[test]
@@ -219,5 +259,85 @@ mod tests {
         let result = object_store.get(key).await.unwrap();
         assert_eq!(result, bytes.into());
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_minio_object_store_from_config() {
+        let config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "test".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024 * 5,
+            download_part_size_bytes: 1024 * 1024 * 5,
+            max_concurrent_requests: 1,
+            cache: None,
+        });
+        let _object_store = crate::from_config(&config).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_aws_object_store_from_config() {
+        let config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "test".to_string(),
+                r#type: ObjectStoreType::S3,
+            },
+            upload_part_size_bytes: 1024 * 1024 * 5,
+            download_part_size_bytes: 1024 * 1024 * 5,
+            max_concurrent_requests: 1,
+            cache: None,
+        });
+        let _object_store = crate::from_config(&config).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_minio_object_store_from_config_with_cache() {
+        let config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "test".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024 * 5,
+            download_part_size_bytes: 1024 * 1024 * 5,
+            max_concurrent_requests: 1,
+            cache: Some(Box::new(ObjectStoreConfig {
+                bucket: ObjectStoreBucketConfig {
+                    name: "cache".to_string(),
+                    r#type: ObjectStoreType::Minio,
+                },
+                upload_part_size_bytes: 1024 * 1024 * 5,
+                download_part_size_bytes: 1024 * 1024 * 5,
+                max_concurrent_requests: 1,
+                cache: None,
+            })),
+        });
+        let storage = crate::from_config(&config).await.unwrap();
+        assert!(!storage.supports_delete());
+    }
+
+    #[tokio::test]
+    async fn create_aws_object_store_from_config_with_cache() {
+        let config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "test".to_string(),
+                r#type: ObjectStoreType::S3,
+            },
+            upload_part_size_bytes: 1024 * 1024 * 5,
+            download_part_size_bytes: 1024 * 1024 * 5,
+            max_concurrent_requests: 1,
+            cache: Some(Box::new(ObjectStoreConfig {
+                bucket: ObjectStoreBucketConfig {
+                    name: "cache".to_string(),
+                    r#type: ObjectStoreType::Minio,
+                },
+                upload_part_size_bytes: 1024 * 1024 * 5,
+                download_part_size_bytes: 1024 * 1024 * 5,
+                max_concurrent_requests: 1,
+                cache: None,
+            })),
+        });
+        let storage = crate::from_config(&config).await.unwrap();
+        assert!(!storage.supports_delete());
     }
 }
