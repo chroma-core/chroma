@@ -977,6 +977,18 @@ impl SpannIndexWriter {
             .await
     }
 
+    pub async fn update(&self, id: u32, embedding: &[f32]) -> Result<(), SpannIndexWriterError> {
+        // Delete and then add.
+        self.delete(id).await?;
+        self.add(id, embedding).await
+    }
+
+    pub async fn delete(&self, id: u32) -> Result<(), SpannIndexWriterError> {
+        let mut version_map_guard = self.versions_map.write();
+        version_map_guard.versions_map.insert(id, 0);
+        Ok(())
+    }
+
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
         // Pl list.
         let pl_flusher = match Arc::try_unwrap(self.posting_list_writer) {

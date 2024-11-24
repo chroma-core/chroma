@@ -206,6 +206,26 @@ impl SpannSegmentWriter {
             .await
             .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
+
+    async fn delete(
+        &self,
+        record: &MaterializedLogRecord<'_>,
+    ) -> Result<(), SpannSegmentWriterError> {
+        self.index
+            .delete(record.offset_id)
+            .await
+            .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
+    }
+
+    async fn update(
+        &self,
+        record: &MaterializedLogRecord<'_>,
+    ) -> Result<(), SpannSegmentWriterError> {
+        self.index
+            .update(record.offset_id, record.merged_embeddings())
+            .await
+            .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
+    }
 }
 
 struct SpannSegmentFlusher {
@@ -224,10 +244,20 @@ impl<'referred_data> SegmentWriter<'referred_data> for SpannSegmentWriter {
                         .await
                         .map_err(ApplyMaterializedLogError::SpannSegmentError)?;
                 }
-                // TODO(Sanket): Implement other operations.
-                _ => {
-                    todo!()
+                MaterializedLogOperation::UpdateExisting
+                | MaterializedLogOperation::OverwriteExisting => {
+                    self.update(record)
+                        .await
+                        .map_err(|_| ApplyMaterializedLogError::BlockfileUpdate)?;
                 }
+                MaterializedLogOperation::DeleteExisting => {
+                    self.delete(record)
+                        .await
+                        .map_err(|_| ApplyMaterializedLogError::BlockfileDelete)?;
+                }
+                MaterializedLogOperation::Initial => panic!(
+                    "Invariant violation. Mat records should not contain logs in initial state"
+                ),
             }
         }
         Ok(())
