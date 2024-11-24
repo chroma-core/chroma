@@ -146,6 +146,7 @@ const SPLIT_THRESHOLD: usize = 100;
 const NUM_SAMPLES_FOR_KMEANS: usize = 1000;
 const INITIAL_LAMBDA: f32 = 100.0;
 const REASSIGN_NBR_COUNT: usize = 8;
+const QUERY_EPSILON: f32 = 10.0;
 
 impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
@@ -360,15 +361,14 @@ impl SpannIndexWriter {
         &self,
         query: &[f32],
     ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannIndexWriterError> {
-        let ids;
-        let distances;
+        let mut nearby_ids: Vec<usize> = vec![];
+        let mut nearby_distances: Vec<f32> = vec![];
         let mut embeddings: Vec<Vec<f32>> = vec![];
         {
             let read_guard = self.hnsw_index.inner.read();
             let allowed_ids = vec![];
             let disallowed_ids = vec![];
-            // Query is already normalized so no need to normalize again.
-            (ids, distances) = read_guard
+            let (ids, distances) = read_guard
                 .query(
                     query,
                     NUM_CENTROIDS_TO_SEARCH as usize,
@@ -379,7 +379,14 @@ impl SpannIndexWriter {
             // Get the embeddings also for distance computation.
             // Normalization is idempotent and since we write normalized embeddings
             // to the hnsw index, we'll get the same embeddings after denormalization.
-            for id in ids.iter() {
+            for (id, distance) in ids.iter().zip(distances.iter()) {
+                if *distance <= (1_f32 + QUERY_EPSILON) * distances[0] {
+                    nearby_ids.push(*id);
+                    nearby_distances.push(*distance);
+                }
+            }
+            // Get the embeddings also for distance computation.
+            for id in nearby_ids.iter() {
                 let emb = read_guard
                     .get(*id)
                     .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
@@ -392,7 +399,10 @@ impl SpannIndexWriter {
         let mut res_distances = vec![];
         let mut res_embeddings: Vec<Vec<f32>> = vec![];
         // Embeddings that were obtained are already normalized.
-        for (id, (distance, embedding)) in ids.iter().zip(distances.iter().zip(embeddings)) {
+        for (id, (distance, embedding)) in nearby_ids
+            .iter()
+            .zip(nearby_distances.iter().zip(embeddings))
+        {
             let mut rng_accepted = true;
             for nbr_embedding in res_embeddings.iter() {
                 // Embeddings are already normalized so no need to normalize again.
@@ -435,21 +445,18 @@ impl SpannIndexWriter {
     async fn collect_and_reassign_split_points(
         &self,
         new_head_ids: &[i32],
-        new_head_embeddings: &Vec<Option<&Vec<f32>>>,
-        old_head_id: u32,
+        new_head_embeddings: &[Option<&Vec<f32>>],
         old_head_embedding: &[f32],
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
         split_doc_embeddings: &[Vec<f32>],
     ) -> Result<HashSet<u32>, SpannIndexWriterError> {
         let mut assigned_ids = HashSet::new();
-        for (k, (((doc_offset_ids, doc_versions), doc_embeddings), new_head)) in
-            split_doc_offset_ids
-                .iter()
-                .zip(split_doc_versions.iter())
-                .zip(split_doc_embeddings.iter())
-                .zip(new_head_ids.iter())
-                .enumerate()
+        for (k, ((doc_offset_ids, doc_versions), doc_embeddings)) in split_doc_offset_ids
+            .iter()
+            .zip(split_doc_versions.iter())
+            .zip(split_doc_embeddings.iter())
+            .enumerate()
         {
             for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
                 if assigned_ids.contains(doc_offset_id)
@@ -469,7 +476,6 @@ impl SpannIndexWriter {
                 );
                 // NPA check.
                 if new_dist > old_dist {
-                    // TODO(Sanket): Implement reassign.
                     assigned_ids.insert(*doc_offset_id);
                     self.reassign(
                         *doc_offset_id,
@@ -527,6 +533,7 @@ impl SpannIndexWriter {
             return Ok(());
         }
         // Increment version and trigger append.
+        let next_version;
         {
             let mut version_map_guard = self.versions_map.write();
             let current_version = version_map_guard
@@ -536,7 +543,7 @@ impl SpannIndexWriter {
             if doc_version < *current_version {
                 return Ok(());
             }
-            let next_version = *current_version + 1;
+            next_version = *current_version + 1;
             version_map_guard
                 .versions_map
                 .insert(doc_offset_id, next_version);
@@ -546,10 +553,14 @@ impl SpannIndexWriter {
             .into_iter()
             .zip(nearest_head_embeddings.into_iter())
         {
+            if self.is_outdated(doc_offset_id, next_version).await? {
+                return Ok(());
+            }
+            tracing::info!("Reassigning {} to {}", doc_offset_id, nearest_head_id);
             self.append(
                 nearest_head_id as u32,
                 doc_offset_id,
-                doc_version,
+                next_version,
                 doc_embedding,
                 nearest_head_embedding,
             )
@@ -563,31 +574,30 @@ impl SpannIndexWriter {
         head_id: usize,
         head_embedding: &[f32],
         assigned_ids: &mut HashSet<u32>,
-        new_head_embeddings: &Vec<Option<&Vec<f32>>>,
+        new_head_embeddings: &[Option<&Vec<f32>>],
         old_head_embedding: &[f32],
     ) -> Result<(), SpannIndexWriterError> {
         // Get posting list of each neighbour and check for reassignment criteria.
-        let write_guard = self.posting_list_writer.lock().await;
-        // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
-        // deletes it.
-        let (doc_offset_ids, doc_versions, doc_embeddings) = write_guard
-            .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
-            .await
-            .map_err(|_| SpannIndexWriterError::PostingListGetError)?
-            .ok_or(SpannIndexWriterError::PostingListGetError)?;
+        let doc_offset_ids;
+        let doc_versions;
+        let doc_embeddings;
+        {
+            let write_guard = self.posting_list_writer.lock().await;
+            // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
+            // deletes it.
+            (doc_offset_ids, doc_versions, doc_embeddings) = write_guard
+                .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
+                .await
+                .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                .ok_or(SpannIndexWriterError::PostingListGetError)?;
+        }
         for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
-            if assigned_ids.contains(doc_offset_id) {
-                continue;
-            }
+            if assigned_ids.contains(doc_offset_id)
+                || self
+                    .is_outdated(*doc_offset_id, doc_versions[index])
+                    .await?
             {
-                let version_map_guard = self.versions_map.read();
-                let current_version = version_map_guard
-                    .versions_map
-                    .get(doc_offset_id)
-                    .ok_or(SpannIndexWriterError::VersionNotFound)?;
-                if *current_version == 0 || doc_versions[index] < *current_version {
-                    continue;
-                }
+                continue;
             }
             let distance_from_curr_center = self.distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
@@ -633,8 +643,7 @@ impl SpannIndexWriter {
     async fn collect_and_reassign(
         &self,
         new_head_ids: &[i32],
-        new_head_embeddings: &Vec<Option<&Vec<f32>>>,
-        old_head_id: u32,
+        new_head_embeddings: &[Option<&Vec<f32>>],
         old_head_embedding: &[f32],
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
@@ -644,7 +653,6 @@ impl SpannIndexWriter {
             .collect_and_reassign_split_points(
                 new_head_ids,
                 new_head_embeddings,
-                old_head_id,
                 old_head_embedding,
                 split_doc_offset_ids,
                 split_doc_versions,
@@ -657,6 +665,10 @@ impl SpannIndexWriter {
                 .get_nearby_heads(old_head_embedding, REASSIGN_NBR_COUNT)
                 .await?;
             for (head_idx, head_id) in nearby_head_ids.iter().enumerate() {
+                // Skip the current split heads.
+                if new_head_ids.contains(&(*head_id as i32)) {
+                    continue;
+                }
                 self.collect_and_reassign_nearby_points(
                     *head_id,
                     &nearby_head_embeddings[head_idx],
@@ -751,6 +763,7 @@ impl SpannIndexWriter {
 
                 return Ok(());
             }
+            tracing::info!("Splitting posting list for head {}", head_id);
             // Otherwise split the posting list.
             local_indices.truncate(up_to_date_index);
             // Shuffle local_indices.
@@ -863,7 +876,6 @@ impl SpannIndexWriter {
         Box::pin(self.collect_and_reassign(
             &new_head_ids,
             &new_head_embeddings,
-            head_id,
             &head_embedding,
             &new_doc_offset_ids,
             &new_doc_versions,
@@ -1060,5 +1072,204 @@ impl SpannIndexFlusher {
             .await
             .map_err(|_| SpannIndexWriterError::HnswIndexFlushError)?;
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{f32::consts::PI, path::PathBuf};
+
+    use chroma_blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
+    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{CollectionUuid, SpannPostingList};
+    use rand::Rng;
+
+    use crate::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter, Index};
+
+    #[tokio::test]
+    async fn test_split() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmp_dir.path().to_str().unwrap()),
+            hnsw_cache,
+            rx,
+        );
+        let m = 16;
+        let ef_construction = 200;
+        let ef_search = 200;
+        let collection_id = CollectionUuid::new();
+        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let dimensionality = 2;
+        let writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            None,
+            None,
+            None,
+            None,
+            Some(m),
+            Some(ef_construction),
+            Some(ef_search),
+            &collection_id,
+            distance_function,
+            dimensionality,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index writer");
+        // Insert origin.
+        writer
+            .add(1, &[0.0, 0.0])
+            .await
+            .expect("Error adding to spann index writer");
+        println!("Inserted {:?}", &[0.0, 0.0]);
+        // Insert 100 points. There should be no splitting yet.
+        // Generate these points within a radius of 1 from origin.
+        let mut rng = rand::thread_rng();
+        for i in 2..=100 {
+            // Generate random radius between 0 and 1
+            let r = rng.gen::<f32>().sqrt(); // sqrt for uniform distribution
+
+            // Generate random angle between 0 and 2π
+            let theta = rng.gen::<f32>() * 2.0 * PI;
+
+            // Convert to Cartesian coordinates
+            let x = r * theta.cos();
+            let y = r * theta.sin();
+
+            let embedding = vec![x, y];
+            println!("Inserting {:?}", embedding);
+            writer
+                .add(i, &embedding)
+                .await
+                .expect("Error adding to spann index writer");
+        }
+        {
+            let hnsw_read_guard = writer.hnsw_index.inner.read();
+            assert_eq!(hnsw_read_guard.len(), 1);
+            let emb = hnsw_read_guard
+                .get(1)
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
+        }
+        {
+            // Posting list should have 100 points.
+            let pl_read_guard = writer.posting_list_writer.lock().await;
+            let pl = pl_read_guard
+                .get_owned::<u32, &SpannPostingList<'_>>("", 1)
+                .await
+                .expect("Error getting posting list")
+                .unwrap();
+            assert_eq!(pl.0.len(), 100);
+            assert_eq!(pl.1.len(), 100);
+            assert_eq!(pl.2.len(), 200);
+        }
+        // Insert a point in another region. (10000.0, 10000.0)
+        writer
+            .add(101, &[10000.0, 10000.0])
+            .await
+            .expect("Error adding to spann index writer");
+        // There should be a split and we should have 2 centers.
+        let mut emb_1_id;
+        let mut emb_2_id;
+        {
+            let hnsw_read_guard = writer.hnsw_index.inner.read();
+            assert_eq!(hnsw_read_guard.len(), 2);
+            emb_2_id = 2;
+            // Head could be 2 and 3 or 1 and 2.
+            if hnsw_read_guard.get(1).is_err() {
+                emb_1_id = 3;
+            } else {
+                emb_1_id = 1;
+            }
+        }
+        {
+            // Posting list should have 100 points.
+            let pl_read_guard = writer.posting_list_writer.lock().await;
+            let pl = pl_read_guard
+                .get_owned::<u32, &SpannPostingList<'_>>("", emb_1_id)
+                .await
+                .expect("Error getting posting list")
+                .unwrap();
+            assert_eq!(pl.0.len(), 100);
+            assert_eq!(pl.1.len(), 100);
+            assert_eq!(pl.2.len(), 200);
+            let pl = pl_read_guard
+                .get_owned::<u32, &SpannPostingList<'_>>("", emb_2_id)
+                .await
+                .expect("Error getting posting list")
+                .unwrap();
+            assert_eq!(pl.0.len(), 1);
+            assert_eq!(pl.1.len(), 1);
+            assert_eq!(pl.2.len(), 2);
+        }
+        // Next insert 99 points in the region of (1000.0, 1000.0)
+        for i in 102..=200 {
+            // Generate random radius between 0 and 1
+            let r = rng.gen::<f32>().sqrt(); // sqrt for uniform distribution
+
+            // Generate random angle between 0 and 2π
+            let theta = rng.gen::<f32>() * 2.0 * PI;
+
+            // Convert to Cartesian coordinates
+            let x = r * theta.cos() + 10000.0;
+            let y = r * theta.sin() + 10000.0;
+
+            let embedding = vec![x, y];
+            println!("Inserting {:?}", embedding);
+            writer
+                .add(i, &embedding)
+                .await
+                .expect("Error adding to spann index writer");
+        }
+        {
+            let hnsw_read_guard = writer.hnsw_index.inner.read();
+            assert_eq!(hnsw_read_guard.len(), 2);
+            emb_2_id = 2;
+            // Head could be 2 and 3 or 1 and 2.
+            if hnsw_read_guard.get(1).is_err() {
+                emb_1_id = 3;
+            } else {
+                emb_1_id = 1;
+            }
+        }
+        {
+            // Posting list should have 100 points.
+            let pl_read_guard = writer.posting_list_writer.lock().await;
+            let pl = pl_read_guard
+                .get_owned::<u32, &SpannPostingList<'_>>("", emb_1_id)
+                .await
+                .expect("Error getting posting list")
+                .unwrap();
+            assert_eq!(pl.0.len(), 100);
+            assert_eq!(pl.1.len(), 100);
+            assert_eq!(pl.2.len(), 200);
+            let pl = pl_read_guard
+                .get_owned::<u32, &SpannPostingList<'_>>("", emb_2_id)
+                .await
+                .expect("Error getting posting list")
+                .unwrap();
+            assert_eq!(pl.0.len(), 100);
+            assert_eq!(pl.1.len(), 100);
+            assert_eq!(pl.2.len(), 200);
+        }
     }
 }
