@@ -64,24 +64,45 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
         "service.name",
         service_name.clone(),
     )]);
-    // Prepare trace config.
+
+    // Prepare tracer.
+    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(otel_endpoint)
+        .build()
+        .expect("could not build span exporter");
     let trace_config = opentelemetry_sdk::trace::Config::default()
         .with_sampler(ChromaShouldSample)
         .with_resource(resource.clone());
-    // Prepare exporter.
-    let exporter = opentelemetry_otlp::new_exporter()
-        .tonic()
-        .with_endpoint(otel_endpoint);
-    let otlp_tracer = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(exporter)
-        .with_trace_config(trace_config)
-        .install_batch(opentelemetry_sdk::runtime::Tokio)
-        .expect("could not build otlp trace provider")
-        .tracer(service_name.clone());
+    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        .with_batch_exporter(span_exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_config(trace_config)
+        .build();
+    let tracer = tracer_provider.tracer(service_name.clone());
+    // TODO(MrCroxx): Should we the tracer provider as global?
+    // global::set_tracer_provider(tracer_provider);
+
+    // Prepare meter.
+    let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+        .with_tonic()
+        .with_endpoint(otel_endpoint)
+        .build()
+        .expect("could not build metric exporter");
+
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(
+        metric_exporter,
+        opentelemetry_sdk::runtime::Tokio,
+    )
+    .build();
+    let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+        .with_reader(reader)
+        .with_resource(resource.clone())
+        .build();
+    global::set_meter_provider(meter_provider);
+
     // Layer for adding our configured tracer.
     // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
-    let exporter_layer = tracing_opentelemetry::OpenTelemetryLayer::new(otlp_tracer)
+    let exporter_layer = tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
         .with_filter(tracing_subscriber::filter::LevelFilter::TRACE);
     // Layer for printing spans to stdout. Only print INFO logs by default.
     let stdout_layer =
@@ -161,16 +182,4 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
 
         prev_hook(panic_info);
     }));
-    let exporter = opentelemetry_otlp::new_exporter()
-        .tonic()
-        .with_endpoint(otel_endpoint);
-    let provider = opentelemetry_otlp::new_pipeline()
-        .metrics(opentelemetry_sdk::runtime::Tokio)
-        .with_resource(opentelemetry_sdk::resource::Resource::new(vec![
-            opentelemetry::KeyValue::new("service.name", service_name.clone()),
-        ]))
-        .with_exporter(exporter)
-        .build()
-        .expect("Failed to build metrics provider");
-    global::set_meter_provider(provider);
 }

@@ -18,14 +18,14 @@ schemars = "0.8.16"
 kube = { version = "0.87.1", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.20.0", features = ["latest"] }
 tracing-bunyan-formatter = "0.3"
-tracing-opentelemetry = "0.27.0"
+tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.26.0", default-features = false, features = [
+opentelemetry = { version = "0.27.0", default-features = false, features = [
   "trace",
   "metrics",
 ] }
-opentelemetry-otlp = "0.26"
-opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
+opentelemetry-otlp = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 regex = "1.10.5"
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 

@@ -10,7 +10,7 @@ path = "src/lib.rs"
 clap = { version = "4", features = ["derive"] }
 foyer = "0.12"
 anyhow = "1.0"
-opentelemetry = { version = "0.26.0", default-features = false, features = [
+opentelemetry = { version = "0.27.0", default-features = false, features = [
   "trace",
   "metrics",
 ] }
