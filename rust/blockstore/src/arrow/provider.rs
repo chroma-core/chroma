@@ -430,7 +430,10 @@ impl RootManager {
                 tracing::debug!("Reading root from storage with key: {}", key);
                 match self.storage.get(&key).await {
                     Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, *id) {
-                        Ok(root) => Ok(Some(root)),
+                        Ok(root) => {
+                            self.cache.insert(*id, root.clone()).await;
+                            Ok(Some(root))
+                        }
                         Err(e) => {
                             tracing::error!("Error turning bytes into root: {}", e);
                             Err(RootManagerError::FromBytesError(e))

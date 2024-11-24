@@ -247,6 +247,8 @@ where
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
     cache: foyer::HybridCache<K, V>,
+    cache_hit: opentelemetry::metrics::Counter<u64>,
+    cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
@@ -330,12 +332,16 @@ where
             TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)),
         );
         let meter = global::meter("chroma");
+        let cache_hit = meter.u64_counter("cache_hit").init();
+        let cache_miss = meter.u64_counter("cache_miss").init();
         let get_latency = meter.u64_histogram("get_latency").init();
         let insert_latency = meter.u64_histogram("insert_latency").init();
         let remove_latency = meter.u64_histogram("remove_latency").init();
         let clear_latency = meter.u64_histogram("clear_latency").init();
         Ok(FoyerHybridCache {
             cache,
+            cache_hit,
+            cache_miss,
             get_latency,
             insert_latency,
             remove_latency,
@@ -353,7 +359,13 @@ where
     #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
-        Ok(self.cache.get(key).await?.map(|v| v.value().clone()))
+        let res = self.cache.get(key).await?.map(|v| v.value().clone());
+        if res.is_some() {
+            self.cache_hit.add(1, &[]);
+        } else {
+            self.cache_miss.add(1, &[]);
+        }
+        Ok(res)
     }
 
     #[tracing::instrument(skip(self, key, value))]
@@ -389,8 +401,10 @@ where
     V: Clone + Send + Sync + Weighted + 'static,
 {
     cache: foyer::Cache<K, V>,
-    insert_latency: opentelemetry::metrics::Histogram<u64>,
+    cache_hit: opentelemetry::metrics::Counter<u64>,
+    cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
+    insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
 }
@@ -409,14 +423,18 @@ where
             .with_weighter(|_: &_, v: &V| v.weight())
             .build();
         let meter = global::meter("chroma");
-        let insert_latency = meter.u64_histogram("insert_latency").init();
+        let cache_hit = meter.u64_counter("cache_hit").init();
+        let cache_miss = meter.u64_counter("cache_miss").init();
         let get_latency = meter.u64_histogram("get_latency").init();
+        let insert_latency = meter.u64_histogram("insert_latency").init();
         let remove_latency = meter.u64_histogram("remove_latency").init();
         let clear_latency = meter.u64_histogram("clear_latency").init();
         Ok(FoyerPlainCache {
             cache,
-            insert_latency,
+            cache_hit,
+            cache_miss,
             get_latency,
+            insert_latency,
             remove_latency,
             clear_latency,
         })
@@ -455,20 +473,19 @@ where
             .with_weighter(|_: &_, v: &V| v.weight())
             .with_event_listener(Arc::new(evl))
             .build();
-        let get_latency = global::meter("chroma").u64_histogram("get_latency").init();
-        let insert_latency = global::meter("chroma")
-            .u64_histogram("insert_latency")
-            .init();
-        let remove_latency = global::meter("chroma")
-            .u64_histogram("remove_latency")
-            .init();
-        let clear_latency = global::meter("chroma")
-            .u64_histogram("clear_latency")
-            .init();
+        let meter = global::meter("chroma");
+        let cache_hit = meter.u64_counter("cache_hit").init();
+        let cache_miss = meter.u64_counter("cache_miss").init();
+        let get_latency = meter.u64_histogram("get_latency").init();
+        let insert_latency = meter.u64_histogram("insert_latency").init();
+        let remove_latency = meter.u64_histogram("remove_latency").init();
+        let clear_latency = meter.u64_histogram("clear_latency").init();
         Ok(FoyerPlainCache {
             cache,
-            insert_latency,
+            cache_hit,
+            cache_miss,
             get_latency,
+            insert_latency,
             remove_latency,
             clear_latency,
         })
@@ -484,7 +501,13 @@ where
     #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
-        Ok(self.cache.get(key).map(|v| v.value().clone()))
+        let res = self.cache.get(key).map(|v| v.value().clone());
+        if res.is_some() {
+            self.cache_hit.add(1, &[]);
+        } else {
+            self.cache_miss.add(1, &[]);
+        }
+        Ok(res)
     }
 
     #[tracing::instrument(skip(self, key, value))]

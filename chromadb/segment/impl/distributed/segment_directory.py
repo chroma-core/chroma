@@ -1,5 +1,11 @@
+import threading
+import time
 from typing import Any, Callable, Dict, Optional, cast
+
+from kubernetes import client, config, watch
+from kubernetes.client.rest import ApiException
 from overrides import EnforceOverrides, override
+
 from chromadb.config import System
 from chromadb.errors import InvalidArgumentError
 from chromadb.segment.distributed import (
@@ -7,17 +13,12 @@ from chromadb.segment.distributed import (
     MemberlistProvider,
     SegmentDirectory,
 )
-from chromadb.types import Segment
-from kubernetes import client, config, watch
-from kubernetes.client.rest import ApiException
-import threading
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     add_attributes_to_current_span,
     trace_method,
 )
-import time
-
+from chromadb.types import Segment
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
 
 # These could go in config but given that they will rarely change, they are here for now to avoid
@@ -242,10 +243,18 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
+<<<<<<< HEAD
             raise InvalidArgumentError("Memberlist is not initialized")
         assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher, 1)[
             0
         ]
+=======
+            raise ValueError("Memberlist is not initialized")
+        # Query to the same collection should end up on the same endpoint
+        assignment = assign(
+            segment["collection"].hex, self._curr_memberlist, murmur3hasher, 1
+        )[0]
+>>>>>>> main
         service_name = self.extract_service_name(assignment)
         assignment = f"{assignment}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"  # TODO: make port configurable
         return assignment

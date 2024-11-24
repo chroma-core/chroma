@@ -54,7 +54,7 @@ pub struct KnnProjectionRecord {
     pub distance: Option<f32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct KnnProjectionOutput {
     pub records: Vec<KnnProjectionRecord>,
 }
