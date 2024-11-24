@@ -334,15 +334,15 @@ def to_proto_request_version_context(
 def to_proto_where(where: Where) -> chroma_pb.Where:
     response = chroma_pb.Where()
     if len(where) != 1:
-        raise ValueError(f"Expected where to have exactly one operator, got {where}")
+        raise InvalidArgumentError(f"Expected where to have exactly one operator, got {where}")
 
     for key, value in where.items():
         if not isinstance(key, str):
-            raise ValueError(f"Expected where key to be a str, got {key}")
+            raise InvalidArgumentError(f"Expected where key to be a str, got {key}")
 
         if key == "$and" or key == "$or":
             if not isinstance(value, list):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Expected where value for $and or $or to be a list of where expressions, got {value}"
                 )
             children: chroma_pb.WhereChildren = chroma_pb.WhereChildren(
@@ -385,20 +385,20 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
                 sdc.generic_comparator = chroma_pb.GenericComparator.EQ
                 dc.single_double_operand.CopyFrom(sdc)
             else:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Expected where value to be a string, int, or float, got {value}"
                 )
         else:
             for operator, operand in value.items():
                 if operator in ["$in", "$nin"]:
                     if not isinstance(operand, list):
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             f"Expected where value for $in or $nin to be a list of values, got {value}"
                         )
                     if len(operand) == 0 or not all(
                         isinstance(x, type(operand[0])) for x in operand
                     ):
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             f"Expected where operand value to be a non-empty list, and all values to be of the same type "
                             f"got {operand}"
                         )
@@ -432,7 +432,7 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
                         dlo.list_operator = list_operator
                         dc.double_list_operand.CopyFrom(dlo)
                     else:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             f"Expected where operand value to be a list of strings, ints, or floats, got {operand}"
                         )
                 elif operator in ["$eq", "$ne", "$gt", "$lt", "$gte", "$lte"]:
@@ -445,7 +445,7 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
                         elif operator == "$ne":
                             ssc.comparator = chroma_pb.GenericComparator.NE
                         else:
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where operator to be $eq or $ne, got {operator}"
                             )
                         dc.single_string_operand.CopyFrom(ssc)
@@ -457,7 +457,7 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
                         elif operator == "$ne":
                             sbc.comparator = chroma_pb.GenericComparator.NE
                         else:
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where operator to be $eq or $ne, got {operator}"
                             )
                         dc.single_bool_operand.CopyFrom(sbc)
@@ -477,7 +477,7 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
                         elif operator == "$lte":
                             sic.number_comparator = chroma_pb.NumberComparator.LTE
                         else:
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
                             )
                         dc.single_int_operand.CopyFrom(sic)
@@ -497,12 +497,12 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
                         elif operator == "$lte":
                             sfc.number_comparator = chroma_pb.NumberComparator.LTE
                         else:
-                            raise ValueError(
+                            raise InvalidArgumentError(
                                 f"Expected where operator to be one of $eq, $ne, $gt, $lt, $gte, $lte, got {operator}"
                             )
                         dc.single_double_operand.CopyFrom(sfc)
                     else:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             f"Expected where operand value to be a string, int, or float, got {operand}"
                         )
                 else:
@@ -517,7 +517,7 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
 def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDocument:
     response = chroma_pb.WhereDocument()
     if len(where_document) != 1:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Expected where_document to have exactly one operator, got {where_document}"
         )
 
@@ -525,7 +525,7 @@ def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDoc
         if operator == "$and" or operator == "$or":
             # Nested "$and" or "$or" expression.
             if not isinstance(operand, list):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Expected where_document value for $and or $or to be a list of where_document expressions, got {operand}"
                 )
             children: chroma_pb.WhereDocumentChildren = chroma_pb.WhereDocumentChildren(
@@ -541,7 +541,7 @@ def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDoc
             # Direct "$contains" or "$not_contains" comparison to a single
             # value.
             if not isinstance(operand, str):
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Expected where_document operand to be a string, got {operand}"
                 )
             dwd = chroma_pb.DirectWhereDocument()
@@ -551,7 +551,7 @@ def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDoc
             elif operator == "$not_contains":
                 dwd.operator = chroma_pb.WhereDocumentOperator.NOT_CONTAINS
             else:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"Expected where_document operator to be one of $contains, $not_contains, got {operator}"
                 )
             response.direct.CopyFrom(dwd)
