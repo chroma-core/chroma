@@ -230,6 +230,28 @@ impl Index<HnswIndexConfig> for HnswIndex {
             Ok(Some(data))
         }
     }
+
+    fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
+        let mut sizes = vec![0usize; 2];
+        unsafe { get_all_ids_size(self.ffi_ptr, sizes.as_mut_ptr()) };
+        read_and_return_hnsw_error(self.ffi_ptr)?;
+        Ok(sizes)
+    }
+
+    fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>> {
+        let sizes = self.get_all_ids_sizes()?;
+        let mut non_deleted_ids = vec![0usize; sizes[0]];
+        let mut deleted_ids = vec![0usize; sizes[1]];
+        unsafe {
+            get_all_ids(
+                self.ffi_ptr,
+                non_deleted_ids.as_mut_ptr(),
+                deleted_ids.as_mut_ptr(),
+            );
+        }
+        read_and_return_hnsw_error(self.ffi_ptr)?;
+        Ok((non_deleted_ids, deleted_ids))
+    }
 }
 
 impl PersistentIndex<HnswIndexConfig> for HnswIndex {
@@ -359,6 +381,8 @@ extern "C" {
     fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
     fn mark_deleted(index: *const IndexPtrFFI, id: usize);
     fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
+    fn get_all_ids_size(index: *const IndexPtrFFI, sizes: *mut usize);
+    fn get_all_ids(index: *const IndexPtrFFI, non_deleted_ids: *mut usize, deleted_ids: *mut usize);
     fn knn_query(
         index: *const IndexPtrFFI,
         query_vector: *const f32,

@@ -147,6 +147,8 @@ const NUM_SAMPLES_FOR_KMEANS: usize = 1000;
 const INITIAL_LAMBDA: f32 = 100.0;
 const REASSIGN_NBR_COUNT: usize = 8;
 const QUERY_EPSILON: f32 = 10.0;
+const MERGE_THRESHOLD: usize = 50;
+const NUM_CENTERS_TO_MERGE_TO: usize = 8;
 
 impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
@@ -504,6 +506,7 @@ impl SpannIndexWriter {
             .query(head_embedding, k, &allowed_ids, &disallowed_ids)
             .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
         // Get the embeddings also for distance computation.
+        // TODO(Sanket): Don't consider heads that are farther away than the closest.
         for id in nearest_ids.iter() {
             let emb = read_guard
                 .get(*id)
@@ -989,6 +992,307 @@ impl SpannIndexWriter {
         Ok(())
     }
 
+    async fn get_up_to_date_count(
+        &self,
+        doc_offset_ids: &[u32],
+        doc_versions: &[u32],
+    ) -> Result<usize, SpannIndexWriterError> {
+        let mut up_to_date_index = 0;
+        let version_map_guard = self.versions_map.read();
+        for (index, doc_version) in doc_versions.iter().enumerate() {
+            let current_version = version_map_guard
+                .versions_map
+                .get(&doc_offset_ids[index])
+                .ok_or(SpannIndexWriterError::VersionNotFound)?;
+            // disregard if either deleted or on an older version.
+            if *current_version == 0 || doc_version < current_version {
+                continue;
+            }
+            up_to_date_index += 1;
+        }
+        Ok(up_to_date_index)
+    }
+
+    async fn is_head_deleted(&self, head_id: usize) -> Result<bool, SpannIndexWriterError> {
+        let hnsw_read_guard = self.hnsw_index.inner.read();
+        let hnsw_emb = hnsw_read_guard.get(head_id);
+        // TODO(Sanket): Check for exact error.
+        if hnsw_emb.is_err() || hnsw_emb.unwrap().is_none() {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn remove_outdated_entries(
+        &self,
+        mut doc_offset_ids: Vec<u32>,
+        mut doc_versions: Vec<u32>,
+        mut doc_embeddings: Vec<f32>,
+    ) -> Result<(Vec<u32>, Vec<u32>, Vec<f32>), SpannIndexWriterError> {
+        let mut cluster_len = 0;
+        let mut local_indices = vec![0; doc_offset_ids.len()];
+        {
+            let version_map_guard = self.versions_map.read();
+            for (index, doc_version) in doc_versions.iter().enumerate() {
+                let current_version = version_map_guard
+                    .versions_map
+                    .get(&doc_offset_ids[index])
+                    .ok_or(SpannIndexWriterError::VersionNotFound)?;
+                // disregard if either deleted or on an older version.
+                if *current_version == 0 || doc_version < current_version {
+                    continue;
+                }
+                local_indices[cluster_len] = index;
+                cluster_len += 1;
+            }
+        }
+        for idx in 0..cluster_len {
+            if local_indices[idx] == idx {
+                continue;
+            }
+            doc_offset_ids[idx] = doc_offset_ids[local_indices[idx]];
+            doc_versions[idx] = doc_versions[local_indices[idx]];
+            doc_embeddings.copy_within(
+                local_indices[idx] * self.dimensionality
+                    ..(local_indices[idx] + 1) * self.dimensionality,
+                idx * self.dimensionality,
+            );
+        }
+        doc_offset_ids.truncate(cluster_len);
+        doc_versions.truncate(cluster_len);
+        doc_embeddings.truncate(cluster_len * self.dimensionality);
+        Ok((doc_offset_ids, doc_versions, doc_embeddings))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn merge_posting_lists(
+        &self,
+        mut source_doc_offset_ids: Vec<u32>,
+        mut source_doc_versions: Vec<u32>,
+        mut source_doc_embeddings: Vec<f32>,
+        target_doc_offset_ids: Vec<u32>,
+        target_doc_versions: Vec<u32>,
+        target_doc_embeddings: Vec<f32>,
+        target_cluster_len: usize,
+    ) -> Result<(Vec<u32>, Vec<u32>, Vec<f32>), SpannIndexWriterError> {
+        source_doc_embeddings.reserve_exact(target_cluster_len);
+        source_doc_versions.reserve_exact(target_cluster_len);
+        source_doc_embeddings.reserve_exact(target_cluster_len * self.dimensionality);
+        for (index, target_doc_offset_id) in target_doc_offset_ids.into_iter().enumerate() {
+            if self
+                .is_outdated(target_doc_offset_id, target_doc_versions[index])
+                .await?
+            {
+                continue;
+            }
+            source_doc_offset_ids.push(target_doc_offset_id);
+            source_doc_versions.push(target_doc_versions[index]);
+            source_doc_embeddings.extend_from_slice(
+                &target_doc_embeddings
+                    [index * self.dimensionality..(index + 1) * self.dimensionality],
+            );
+        }
+        Ok((
+            source_doc_offset_ids,
+            source_doc_versions,
+            source_doc_embeddings,
+        ))
+    }
+
+    async fn garbage_collect_head(
+        &self,
+        head_id: usize,
+        head_embedding: &[f32],
+    ) -> Result<(), SpannIndexWriterError> {
+        // Get heads.
+        let mut merged_with_a_nbr = false;
+        let source_cluster_len;
+        let mut target_cluster_len = 0;
+        let mut doc_offset_ids;
+        let mut doc_versions;
+        let mut doc_embeddings;
+        let mut target_embedding = vec![];
+        let mut target_head = 0;
+        {
+            let pl_guard = self.posting_list_writer.lock().await;
+            // If head is concurrently deleted then skip.
+            if self.is_head_deleted(head_id).await? {
+                return Ok(());
+            }
+            (doc_offset_ids, doc_versions, doc_embeddings) = pl_guard
+                .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
+                .await
+                .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                .ok_or(SpannIndexWriterError::PostingListGetError)?;
+            (doc_offset_ids, doc_versions, doc_embeddings) = self
+                .remove_outdated_entries(doc_offset_ids, doc_versions, doc_embeddings)
+                .await?;
+            source_cluster_len = doc_offset_ids.len();
+            // Write the PL back and return if within the merge threshold.
+            if source_cluster_len > MERGE_THRESHOLD {
+                let posting_list = SpannPostingList {
+                    doc_offset_ids: &doc_offset_ids,
+                    doc_versions: &doc_versions,
+                    doc_embeddings: &doc_embeddings,
+                };
+                pl_guard
+                    .set("", head_id as u32, &posting_list)
+                    .await
+                    .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+
+                return Ok(());
+            }
+            // Find candidates for merge.
+            let (nearest_head_ids, _, nearest_head_embeddings) = self
+                .get_nearby_heads(head_embedding, NUM_CENTERS_TO_MERGE_TO)
+                .await?;
+            for (nearest_head_id, head_embedding) in nearest_head_ids
+                .into_iter()
+                .zip(nearest_head_embeddings.into_iter())
+            {
+                // TODO(Sanket): If and when the lock is more fine grained, then
+                // need to acquire a lock on the nearest_head_id here.
+                // TODO(Sanket): Also need to check if the head is deleted concurrently then.
+                let (
+                    nearest_head_doc_offset_ids,
+                    nearest_head_doc_versions,
+                    nearest_head_doc_embeddings,
+                ) = pl_guard
+                    .get_owned::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
+                    .await
+                    .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                    .ok_or(SpannIndexWriterError::PostingListGetError)?;
+                target_cluster_len = self
+                    .get_up_to_date_count(&nearest_head_doc_offset_ids, &nearest_head_doc_versions)
+                    .await?;
+                // If the total count exceeds the max posting list size then skip.
+                if target_cluster_len + source_cluster_len >= SPLIT_THRESHOLD {
+                    continue;
+                }
+                // Merge the two PLs.
+                (doc_offset_ids, doc_versions, doc_embeddings) = self
+                    .merge_posting_lists(
+                        doc_offset_ids,
+                        doc_versions,
+                        doc_embeddings,
+                        nearest_head_doc_offset_ids,
+                        nearest_head_doc_versions,
+                        nearest_head_doc_embeddings,
+                        target_cluster_len,
+                    )
+                    .await?;
+                // Write the merged PL back.
+                // Merge into the larger of the two clusters.
+                let merged_posting_list = SpannPostingList {
+                    doc_offset_ids: &doc_offset_ids,
+                    doc_versions: &doc_versions,
+                    doc_embeddings: &doc_embeddings,
+                };
+                if target_cluster_len > source_cluster_len {
+                    pl_guard
+                        .set("", nearest_head_id as u32, &merged_posting_list)
+                        .await
+                        .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                    // Delete from hnsw.
+                    let hnsw_write_guard = self.hnsw_index.inner.write();
+                    hnsw_write_guard
+                        .delete(head_id)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                } else {
+                    pl_guard
+                        .set("", head_id as u32, &merged_posting_list)
+                        .await
+                        .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                    // Delete from hnsw.
+                    let hnsw_write_guard = self.hnsw_index.inner.write();
+                    hnsw_write_guard
+                        .delete(nearest_head_id)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                }
+                // This center is now merged with a neighbor.
+                target_head = nearest_head_id;
+                target_embedding = head_embedding;
+                merged_with_a_nbr = true;
+                break;
+            }
+        }
+        if !merged_with_a_nbr {
+            return Ok(());
+        }
+        // Reassign points that were merged to neighbouring heads.
+        if source_cluster_len > target_cluster_len {
+            // target_cluster points were merged to source_cluster
+            // so they are candidates for reassignment.
+            for idx in source_cluster_len..(source_cluster_len + target_cluster_len) {
+                let origin_dist = self.distance_function.distance(
+                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+                    &target_embedding,
+                );
+                let new_dist = self.distance_function.distance(
+                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+                    head_embedding,
+                );
+                if new_dist > origin_dist {
+                    self.reassign(
+                        doc_offset_ids[idx],
+                        doc_versions[idx],
+                        &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+                        head_id as u32,
+                    )
+                    .await?;
+                }
+            }
+        } else {
+            // source_cluster points were merged to target_cluster
+            // so they are candidates for reassignment.
+            for idx in 0..source_cluster_len {
+                let origin_dist = self.distance_function.distance(
+                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+                    head_embedding,
+                );
+                let new_dist = self.distance_function.distance(
+                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+                    &target_embedding,
+                );
+                if new_dist > origin_dist {
+                    self.reassign(
+                        doc_offset_ids[idx],
+                        doc_versions[idx],
+                        &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+                        target_head as u32,
+                    )
+                    .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // TODO(Sanket): Hook in the gc policy.
+    pub async fn garbage_collect(&self) -> Result<(), SpannIndexWriterError> {
+        // Get all the heads.
+        let non_deleted_heads;
+        {
+            let hnsw_read_guard = self.hnsw_index.inner.read();
+            (non_deleted_heads, _) = hnsw_read_guard
+                .get_all_ids()
+                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+        }
+        // Iterate over all the heads and gc heads.
+        for head_id in non_deleted_heads.into_iter() {
+            let head_embedding = self
+                .hnsw_index
+                .inner
+                .read()
+                .get(head_id)
+                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
+                .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
+            self.garbage_collect_head(head_id, &head_embedding).await?;
+        }
+        Ok(())
+    }
+
+    // TODO(Sanket): Change the error types.
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
         // Pl list.
         let pl_flusher = match Arc::try_unwrap(self.posting_list_writer) {

@@ -129,6 +129,34 @@ public:
         }
     }
 
+    void get_all_ids_sizes(size_t *ids_sizes)
+    {
+        if (!index_inited)
+        {
+            throw std::runtime_error("Index not inited");
+        }
+        auto res = appr_alg->getLabelCounts();
+        ids_sizes[0] = res.first;
+        ids_sizes[1] = res.second;
+    }
+
+    void get_all_ids(hnswlib::labeltype *non_deleted_ids, hnswlib::labeltype *deleted_ids)
+    {
+        if (!index_inited)
+        {
+            throw std::runtime_error("Index not inited");
+        }
+        auto res = appr_alg->getAllLabels();
+        for (int i = 0; i < res.first.size(); i++)
+        {
+            non_deleted_ids[i] = res.first[i];
+        }
+        for (int i = 0; i < res.second.size(); i++)
+        {
+            deleted_ids[i] = res.second[i];
+        }
+    }
+
     void mark_deleted(const hnswlib::labeltype id)
     {
         if (!index_inited)
@@ -298,6 +326,34 @@ extern "C"
         try
         {
             index->get_item(id, data);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+            return;
+        }
+        last_error.clear();
+    }
+
+    void get_all_ids_sizes(Index<float> *index, size_t *ids_sizes)
+    {
+        try
+        {
+            index->get_all_ids_sizes(ids_sizes);
+        }
+        catch (std::exception &e)
+        {
+            last_error = e.what();
+            return;
+        }
+        last_error.clear();
+    }
+
+    void get_all_ids(Index<float> *index, hnswlib::labeltype *non_deleted_ids, hnswlib::labeltype *deleted_ids)
+    {
+        try
+        {
+            index->get_all_ids(non_deleted_ids, deleted_ids);
         }
         catch (std::exception &e)
         {
