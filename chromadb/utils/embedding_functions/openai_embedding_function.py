@@ -54,13 +54,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self._api_key = api_key or openai.api_key
         # If the api key is still not set, raise an error
-<<<<<<< HEAD
         elif openai.api_key is None:
             raise InvalidArgumentError(
-=======
-        if self._api_key is None:
-            raise ValueError(
->>>>>>> main
                 "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
             )
 

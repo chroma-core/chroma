@@ -243,18 +243,10 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
-<<<<<<< HEAD
             raise InvalidArgumentError("Memberlist is not initialized")
         assignment = assign(segment["id"].hex, self._curr_memberlist, murmur3hasher, 1)[
             0
         ]
-=======
-            raise ValueError("Memberlist is not initialized")
-        # Query to the same collection should end up on the same endpoint
-        assignment = assign(
-            segment["collection"].hex, self._curr_memberlist, murmur3hasher, 1
-        )[0]
->>>>>>> main
         service_name = self.extract_service_name(assignment)
         assignment = f"{assignment}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"  # TODO: make port configurable
         return assignment
