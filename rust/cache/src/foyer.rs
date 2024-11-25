@@ -332,12 +332,12 @@ where
             TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)),
         );
         let meter = global::meter("chroma");
-        let cache_hit = meter.u64_counter("cache_hit").init();
-        let cache_miss = meter.u64_counter("cache_miss").init();
-        let get_latency = meter.u64_histogram("get_latency").init();
-        let insert_latency = meter.u64_histogram("insert_latency").init();
-        let remove_latency = meter.u64_histogram("remove_latency").init();
-        let clear_latency = meter.u64_histogram("clear_latency").init();
+        let cache_hit = meter.u64_counter("cache_hit").build();
+        let cache_miss = meter.u64_counter("cache_miss").build();
+        let get_latency = meter.u64_histogram("get_latency").build();
+        let insert_latency = meter.u64_histogram("insert_latency").build();
+        let remove_latency = meter.u64_histogram("remove_latency").build();
+        let clear_latency = meter.u64_histogram("clear_latency").build();
         Ok(FoyerHybridCache {
             cache,
             cache_hit,
@@ -423,12 +423,12 @@ where
             .with_weighter(|_: &_, v: &V| v.weight())
             .build();
         let meter = global::meter("chroma");
-        let cache_hit = meter.u64_counter("cache_hit").init();
-        let cache_miss = meter.u64_counter("cache_miss").init();
-        let get_latency = meter.u64_histogram("get_latency").init();
-        let insert_latency = meter.u64_histogram("insert_latency").init();
-        let remove_latency = meter.u64_histogram("remove_latency").init();
-        let clear_latency = meter.u64_histogram("clear_latency").init();
+        let cache_hit = meter.u64_counter("cache_hit").build();
+        let cache_miss = meter.u64_counter("cache_miss").build();
+        let get_latency = meter.u64_histogram("get_latency").build();
+        let insert_latency = meter.u64_histogram("insert_latency").build();
+        let remove_latency = meter.u64_histogram("remove_latency").build();
+        let clear_latency = meter.u64_histogram("clear_latency").build();
         Ok(FoyerPlainCache {
             cache,
             cache_hit,
@@ -474,12 +474,12 @@ where
             .with_event_listener(Arc::new(evl))
             .build();
         let meter = global::meter("chroma");
-        let cache_hit = meter.u64_counter("cache_hit").init();
-        let cache_miss = meter.u64_counter("cache_miss").init();
-        let get_latency = meter.u64_histogram("get_latency").init();
-        let insert_latency = meter.u64_histogram("insert_latency").init();
-        let remove_latency = meter.u64_histogram("remove_latency").init();
-        let clear_latency = meter.u64_histogram("clear_latency").init();
+        let cache_hit = meter.u64_counter("cache_hit").build();
+        let cache_miss = meter.u64_counter("cache_miss").build();
+        let get_latency = meter.u64_histogram("get_latency").build();
+        let insert_latency = meter.u64_histogram("insert_latency").build();
+        let remove_latency = meter.u64_histogram("remove_latency").build();
+        let clear_latency = meter.u64_histogram("clear_latency").build();
         Ok(FoyerPlainCache {
             cache,
             cache_hit,
