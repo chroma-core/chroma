@@ -6,7 +6,6 @@ from chromadb.db.base import SqlDB
 from chromadb.errors import InvalidArgumentError
 from chromadb.segment import SegmentManager, VectorReader
 
-
 topic_regex = r"persistent:\/\/(?P<tenant>.+)\/(?P<namespace>.+)\/(?P<topic>.+)"
 
 
