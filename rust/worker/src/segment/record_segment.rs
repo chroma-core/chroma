@@ -937,3 +937,95 @@ impl RecordSegmentReader<'_> {
             .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::AtomicU32, Arc};
+
+    use chroma_blockstore::BlockfileWriter;
+    use chroma_types::Chunk;
+    use shuttle::{future, thread};
+
+    use crate::{
+        log::test::{upsert_generator, LogGenerator},
+        segment::{
+            record_segment::MAX_OFFSET_ID, test::TestSegment, LogMaterializer, SegmentWriter,
+        },
+    };
+
+    use super::RecordSegmentWriter;
+
+    // The same record segment writer should be able to run concurrently on different threads without conflict
+    #[test]
+    fn test_record_segment_writer_shuttle() {
+        shuttle::check_random(
+            || {
+                let log_partition_size = 1000;
+                let stack_size = 1 << 22;
+                let thread_count = num_cpus::get() * 2;
+                let log_generator = LogGenerator {
+                    generator: upsert_generator,
+                };
+                let max_log_offset = thread_count * log_partition_size;
+                let logs = log_generator.generate_vec(1..=max_log_offset);
+                let test_segment = TestSegment::default();
+
+                let batches = logs
+                    .chunks(log_partition_size)
+                    .map(|chunk| chunk.to_vec())
+                    .collect::<Vec<_>>();
+
+                let offset_id = Arc::new(AtomicU32::new(1));
+
+                let record_segment_writer = future::block_on(RecordSegmentWriter::from_segment(
+                    &test_segment.record_segment,
+                    &test_segment.blockfile_provider,
+                ))
+                .expect("Should be able to initialize record segment writer");
+
+                let mut handles = Vec::new();
+
+                for batch in batches {
+                    let curr_offset_id = offset_id.clone();
+                    let record_writer = record_segment_writer.clone();
+
+                    let handle = thread::Builder::new()
+                        .stack_size(stack_size)
+                        .spawn(move || {
+                            let log_chunk = Chunk::new(batch.into());
+                            let materializer =
+                                LogMaterializer::new(None, log_chunk, Some(curr_offset_id));
+                            let materialized_logs = future::block_on(materializer.materialize())
+                                .expect("Should be able to materialize log");
+                            future::block_on(
+                                record_writer.apply_materialized_log_chunk(materialized_logs),
+                            )
+                            .expect("Should be able to apply materialized log")
+                        })
+                        .expect("Should be able to spawn thread");
+
+                    handles.push(handle);
+                }
+
+                handles
+                    .into_iter()
+                    .for_each(|handle| handle.join().expect("Writer should not fail"));
+
+                if let Some(BlockfileWriter::ArrowUnorderedBlockfileWriter(writer)) =
+                    record_segment_writer.max_offset_id
+                {
+                    let max_offset_id =
+                        future::block_on(writer.get_owned::<&str, u32>("", MAX_OFFSET_ID))
+                            .expect("Get owned should not fail")
+                            .expect("Max offset id should exist");
+                    assert_eq!(max_offset_id, max_log_offset as u32);
+                } else {
+                    unreachable!(
+                        "Please adjust how max offset id is extracted from record segment writer"
+                    );
+                }
+            },
+            100,
+        );
+    }
+}

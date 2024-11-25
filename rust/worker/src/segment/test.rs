@@ -1,7 +1,6 @@
 use std::sync::atomic::AtomicU32;
 
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
-use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
 use chroma_types::{
     test_segment, Chunk, Collection, CollectionUuid, LogRecord, OperationRecord, Segment,
     SegmentScope,
@@ -15,7 +14,6 @@ use super::{
 };
 
 pub struct TestSegment {
-    pub hnsw_provider: HnswIndexProvider,
     pub blockfile_provider: BlockfileProvider,
     pub collection: Collection,
     pub metadata_segment: Segment,
@@ -104,7 +102,6 @@ impl Default for TestSegment {
             version: 0,
         };
         Self {
-            hnsw_provider: test_hnsw_index_provider(),
             blockfile_provider: test_arrow_blockfile_provider(2 << 22),
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),

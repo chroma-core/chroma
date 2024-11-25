@@ -225,7 +225,7 @@ impl ArrowUnorderedBlockfileWriter {
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn get_owned<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    pub async fn get_owned<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
