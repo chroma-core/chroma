@@ -16,6 +16,7 @@ from chromadb.execution.expression.operator import (
     SegmentScan,
 )
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
+from chromadb.errors import InvalidArgumentError
 from chromadb.types import (
     Collection,
     LogRecord,
@@ -32,9 +33,18 @@ from chromadb.types import (
     VectorEmbeddingRecord,
     VectorQueryResult,
 )
-from chromadb.errors import InvalidArgumentError
-import numpy as np
-from numpy.typing import NDArray
+
+
+class ProjectionRecord(TypedDict):
+    id: str
+    document: Optional[str]
+    embedding: Optional[Vector]
+    metadata: Optional[Metadata]
+
+
+class KNNProjectionRecord(TypedDict):
+    record: ProjectionRecord
+    distance: Optional[float]
 
 
 # TODO: Unit tests for this file, handling optional states etc

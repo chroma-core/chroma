@@ -24,7 +24,10 @@ from chromadb.api.types import (
     URIs,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-from chromadb.errors import ChromaError, InvalidArgumentError
+from chromadb.errors import (
+    ChromaError, 
+    InvalidArgumentError
+)
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
