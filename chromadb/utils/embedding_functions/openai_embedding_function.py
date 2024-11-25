@@ -4,7 +4,6 @@ from typing import Mapping, Optional, cast
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from chromadb.errors import InvalidArgumentError
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -54,7 +53,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self._api_key = api_key or openai.api_key
         # If the api key is still not set, raise an error
-        elif openai.api_key is None:
+        if self._api_key is None:
             raise InvalidArgumentError(
                 "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
             )
@@ -144,3 +143,4 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             return cast(
                 Embeddings, [result["embedding"] for result in sorted_embeddings]
             )
+        

@@ -8,7 +8,6 @@ from chromadb.errors import InvalidArgumentError
 from chromadb.api.fastapi import FastAPI
 
 
-
 def hostname_strategy() -> st.SearchStrategy[str]:
     label = st.text(
         alphabet=st.characters(min_codepoint=97, max_codepoint=122),

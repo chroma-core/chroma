@@ -1158,7 +1158,7 @@ def test_escape_chars_in_ids(client: ClientAPI) -> None:
 def test_delete_empty_fails(client: ClientAPI) -> None:
     reset(client)
     coll = client.create_collection(name="foo")
-    with pytest.raises(Invalid):
+    with pytest.raises(InvalidArgumentError):
         coll.delete()
 
 

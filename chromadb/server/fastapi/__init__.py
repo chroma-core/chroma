@@ -22,7 +22,6 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 
 from chromadb.api.configuration import CollectionConfigurationInternal
-
 from pydantic import BaseModel
 from chromadb.api.types import (
     Embedding,
