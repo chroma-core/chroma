@@ -7,9 +7,9 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.88"
+anyhow = "1.0.93"
 async-tempfile = "0.6.0"
-async-compression = { version = "0.4.12", features = [
+async-compression = { version = "0.4.18", features = [
   "tokio",
   "gzip",
   "bzip2",
@@ -27,9 +27,9 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 
-clap = { version = "4.5.17", features = ["derive"] }
+clap = { version = "4.5.21", features = ["derive"] }
 dirs = "5.0.1"
-reqwest = { version = "0.12.7", features = ["stream"] }
+reqwest = { version = "0.12.9", features = ["stream"] }
 tokio-stream = { version = "0.1.16", features = ["full"] }
 tokio-util = "0.7.12"
 bloom = "0.3.2"
