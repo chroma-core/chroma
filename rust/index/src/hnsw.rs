@@ -233,7 +233,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
 
     fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
         let mut sizes = vec![0usize; 2];
-        unsafe { get_all_ids_size(self.ffi_ptr, sizes.as_mut_ptr()) };
+        unsafe { get_all_ids_sizes(self.ffi_ptr, sizes.as_mut_ptr()) };
         read_and_return_hnsw_error(self.ffi_ptr)?;
         Ok(sizes)
     }
@@ -381,7 +381,7 @@ extern "C" {
     fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
     fn mark_deleted(index: *const IndexPtrFFI, id: usize);
     fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
-    fn get_all_ids_size(index: *const IndexPtrFFI, sizes: *mut usize);
+    fn get_all_ids_sizes(index: *const IndexPtrFFI, sizes: *mut usize);
     fn get_all_ids(index: *const IndexPtrFFI, non_deleted_ids: *mut usize, deleted_ids: *mut usize);
     fn knn_query(
         index: *const IndexPtrFFI,
