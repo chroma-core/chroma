@@ -124,7 +124,7 @@ impl CompactionManager {
                     dispatcher,
                     None,
                     None,
-                    Arc::new(AtomicU32::new(0)),
+                    Arc::new(AtomicU32::new(1)),
                     self.max_compaction_size,
                     self.max_partition_size,
                 );
