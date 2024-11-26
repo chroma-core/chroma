@@ -295,6 +295,9 @@ impl RecordSegmentWriter {
             id_to_user_id: Some(id_to_user_id),
             id_to_data: Some(id_to_data),
             max_offset_id: Some(max_offset_id),
+            // The max new offset id introduced by materialized logs is initialized as zero
+            // Since offset id should start from 1, we use this to indicate no new offset id
+            // has been introduced in the materialized logs
             max_new_offset_id: AtomicU32::new(0).into(),
             id: segment.id,
         })
@@ -339,6 +342,9 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
         &self,
         records: Chunk<MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError> {
+        // The max new offset id introduced by materialized logs is initialized as zero
+        // Since offset id should start from 1, we use this to indicate no new offset id
+        // has been introduced in the materialized logs
         let mut max_new_offset_id = 0;
         let mut count = 0u64;
         for (log_record, _) in records.iter() {
@@ -494,11 +500,11 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
             .commit::<u32, &DataRecord>()
             .await;
         let max_offset_id = self.max_offset_id.take().unwrap();
-        let max_known_offset_id = self.max_new_offset_id.load(atomic::Ordering::SeqCst);
-        if max_known_offset_id > 0 {
-            // The max known offset id has been updated if and only if new records are introduced
+        let max_new_offset_id = self.max_new_offset_id.load(atomic::Ordering::SeqCst);
+        // The max new offset id is non zero if and only if new records are introduced
+        if max_new_offset_id > 0 {
             max_offset_id
-                .set::<&str, u32>("", MAX_OFFSET_ID, max_known_offset_id)
+                .set::<&str, u32>("", MAX_OFFSET_ID, max_new_offset_id)
                 .await
                 .map_err(|_| {
                     Box::new(ApplyMaterializedLogError::BlockfileSet) as Box<dyn ChromaError>
@@ -962,7 +968,7 @@ mod tests {
             || {
                 let log_partition_size = 1000;
                 let stack_size = 1 << 22;
-                let thread_count = num_cpus::get() * 2;
+                let thread_count = 4;
                 let log_generator = LogGenerator {
                     generator: upsert_generator,
                 };
