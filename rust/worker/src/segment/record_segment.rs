@@ -966,7 +966,7 @@ mod tests {
     fn test_max_offset_id_shuttle() {
         shuttle::check_random(
             || {
-                let log_partition_size = 1000;
+                let log_partition_size = 100;
                 let stack_size = 1 << 22;
                 let thread_count = 4;
                 let log_generator = LogGenerator {
@@ -1047,7 +1047,7 @@ mod tests {
                 // assert_eq!(max_offset_id, max_log_offset as u32);
                 assert_eq!(max_offset_id as usize, max_log_offset + thread_count);
             },
-            10,
+            60,
         );
     }
 }
