@@ -18,10 +18,13 @@ use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
 
+pub mod config;
 pub mod data_sets;
 pub mod opentelemetry_config;
 pub mod rest;
 pub mod workloads;
+
+const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -659,10 +662,14 @@ async fn uninhibit(State(state): State<AppState>) -> Result<String, Error> {
 }
 
 pub async fn entrypoint() {
-    opentelemetry_config::init_otel_tracing(
-        &"chroma-load".to_string(),
-        &"localhost:4317".to_string(),
-    );
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => config::RootConfig::load_from_path(&config_path),
+        Err(_) => config::RootConfig::load(),
+    };
+
+    let config = config.load_service;
+
+    opentelemetry_config::init_otel_tracing(&config.service_name, &config.otel_endpoint);
     let load = Arc::new(LoadService::default());
     let state = AppState {
         load: Arc::clone(&load),
@@ -690,7 +697,9 @@ pub async fn entrypoint() {
             }),
         )
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port))
+        .await
+        .unwrap();
     let runner = tokio::task::spawn(async move { load.run().await });
     axum::serve(listener, app).await.unwrap();
     runner.abort();
