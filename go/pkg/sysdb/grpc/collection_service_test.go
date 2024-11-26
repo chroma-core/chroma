@@ -401,6 +401,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	validateDatabase(suite, collectionID, collection, filePaths)
 
 	// test empty segment compaction info
+	// this happens when the compaction results in no delta for the collection
 	req = &coordinatorpb.FlushCollectionCompactionRequest{
 		TenantId:              suite.tenantName,
 		CollectionId:          collectionID,
@@ -410,6 +411,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	}
 	response, err = suite.s.FlushCollectionCompaction(context.Background(), req)
 	suite.NoError(err)
+	// log position and collection version should be updated
 	collection = &coordinatorpb.Collection{
 		Id:          collectionID,
 		LogPosition: int64(200),
