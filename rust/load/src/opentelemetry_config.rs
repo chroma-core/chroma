@@ -1,5 +1,5 @@
-// NOTE:  This is file is copied to a file of the same name in the
-// load/src/opentelemetry_config.rs file.
+// NOTE:  This is a copy of the file of the same name in the
+// worker/src/tracing/opentelemetry_config.rs file.
 //
 // Keep them in-sync manually.
 
@@ -129,7 +129,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // global filter layer. Don't filter anything at above trace at the global layer for chroma.
     // And enable errors for every other library.
     let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,".to_string()
+        "info,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -138,6 +138,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
                 "chroma-distance",
                 "chroma-error",
                 "chroma-index",
+                "chroma-load",
                 "chroma-storage",
                 "chroma-test",
                 "chroma-types",

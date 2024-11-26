@@ -10,6 +10,7 @@ members = [
    "rust/distance",
    "rust/error",
    "rust/index",
+   "rust/load",
    "rust/storage",
    "rust/types",
    "rust/worker",
