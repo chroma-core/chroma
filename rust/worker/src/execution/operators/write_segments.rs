@@ -68,7 +68,7 @@ pub struct WriteSegmentsInput {
     chunk: Chunk<LogRecord>,
     provider: BlockfileProvider,
     record_segment: Segment,
-    offset_id: Arc<AtomicU32>,
+    next_offset_id: Arc<AtomicU32>,
 }
 
 impl WriteSegmentsInput {
@@ -79,7 +79,7 @@ impl WriteSegmentsInput {
         chunk: Chunk<LogRecord>,
         provider: BlockfileProvider,
         record_segment: Segment,
-        offset_id: Arc<AtomicU32>,
+        next_offset_id: Arc<AtomicU32>,
     ) -> Self {
         WriteSegmentsInput {
             record_segment_writer,
@@ -88,7 +88,7 @@ impl WriteSegmentsInput {
             chunk,
             provider,
             record_segment,
-            offset_id,
+            next_offset_id,
         }
     }
 }
@@ -163,7 +163,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         let materializer = LogMaterializer::new(
             record_segment_reader,
             input.chunk.clone(),
-            Some(input.offset_id.clone()),
+            Some(input.next_offset_id.clone()),
         );
         // Materialize the logs.
         let res = match materializer

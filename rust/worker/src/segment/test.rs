@@ -23,9 +23,9 @@ pub struct TestSegment {
 
 impl TestSegment {
     // WARN: The size of the log chunk should not be too large
-    async fn compact_log(&mut self, logs: Chunk<LogRecord>, offset: usize) {
+    async fn compact_log(&mut self, logs: Chunk<LogRecord>, next_offset: usize) {
         let materializer =
-            LogMaterializer::new(None, logs, Some(AtomicU32::new(offset as u32).into()));
+            LogMaterializer::new(None, logs, Some(AtomicU32::new(next_offset as u32).into()));
         let materialized_logs = materializer
             .materialize()
             .await
@@ -80,8 +80,7 @@ impl TestSegment {
                 chunk
                     .first()
                     .copied()
-                    .expect("The chunk of offset ids to generate should not be empty.")
-                    - 1,
+                    .expect("The chunk of offset ids to generate should not be empty."),
             )
             .await;
         }

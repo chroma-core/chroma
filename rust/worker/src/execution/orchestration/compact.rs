@@ -43,6 +43,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_types::Chunk;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
+use std::sync::atomic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -105,8 +106,8 @@ pub struct CompactOrchestrator {
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
-    // Current max offset id.
-    curr_max_offset_id: Arc<AtomicU32>,
+    // Next offset id
+    next_offset_id: Arc<AtomicU32>,
     max_compaction_size: usize,
     max_partition_size: usize,
 }
@@ -180,7 +181,7 @@ impl CompactOrchestrator {
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
         >,
         record_segment: Option<Segment>,
-        curr_max_offset_id: Arc<AtomicU32>,
+        next_offset_id: Arc<AtomicU32>,
         max_compaction_size: usize,
         max_partition_size: usize,
     ) -> Self {
@@ -199,7 +200,7 @@ impl CompactOrchestrator {
             num_write_tasks: 0,
             result_channel,
             record_segment,
-            curr_max_offset_id,
+            next_offset_id,
             max_compaction_size,
             max_partition_size,
             writers: None,
@@ -306,7 +307,7 @@ impl CompactOrchestrator {
                     .as_ref()
                     .expect("WriteSegmentsInput: Record segment not set in the input")
                     .clone(),
-                self.curr_max_offset_id.clone(),
+                self.next_offset_id.clone(),
             );
             let task = wrap(operator, input, self_address.clone());
             match self.dispatcher.send(task, Some(Span::current())).await {
@@ -431,10 +432,15 @@ impl CompactOrchestrator {
         tracing::debug!("Record Segment Writer created");
         match RecordSegmentReader::from_segment(record_segment, &self.blockfile_provider).await {
             Ok(reader) => {
-                self.curr_max_offset_id = reader.get_current_max_offset_id();
+                self.next_offset_id = Arc::new(AtomicU32::new(
+                    reader
+                        .get_current_max_offset_id()
+                        .load(atomic::Ordering::SeqCst)
+                        + 1,
+                ));
             }
             Err(_) => {
-                self.curr_max_offset_id = Arc::new(AtomicU32::new(0));
+                self.next_offset_id = Arc::new(AtomicU32::new(1));
             }
         };
         self.record_segment = Some(record_segment.clone()); // auto deref.

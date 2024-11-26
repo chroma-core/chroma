@@ -1043,9 +1043,7 @@ mod tests {
                 .expect("Get owned should not fail")
                 .expect("Max offset id should exist");
 
-                // TODO: Switch the expected log offset after log materializer bug fix
-                // assert_eq!(max_offset_id, max_log_offset as u32);
-                assert_eq!(max_offset_id as usize, max_log_offset + thread_count);
+                assert_eq!(max_offset_id, max_log_offset as u32);
             },
             60,
         );

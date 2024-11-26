@@ -416,19 +416,19 @@ pub struct LogMaterializer<'me> {
     // the current maximum from the record segment and uses that
     // for materializing. Writers pass this value to the materializer
     // because they need to share this across all log partitions.
-    pub(crate) curr_offset_id: Option<Arc<AtomicU32>>,
+    pub(crate) next_offset_id: Option<Arc<AtomicU32>>,
 }
 
 impl<'me> LogMaterializer<'me> {
     pub fn new(
         record_segment_reader: Option<RecordSegmentReader<'me>>,
         logs: Chunk<LogRecord>,
-        curr_offset_id: Option<Arc<AtomicU32>>,
+        next_offset_id: Option<Arc<AtomicU32>>,
     ) -> Self {
         Self {
             record_segment_reader,
             logs,
-            curr_offset_id,
+            next_offset_id,
         }
     }
     pub async fn materialize(
@@ -441,10 +441,9 @@ impl<'me> LogMaterializer<'me> {
             self.logs.total_len()
         );
         let next_offset_id;
-        match self.curr_offset_id.as_ref() {
-            Some(curr_offset_id) => {
-                next_offset_id = curr_offset_id.clone();
-                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self.next_offset_id.as_ref() {
+            Some(next_oid) => {
+                next_offset_id = next_oid.clone();
             }
             None => {
                 match self.record_segment_reader.as_ref() {
@@ -975,7 +974,7 @@ mod tests {
         let materializer = LogMaterializer {
             record_segment_reader: Some(reader),
             logs: data,
-            curr_offset_id: None,
+            next_offset_id: None,
         };
         let res = materializer
             .materialize()
@@ -1261,7 +1260,7 @@ mod tests {
         let materializer = LogMaterializer {
             record_segment_reader: Some(reader),
             logs: data,
-            curr_offset_id: None,
+            next_offset_id: None,
         };
         let res = materializer
             .materialize()
@@ -1576,7 +1575,7 @@ mod tests {
         let materializer = LogMaterializer {
             record_segment_reader: Some(reader),
             logs: data,
-            curr_offset_id: None,
+            next_offset_id: None,
         };
         let res = materializer
             .materialize()
@@ -1874,7 +1873,7 @@ mod tests {
         let materializer = LogMaterializer {
             record_segment_reader: Some(reader),
             logs: data,
-            curr_offset_id: None,
+            next_offset_id: None,
         };
         let res = materializer
             .materialize()
