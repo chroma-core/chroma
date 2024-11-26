@@ -80,7 +80,7 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                     0.25,
                     Workload::Query(QueryQuery {
                         limit: Distribution::Constant(10),
-                        metadata: Some(MetadataQuery::Raw(serde_json::json!({"i1": 1000}))),
+                        metadata: None,
                         document: None,
                     }),
                 ),
