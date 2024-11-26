@@ -377,7 +377,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	req = &coordinatorpb.FlushCollectionCompactionRequest{
 		TenantId:              suite.tenantName,
 		CollectionId:          collectionID,
-		LogPosition:           150,
+		LogPosition:           100,
 		CollectionVersion:     1,
 		SegmentCompactionInfo: []*coordinatorpb.FlushSegmentCompactionInfo{info},
 	}
@@ -390,7 +390,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	req = &coordinatorpb.FlushCollectionCompactionRequest{
 		TenantId:              suite.tenantName,
 		CollectionId:          collectionID,
-		LogPosition:           150,
+		LogPosition:           100,
 		CollectionVersion:     5,
 		SegmentCompactionInfo: []*coordinatorpb.FlushSegmentCompactionInfo{info},
 	}
@@ -398,6 +398,24 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	suite.Error(err)
 	suite.Equal(status.Error(codes.Code(code.Code_INTERNAL), common.ErrCollectionVersionInvalid.Error()), err)
 	// nothing should change in DB
+	validateDatabase(suite, collectionID, collection, filePaths)
+
+	// test empty segment compaction info
+	req = &coordinatorpb.FlushCollectionCompactionRequest{
+		TenantId:              suite.tenantName,
+		CollectionId:          collectionID,
+		LogPosition:           200,
+		CollectionVersion:     2,
+		SegmentCompactionInfo: []*coordinatorpb.FlushSegmentCompactionInfo{},
+	}
+	response, err = suite.s.FlushCollectionCompaction(context.Background(), req)
+	suite.NoError(err)
+	collection = &coordinatorpb.Collection{
+		Id:          collectionID,
+		LogPosition: int64(200),
+		Version:     int32(3),
+	}
+	// nothing else should change in DB
 	validateDatabase(suite, collectionID, collection, filePaths)
 
 	// clean up
