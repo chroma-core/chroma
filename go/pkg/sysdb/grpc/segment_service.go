@@ -36,7 +36,6 @@ func (s *Server) CreateSegment(ctx context.Context, req *coordinatorpb.CreateSeg
 }
 
 func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegmentsRequest) (*coordinatorpb.GetSegmentsResponse, error) {
-	log.Info("GetSegments", zap.String("request", req.String()))
 	segmentID := req.Id
 	segmentType := req.Type
 	scope := req.Scope
@@ -61,20 +60,6 @@ func (s *Server) GetSegments(ctx context.Context, req *coordinatorpb.GetSegments
 		scopeString := scope.String()
 		scopeValue = &scopeString
 	}
-
-	// If Collection has been deleted (soft or hard), then do not return the segments.
-	collection, err := s.coordinator.GetCollections(ctx, parsedCollectionID, nil, "", "", nil, nil)
-	if err != nil {
-		log.Error("GetSegments failed. GetCollections error", zap.Error(err), zap.String("request", req.String()))
-		return res, grpcutils.BuildInternalGrpcError(err.Error())
-	}
-	if len(collection) == 0 {
-		log.Info("GetSegments - Collection not found. Returning empty response", zap.String("request", req.String()))
-		return res, nil
-	}
-
-	log.Info("GetSegments. Collection found", zap.Any("collection", collection[0]))
-	// Get segments for the collection.
 	segments, err := s.coordinator.GetSegments(ctx, parsedSegmentID, segmentType, scopeValue, parsedCollectionID)
 	if err != nil {
 		log.Error("GetSegments failed.", zap.Error(err), zap.String("request", req.String()))
