@@ -71,7 +71,7 @@ def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
                 "-q",
                 "-q",
                 "install",
-                f"'{dep}{operator_version}'",
+                f"{dep}{operator_version}",
             ]
         )
 
