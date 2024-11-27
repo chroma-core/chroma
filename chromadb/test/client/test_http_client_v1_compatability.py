@@ -41,7 +41,7 @@ def test_http_client_bw_compatibility() -> None:
     port = sys.settings.chroma_server_http_port
 
     old_version = "0.5.11"  # Module with known v1 client
-    install_version(old_version)
+    install_version(old_version, {})
 
     ctx = multiprocessing.get_context("spawn")
     conn1, conn2 = multiprocessing.Pipe()
