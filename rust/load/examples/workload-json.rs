@@ -22,10 +22,10 @@ fn main() {
         ),
         (
             1.0,
-            Workload::Delay(
-                chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00+00:00").unwrap(),
-                Box::new(Workload::Nop),
-            ),
+            Workload::Delay {
+                after: chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00+00:00").unwrap(),
+                wrap: Box::new(Workload::Nop),
+            },
         ),
     ]);
     println!("{}", serde_json::to_string_pretty(&w).unwrap());

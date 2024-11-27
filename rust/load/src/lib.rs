@@ -202,7 +202,10 @@ pub enum Workload {
     #[serde(rename = "hybrid")]
     Hybrid(Vec<(f64, Workload)>),
     #[serde(rename = "delay")]
-    Delay(chrono::DateTime<chrono::FixedOffset>, Box<Workload>),
+    Delay {
+        after: chrono::DateTime<chrono::FixedOffset>,
+        wrap: Box<Workload>,
+    },
 }
 
 impl Workload {
@@ -227,7 +230,7 @@ impl Workload {
                     workload.resolve_by_name(workloads)?;
                 }
             }
-            Workload::Delay(_, w) => w.resolve_by_name(workloads)?,
+            Workload::Delay { after: _, wrap } => wrap.resolve_by_name(workloads)?,
         }
         Ok(())
     }
@@ -285,7 +288,7 @@ impl Workload {
                     "miscalculation of total hybrid probabilities".to_string(),
                 )))
             }
-            Workload::Delay(_, w) => Box::pin(w.step(client, data_set, guac)).await,
+            Workload::Delay { after: _, wrap } => Box::pin(wrap.step(client, data_set, guac)).await,
         }
     }
 
@@ -296,7 +299,7 @@ impl Workload {
             Workload::Get(_) => true,
             Workload::Query(_) => true,
             Workload::Hybrid(hybrid) => hybrid.iter().any(|(_, w)| w.is_active()),
-            Workload::Delay(after, w) => chrono::Utc::now() >= *after && w.is_active(),
+            Workload::Delay { after, wrap } => chrono::Utc::now() >= *after && wrap.is_active(),
         }
     }
 }
@@ -788,10 +791,10 @@ mod tests {
     [
       1.0,
       {
-        "delay": [
-          "2021-01-01T00:00:00Z",
-          "nop"
-        ]
+        "delay": {
+          "after": "2021-01-01T00:00:00Z",
+          "wrap": "nop"
+        }
       }
     ]
   ]
@@ -817,10 +820,11 @@ mod tests {
             ),
             (
                 1.0,
-                Workload::Delay(
-                    chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00+00:00").unwrap(),
-                    Box::new(Workload::Nop),
-                ),
+                Workload::Delay {
+                    after: chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00+00:00")
+                        .unwrap(),
+                    wrap: Box::new(Workload::Nop),
+                },
             ),
         ]);
         assert_eq!(json, serde_json::to_string_pretty(&workload).unwrap());
