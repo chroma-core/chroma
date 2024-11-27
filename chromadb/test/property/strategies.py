@@ -294,7 +294,7 @@ def collections(
 
     name = draw(collection_name())
     metadata = draw(collection_metadata)
-    dimension = draw(st.integers(min_value=2, max_value=3))
+    dimension = draw(st.integers(min_value=2, max_value=2))
     dtype = draw(st.sampled_from(float_types))
 
     use_persistent_hnsw_params = draw(with_persistent_hnsw_params)

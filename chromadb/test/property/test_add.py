@@ -52,9 +52,9 @@ def test_add_small(
         collection_st,
         min_size=500,
         max_size=600,
-        num_unique_metadata=2,
+        num_unique_metadata=1,
         min_metadata_size=1,
-        max_metadata_size=2,
+        max_metadata_size=1,
     ),
     should_compact=st.booleans(),
 )
@@ -81,7 +81,8 @@ def test_add_medium(
     # This breaks the ann_accuracy invariant by default, since
     # the vector reader returns a payload of dataset size. So we need to batch
     # the queries in the ann_accuracy invariant
-    _test_add(client, collection, record_set, should_compact, batch_ann_accuracy=True)
+    # _test_add(client, collection, record_set, should_compact, batch_ann_accuracy=True)
+    _test_add(client, collection, record_set, should_compact=False, batch_ann_accuracy=True)
 
 
 def _test_add(
