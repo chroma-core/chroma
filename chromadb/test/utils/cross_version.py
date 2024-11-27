@@ -3,7 +3,7 @@ import subprocess
 import os
 import tempfile
 from types import ModuleType
-from typing import List
+from typing import Dict, List
 
 base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 
@@ -38,16 +38,16 @@ def get_path_to_version_library(version: str) -> str:
     return get_path_to_version_install(version) + "/chromadb/__init__.py"
 
 
-def install_version(version: str) -> None:
+def install_version(version: str, dep_overrides: Dict[str, str]) -> None:
     # Check if already installed
     version_library = get_path_to_version_library(version)
     if os.path.exists(version_library):
         return
     path = get_path_to_version_install(version)
-    install(f"chromadb=={version}", path)
+    install(f"chromadb=={version}", path, dep_overrides)
 
 
-def install(pkg: str, path: str) -> int:
+def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
     print("Purging pip cache")
@@ -60,17 +60,14 @@ def install(pkg: str, path: str) -> int:
             "purge",
         ]
     )
+
+    command = [sys.executable, "-m", "pip", "-q", "-q", "install", pkg]
+
+    for dep, operator_version in dep_overrides.items():
+        command.append(f"{dep}{operator_version}")
+
+    command.append("--no-binary=chroma-hnswlib")
+    command.append(f"--target={path}")
+
     print(f"Installing chromadb version {pkg} to {path}")
-    return subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "-q",
-            "-q",
-            "install",
-            pkg,
-            "--no-binary=chroma-hnswlib",
-            "--target={}".format(path),
-        ]
-    )
+    return subprocess.check_call(command)

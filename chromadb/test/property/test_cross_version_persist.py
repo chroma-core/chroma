@@ -22,6 +22,7 @@ import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
 import re
+import sys
 import multiprocessing
 from chromadb.config import Settings
 from chromadb.api.client import Client as ClientCreator
@@ -38,7 +39,7 @@ BASELINE_VERSIONS = ["0.4.1", "0.5.3"]
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
-VERSIONED_MODULES = ["pydantic", "numpy"]
+VERSIONED_MODULES = ["pydantic", "numpy", "tokenizers"]
 
 
 def versions() -> List[str]:
@@ -148,7 +149,14 @@ base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
-    install_version(version)
+
+    # Version <3.9 requires bounding tokenizers<=0.20.3
+    (major, minor, patch) = sys.version_info[:3]
+    if major == 3 and minor < 9:
+        install_version(version, {"tokenizers": "<=0.20.3"})
+    else:
+        install_version(version, {})
+
     yield configuration
     # Cleanup the installed version
     path = get_path_to_version_install(version)
