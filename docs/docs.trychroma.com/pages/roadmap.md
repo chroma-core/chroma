@@ -43,7 +43,7 @@ Not an exhaustive list, but these are some of the core team’s biggest prioriti
 
 ## What areas are great for community contributions?
 
-This is where you have a lot more free reign to contribute (without having to sync with us first)!
+This is where you have a lot more free rein to contribute (without having to sync with us first)!
 
 If you're unsure about your contribution idea, feel free to chat with us (@chroma) in the `#general` channel in [our Discord](https://discord.gg/rahcMUU5XV)! We'd love to support you however we can.
 

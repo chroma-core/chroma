@@ -272,7 +272,7 @@ chromaClient.heartbeat()
 
 ## Observability with Docker
 
-Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only export OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
 
 Tracing is configured with four environment variables:
 
@@ -309,7 +309,7 @@ service:
 ```
 
 This is the configuration file for the OpenTelemetry Collector:
-* The `recievers` section specifies that the OpenTelemetry protocol (OTLP) will be used to receive data over GRPC and HTTP.
+* The `receivers` section specifies that the OpenTelemetry protocol (OTLP) will be used to receive data over GRPC and HTTP.
 * `exporters` defines that telemetry data is logged to the console (`debug`), and sent to a `zipkin` server (defined bellow in `docker-compose.yml`).
 * The `service` section ties everything together, defining a `traces` pipeline receiving data through our `otlp` receiver and exporting data to `zipkin` and via logging.
 

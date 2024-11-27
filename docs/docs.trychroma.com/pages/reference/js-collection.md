@@ -32,19 +32,19 @@ ___
 
 Add items to the collection
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `AddRecordsParams` | The parameters for the query. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`void`\>
 
 - The response from the API. True if successful.
 
-**`Example`**
+**Example**
 
 ```typescript
 const response = await collection.add({
@@ -63,13 +63,13 @@ ___
 
 Count the number of items in the collection
 
-#### Returns
+**Returns**
 
 `Promise`\<`number`\>
 
 - The number of items in the collection.
 
-**`Example`**
+**Example**
 
 ```typescript
 const count = await collection.count();
@@ -83,23 +83,23 @@ ___
 
 Deletes items from the collection.
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `DeleteParams` | The parameters for deleting items from the collection. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`string`[]\>
 
 A promise that resolves to the IDs of the deleted items.
 
-**`Throws`**
+**Throws**
 
 If there is an issue deleting items from the collection.
 
-**`Example`**
+**Example**
 
 ```typescript
 const results = await collection.delete({
@@ -117,19 +117,19 @@ ___
 
 Get items from the collection
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `BaseGetParams` | The parameters for the query. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`MultiGetResponse`\>
 
 - The response from the server.
 
-**`Example`**
+**Example**
 
 ```typescript
 const response = await collection.get({
@@ -150,7 +150,7 @@ ___
 
 Modify the collection name or metadata
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
@@ -158,13 +158,13 @@ Modify the collection name or metadata
 | `params.metadata?` | `CollectionMetadata` | Optional new metadata for the collection. |
 | `params.name?` | `string` | Optional new name for the collection. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`CollectionParams`\>
 
 - The response from the API.
 
-**`Example`**
+**Example**
 
 ```typescript
 const response = await client.updateCollection({
@@ -181,23 +181,23 @@ ___
 
 Peek inside the collection
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `PeekParams` | The parameters for the query. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`MultiGetResponse`\>
 
 A promise that resolves to the query results.
 
-**`Throws`**
+**Throws**
 
 If there is an issue executing the query.
 
-**`Example`**
+**Example**
 
 ```typescript
 const results = await collection.peek({
@@ -213,23 +213,23 @@ ___
 
 Performs a query on the collection using the specified parameters.
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `QueryRecordsParams` | The parameters for the query. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`MultiQueryResponse`\>
 
 A promise that resolves to the query results.
 
-**`Throws`**
+**Throws**
 
 If there is an issue executing the query.
 
-**`Example`**
+**Example**
 
 ```ts
 // Query the collection using embeddings
@@ -241,7 +241,7 @@ const results = await collection.query({
 });
 ```
 
-**`Example`**
+**Example**
 
 ```js
 // Query the collection using query text
@@ -261,17 +261,17 @@ ___
 
 Update items in the collection
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `UpdateRecordsParams` | The parameters for the query. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`void`\>
 
-**`Example`**
+**Example**
 
 ```typescript
 const response = await collection.update({
@@ -290,17 +290,17 @@ ___
 
 Upsert items to the collection
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `AddRecordsParams` | The parameters for the query. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`void`\>
 
-**`Example`**
+**Example**
 
 ```typescript
 const response = await collection.upsert({
