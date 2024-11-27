@@ -1,6 +1,7 @@
 use super::{CacheError, Weighted};
 use chroma_error::ChromaError;
 use clap::Parser;
+use foyer::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
     InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
@@ -272,6 +273,7 @@ where
             .with_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
 
         let builder = HybridCacheBuilder::<K, V>::new()
+            .with_metrics_registry(OpenTelemetryMetricsRegistry::new(global::meter("chroma")))
             .with_tracing_options(tracing_options)
             .memory(config.mem)
             .with_shards(config.shards);
@@ -457,13 +459,14 @@ where
             type Key = K;
             type Value = V;
 
-            fn on_memory_release(&self, key: Self::Key, value: Self::Value)
+            fn on_leave(&self, _: foyer::Event, key: &Self::Key, value: &Self::Value)
             where
-                K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+                Self::Key: foyer::Key,
+                Self::Value: foyer::Value,
             {
                 // NOTE(rescrv):  There's no mechanism by which we can error.  We could log a
                 // metric, but this should really never happen.
-                let _ = self.0.send((key, value));
+                let _ = self.0.send((key.clone(), value.clone()));
             }
         }
         let evl = TokioEventListener(tx);
