@@ -50,8 +50,8 @@ def test_add_small(
     collection=collection_st,
     record_set=strategies.recordsets(
         collection_st,
-        min_size=60,
-        max_size=120,
+        min_size=500,
+        max_size=600,
         num_unique_metadata=2,
         min_metadata_size=1,
         max_metadata_size=2,
