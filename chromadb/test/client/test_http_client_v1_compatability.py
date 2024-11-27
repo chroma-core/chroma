@@ -1,6 +1,6 @@
 import multiprocessing
 from unittest.mock import patch
-
+import sys as pysys
 from multiprocessing.connection import Connection
 
 from chromadb.config import System
@@ -41,7 +41,16 @@ def test_http_client_bw_compatibility() -> None:
     port = sys.settings.chroma_server_http_port
 
     old_version = "0.5.11"  # Module with known v1 client
-    install_version(old_version, {})
+
+    # Version <3.9 requires bounding tokenizers<=0.20.3
+    # TOOD(hammadb): This code is duplicated in test_cross_version_persist.py
+    # for expediency on 11/27/2024 I am copy pasting rather than refactoring
+    # to DRY. Refactor later.
+    (major, minor, _) = pysys.version_info[:3]
+    if major == 3 and minor < 9:
+        install_version(old_version, {"tokenizers": "<=0.20.3"})
+    else:
+        install_version(old_version, {})
 
     ctx = multiprocessing.get_context("spawn")
     conn1, conn2 = multiprocessing.Pipe()
