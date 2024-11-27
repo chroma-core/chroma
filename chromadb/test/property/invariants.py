@@ -293,7 +293,16 @@ def ann_accuracy(
     missing = 0
     for i, (indices_i, distances_i) in enumerate(zip(indices, distances)):
         expected_ids = np.array(normalized_record_set["ids"])[indices_i[:n_results]]
-        missing += len(set(expected_ids) - set(query_results["ids"][i]))
+        misses = set(expected_ids) - set(query_results["ids"][i])
+        missing += len(misses)
+
+        if len(misses) > 0:
+            print("\n>>>>>>>>>>>>")
+            print(f"[Debug] Querying for {query_embeddings[i]}")
+            print(f"[Debug] Expected IDs {expected_ids}")
+            print(f"[Debug] Got IDs {query_results['ids'][i]}")
+            print(f"[Debug] Missing {misses}")
+            print("<<<<<<<<<<<<\n")
 
         # For each id in the query results, find the index in the embeddings set
         # and assert that the embeddings are the same
@@ -340,7 +349,7 @@ def ann_accuracy(
         pass  # it's ok if we're running outside hypothesis
 
     if recall < min_recall:
-        print(f">>>>>>>>>>>> Missing: {missing}, Size: {size} <<<<<<<<<<<<")
+        print(f"\n>>>>>>>>>>>> [Debug] Missing: {missing}, Size: {size} <<<<<<<<<<<<\n")
 
     assert recall >= min_recall
 

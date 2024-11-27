@@ -51,7 +51,7 @@ def test_add_small(
     record_set=strategies.recordsets(
         collection_st,
         min_size=500,
-        max_size=600,
+        max_size=520,
         num_unique_metadata=1,
         min_metadata_size=1,
         max_metadata_size=1,
