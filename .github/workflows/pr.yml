@@ -42,7 +42,7 @@ jobs:
   #         name: test_logs
   #         path: ~/work/chroma/chroma/**/*.log
 
-  test-embeddings:
+  test-add:
     strategy:
       fail-fast: false
       matrix:

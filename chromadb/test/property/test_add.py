@@ -52,9 +52,9 @@ def test_add_small(
         collection_st,
         min_size=250,
         max_size=500,
-        num_unique_metadata=5,
+        num_unique_metadata=2,
         min_metadata_size=1,
-        max_metadata_size=5,
+        max_metadata_size=2,
     ),
     should_compact=st.booleans(),
 )

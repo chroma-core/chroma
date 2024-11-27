@@ -339,6 +339,9 @@ def ann_accuracy(
     except InvalidArgument:
         pass  # it's ok if we're running outside hypothesis
 
+    if recall < min_recall:
+        print(f">>>>>>>>>>>> Missing: {missing}, Size: {size} <<<<<<<<<<<<")
+
     assert recall >= min_recall
 
     # Ensure that the query results are sorted by distance
