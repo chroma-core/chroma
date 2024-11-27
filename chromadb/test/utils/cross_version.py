@@ -61,31 +61,13 @@ def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
         ]
     )
 
+    command = [sys.executable, "-m", "pip", "-q", "-q", "install", pkg]
+
     for dep, operator_version in dep_overrides.items():
-        print(f"Installing {dep} version {operator_version}")
-        subprocess.check_call(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "-q",
-                "-q",
-                "install",
-                f"{dep}{operator_version}",
-            ]
-        )
+        command.append(f"{dep}{operator_version}")
+
+    command.append("--no-binary=chroma-hnswlib")
+    command.append(f"--target={path}")
 
     print(f"Installing chromadb version {pkg} to {path}")
-    return subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "-q",
-            "-q",
-            "install",
-            pkg,
-            "--no-binary=chroma-hnswlib",
-            "--target={}".format(path),
-        ]
-    )
+    return subprocess.check_call(command)
