@@ -31,9 +31,9 @@ use crate::{
         orchestration::common::terminate_with_error,
     },
     segment::distributed_hnsw_segment::{
-        distance_function_from_segment, DistributedHNSWSegmentFromSegmentError,
-        DistributedHNSWSegmentReader,
+        DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
     },
+    segment::utils::distance_function_from_segment,
     system::{ChannelError, Component, ComponentContext, ComponentHandle, Handler, System},
 };
 
@@ -186,6 +186,8 @@ pub enum KnnError {
     Panic(String),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
+    #[error("Invalid distance function")]
+    InvalidDistanceFunction,
 }
 
 impl ChromaError for KnnError {
@@ -203,6 +205,7 @@ impl ChromaError for KnnError {
             KnnError::NoCollectionDimension => ErrorCodes::InvalidArgument,
             KnnError::Panic(_) => ErrorCodes::Aborted,
             KnnError::Result(_) => ErrorCodes::Internal,
+            KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -421,8 +424,8 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
         };
         let distance_function = match distance_function_from_segment(&segments.vector_segment) {
             Ok(distance_function) => distance_function,
-            Err(err) => {
-                self.terminate_with_error(ctx, *err);
+            Err(_) => {
+                self.terminate_with_error(ctx, KnnError::InvalidDistanceFunction);
                 return;
             }
         };
