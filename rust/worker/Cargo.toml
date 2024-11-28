@@ -60,6 +60,9 @@ chroma-cache = { workspace = true }
 chroma-index = { workspace = true }
 chroma-distance = { workspace = true }
 
+fastrace = "0.7"
+fastrace-opentelemetry = "0.8"
+
 [dev-dependencies]
 random-port = "0.1.1"
 serial_test = "3.1.1"
