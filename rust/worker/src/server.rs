@@ -605,10 +605,12 @@ mod tests {
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
-    #[tokio::test]
-    async fn validate_knn_plan() {
-        let gen_request = || chroma_proto::KnnPlan {
-            scan: Some(scan()),
+    fn gen_knn_request(mut scan_operator: Option<chroma_proto::ScanOperator>) -> chroma_proto::KnnPlan {
+        if scan_operator.is_none() {
+            scan_operator = Some(scan());
+        }
+        chroma_proto::KnnPlan {
+            scan: scan_operator,
             filter: Some(chroma_proto::FilterOperator {
                 ids: None,
                 r#where: None,
@@ -626,29 +628,21 @@ mod tests {
                 }),
                 distance: false,
             }),
-        };
+        }
+    }
 
+    #[tokio::test]
+    async fn validate_knn_plan_empty_embeddings() {
         let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
-
-        // empty embeddings
-        let response = executor.knn(gen_request()).await;
+        let response = executor.knn(gen_knn_request(None)).await;
         assert!(response.is_ok());
         assert_eq!(response.unwrap().into_inner().results.len(), 0);
+    }
 
-        // invalid collection
-        let mut request = gen_request();
-        request.scan = None;
-        let response = executor.knn(request).await;
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(
-            err.message().to_lowercase().contains("scan operator"),
-            "{}",
-            err.message()
-        );
-
-        // error parsing filter
-        let mut request = gen_request();
+    #[tokio::test]
+    async fn validate_knn_plan_filter() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
         request.filter = None;
         let response = executor.knn(request).await;
         let err = response.unwrap_err();
@@ -658,9 +652,12 @@ mod tests {
             "{}",
             err.message()
         );
+    }
 
-        // invalid knn operator
-        let mut request = gen_request();
+    #[tokio::test]
+    async fn validate_knn_plan_knn() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
         request.knn = None;
         let response = executor.knn(request).await;
         assert!(response.is_err());
@@ -671,9 +668,12 @@ mod tests {
             "{}",
             err.message()
         );
+    }
 
-        // invalid projection
-        let mut request = gen_request();
+    #[tokio::test]
+    async fn validate_knn_plan_projection() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
         request.projection = None;
         let response = executor.knn(request).await;
         let err = response.unwrap_err();
@@ -684,8 +684,7 @@ mod tests {
             err.message()
         );
 
-        // invalid projection
-        let mut request = gen_request();
+        let mut request = gen_knn_request(None);
         request.projection = Some(chroma_proto::KnnProjectionOperator {
             projection: None,
             distance: false,
@@ -704,41 +703,25 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_scan() {
-        let gen_request = |scan_op| chroma_proto::KnnPlan {
-            scan: Some(scan_op),
-            filter: Some(chroma_proto::FilterOperator {
-                ids: None,
-                r#where: None,
-                where_document: None,
-            }),
-            knn: Some(chroma_proto::KnnOperator {
-                embeddings: vec![],
-                fetch: 0,
-            }),
-            projection: Some(chroma_proto::KnnProjectionOperator {
-                projection: Some(chroma_proto::ProjectionOperator {
-                    document: false,
-                    embedding: false,
-                    metadata: false,
-                }),
-                distance: false,
-            }),
-        };
-
         let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
+        request.scan = None;
+        let response = executor.knn(request).await;
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(
+            err.message().to_lowercase().contains("scan operator"),
+            "{}",
+            err.message()
+        );
+    }
 
-        // empty embeddings
-        let response = executor.knn(gen_request(scan())).await;
-        assert!(response.is_ok());
-        assert_eq!(response.unwrap().into_inner().results.len(), 0);
-
-        let mut request = gen_request(scan());
-        request.filter = None;
-
-        // invalid collection uuid
-        let mut scan_operator = scan();
-        scan_operator.collection.as_mut().unwrap().id = "Invalid-Collection-ID".to_string();
-        let response = executor.knn(gen_request(scan_operator)).await;
+    #[tokio::test]
+    async fn validate_knn_plan_scan_collection() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan = scan();
+        scan.collection.as_mut().unwrap().id = "Invalid-Collection-ID".to_string();
+        let response = executor.knn(gen_knn_request(Some(scan))).await;
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -747,11 +730,15 @@ mod tests {
             "{}",
             err.message()
         );
+    }
 
+    #[tokio::test]
+    async fn validate_knn_plan_scan_vector() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
         // invalid vector uuid
-        scan_operator = scan();
+        let mut scan_operator = scan();
         scan_operator.knn_id = "invalid_segment_id".to_string();
-        let response = executor.knn(gen_request(scan_operator)).await;
+        let response = executor.knn(gen_knn_request(Some(scan_operator))).await;
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -760,11 +747,14 @@ mod tests {
             "{}",
             err.message()
         );
+    }
 
-        // invalid record uuid
-        scan_operator = scan();
+    #[tokio::test]
+    async fn validate_knn_plan_scan_record() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan_operator = scan();
         scan_operator.record_id = "invalid_record_id".to_string();
-        let response = executor.knn(gen_request(scan_operator)).await;
+        let response = executor.knn(gen_knn_request(Some(scan_operator))).await;
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -773,11 +763,14 @@ mod tests {
             "{}",
             err.message()
         );
+    }
 
-        // invalid metadata uuid
-        scan_operator = scan();
+    #[tokio::test]
+    async fn validate_knn_plan_scan_metadata() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan_operator = scan();
         scan_operator.metadata_id = "invalid_metadata_id".to_string();
-        let response = executor.knn(gen_request(scan_operator)).await;
+        let response = executor.knn(gen_knn_request(Some(scan_operator))).await;
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
