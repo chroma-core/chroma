@@ -222,14 +222,12 @@ impl KnnOrchestrator {
             self.knn_log_distances.as_ref(),
             self.knn_segment_distances.as_ref(),
         ) {
-            let task = wrap(
-                Box::new(self.merge.clone()),
-                KnnMergeInput {
-                    first_distances: log_distances.clone(),
-                    second_distances: segment_distances.clone(),
-                },
-                ctx.receiver(),
-            );
+            let input = KnnMergeInput {
+                first_distances: log_distances.clone(),
+                second_distances: segment_distances.clone(),
+            };
+            tracing::info!("[Debug] Merge Input: {:?}", &input);
+            let task = wrap(Box::new(self.merge.clone()), input, ctx.receiver());
             if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
                 self.terminate_with_error(ctx, err);
             }
@@ -373,17 +371,15 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         {
             self.terminate_with_error(ctx, err);
         }
+        let input = KnnProjectionInput {
+            logs: self.knn_filter_output.logs.clone(),
+            blockfile_provider: self.blockfile_provider.clone(),
+            record_segment: self.knn_filter_output.record_segment.clone(),
+            record_distances: output.record_distances,
+        };
+        tracing::info!("[Debug] Projection Input: {:?}", &input);
 
-        let projection_task = wrap(
-            Box::new(self.knn_projection.clone()),
-            KnnProjectionInput {
-                logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
-                record_distances: output.record_distances,
-            },
-            ctx.receiver(),
-        );
+        let projection_task = wrap(Box::new(self.knn_projection.clone()), input, ctx.receiver());
         if let Err(err) = self
             .dispatcher
             .send(projection_task, Some(Span::current()))
