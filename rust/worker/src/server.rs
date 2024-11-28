@@ -417,6 +417,7 @@ mod tests {
     use crate::segment::test::TestSegment;
     use crate::sysdb::test_sysdb::TestSysDb;
     use crate::system;
+    use chroma_index::test_hnsw_index_provider;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;
@@ -433,7 +434,7 @@ mod tests {
             system: None,
             sysdb: Box::new(SysDb::Test(sysdb)),
             log: Box::new(Log::InMemory(log)),
-            hnsw_index_provider: segments.hnsw_provider,
+            hnsw_index_provider: test_hnsw_index_provider(),
             blockfile_provider: segments.blockfile_provider,
             port,
         };

@@ -13,7 +13,7 @@ use chroma_types::{
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -32,6 +32,7 @@ pub struct RecordSegmentWriter {
     // TODO: for now we store the max offset ID in a separate blockfile, this is not ideal
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
+    max_new_offset_id: Arc<AtomicU32>,
     pub(crate) id: SegmentUuid,
 }
 
@@ -294,6 +295,10 @@ impl RecordSegmentWriter {
             id_to_user_id: Some(id_to_user_id),
             id_to_data: Some(id_to_data),
             max_offset_id: Some(max_offset_id),
+            // The max new offset id introduced by materialized logs is initialized as zero
+            // Since offset id should start from 1, we use this to indicate no new offset id
+            // has been introduced in the materialized logs
+            max_new_offset_id: AtomicU32::new(0).into(),
             id: segment.id,
         })
     }
@@ -337,6 +342,10 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
         &self,
         records: Chunk<MaterializedLogRecord<'a>>,
     ) -> Result<(), ApplyMaterializedLogError> {
+        // The max new offset id introduced by materialized logs is initialized as zero
+        // Since offset id should start from 1, we use this to indicate no new offset id
+        // has been introduced in the materialized logs
+        let mut max_new_offset_id = 0;
         let mut count = 0u64;
         for (log_record, _) in records.iter() {
             count += 1;
@@ -384,18 +393,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                     // Set max offset id.
-                    match self
-                        .max_offset_id
-                        .as_ref()
-                        .unwrap()
-                        .set("", MAX_OFFSET_ID, log_record.offset_id)
-                        .await
-                    {
-                        Ok(()) => (),
-                        Err(_) => {
-                            return Err(ApplyMaterializedLogError::BlockfileSet);
-                        }
-                    }
+                    max_new_offset_id = max_new_offset_id.max(log_record.offset_id);
                 }
                 MaterializedLogOperation::UpdateExisting | MaterializedLogOperation::OverwriteExisting => {
                     // Offset id and user id do not need to change. Only data
@@ -475,6 +473,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                 MaterializedLogOperation::Initial => panic!("Invariant violation. Materialized logs should not have any logs in the initial state")
             }
         }
+        self.max_new_offset_id
+            .fetch_max(max_new_offset_id, atomic::Ordering::SeqCst);
         tracing::info!("Applied {} records to record segment", count,);
         Ok(())
     }
@@ -499,12 +499,18 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
             .unwrap()
             .commit::<u32, &DataRecord>()
             .await;
-        let flusher_max_offset_id = self
-            .max_offset_id
-            .take()
-            .unwrap()
-            .commit::<&str, u32>()
-            .await;
+        let max_offset_id = self.max_offset_id.take().unwrap();
+        let max_new_offset_id = self.max_new_offset_id.load(atomic::Ordering::SeqCst);
+        // The max new offset id is non zero if and only if new records are introduced
+        if max_new_offset_id > 0 {
+            max_offset_id
+                .set::<&str, u32>("", MAX_OFFSET_ID, max_new_offset_id)
+                .await
+                .map_err(|_| {
+                    Box::new(ApplyMaterializedLogError::BlockfileSet) as Box<dyn ChromaError>
+                })?;
+        }
+        let flusher_max_offset_id = max_offset_id.commit::<&str, u32>().await;
 
         let flusher_user_id_to_id = match flusher_user_id_to_id {
             Ok(f) => f,
@@ -935,5 +941,113 @@ impl RecordSegmentReader<'_> {
         self.id_to_user_id
             .load_blocks_for_keys(&prefixes, keys)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::AtomicU32, Arc};
+
+    use chroma_blockstore::BlockfileWriter;
+    use chroma_types::Chunk;
+    use shuttle::{future, thread};
+
+    use crate::{
+        log::test::{upsert_generator, LogGenerator},
+        segment::{
+            record_segment::MAX_OFFSET_ID, test::TestSegment, LogMaterializer, SegmentWriter,
+        },
+    };
+
+    use super::RecordSegmentWriter;
+
+    // The same record segment writer should be able to run concurrently on different threads without conflict
+    #[test]
+    fn test_max_offset_id_shuttle() {
+        shuttle::check_random(
+            || {
+                let log_partition_size = 100;
+                let stack_size = 1 << 22;
+                let thread_count = 4;
+                let log_generator = LogGenerator {
+                    generator: upsert_generator,
+                };
+                let max_log_offset = thread_count * log_partition_size;
+                let logs = log_generator.generate_vec(1..=max_log_offset);
+                let test_segment = TestSegment::default();
+
+                let batches = logs
+                    .chunks(log_partition_size)
+                    .map(|chunk| chunk.to_vec())
+                    .collect::<Vec<_>>();
+
+                let offset_id = Arc::new(AtomicU32::new(1));
+
+                let record_segment_writer = future::block_on(RecordSegmentWriter::from_segment(
+                    &test_segment.record_segment,
+                    &test_segment.blockfile_provider,
+                ))
+                .expect("Should be able to initialize record segment writer");
+
+                let mut handles = Vec::new();
+
+                for batch in batches {
+                    let curr_offset_id = offset_id.clone();
+                    let record_writer = record_segment_writer.clone();
+
+                    let handle = thread::Builder::new()
+                        .stack_size(stack_size)
+                        .spawn(move || {
+                            let log_chunk = Chunk::new(batch.into());
+                            let materializer =
+                                LogMaterializer::new(None, log_chunk, Some(curr_offset_id));
+                            let materialized_logs = future::block_on(materializer.materialize())
+                                .expect("Should be able to materialize log");
+                            future::block_on(
+                                record_writer.apply_materialized_log_chunk(materialized_logs),
+                            )
+                            .expect("Should be able to apply materialized log")
+                        })
+                        .expect("Should be able to spawn thread");
+
+                    handles.push(handle);
+                }
+
+                handles
+                    .into_iter()
+                    .for_each(|handle| handle.join().expect("Writer should not fail"));
+
+                let max_offset_id_writer =
+                    if let Some(BlockfileWriter::ArrowUnorderedBlockfileWriter(writer)) =
+                        &record_segment_writer.max_offset_id
+                    {
+                        writer.clone()
+                    } else {
+                        unreachable!(
+                        "Please adjust how max offset id is extracted from record segment writer"
+                    );
+                    };
+
+                thread::Builder::new()
+                    .stack_size(stack_size)
+                    .spawn(move || {
+                        future::block_on(record_segment_writer.commit())
+                            .expect("Should be able to commit applied logs")
+                    })
+                    .expect("Should be able to spawn thread")
+                    .join()
+                    .expect("Should be able to commit applied logs");
+                let max_offset_id = future::block_on(
+                    max_offset_id_writer.get_owned::<&str, u32>("", MAX_OFFSET_ID),
+                )
+                .expect("Get owned should not fail")
+                .expect("Max offset id should exist");
+
+                // TODO: Switch the expected log offset after log materializer bug fix
+                // assert_eq!(max_offset_id, max_log_offset as u32);
+                assert_eq!(max_offset_id as usize, max_log_offset + thread_count);
+            },
+            60,
+        );
     }
 }
