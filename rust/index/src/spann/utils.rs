@@ -5,6 +5,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use rand::{seq::SliceRandom, Rng};
 use thiserror::Error;
 
+use crate::{hnsw_provider::HnswIndexRef, Index};
+
 // TODO(Sanket): I don't understand why the reference implementation defined
 // max_distance this way.
 // TODO(Sanket): Make these configurable.
@@ -499,6 +501,82 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
         cluster_labels: kmeans_assign.cluster_labels,
         num_clusters: total_non_zero_clusters,
     })
+}
+
+#[derive(Error, Debug)]
+pub enum RngQueryError {
+    #[error("Error searching Hnsw graph")]
+    HnswSearchError,
+}
+
+impl ChromaError for RngQueryError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::HnswSearchError => ErrorCodes::Internal,
+        }
+    }
+}
+
+// Assumes that query is already normalized.
+pub async fn rng_query(
+    normalized_query: &[f32],
+    hnsw_index: HnswIndexRef,
+    k: usize,
+    rng_epsilon: f32,
+    rng_factor: f32,
+    distance_function: DistanceFunction,
+) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), RngQueryError> {
+    let mut nearby_ids: Vec<usize> = vec![];
+    let mut nearby_distances: Vec<f32> = vec![];
+    let mut embeddings: Vec<Vec<f32>> = vec![];
+    {
+        let read_guard = hnsw_index.inner.read();
+        let allowed_ids = vec![];
+        let disallowed_ids = vec![];
+        let (ids, distances) = read_guard
+            .query(normalized_query, k, &allowed_ids, &disallowed_ids)
+            .map_err(|_| RngQueryError::HnswSearchError)?;
+        for (id, distance) in ids.iter().zip(distances.iter()) {
+            if *distance <= (1_f32 + rng_epsilon) * distances[0] {
+                nearby_ids.push(*id);
+                nearby_distances.push(*distance);
+            }
+        }
+        // Get the embeddings also for distance computation.
+        for id in nearby_ids.iter() {
+            let emb = read_guard
+                .get(*id)
+                .map_err(|_| RngQueryError::HnswSearchError)?
+                .ok_or(RngQueryError::HnswSearchError)?;
+            embeddings.push(emb);
+        }
+    }
+    // Apply the RNG rule to prune.
+    let mut res_ids = vec![];
+    let mut res_distances = vec![];
+    let mut res_embeddings: Vec<Vec<f32>> = vec![];
+    // Embeddings that were obtained are already normalized.
+    for (id, (distance, embedding)) in nearby_ids
+        .iter()
+        .zip(nearby_distances.iter().zip(embeddings))
+    {
+        let mut rng_accepted = true;
+        for nbr_embedding in res_embeddings.iter() {
+            let dist = distance_function.distance(&embedding[..], &nbr_embedding[..]);
+            if rng_factor * dist <= *distance {
+                rng_accepted = false;
+                break;
+            }
+        }
+        if !rng_accepted {
+            continue;
+        }
+        res_ids.push(*id);
+        res_distances.push(*distance);
+        res_embeddings.push(embedding);
+    }
+
+    Ok((res_ids, res_distances, res_embeddings))
 }
 
 #[cfg(test)]
