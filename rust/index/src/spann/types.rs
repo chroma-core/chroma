@@ -5,7 +5,7 @@ use std::{
 
 use chroma_blockstore::{
     provider::{BlockfileProvider, CreateError, OpenError},
-    BlockfileFlusher, BlockfileWriter, BlockfileWriterOptions,
+    BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -1424,6 +1424,124 @@ impl SpannIndexFlusher {
             .await
             .map_err(|_| SpannIndexWriterError::HnswIndexFlushError)?;
         Ok(res)
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SpannIndexReaderError {
+    #[error("Error creating/opening hnsw index")]
+    HnswIndexConstructionError,
+    #[error("Error creating/opening blockfile reader")]
+    BlockfileReaderConstructionError,
+    #[error("Spann index uninitialized")]
+    UninitializedIndex,
+}
+
+impl ChromaError for SpannIndexReaderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::HnswIndexConstructionError => ErrorCodes::Internal,
+            Self::BlockfileReaderConstructionError => ErrorCodes::Internal,
+            Self::UninitializedIndex => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct SpannIndexReader<'me> {
+    pub posting_lists: BlockfileReader<'me, u32, SpannPostingList<'me>>,
+    pub hnsw_index: HnswIndexRef,
+    pub versions_map: BlockfileReader<'me, u32, u32>,
+}
+
+impl<'me> SpannIndexReader<'me> {
+    async fn hnsw_index_from_id(
+        hnsw_provider: &HnswIndexProvider,
+        id: &IndexUuid,
+        cache_key: &CollectionUuid,
+        distance_function: DistanceFunction,
+        dimensionality: usize,
+    ) -> Result<HnswIndexRef, SpannIndexReaderError> {
+        match hnsw_provider.get(id, cache_key).await {
+            Some(index) => Ok(index),
+            None => {
+                match hnsw_provider
+                    .open(id, cache_key, dimensionality as i32, distance_function)
+                    .await
+                {
+                    Ok(index) => Ok(index),
+                    Err(_) => Err(SpannIndexReaderError::HnswIndexConstructionError),
+                }
+            }
+        }
+    }
+
+    async fn posting_list_reader_from_id(
+        blockfile_id: &Uuid,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<BlockfileReader<'me, u32, SpannPostingList<'me>>, SpannIndexReaderError> {
+        match blockfile_provider
+            .read::<u32, SpannPostingList<'me>>(blockfile_id)
+            .await
+        {
+            Ok(reader) => Ok(reader),
+            Err(_) => Err(SpannIndexReaderError::BlockfileReaderConstructionError),
+        }
+    }
+
+    async fn versions_map_reader_from_id(
+        blockfile_id: &Uuid,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<BlockfileReader<'me, u32, u32>, SpannIndexReaderError> {
+        match blockfile_provider.read::<u32, u32>(blockfile_id).await {
+            Ok(reader) => Ok(reader),
+            Err(_) => Err(SpannIndexReaderError::BlockfileReaderConstructionError),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn from_id(
+        hnsw_id: Option<&IndexUuid>,
+        hnsw_provider: &HnswIndexProvider,
+        hnsw_cache_key: &CollectionUuid,
+        distance_function: DistanceFunction,
+        dimensionality: usize,
+        pl_blockfile_id: Option<&Uuid>,
+        versions_map_blockfile_id: Option<&Uuid>,
+        blockfile_provider: &BlockfileProvider,
+    ) -> Result<SpannIndexReader<'me>, SpannIndexReaderError> {
+        let hnsw_reader = match hnsw_id {
+            Some(hnsw_id) => {
+                Self::hnsw_index_from_id(
+                    hnsw_provider,
+                    hnsw_id,
+                    hnsw_cache_key,
+                    distance_function,
+                    dimensionality,
+                )
+                .await?
+            }
+            None => {
+                return Err(SpannIndexReaderError::UninitializedIndex);
+            }
+        };
+        let postings_list_reader = match pl_blockfile_id {
+            Some(pl_id) => Self::posting_list_reader_from_id(pl_id, blockfile_provider).await?,
+            None => return Err(SpannIndexReaderError::UninitializedIndex),
+        };
+
+        let versions_map_reader = match versions_map_blockfile_id {
+            Some(versions_id) => {
+                Self::versions_map_reader_from_id(versions_id, blockfile_provider).await?
+            }
+            None => return Err(SpannIndexReaderError::UninitializedIndex),
+        };
+
+        Ok(Self {
+            posting_lists: postings_list_reader,
+            hnsw_index: hnsw_reader,
+            versions_map: versions_map_reader,
+        })
     }
 }
 

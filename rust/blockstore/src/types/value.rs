@@ -61,6 +61,12 @@ impl Value for &DataRecord<'_> {
     }
 }
 
+impl Value for SpannPostingList<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}
+
 impl Value for &SpannPostingList<'_> {
     fn get_size(&self) -> usize {
         self.compute_size()
