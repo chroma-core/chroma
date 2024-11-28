@@ -2047,7 +2047,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.13.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=7e0b714a065a54b15b649bc9f58b5e36de20964f#7e0b714a065a54b15b649bc9f58b5e36de20964f"
+source = "git+https://github.com/foyer-rs/foyer?rev=746333ebb0ac198edde95ffcd33c8b2a2738646a#746333ebb0ac198edde95ffcd33c8b2a2738646a"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2065,7 +2065,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.13.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=7e0b714a065a54b15b649bc9f58b5e36de20964f#7e0b714a065a54b15b649bc9f58b5e36de20964f"
+source = "git+https://github.com/foyer-rs/foyer?rev=746333ebb0ac198edde95ffcd33c8b2a2738646a#746333ebb0ac198edde95ffcd33c8b2a2738646a"
 dependencies = [
  "ahash",
  "bytes",
@@ -2084,7 +2084,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.13.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=7e0b714a065a54b15b649bc9f58b5e36de20964f#7e0b714a065a54b15b649bc9f58b5e36de20964f"
+source = "git+https://github.com/foyer-rs/foyer?rev=746333ebb0ac198edde95ffcd33c8b2a2738646a#746333ebb0ac198edde95ffcd33c8b2a2738646a"
 dependencies = [
  "ahash",
  "bitflags 2.4.2",
@@ -2108,7 +2108,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.13.0-dev"
-source = "git+https://github.com/foyer-rs/foyer?rev=7e0b714a065a54b15b649bc9f58b5e36de20964f#7e0b714a065a54b15b649bc9f58b5e36de20964f"
+source = "git+https://github.com/foyer-rs/foyer?rev=746333ebb0ac198edde95ffcd33c8b2a2738646a#746333ebb0ac198edde95ffcd33c8b2a2738646a"
 dependencies = [
  "ahash",
  "allocator-api2",

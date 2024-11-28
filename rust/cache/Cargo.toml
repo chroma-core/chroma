@@ -9,7 +9,7 @@ path = "src/lib.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 # TODO(MrCroxx): switch to a release version after the new features are included.
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "7e0b714a065a54b15b649bc9f58b5e36de20964f", features = [
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "746333ebb0ac198edde95ffcd33c8b2a2738646a", features = [
   "opentelemetry_0_27",
   "tracing",
 ] }
