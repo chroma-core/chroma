@@ -8,8 +8,8 @@ use chroma_index::spann::types::{
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
-use chroma_types::SegmentUuid;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
+use chroma_types::{SegmentUuid, SpannPostingList};
 use thiserror::Error;
 use tonic::async_trait;
 use uuid::Uuid;
@@ -327,6 +327,8 @@ pub enum SpannSegmentReaderError {
     SpannSegmentReaderCreateError,
     #[error("Spann segment is uninitialized")]
     UninitializedSegment,
+    #[error("Error reading key")]
+    KeyReadError,
 }
 
 impl ChromaError for SpannSegmentReaderError {
@@ -340,6 +342,7 @@ impl ChromaError for SpannSegmentReaderError {
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
             Self::SpannSegmentReaderCreateError => ErrorCodes::Internal,
             Self::UninitializedSegment => ErrorCodes::Internal,
+            Self::KeyReadError => ErrorCodes::Internal,
         }
     }
 }
@@ -455,6 +458,24 @@ impl<'me> SpannSegmentReader<'me> {
             index_reader,
             id: segment.id,
         })
+    }
+
+    pub async fn fetch_posting_list(
+        &self,
+        head_id: u32,
+    ) -> Result<SpannPostingList<'_>, SpannSegmentReaderError> {
+        let res = self
+            .index_reader
+            .posting_lists
+            .get("", head_id)
+            .await
+            .map_err(|_| SpannSegmentReaderError::KeyReadError)?;
+        match res {
+            Some(pl) => Ok(pl),
+            None => {
+                panic!("Invariant violation. Key present in hnsw but not in posting list")
+            }
+        }
     }
 }
 
