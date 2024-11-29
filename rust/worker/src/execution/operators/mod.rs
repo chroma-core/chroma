@@ -9,6 +9,7 @@ pub(super) mod partition;
 pub(super) mod pull_log;
 pub(super) mod record_segment_prefetch;
 pub(super) mod register;
+pub(super) mod spann_bf_pl;
 pub(super) mod spann_centers_search;
 pub(super) mod spann_fetch_pl;
 pub(super) mod write_segments;
