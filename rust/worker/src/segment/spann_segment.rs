@@ -4,7 +4,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::{
-    SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError,
+    SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
@@ -463,19 +463,11 @@ impl<'me> SpannSegmentReader<'me> {
     pub async fn fetch_posting_list(
         &self,
         head_id: u32,
-    ) -> Result<SpannPostingList<'_>, SpannSegmentReaderError> {
-        let res = self
-            .index_reader
-            .posting_lists
-            .get("", head_id)
+    ) -> Result<Vec<SpannPosting>, SpannSegmentReaderError> {
+        self.index_reader
+            .fetch_posting_list(head_id)
             .await
-            .map_err(|_| SpannSegmentReaderError::KeyReadError)?;
-        match res {
-            Some(pl) => Ok(pl),
-            None => {
-                panic!("Invariant violation. Key present in hnsw but not in posting list")
-            }
-        }
+            .map_err(|_| SpannSegmentReaderError::KeyReadError)
     }
 }
 

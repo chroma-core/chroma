@@ -1,4 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::spann::types::SpannPosting;
 use thiserror::Error;
 use tonic::async_trait;
 
@@ -15,9 +16,7 @@ pub struct SpannFetchPlInput {
 
 #[derive(Debug)]
 pub struct SpannFetchPlOutput {
-    doc_offset_ids: Vec<u32>,
-    doc_versions: Vec<u32>,
-    doc_embeddings: Vec<f32>,
+    posting_list: Vec<SpannPosting>,
 }
 
 #[derive(Error, Debug)]
@@ -62,14 +61,10 @@ impl Operator<SpannFetchPlInput, SpannFetchPlOutput> for SpannFetchPlOperator {
         )
         .await
         .map_err(|_| SpannFetchPlError::SpannSegmentReaderCreationError)?;
-        let pl = spann_reader
+        let posting_list = spann_reader
             .fetch_posting_list(input.head_id)
             .await
             .map_err(|_| SpannFetchPlError::SpannSegmentReaderError)?;
-        Ok(SpannFetchPlOutput {
-            doc_offset_ids: pl.doc_offset_ids.to_vec(),
-            doc_versions: pl.doc_versions.to_vec(),
-            doc_embeddings: pl.doc_embeddings.to_vec(),
-        })
+        Ok(SpannFetchPlOutput { posting_list })
     }
 }
