@@ -485,7 +485,8 @@ def test_metadata_cru(client):
 
     # Test list collections
     collections = client.list_collections()
-    for collection in collections:
+    for collection_name in collections:
+        collection = client.get_collection(collection_name)
         if collection.name == "testspace":
             assert collection.metadata is not None
             assert collection.metadata["a"] == 2
