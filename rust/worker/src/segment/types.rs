@@ -409,8 +409,13 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
 }
 
 pub async fn materialize_logs<'me>(
+    // Is None when record segment is uninitialized.
     record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
     logs: &'me Chunk<LogRecord>,
+    // Is None for readers. In that case, the materializer reads
+    // the current maximum from the record segment and uses that
+    // for materializing. Writers pass this value to the materializer
+    // because they need to share this across all log partitions.
     next_offset_id: Option<Arc<AtomicU32>>,
 ) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
