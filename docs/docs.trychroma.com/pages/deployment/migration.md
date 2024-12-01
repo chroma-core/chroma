@@ -20,6 +20,14 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.6.0
+
+`list_collections` now returns a list of collection *names*, instead of collection objects. 
+
+Previously, `list_collections` returned a list of collection objects, configured with the default embedding function. If one of your collections was created with a different embedding function, using the version returned by `list_collections` would result in various errors.
+
+We are working on embedding function persistence to allow you to configure a collection with an embedding function once, and not have to specify it again (in `get_collection` for example). 
+
 ### v0.5.17
 
 We no longer support sending empty lists or dictionaries for metadata filtering, ID filtering, etc. For example,

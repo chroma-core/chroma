@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Optional, Sequence, List
 from uuid import UUID
 
 from overrides import override
@@ -25,7 +25,7 @@ from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
-from chromadb.api.models.Collection import Collection
+from chromadb.api.models.Collection import Collection, CollectionName
 from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
@@ -118,9 +118,9 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
-    ) -> Sequence[Collection]:
+    ) -> List[CollectionName]:
         return [
-            Collection(client=self._server, model=model)
+            CollectionName(model.name)
             for model in self._server.list_collections(
                 limit, offset, tenant=self.tenant, database=self.database
             )

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional
+from typing import Sequence, Optional, List
 from uuid import UUID
 
 from overrides import override
@@ -31,8 +31,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
-from chromadb.api.models.Collection import Collection
-
+from chromadb.api.models.Collection import Collection, CollectionName
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -347,19 +346,19 @@ class ClientAPI(BaseAPI, ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[Collection]:
+    ) -> List[CollectionName]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
 
         Returns:
-            Sequence[Collection]: A list of collections
+            List[CollectionName]: A list of collection names
 
         Examples:
             ```python
             client.list_collections()
-            # [collection(name="my_collection", metadata={})]
+            # ["my_collection"]
             ```
         """
         pass

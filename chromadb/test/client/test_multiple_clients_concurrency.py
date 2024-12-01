@@ -44,6 +44,7 @@ def test_multiple_clients_concurrently(client_factories: ClientFactories) -> Non
         client.set_database(database)
         seen_collections = client.list_collections()
         assert len(seen_collections) == COLLECTION_COUNT
-        for collection in seen_collections:
+        for collection_name in seen_collections:
+            collection = client.get_collection(collection_name)
             assert collection.name in collections
             assert collection.metadata == {"database": database}

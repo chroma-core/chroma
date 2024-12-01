@@ -1,3 +1,4 @@
+import inspect
 from typing import TYPE_CHECKING, Optional, Union
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -380,3 +381,26 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+
+
+class CollectionName(str):
+    """
+    A string wrapper to supply users with indicative message about list_collections only
+    returning collection names, in lieu of Collection object.
+    """
+
+    def __getattr__(self, name):
+        collection_attributes_and_methods = [
+            member for member, _ in inspect.getmembers(Collection)
+            if not member.startswith("_")
+        ]
+
+        if name in collection_attributes_and_methods:
+            raise NotImplementedError(
+                f"In Chroma v0.6.0, list_collections only returns collection names. "
+                f"Use get_collection to access Collection.{name}. "
+                f"See https://docs.trychroma.com/deployment/migration for more information."
+            )
+
+        raise AttributeError(f"'CollectionName' object has no attribute '{name}'")
