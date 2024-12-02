@@ -199,9 +199,9 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 
 #[cfg(test)]
 mod tests {
+    use crate::segment::materialize_logs;
     use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
     use crate::segment::types::SegmentFlusher;
-    use crate::segment::LogMaterializer;
     use crate::{
         execution::{
             operator::Operator,
@@ -293,9 +293,7 @@ mod tests {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, &data, None)
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await
                 .expect("Log materialization failed");

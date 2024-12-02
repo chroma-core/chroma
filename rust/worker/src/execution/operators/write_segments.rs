@@ -1,9 +1,9 @@
+use crate::segment::materialize_logs;
 use crate::segment::metadata_segment::MetadataSegmentError;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::ApplyMaterializedLogError;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::LogMaterializer;
 use crate::segment::LogMaterializerError;
 use crate::segment::SegmentWriter;
 use crate::{
@@ -160,16 +160,14 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
                 };
             }
         };
-        let materializer = LogMaterializer::new(
-            record_segment_reader,
-            input.chunk.clone(),
-            Some(input.next_offset_id.clone()),
-        );
         // Materialize the logs.
-        let res = match materializer
-            .materialize()
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await
+        let res = match materialize_logs(
+            &record_segment_reader,
+            &input.chunk,
+            Some(input.next_offset_id.clone()),
+        )
+        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+        .await
         {
             Ok(records) => records,
             Err(e) => {

@@ -19,9 +19,10 @@ use tracing::{trace, Instrument, Span};
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError, MaterializedLogRecord,
+        LogMaterializerError, MaterializedLogRecord,
     },
 };
 
@@ -416,10 +417,8 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             }
             Err(e) => Err(*e),
         }?;
-        let materializer =
-            LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
-        let materialized_logs = materializer
-            .materialize()
+        let cloned_record_segment_reader = record_segment_reader.clone();
+        let materialized_logs = materialize_logs(&cloned_record_segment_reader, &input.logs, None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
         let metadata_log_reader = MetadataLogReader::new(&materialized_logs);

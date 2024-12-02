@@ -955,7 +955,7 @@ mod tests {
     use crate::{
         log::test::{upsert_generator, LogGenerator},
         segment::{
-            record_segment::MAX_OFFSET_ID, test::TestSegment, LogMaterializer, SegmentWriter,
+            materialize_logs, record_segment::MAX_OFFSET_ID, test::TestSegment, SegmentWriter,
         },
     };
 
@@ -999,10 +999,12 @@ mod tests {
                         .stack_size(stack_size)
                         .spawn(move || {
                             let log_chunk = Chunk::new(batch.into());
-                            let materializer =
-                                LogMaterializer::new(None, log_chunk, Some(curr_offset_id));
-                            let materialized_logs = future::block_on(materializer.materialize())
-                                .expect("Should be able to materialize log");
+                            let materialized_logs = future::block_on(materialize_logs(
+                                &None,
+                                &log_chunk,
+                                Some(curr_offset_id),
+                            ))
+                            .expect("Should be able to materialize log");
                             future::block_on(
                                 record_writer.apply_materialized_log_chunk(materialized_logs),
                             )
