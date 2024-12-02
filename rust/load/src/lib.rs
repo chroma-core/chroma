@@ -706,7 +706,7 @@ mod tests {
         load.start(
             "foo".to_string(),
             "nop".to_string(),
-            "get-no-filter".to_string(),
+            Workload::ByName("get-no-filter".to_string()),
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
             1.0,
         )
