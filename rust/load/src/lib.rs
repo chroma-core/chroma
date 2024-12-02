@@ -736,6 +736,21 @@ pub async fn entrypoint() {
     runner.abort();
 }
 
+pub fn humanize_expires(expires: &str) -> Option<String> {
+    if let Ok(expires) = chrono::DateTime::parse_from_rfc3339(expires) {
+        Some(expires.to_rfc3339())
+    } else if let Some(duration) = expires.strip_suffix("s") {
+        let expires = chrono::Utc::now() + chrono::Duration::seconds(duration.trim().parse().ok()?);
+        Some(expires.to_rfc3339())
+    } else if let Some(duration) = expires.strip_suffix("min") {
+        let expires = chrono::Utc::now()
+            + chrono::Duration::seconds(duration.trim().parse::<i64>().ok()? * 60i64);
+        Some(expires.to_rfc3339())
+    } else {
+        Some(expires.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
