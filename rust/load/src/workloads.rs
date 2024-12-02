@@ -32,7 +32,7 @@ pub fn all_workloads() -> HashMap<String, Workload> {
             "query-no-filter".to_string(),
             Workload::Query(QueryQuery {
                 limit: Distribution::Constant(10),
-                metadata: Some(MetadataQuery::Raw(serde_json::json!({"i1": 1000}))),
+                metadata: None,
                 document: None,
             }),
         ),
