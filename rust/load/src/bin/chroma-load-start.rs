@@ -34,13 +34,27 @@ async fn main() {
     };
     match client
         .post(format!("{}/start", args.host))
+        .header(reqwest::header::ACCEPT, "application/json")
         .json(&req)
         .send()
         .await
     {
         Ok(resp) => {
             if resp.status().is_success() {
-                println!("Started workload on {}", args.host);
+                let uuid = match resp.text().await {
+                    Ok(uuid) => uuid,
+                    Err(err) => {
+                        eprintln!("Failed to start workload on {}: {}", args.host, err);
+                        return;
+                    }
+                };
+                println!(
+                    "Started workload on {}:\n{}",
+                    args.host,
+                    // SAFETY(rescrv):  serde_json::to_string_pretty should always convert to JSON
+                    // when it just parses as JSON.
+                    uuid,
+                );
             } else {
                 eprintln!(
                     "Failed to start workload on {}: {}",
