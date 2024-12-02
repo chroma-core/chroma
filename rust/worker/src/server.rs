@@ -25,11 +25,7 @@ use crate::{
             fetch_log::FetchLogOperator, fetch_segment::FetchSegmentOperator,
             knn_projection::KnnProjectionOperator,
         },
-        orchestration::{
-            get::GetOrchestrator,
-            knn::{KnnError, KnnFilterOrchestrator, KnnOrchestrator},
-            CountQueryOrchestrator,
-        },
+        orchestration::{get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::{KnnError, KnnFilterOrchestrator}, CountQueryOrchestrator},
     },
     log::log::Log,
     sysdb::sysdb::SysDb,
