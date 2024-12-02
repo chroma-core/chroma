@@ -280,6 +280,8 @@ impl WorkerServer {
             return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
         }
 
+        let collection_id = fetch_log_operator.collection_uuid;
+
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
@@ -326,7 +328,14 @@ impl WorkerServer {
             .try_collect::<Vec<_>>()
             .await
         {
-            Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
+            Ok(results) => {
+                tracing::info!(
+                    "[Debug] KNN result from collection {}: {:?}",
+                    collection_id,
+                    results
+                );
+                Ok(Response::new(to_proto_knn_batch_result(results)?))
+            }
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
     }
