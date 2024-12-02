@@ -125,7 +125,7 @@ pub struct MaterializedLogRecord<'referred_data> {
     // Set only for the records that are being inserted for the first time
     // in the log since data_record will be None in such cases. For other
     // cases, just read from data record.
-    pub(crate) user_id: Option<&'referred_data str>,
+    pub(crate) user_id: Option<String>,
     // There can be several entries in the log for an id. This is the final
     // operation that needs to be done on it. For e.g.
     // If log has [Update, Update, Delete] then final operation is Delete.
@@ -200,8 +200,8 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     // Performs a deep copy of the user id so only use it if really
     // needed. If you only need reference then use merged_user_id_ref below.
     pub(crate) fn merged_user_id(&self) -> String {
-        match self.user_id {
-            Some(id) => id.to_string(),
+        match &self.user_id {
+            Some(id) => id.clone(),
             None => match &self.data_record {
                 Some(data_record) => data_record.id.to_string(),
                 None => panic!("Expected at least one user id to be set"),
@@ -209,9 +209,10 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         }
     }
 
+    // todo: needed?
     pub(crate) fn merged_user_id_ref(&self) -> &str {
-        match self.user_id {
-            Some(id) => id,
+        match &self.user_id {
+            Some(id) => id.as_str(),
             None => match &self.data_record {
                 Some(data_record) => data_record.id,
                 None => panic!("Expected at least one user id to be set"),
@@ -398,7 +399,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
         Ok(Self {
             data_record: None,
             offset_id,
-            user_id: Some(user_id),
+            user_id: Some(user_id.to_string()),
             final_operation: MaterializedLogOperation::AddNew,
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
@@ -1857,7 +1858,7 @@ mod tests {
             // Embedding 3.
             if log.user_id.is_some() {
                 id3_found += 1;
-                assert_eq!("embedding_id_3", log.user_id.unwrap());
+                assert_eq!("embedding_id_3", log.user_id.clone().unwrap());
                 assert!(log.data_record.is_none());
                 assert_eq!("doc3", log.final_document.unwrap());
                 assert_eq!(vec![7.0, 8.0, 9.0], log.final_embedding.unwrap());
