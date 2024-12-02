@@ -22,7 +22,7 @@ proto:
 	@rm -rf pkg/proto/coordinatorpb/chromadb
 	@echo "Done"
 
-build:
+build: proto
 	go build -v -o bin/coordinator ./cmd/coordinator/
 	go build -v -o bin/logservice ./cmd/logservice/
 
