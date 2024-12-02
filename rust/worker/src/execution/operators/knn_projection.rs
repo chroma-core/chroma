@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_types::Segment;
@@ -95,6 +97,27 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
         };
 
         let result = self.projection.run(&projection_input).await?;
+        let id_set: HashSet<String> =
+            HashSet::from_iter(result.records.iter().map(|record| record.id.clone()));
+        if id_set.len() < input.record_distances.len() {
+            let debug_recs = result
+                .records
+                .iter()
+                .zip(input.record_distances.clone())
+                .map(|(record, RecordDistance { offset_id, measure })| {
+                    format!(
+                        "<OffsetID: {}>-<UserID: {}>-<Distance: {}>",
+                        offset_id,
+                        record.id.clone(),
+                        measure
+                    )
+                })
+                .collect::<Vec<_>>();
+            tracing::info!(
+                "[Debug-Projection] Duplicate user ids found: {:?}",
+                debug_recs
+            );
+        }
 
         return Ok(KnnProjectionOutput {
             records: result
