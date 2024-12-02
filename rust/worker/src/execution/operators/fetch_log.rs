@@ -105,6 +105,11 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
             }
         }
         tracing::info!(name: "Fetched log records", num_records = fetched.len());
+        tracing::info!(
+            "[Debug-FetchLog] Collection {}: Fetching from log position {}",
+            self.collection_uuid,
+            self.start_log_offset_id,
+        );
         Ok(Chunk::new(fetched.into()))
     }
 }

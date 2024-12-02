@@ -1,4 +1,4 @@
-use std::{collections::HashSet, iter::once, str::FromStr};
+use std::{iter::once, str::FromStr};
 
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
@@ -280,10 +280,6 @@ impl WorkerServer {
             return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
         }
 
-        let embeddings = from_proto_knn(knn.clone())?
-            .into_iter()
-            .map(|k| k.embedding);
-
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
@@ -330,20 +326,7 @@ impl WorkerServer {
             .try_collect::<Vec<_>>()
             .await
         {
-            Ok(results) => {
-                embeddings.into_iter().zip(&results).for_each(|(emb, res)| {
-                    let id_set: HashSet<String> =
-                        HashSet::from_iter(res.records.iter().map(|r| r.record.id.clone()));
-                    if id_set.len() < res.records.len() {
-                        tracing::info!(
-                            "[Debug] Duplicate query ids found for {:?}: {:?}",
-                            emb,
-                            res
-                        );
-                    }
-                });
-                Ok(Response::new(to_proto_knn_batch_result(results)?))
-            }
+            Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
     }
@@ -618,9 +601,7 @@ mod tests {
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
-    fn gen_knn_request(
-        mut scan_operator: Option<chroma_proto::ScanOperator>,
-    ) -> chroma_proto::KnnPlan {
+    fn gen_knn_request(mut scan_operator: Option<chroma_proto::ScanOperator>) -> chroma_proto::KnnPlan {
         if scan_operator.is_none() {
             scan_operator = Some(scan());
         }

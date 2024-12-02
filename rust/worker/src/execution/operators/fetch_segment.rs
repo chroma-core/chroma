@@ -85,6 +85,12 @@ impl FetchSegmentOperator {
         if collection.version != self.collection_version as i32 {
             Err(FetchSegmentError::VersionMismatch)
         } else {
+            tracing::info!(
+                "[Debug-FetchSegment] Collection <{}: {}> version: {}",
+                collection.name,
+                collection.collection_id,
+                collection.version,
+            );
             Ok(collection)
         }
     }

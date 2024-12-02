@@ -123,6 +123,13 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
             Err(error) => return Err(RegisterError::FlushCompactionError(error)),
         };
 
+        tracing::debug!(
+            "[Debug-Register] Collection {}: Version {}, Log position {}",
+            input.collection_id,
+            input.collection_version,
+            input.log_position
+        );
+
         let result = log
             .update_collection_log_offset(input.collection_id, input.log_position)
             .await;
