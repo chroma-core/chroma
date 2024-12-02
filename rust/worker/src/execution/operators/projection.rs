@@ -123,34 +123,20 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
             })
             .collect();
 
-        let mut user_id_source = HashMap::new();
-
         let mut records = Vec::with_capacity(input.offset_ids.len());
 
         for offset_id in &input.offset_ids {
             let record = match offset_id_to_log_record.get(offset_id) {
                 // The offset id is in the log
-                Some(&log) => {
-                    if let Some(src) =
-                        user_id_source.insert(log.merged_user_id(), "Log".to_string())
-                    {
-                        tracing::info!(
-                            "[Debug] Duplicate user id in {} and {}: {}",
-                            src,
-                            "Log",
-                            log.merged_user_id(),
-                        )
-                    };
-                    ProjectionRecord {
-                        id: log.merged_user_id().to_string(),
-                        document: log.merged_document().filter(|_| self.document),
-                        embedding: self.embedding.then_some(log.merged_embeddings().to_vec()),
-                        metadata: self
-                            .metadata
-                            .then_some(log.merged_metadata())
-                            .filter(|metadata| !metadata.is_empty()),
-                    }
-                }
+                Some(&log) => ProjectionRecord {
+                    id: log.merged_user_id().to_string(),
+                    document: log.merged_document().filter(|_| self.document),
+                    embedding: self.embedding.then_some(log.merged_embeddings().to_vec()),
+                    metadata: self
+                        .metadata
+                        .then_some(log.merged_metadata())
+                        .filter(|metadata| !metadata.is_empty()),
+                },
                 // The offset id is in the record segment
                 None => {
                     if let Some(reader) = &record_segment_reader {
@@ -158,16 +144,6 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                             .get_data_for_offset_id(*offset_id)
                             .await?
                             .ok_or(ProjectionError::RecordSegmentUninitialized)?;
-                        if let Some(src) =
-                            user_id_source.insert(record.id.to_string(), "Segment".to_string())
-                        {
-                            tracing::info!(
-                                "[Debug] Duplicate user id in {} and {}: {}",
-                                src,
-                                "Segment",
-                                record.id,
-                            )
-                        };
                         ProjectionRecord {
                             id: record.id.to_string(),
                             document: record

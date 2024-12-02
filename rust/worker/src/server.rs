@@ -280,7 +280,7 @@ impl WorkerServer {
             return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
         }
 
-        let collection_id = fetch_log_operator.collection_uuid;
+        let embeddings = knn.embeddings.clone();
 
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -329,11 +329,9 @@ impl WorkerServer {
             .await
         {
             Ok(results) => {
-                tracing::info!(
-                    "[Debug] KNN result from collection {}: {:?}",
-                    collection_id,
-                    results
-                );
+                embeddings.into_iter().zip(&results).for_each(|(emb, res)| {
+                    tracing::info!("[Debug] KNN result for {:?}: {:?}", emb, res)
+                });
                 Ok(Response::new(to_proto_knn_batch_result(results)?))
             }
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
@@ -610,7 +608,9 @@ mod tests {
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
-    fn gen_knn_request(mut scan_operator: Option<chroma_proto::ScanOperator>) -> chroma_proto::KnnPlan {
+    fn gen_knn_request(
+        mut scan_operator: Option<chroma_proto::ScanOperator>,
+    ) -> chroma_proto::KnnPlan {
         if scan_operator.is_none() {
             scan_operator = Some(scan());
         }
