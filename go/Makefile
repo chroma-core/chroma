@@ -1,4 +1,27 @@
-.PHONY: build
+.PHONY: build test lint clean docker proto log_db_clean log_db_generate log_db_migration
+
+PROTOC_GEN_GO_BIN_PATH := $(if $(shell which protoc-gen-go),$(shell which protoc-gen-go),"${GOPATH}/bin/protoc-gen-go")
+PROTOC_GEN_GO_GRPC_BIN_PATH := $(if $(shell which protoc-gen-go-grpc),$(shell which protoc-gen-go-grpc),"${GOPATH}/bin/protoc-gen-go-grpc")
+
+proto:
+	@echo "Generating gRPC code for Golang..."
+	@mkdir -p pkg/proto/coordinatorpb pkg/proto/logservicepb
+	@protoc \
+		-I../idl/ \
+		--go_out=pkg/proto/coordinatorpb \
+		--go_opt paths=source_relative \
+		--plugin protoc-gen-go="$(PROTOC_GEN_GO_BIN_PATH)" \
+		--go-grpc_out=pkg/proto/coordinatorpb \
+		--go-grpc_opt paths=source_relative \
+		--plugin protoc-gen-go-grpc="$(PROTOC_GEN_GO_GRPC_BIN_PATH)" \
+		../idl/chromadb/proto/chroma.proto \
+		../idl/chromadb/proto/coordinator.proto \
+		../idl/chromadb/proto/logservice.proto
+	@mv pkg/proto/coordinatorpb/chromadb/proto/logservice*.go pkg/proto/logservicepb/
+	@mv pkg/proto/coordinatorpb/chromadb/proto/*.go pkg/proto/coordinatorpb/
+	@rm -rf pkg/proto/coordinatorpb/chromadb
+	@echo "Done"
+
 build:
 	go build -v -o bin/coordinator ./cmd/coordinator/
 	go build -v -o bin/logservice ./cmd/logservice/
@@ -13,6 +36,7 @@ lint:
 
 clean:
 	rm -f bin/chroma
+	rm -rf pkg/proto/coordinatorpb pkg/proto/logservicepb
 
 docker:
 	docker build -t chroma-coordinator:latest .
