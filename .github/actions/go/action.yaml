@@ -5,5 +5,43 @@ runs:
   steps:
     - uses: actions/setup-go@v5
       with:
+        go-version: "1.21"
         cache-dependency-path: go/go.sum
+
     - uses: ariga/setup-atlas@v0
+
+    - name: Install protobuf compiler (protoc)
+      run: |
+        apt-get update
+        apt-get install -y wget unzip
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+        unzip protoc-21.12-linux-x86_64.zip -d /usr/local/
+        rm protoc-21.12-linux-x86_64.zip
+      shell: bash
+
+    - name: Add Go bin to PATH
+      run: |
+        export PATH="$PATH:$(go env GOPATH)/bin"
+      shell: bash
+
+    - name: Install protoc-gen-go
+      run: |
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+      shell: bash
+
+    - name: Install protoc-gen-go-grpc
+      run: |
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2.0
+      shell: bash
+
+    - name: Add Go bin to PATH
+      run: |
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Verify protoc and plugins
+      run: |
+        protoc --version
+        protoc-gen-go --version
+        protoc-gen-go-grpc --version
+      shell: bash
