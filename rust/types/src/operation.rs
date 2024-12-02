@@ -13,9 +13,6 @@ pub enum Operation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MaterializedLogOperation {
-    // Set when the record is initially read from the segment
-    // before it is processed based on state of the log.
-    Initial,
     // Set for records that don't exist in the segment and
     // have been encountered for the first time in the log.
     AddNew,

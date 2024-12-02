@@ -685,7 +685,6 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
                         }
 
                 },
-                MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
         }
         tracing::info!("Applied {} records to metadata segment", count,);

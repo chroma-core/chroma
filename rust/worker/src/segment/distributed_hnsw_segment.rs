@@ -284,9 +284,6 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                         }
                     }
                 }
-                MaterializedLogOperation::Initial => panic!(
-                    "Invariant violation. Mat records should not contain logs in initial state"
-                ),
             }
         }
         Ok(())

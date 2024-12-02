@@ -113,10 +113,7 @@ impl<'me> MetadataLogReader<'me> {
         let mut updated_offset_ids = RoaringBitmap::new();
         let mut user_id_to_offset_id = HashMap::new();
         for (log, _) in logs.iter() {
-            if !matches!(
-                log.final_operation,
-                MaterializedLogOperation::Initial | MaterializedLogOperation::AddNew
-            ) {
+            if !matches!(log.final_operation, MaterializedLogOperation::AddNew) {
                 updated_offset_ids.insert(log.offset_id);
             }
             if !matches!(

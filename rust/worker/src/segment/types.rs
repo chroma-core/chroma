@@ -336,24 +336,24 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
     }
 }
 
-impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
-    for MaterializedLogRecord<'referred_data>
-{
-    fn from(data_record_info: (DataRecord<'referred_data>, u32)) -> Self {
-        let data_record = data_record_info.0;
-        let offset_id = data_record_info.1;
-        Self {
-            data_record: Some(data_record),
-            offset_id,
-            user_id: None,
-            final_operation: MaterializedLogOperation::Initial,
-            metadata_to_be_merged: None,
-            metadata_to_be_deleted: None,
-            final_document: None,
-            final_embedding: None,
-        }
-    }
-}
+// impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
+//     for MaterializedLogRecord<'referred_data>
+// {
+//     fn from(data_record_info: (DataRecord<'referred_data>, u32)) -> Self {
+//         let data_record = data_record_info.0;
+//         let offset_id = data_record_info.1;
+//         Self {
+//             data_record: Some(data_record),
+//             offset_id,
+//             user_id: None,
+//             final_operation: MaterializedLogOperation::Initial,
+//             metadata_to_be_merged: None,
+//             metadata_to_be_deleted: None,
+//             final_document: None,
+//             final_embedding: None,
+//         }
+//     }
+// }
 
 // Creates a materialized log record from the corresponding entry
 // in the log (OperationRecord), offset id in storage where it will be stored (u32)
@@ -438,8 +438,8 @@ pub async fn materialize_logs<'me>(
     };
 
     // Populate entries that are present in the record segment.
-    let mut existing_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
-    let mut new_id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
+    let mut existing_id_to_record: HashMap<&str, (DataRecord, u32)> = HashMap::new();
+    let mut id_to_materialized: HashMap<&str, MaterializedLogRecord> = HashMap::new();
     if let Some(reader) = &record_segment_reader {
         async {
             for (log_record, _) in logs.iter() {
@@ -458,10 +458,8 @@ pub async fn materialize_logs<'me>(
                         .await
                     {
                         Ok(Some((data_record, offset_id))) => {
-                            existing_id_to_materialized.insert(
-                                log_record.record.id.as_str(),
-                                MaterializedLogRecord::from((data_record, offset_id)),
-                            );
+                            existing_id_to_record
+                                .insert(log_record.record.id.as_str(), (data_record, offset_id));
                         }
                         Ok(None) => {
                             return Err(LogMaterializerError::RecordSegment(Box::new(
@@ -485,116 +483,208 @@ pub async fn materialize_logs<'me>(
         )
         .await?;
     }
+
     // Populate updates to these and fresh records that are being
     // inserted for the first time.
-    async {
-            for (log_record, _) in logs.iter() {
-                match log_record.record.operation {
-                    Operation::Add => {
-                        // If this is an add of a record present in the segment then add
-                        // only if it has been previously deleted in the log.
-                        if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                            // safe to unwrap
-                            let operation = existing_id_to_materialized
-                                .get(log_record.record.id.as_str())
-                                .unwrap()
-                                .final_operation
-                                .clone();
-                            match operation {
-                                MaterializedLogOperation::DeleteExisting => {
-                                    let curr_val = existing_id_to_materialized.remove(log_record.record.id.as_str()).unwrap();
-                                    // Overwrite.
-                                    let mut materialized_record =
-                                        match MaterializedLogRecord::try_from((
-                                            &log_record.record,
-                                            curr_val.offset_id,
-                                            log_record.record.id.as_str(),
-                                        )) {
-                                            Ok(record) => record,
+    // async {
+    for (log_record, _) in logs.iter() {
+        match log_record.record.operation {
+            Operation::Add => {
+                match (
+                    existing_id_to_record.get(log_record.record.id.as_str()),
+                    id_to_materialized.get_mut(log_record.record.id.as_str()),
+                ) {
+                    (Some(_), None) => {
+                        // Offset ID already exists in segment and this ID has not been modified in the log up to this point, so the add is a noop/invalid.
+                        continue;
+                    }
+                    (None, Some(_)) => {
+                        // Offset ID does not exist in segment but does exist in log up to this point (a new add), so this second add is a noop/invalid.
+                        continue;
+                    }
+                    (Some(_), Some(materialized_operation)) => {
+                        match materialized_operation.final_operation {
+                                    MaterializedLogOperation::AddNew => panic!("Invariant violation. AddNew state not expected for records that exist in the segment."),
+                                    MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {
+                                        // This is a noop.
+                                        continue;
+                                    }
+
+                                    MaterializedLogOperation::DeleteExisting => {
+                                        match merge_update_metadata(
+                                            (
+                                                &materialized_operation.metadata_to_be_merged,
+                                                &materialized_operation.metadata_to_be_deleted,
+                                            ),
+                                            &log_record.record.metadata,
+                                        ) {
+                                            Ok(meta) => {
+                                                materialized_operation.metadata_to_be_merged = meta.0;
+                                                materialized_operation.metadata_to_be_deleted = meta.1;
+                                            }
                                             Err(e) => {
-                                                return Err(e);
+                                                return Err(LogMaterializerError::MetadataMaterialization(e));
                                             }
                                         };
-                                    materialized_record.data_record = curr_val.data_record;
-                                    materialized_record.final_operation =
-                                        MaterializedLogOperation::OverwriteExisting;
-                                    existing_id_to_materialized
-                                        .insert(log_record.record.id.as_str(), materialized_record);
-                                },
-                                MaterializedLogOperation::AddNew => panic!("Invariant violation. Existing record can never have an Add new state"),
-                                MaterializedLogOperation::Initial | MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {
-                                    // Invalid add so skip.
-                                    continue;
+                                        if let Some(doc) = log_record.record.document.as_ref() {
+                                            materialized_operation.final_document = Some(doc);
+                                        }
+                                        if let Some(emb) = log_record.record.embedding.as_ref() {
+                                            materialized_operation.final_embedding = Some(emb.as_slice());
+                                        }
+                                        // This record is not present on storage yet hence final operation is
+                                        // AddNew and not UpdateExisting.
+                                        materialized_operation.final_operation = MaterializedLogOperation::OverwriteExisting;
+                                    }
                                 }
+                    }
+                    (None, None) => {
+                        let next_offset_id =
+                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let materialized_record = match MaterializedLogRecord::try_from((
+                            &log_record.record,
+                            next_offset_id,
+                            log_record.record.id.as_str(),
+                        )) {
+                            Ok(record) => record,
+                            Err(e) => {
+                                return Err(e);
                             }
-                        }
-                        // Adding an entry that does not exist on the segment yet.
-                        // Only add if it hasn't been added before in the log.
-                        else if !new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                            let next_offset_id =
-                                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            let materialized_record = match MaterializedLogRecord::try_from((
-                                &log_record.record,
-                                next_offset_id,
+                        };
+                        id_to_materialized
+                            .insert(log_record.record.id.as_str(), materialized_record);
+                    }
+                };
+            }
+            Operation::Delete => {
+                // If the delete is for a record that is currently not in the
+                // record segment, then we can just NOT process these records
+                // at all. On the other hand if it is for a record that is currently
+                // in segment then we'll have to pass it as a delete
+                // to the compactor so that it can be deleted.
+
+                match id_to_materialized.remove(log_record.record.id.as_str()) {
+                    Some(_) => {
+                        // Successfully removed
+                    }
+                    None => {
+                        // Was not found in processed log records, check the segment
+                        if let Some(existing_record) =
+                            existing_id_to_record.get(log_record.record.id.as_str())
+                        {
+                            id_to_materialized.insert(
                                 log_record.record.id.as_str(),
-                            )) {
-                                Ok(record) => record,
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                            };
-                            new_id_to_materialized
-                                .insert(log_record.record.id.as_str(), materialized_record);
+                                MaterializedLogRecord {
+                                    data_record: Some(existing_record.0.clone()),
+                                    offset_id: existing_record.1,
+                                    user_id: None,
+                                    final_operation: MaterializedLogOperation::DeleteExisting,
+                                    metadata_to_be_merged: None,
+                                    metadata_to_be_deleted: None,
+                                    final_document: None,
+                                    final_embedding: None,
+                                },
+                            );
                         }
                     }
-                    Operation::Delete => {
-                        // If the delete is for a record that is currently not in the
-                        // record segment, then we can just NOT process these records
-                        // at all. On the other hand if it is for a record that is currently
-                        // in segment then we'll have to pass it as a delete
-                        // to the compactor so that it can be deleted.
-                        if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                            new_id_to_materialized.remove(log_record.record.id.as_str());
-                        } else if existing_id_to_materialized
-                            .contains_key(log_record.record.id.as_str())
-                        {
-                            // Mark state as deleted. Other fields become noop after such a delete.
-                            let record_from_map = existing_id_to_materialized
-                                .get_mut(log_record.record.id.as_str())
-                                .unwrap();
-                            record_from_map.final_operation = MaterializedLogOperation::DeleteExisting;
-                            record_from_map.final_document = None;
-                            record_from_map.final_embedding = None;
-                            record_from_map.metadata_to_be_merged = None;
-                            record_from_map.metadata_to_be_deleted = None;
-                            record_from_map.user_id = None;
-                        }
+                }
+            }
+            Operation::Update => {
+                // todo: rename
+                let record_from_map = match (
+                    existing_id_to_record.get(log_record.record.id.as_str()),
+                    id_to_materialized.get_mut(log_record.record.id.as_str()),
+                ) {
+                    (Some(existing_record), None) => {
+                        // todo: operation here doesn't matter
+                        let new_record = MaterializedLogRecord {
+                            data_record: Some(existing_record.0.clone()),
+                            offset_id: existing_record.1,
+                            user_id: None,
+                            final_operation: MaterializedLogOperation::UpdateExisting,
+                            metadata_to_be_merged: None,
+                            metadata_to_be_deleted: None,
+                            final_document: None,
+                            final_embedding: None,
+                        };
+                        id_to_materialized.insert(existing_record.0.id, new_record);
+                        id_to_materialized.get_mut(existing_record.0.id).unwrap()
+                        // todo
                     }
-                    Operation::Update => {
-                        let record_from_map = match existing_id_to_materialized
-                            .get_mut(log_record.record.id.as_str())
-                        {
-                            Some(res) => {
-                                match res.final_operation {
-                                    // Ignore the update if deleted.
-                                    MaterializedLogOperation::DeleteExisting => {
-                                        continue;
-                                    },
-                                    MaterializedLogOperation::AddNew => panic!("Invariant violation. AddNew state not expected for an entry that exists on the segment"),
-                                    MaterializedLogOperation::Initial | MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {}
-                                }
-                                res
-                            }
-                            None => match new_id_to_materialized.get_mut(log_record.record.id.as_str())
-                            {
-                                Some(res) => res,
-                                None => {
-                                    // Does not exist in either maps. Ignore this update.
-                                    continue;
-                                }
-                            },
+                    (None, Some(materialized_operation)) => materialized_operation,
+                    (Some(_), Some(materialized_operation)) => materialized_operation,
+                    (None, None) => {
+                        // Invalid update because the offset ID does not exist in the record segment or log (processed up to this point)
+                        continue;
+                    }
+                };
+
+                match merge_update_metadata(
+                    (
+                        &record_from_map.metadata_to_be_merged,
+                        &record_from_map.metadata_to_be_deleted,
+                    ),
+                    &log_record.record.metadata,
+                ) {
+                    Ok(meta) => {
+                        record_from_map.metadata_to_be_merged = meta.0;
+                        record_from_map.metadata_to_be_deleted = meta.1;
+                    }
+                    Err(e) => {
+                        return Err(LogMaterializerError::MetadataMaterialization(e));
+                    }
+                };
+                if let Some(doc) = log_record.record.document.as_ref() {
+                    record_from_map.final_document = Some(doc);
+                }
+                if let Some(emb) = log_record.record.embedding.as_ref() {
+                    record_from_map.final_embedding = Some(emb.as_slice());
+                }
+            }
+            Operation::Upsert => {
+                match (
+                    existing_id_to_record.get(log_record.record.id.as_str()),
+                    id_to_materialized.get_mut(log_record.record.id.as_str()),
+                ) {
+                    (Some(existing_record), None) => {
+                        // Update.
+                        let mut materialized_operation = MaterializedLogRecord {
+                            data_record: Some(existing_record.0.clone()),
+                            offset_id: existing_record.1,
+                            user_id: None,
+                            final_operation: MaterializedLogOperation::UpdateExisting,
+                            metadata_to_be_merged: None,
+                            metadata_to_be_deleted: None,
+                            final_document: None,
+                            final_embedding: None,
                         };
 
+                        let merged_metadata = merge_update_metadata(
+                            (
+                                &materialized_operation.metadata_to_be_merged,
+                                &materialized_operation.metadata_to_be_deleted,
+                            ),
+                            &log_record.record.metadata,
+                        )
+                        .map_err(LogMaterializerError::MetadataMaterialization)?;
+                        materialized_operation.metadata_to_be_merged = merged_metadata.0;
+                        materialized_operation.metadata_to_be_deleted = merged_metadata.1;
+
+                        if let Some(doc) = log_record.record.document.as_ref() {
+                            materialized_operation.final_document = Some(doc);
+                        }
+
+                        if let Some(emb) = log_record.record.embedding.as_ref() {
+                            materialized_operation.final_embedding = Some(emb.as_slice());
+                        }
+
+                        id_to_materialized
+                            .insert(log_record.record.id.as_str(), materialized_operation);
+                    }
+                    (None, Some(materialized_operation)) => {
+                        // Update.
+                        // todo: rename
+                        let record_from_map = materialized_operation;
                         match merge_update_metadata(
                             (
                                 &record_from_map.metadata_to_be_merged,
@@ -616,148 +706,83 @@ pub async fn materialize_logs<'me>(
                         if let Some(emb) = log_record.record.embedding.as_ref() {
                             record_from_map.final_embedding = Some(emb.as_slice());
                         }
-                        match record_from_map.final_operation {
-                            MaterializedLogOperation::Initial => {
-                                record_from_map.final_operation =
-                                    MaterializedLogOperation::UpdateExisting;
-                            }
-                            // State remains as is.
-                            MaterializedLogOperation::AddNew
-                            | MaterializedLogOperation::OverwriteExisting
-                            | MaterializedLogOperation::UpdateExisting => {}
-                            // Not expected.
-                            MaterializedLogOperation::DeleteExisting => {
-                                panic!("Invariant violation. Should not be updating a deleted record")
-                            }
-                        }
+                        // This record is not present on storage yet hence final operation is
+                        // AddNew and not UpdateExisting.
+                        record_from_map.final_operation = MaterializedLogOperation::AddNew;
                     }
-                    Operation::Upsert => {
-                        if existing_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                            // safe to unwrap here.
-                            let operation = existing_id_to_materialized
-                                .get(log_record.record.id.as_str())
-                                .unwrap()
-                                .final_operation
-                                .clone();
-                            match operation {
-                                MaterializedLogOperation::DeleteExisting => {
-                                    let curr_val = existing_id_to_materialized.remove(log_record.record.id.as_str()).unwrap();
-                                    // Overwrite.
-                                    let mut materialized_record =
-                                        match MaterializedLogRecord::try_from((
-                                            &log_record.record,
-                                            curr_val.offset_id,
-                                            log_record.record.id.as_str(),
-                                        )) {
-                                            Ok(record) => record,
+                    (Some(_), Some(materialized_operation)) => {
+                        match materialized_operation.final_operation {
+                                    MaterializedLogOperation::DeleteExisting => {
+                                        let current_value = id_to_materialized.remove(log_record.record.id.as_str()).unwrap(); // todo
+
+                                        // Overwrite.
+                                        let mut materialized_record =
+                                            match MaterializedLogRecord::try_from((
+                                                &log_record.record,
+                                                current_value.offset_id,
+                                                log_record.record.id.as_str(),
+                                            )) {
+                                                Ok(record) => record,
+                                                Err(e) => {
+                                                    return Err(e);
+                                                }
+                                            };
+                                        materialized_record.data_record = current_value.data_record;
+                                        materialized_record.final_operation =
+                                            MaterializedLogOperation::OverwriteExisting;
+                                        id_to_materialized
+                                            .insert(log_record.record.id.as_str(), materialized_record);
+                                    },
+                                    MaterializedLogOperation::AddNew => panic!("Invariant violation. AddNew state not expected for records that exist in the segment"),
+                                     MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {
+                                        // Update.
+                                        match merge_update_metadata((&materialized_operation.metadata_to_be_merged, &materialized_operation.metadata_to_be_deleted,),&log_record.record.metadata,) {
+                                            Ok(meta) => {
+                                                materialized_operation.metadata_to_be_merged = meta.0;
+                                                materialized_operation.metadata_to_be_deleted = meta.1;
+                                            }
                                             Err(e) => {
-                                                return Err(e);
+                                                return Err(LogMaterializerError::MetadataMaterialization(e));
                                             }
                                         };
-                                    materialized_record.data_record = curr_val.data_record;
-                                    materialized_record.final_operation =
-                                        MaterializedLogOperation::OverwriteExisting;
-                                    existing_id_to_materialized
-                                        .insert(log_record.record.id.as_str(), materialized_record);
-                                },
-                                MaterializedLogOperation::AddNew => panic!("Invariant violation. AddNew state not expected for records that exist in the segment"),
-                                MaterializedLogOperation::Initial | MaterializedLogOperation::OverwriteExisting | MaterializedLogOperation::UpdateExisting => {
-                                    // Update.
-                                    let record_from_map = existing_id_to_materialized.get_mut(log_record.record.id.as_str()).unwrap();
-                                    match merge_update_metadata((&record_from_map.metadata_to_be_merged, &record_from_map.metadata_to_be_deleted,),&log_record.record.metadata,) {
-                                        Ok(meta) => {
-                                            record_from_map.metadata_to_be_merged = meta.0;
-                                            record_from_map.metadata_to_be_deleted = meta.1;
+                                        if let Some(doc) = log_record.record.document.as_ref() {
+                                            materialized_operation.final_document = Some(doc);
                                         }
-                                        Err(e) => {
-                                            return Err(LogMaterializerError::MetadataMaterialization(e));
-                                        }
-                                    };
-                                    if let Some(doc) = log_record.record.document.as_ref() {
-                                        record_from_map.final_document = Some(doc);
-                                    }
-                                    if let Some(emb) = log_record.record.embedding.as_ref() {
-                                        record_from_map.final_embedding = Some(emb.as_slice());
-                                    }
-                                    match record_from_map.final_operation {
-                                        MaterializedLogOperation::Initial => {
-                                            record_from_map.final_operation =
-                                                MaterializedLogOperation::UpdateExisting;
-                                        }
-                                        // State remains as is.
-                                        MaterializedLogOperation::AddNew
-                                        | MaterializedLogOperation::OverwriteExisting
-                                        | MaterializedLogOperation::UpdateExisting => {}
-                                        // Not expected.
-                                        MaterializedLogOperation::DeleteExisting => {
-                                            panic!("Invariant violation. Should not be updating a deleted record")
+                                        if let Some(emb) = log_record.record.embedding.as_ref() {
+                                            materialized_operation.final_embedding = Some(emb.as_slice());
                                         }
                                     }
                                 }
+                    }
+                    (None, None) => {
+                        // Insert.
+                        let next_offset =
+                            next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let materialized_record = match MaterializedLogRecord::try_from((
+                            &log_record.record,
+                            next_offset,
+                            log_record.record.id.as_str(),
+                        )) {
+                            Ok(record) => record,
+                            Err(e) => {
+                                return Err(e);
                             }
-                        } else if new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
-                            // Update.
-                            let record_from_map = new_id_to_materialized
-                                .get_mut(log_record.record.id.as_str())
-                                .unwrap();
-                            match merge_update_metadata(
-                                (
-                                    &record_from_map.metadata_to_be_merged,
-                                    &record_from_map.metadata_to_be_deleted,
-                                ),
-                                &log_record.record.metadata,
-                            ) {
-                                Ok(meta) => {
-                                    record_from_map.metadata_to_be_merged = meta.0;
-                                    record_from_map.metadata_to_be_deleted = meta.1;
-                                }
-                                Err(e) => {
-                                    return Err(LogMaterializerError::MetadataMaterialization(e));
-                                }
-                            };
-                            if let Some(doc) = log_record.record.document.as_ref() {
-                                record_from_map.final_document = Some(doc);
-                            }
-                            if let Some(emb) = log_record.record.embedding.as_ref() {
-                                record_from_map.final_embedding = Some(emb.as_slice());
-                            }
-                            // This record is not present on storage yet hence final operation is
-                            // AddNew and not UpdateExisting.
-                            record_from_map.final_operation = MaterializedLogOperation::AddNew;
-                        } else {
-                            // Insert.
-                            let next_offset =
-                                next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            let materialized_record = match MaterializedLogRecord::try_from((
-                                &log_record.record,
-                                next_offset,
-                                log_record.record.id.as_str(),
-                            )) {
-                                Ok(record) => record,
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                            };
-                            new_id_to_materialized
-                                .insert(log_record.record.id.as_str(), materialized_record);
-                        }
+                        };
+                        id_to_materialized
+                            .insert(log_record.record.id.as_str(), materialized_record);
                     }
                 }
             }
-            Ok(())
-        }.instrument(tracing::info_span!(parent: Span::current(), "Materialization main iteration")).await?;
-    let mut res = vec![];
-    for (_key, value) in existing_id_to_materialized {
-        // Ignore records that only had invalid ADDS on the log.
-        if value.final_operation == MaterializedLogOperation::Initial {
-            continue;
         }
-        res.push(value);
     }
-    for (_key, value) in new_id_to_materialized {
+    //     Ok(())
+    // }.instrument(tracing::info_span!(parent: Span::current(), "Materialization main iteration")).await?;
+    let mut res = vec![];
+    for (_key, value) in id_to_materialized {
         res.push(value);
     }
     res.sort_by(|x, y| x.offset_id.cmp(&y.offset_id));
+
     Ok(Chunk::new(res.into()))
 }
 

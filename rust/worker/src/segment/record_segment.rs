@@ -370,7 +370,11 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .set::<u32, String>("", log_record.offset_id, log_record.user_id.unwrap().to_string())
+                        .set::<u32, String>(
+                            "",
+                            log_record.offset_id,
+                            log_record.user_id.unwrap().to_string(),
+                        )
                         .await
                     {
                         Ok(()) => (),
@@ -395,7 +399,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Set max offset id.
                     max_new_offset_id = max_new_offset_id.max(log_record.offset_id);
                 }
-                MaterializedLogOperation::UpdateExisting | MaterializedLogOperation::OverwriteExisting => {
+                MaterializedLogOperation::UpdateExisting
+                | MaterializedLogOperation::OverwriteExisting => {
                     // Offset id and user id do not need to change. Only data
                     // needs to change. Blockfile does not have Read then write
                     // semantics so we'll delete and insert.
@@ -470,7 +475,6 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                 }
-                MaterializedLogOperation::Initial => panic!("Invariant violation. Materialized logs should not have any logs in the initial state")
             }
         }
         self.max_new_offset_id
