@@ -14,8 +14,8 @@ path = "src/bin/compaction_service.rs"
 [dependencies]
 rand = "0.8.5"
 murmur3 = "0.5.2"
-schemars = "0.8.16"
-kube = { version = "0.87.1", features = ["runtime", "derive"] }
+schemars = "0.8.21"
+kube = { version = "0.87.2", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.20.0", features = ["latest"] }
 tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
@@ -26,8 +26,8 @@ opentelemetry = { version = "0.27.0", default-features = false, features = [
 ] }
 opentelemetry-otlp = "0.27"
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
-regex = "1.10.5"
-figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
+regex = "1.11.1"
+figment = { version = "0.10.19", features = ["env", "yaml", "test"] }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
@@ -62,7 +62,7 @@ chroma-distance = { workspace = true }
 
 [dev-dependencies]
 random-port = "0.1.1"
-serial_test = "3.1.1"
+serial_test = "3.2.0"
 
 rand = { workspace = true }
 rand_xorshift = { workspace = true }
