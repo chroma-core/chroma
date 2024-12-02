@@ -280,7 +280,9 @@ impl WorkerServer {
             return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
         }
 
-        let embeddings = knn.embeddings.clone();
+        let embeddings = from_proto_knn(knn.clone())?
+            .into_iter()
+            .map(|k| k.embedding);
 
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -330,7 +332,7 @@ impl WorkerServer {
         {
             Ok(results) => {
                 embeddings.into_iter().zip(&results).for_each(|(emb, res)| {
-                    tracing::info!("[Debug] KNN result for {:?}: {:?}", emb, res)
+                    tracing::info!("[Debug] KNN result for embedding {:?}: {:?}", emb, res)
                 });
                 Ok(Response::new(to_proto_knn_batch_result(results)?))
             }
