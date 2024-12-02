@@ -357,7 +357,11 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .set::<&str, u32>("", log_record.user_id.unwrap(), log_record.offset_id)
+                        .set::<&str, u32>(
+                            "",
+                            log_record.user_id.as_ref().unwrap(),
+                            log_record.offset_id,
+                        )
                         .await
                     {
                         Ok(()) => (),
@@ -370,7 +374,11 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .set::<u32, String>("", log_record.offset_id, log_record.user_id.unwrap().to_string())
+                        .set::<u32, String>(
+                            "",
+                            log_record.offset_id,
+                            log_record.user_id.clone().unwrap(),
+                        )
                         .await
                     {
                         Ok(()) => (),
@@ -382,7 +390,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     match self
                         .construct_and_set_data_record(
                             log_record,
-                            log_record.user_id.unwrap(),
+                            log_record.user_id.as_ref().unwrap(),
                             log_record.offset_id,
                         )
                         .await
