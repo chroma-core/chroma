@@ -131,6 +131,10 @@ class DistributedExecutor(Executor):
         results = convert.from_proto_knn_batch_result(knn_result)
 
         ids = [[record["record"]["id"] for record in records] for records in results]
+        for query_emb, query_ids in zip(plan.knn.embeddings, ids):
+            if len(set(query_ids)) < len(query_ids):
+                print(f"[Debug] Duplicate query ids found for {query_emb}: {query_ids}")
+
         embeddings = (
             [
                 [record["record"]["embedding"] for record in records]
