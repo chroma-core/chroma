@@ -62,6 +62,10 @@ impl axum::response::IntoResponse for Error {
 
 pub fn client() -> ChromaClient {
     let url = std::env::var("CHROMA_HOST").unwrap_or_else(|_| "http://localhost:8000".into());
+    client_for_url(url)
+}
+
+pub fn client_for_url(url: String) -> ChromaClient {
     if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
         ChromaClient::new(ChromaClientOptions {
             url,
@@ -653,4 +657,23 @@ pub async fn entrypoint() {
     let runner = tokio::task::spawn(async move { load.run().await });
     axum::serve(listener, app).await.unwrap();
     runner.abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn end_to_end() {
+        let load = LoadService::default();
+        load.start(
+            "foo".to_string(),
+            "nop".to_string(),
+            "get-no-filter".to_string(),
+            (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
+            1.0,
+        )
+        .unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    }
 }
