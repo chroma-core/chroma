@@ -37,7 +37,7 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   serviceName: query-service
-  replicas: 2
+  replicas: {{ .Values.queryService.replicaCount }}
   selector:
     matchLabels:
       app: query-service

@@ -71,6 +71,7 @@ queryService:
   cache:
     hostPath: '/local/cache/chroma'
     mountPath: '/cache/'
+  replicaCount: 2
 
 
 compactionService:
