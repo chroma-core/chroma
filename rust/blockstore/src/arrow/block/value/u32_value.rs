@@ -81,7 +81,7 @@ impl ArrowWriteableValue for u32 {
     }
 }
 
-impl<'a> ArrowReadableValue<'a> for u32 {
+impl ArrowReadableValue<'_> for u32 {
     fn get(array: &Arc<dyn Array>, index: usize) -> u32 {
         let array = array.as_any().downcast_ref::<UInt32Array>().unwrap();
         array.value(index)
