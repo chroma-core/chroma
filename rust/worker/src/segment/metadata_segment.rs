@@ -530,15 +530,19 @@ impl<'me> MetadataSegmentWriter<'me> {
     }
 }
 
-impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
+impl SegmentWriter for MetadataSegmentWriter<'_> {
     async fn apply_materialized_log_chunk(
         &self,
-        records: Chunk<MaterializedLogRecord<'log_records>>,
+        records: Chunk<MaterializedLogRecord>,
     ) -> Result<(), ApplyMaterializedLogError> {
         let mut count = 0u64;
         let full_text_writer_batch = records.iter().filter_map(|record| {
             let offset_id = record.0.offset_id;
-            let old_document = record.0.data_record.as_ref().and_then(|r| r.document);
+            let old_document = record
+                .0
+                .data_record
+                .as_ref()
+                .and_then(|r| r.document.as_ref().map(|d| d.as_str()));
             let new_document = &record.0.final_document;
 
             if matches!(

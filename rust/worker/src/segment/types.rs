@@ -3,7 +3,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
     MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, OperationRecord,
-    UpdateMetadata, UpdateMetadataValue,
+    OwnedDataRecord, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
@@ -113,10 +113,10 @@ impl ChromaError for LogMaterializerError {
 }
 
 #[derive(Debug, Clone)]
-pub struct MaterializedLogRecord<'referred_data> {
+pub struct MaterializedLogRecord {
     // This is the data record read from the record segment for this id.
     // None if the record exists only in the log.
-    pub(crate) data_record: Option<DataRecord<'referred_data>>,
+    pub(crate) data_record: Option<OwnedDataRecord>,
     // If present in the record segment then it is the offset id
     // in the record segment at which the record was found.
     // If not present in the segment then it is the offset id
@@ -157,7 +157,7 @@ pub struct MaterializedLogRecord<'referred_data> {
     pub(crate) final_embedding: Option<Vec<f32>>,
 }
 
-impl<'referred_data> MaterializedLogRecord<'referred_data> {
+impl MaterializedLogRecord {
     // Performs a deep copy of the document so only use it if really
     // needed. If you only need a reference then use merged_document_ref
     // defined below.
@@ -170,7 +170,7 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         return match self.final_document.clone() {
             Some(doc) => Some(doc),
             None => match self.data_record.as_ref() {
-                Some(data_record) => data_record.document.map(|doc| doc.to_string()),
+                Some(data_record) => data_record.document.clone(),
                 None => None,
             },
         };
@@ -185,10 +185,7 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         return match &self.final_document {
             Some(doc) => Some(doc),
             None => match self.data_record.as_ref() {
-                Some(data_record) => match data_record.document {
-                    Some(doc) => Some(doc),
-                    None => None,
-                },
+                Some(data_record) => data_record.document.as_ref().map(|doc| doc.as_str()),
                 None => None,
             },
         };
@@ -211,7 +208,7 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         match &self.user_id {
             Some(id) => id.as_str(),
             None => match &self.data_record {
-                Some(data_record) => data_record.id,
+                Some(data_record) => &data_record.id,
                 None => panic!("Expected at least one user id to be set"),
             },
         }
@@ -247,7 +244,9 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         final_metadata
     }
 
-    pub(crate) fn metadata_delta(&'referred_data self) -> MetadataDelta<'referred_data> {
+    pub(crate) fn metadata_delta<'referred_data>(
+        &'referred_data self,
+    ) -> MetadataDelta<'referred_data> {
         let mut metadata_delta = MetadataDelta::new();
         let mut base_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
         if let Some(data_record) = &self.data_record {
@@ -327,7 +326,7 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         return match &self.final_embedding {
             Some(embed) => embed,
             None => match self.data_record.as_ref() {
-                Some(data_record) => data_record.embedding,
+                Some(data_record) => &data_record.embedding,
                 None => panic!("Expected at least one source of embedding"),
             },
         };
@@ -357,7 +356,7 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
 // in the log (OperationRecord), offset id in storage where it will be stored (u32)
 // and user id (str).
 impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_data str)>
-    for MaterializedLogRecord<'referred_data>
+    for MaterializedLogRecord
 {
     type Error = LogMaterializerError;
 
@@ -414,7 +413,7 @@ pub async fn materialize_logs<'me>(
     // for materializing. Writers pass this value to the materializer
     // because they need to share this across all log partitions.
     next_offset_id: Option<Arc<AtomicU32>>,
-) -> Result<Chunk<MaterializedLogRecord<'me>>, LogMaterializerError> {
+) -> Result<Chunk<MaterializedLogRecord>, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
     tracing::info!("Total length of logs in materializer: {}", logs.total_len());
@@ -569,7 +568,7 @@ pub async fn materialize_logs<'me>(
                             id_to_materialized.insert(
                                 log_record.record.id.as_str(),
                                 MaterializedLogRecord {
-                                    data_record: Some(existing_record.0.clone()),
+                                    data_record: Some(existing_record.0.to_owned()),
                                     offset_id: existing_record.1,
                                     user_id: None,
                                     final_operation: MaterializedLogOperation::DeleteExisting,
@@ -590,7 +589,7 @@ pub async fn materialize_logs<'me>(
                 ) {
                     (Some(existing_record), None) => {
                         let new_record = MaterializedLogRecord {
-                            data_record: Some(existing_record.0.clone()),
+                            data_record: Some(existing_record.0.to_owned()),
                             offset_id: existing_record.1,
                             user_id: None,
                             final_operation: MaterializedLogOperation::UpdateExisting,
@@ -641,7 +640,7 @@ pub async fn materialize_logs<'me>(
                     (Some(existing_record), None) => {
                         // Update the existing record in the segment
                         let mut materialized_operation = MaterializedLogRecord {
-                            data_record: Some(existing_record.0.clone()),
+                            data_record: Some(existing_record.0.to_owned()),
                             offset_id: existing_record.1,
                             user_id: None,
                             final_operation: MaterializedLogOperation::UpdateExisting,
@@ -777,10 +776,10 @@ pub async fn materialize_logs<'me>(
 
 // This needs to be public for testing
 #[allow(async_fn_in_trait)]
-pub trait SegmentWriter<'a> {
+pub trait SegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: Chunk<MaterializedLogRecord<'a>>,
+        records: Chunk<MaterializedLogRecord>,
     ) -> Result<(), ApplyMaterializedLogError>;
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
 }
@@ -1909,7 +1908,10 @@ mod tests {
                 assert_eq!(hello_found, 1);
                 assert_eq!(hello_again_found, 1);
                 assert!(log.data_record.is_some());
-                assert_eq!(log.data_record.as_ref().unwrap().document, Some("doc1"));
+                assert_eq!(
+                    log.data_record.as_ref().unwrap().document,
+                    Some("doc1".to_string())
+                );
                 assert_eq!(
                     log.data_record.as_ref().unwrap().embedding,
                     vec![1.0, 2.0, 3.0].as_slice()

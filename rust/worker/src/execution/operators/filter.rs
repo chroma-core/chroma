@@ -106,7 +106,7 @@ pub(crate) struct MetadataLogReader<'me> {
 }
 
 impl<'me> MetadataLogReader<'me> {
-    pub(crate) fn new(logs: &'me Chunk<MaterializedLogRecord<'me>>) -> Self {
+    pub(crate) fn new(logs: &'me Chunk<MaterializedLogRecord>) -> Self {
         let mut compact_metadata: HashMap<_, BTreeMap<&MetadataValue, RoaringBitmap>> =
             HashMap::new();
         let mut document = HashMap::new();
