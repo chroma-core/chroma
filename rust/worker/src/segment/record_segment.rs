@@ -61,9 +61,9 @@ pub enum RecordSegmentWriterCreationError {
 }
 
 impl RecordSegmentWriter {
-    async fn construct_and_set_data_record<'a>(
+    async fn construct_and_set_data_record(
         &self,
-        mat_record: &MaterializedLogRecord<'a>,
+        mat_record: &MaterializedLogRecord,
         user_id: &str,
         offset_id: u32,
     ) -> Result<(), ApplyMaterializedLogError> {
@@ -337,10 +337,10 @@ impl ChromaError for ApplyMaterializedLogError {
     }
 }
 
-impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
+impl SegmentWriter for RecordSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: Chunk<MaterializedLogRecord<'a>>,
+        records: Chunk<MaterializedLogRecord>,
     ) -> Result<(), ApplyMaterializedLogError> {
         // The max new offset id introduced by materialized logs is initialized as zero
         // Since offset id should start from 1, we use this to indicate no new offset id
@@ -423,7 +423,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     match self
                         .construct_and_set_data_record(
                             log_record,
-                            log_record.data_record.as_ref().unwrap().id,
+                            &log_record.data_record.as_ref().unwrap().id,
                             log_record.offset_id,
                         )
                         .await
@@ -440,7 +440,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .delete::<&str, u32>("", log_record.data_record.as_ref().unwrap().id)
+                        .delete::<&str, u32>("", &log_record.data_record.as_ref().unwrap().id)
                         .await
                     {
                         Ok(()) => (),
