@@ -16,6 +16,7 @@ async-compression = { version = "0.4.18", features = [
 ] }
 
 bincode = { workspace = true }
+clap = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
 indicatif = { workspace = true }
@@ -27,7 +28,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 
-clap = { version = "4.5.21", features = ["derive"] }
 dirs = "5.0.1"
 reqwest = { version = "0.12.9", features = ["stream"] }
 tokio-stream = { version = "0.1.16", features = ["full"] }

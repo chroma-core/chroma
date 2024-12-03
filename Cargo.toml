@@ -17,30 +17,34 @@ members = [
 ]
 
 [workspace.dependencies]
+arrow = "52.2.0"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+criterion = { version = "0.5", features = ["async_tokio"] }
+figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
+flatbuffers = "24.3.25"
+futures = "0.3"
+num_cpus = "1.16.0"
+opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
+opentelemetry-otlp = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+parking_lot = { version = "0.12.3", features = ["serde"] }
+prost = "0.13"
+prost-types = "0.12"
+roaring = "0.10.6"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
-arrow = "52.2.0"
+tantivy = "0.21.1"
 thiserror = "1.0.69"
-uuid = { version = "1.11.0", features = [
-   "v4",
-   "fast-rng",
-   "macro-diagnostics",
-   "serde",
-] }
-async-trait = "0.1.83"
-roaring = "0.10.6"
-futures = "0.3"
-parking_lot = { version = "0.12.3", features = ["serde"] }
-tracing = "0.1"
 tokio = { version = "1.41", features = ["macros", "rt-multi-thread"] }
 tokio-util = "0.7.12"
 tonic = "0.12"
-prost = "0.13"
-prost-types = "0.12"
-num_cpus = "1.16.0"
-flatbuffers = "24.3.25"
-tantivy = "0.21.1"
-criterion = { version = "0.5", features = ["async_tokio"] }
+tracing = "0.1"
+tracing-bunyan-formatter = "0.3"
+tracing-opentelemetry = "0.28.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }

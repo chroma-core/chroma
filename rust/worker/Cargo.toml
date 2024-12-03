@@ -17,17 +17,13 @@ murmur3 = "0.5.2"
 schemars = "0.8.21"
 kube = { version = "0.87.2", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.20.0", features = ["latest"] }
-tracing-bunyan-formatter = "0.3"
-tracing-opentelemetry = "0.28.0"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.27.0", default-features = false, features = [
-  "trace",
-  "metrics",
-] }
-opentelemetry-otlp = "0.27"
-opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+tracing-bunyan-formatter = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 regex = "1.11.1"
-figment = { version = "0.10.19", features = ["env", "yaml", "test"] }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
@@ -39,6 +35,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
 roaring = { workspace = true }
+figment = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }

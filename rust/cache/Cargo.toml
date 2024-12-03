@@ -7,7 +7,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 foyer = "0.12"
 anyhow = "1.0"
 opentelemetry = { version = "0.27.0", default-features = false, features = [
