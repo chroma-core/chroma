@@ -15,8 +15,8 @@ runs:
         sudo apt-get update
         sudo apt-get install -y wget unzip
         wget https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
-        unzip protoc-21.12-linux-x86_64.zip -d /usr/local/
-        rm protoc-21.12-linux-x86_64.zip
+        sudo unzip protoc-21.12-linux-x86_64.zip -d /usr/local/
+        sudo rm protoc-21.12-linux-x86_64.zip
       shell: bash
 
     - name: Add Go bin to PATH
