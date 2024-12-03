@@ -71,5 +71,5 @@ sed -i.bak -e '/@abstractmethod/d' "$file_out"
 rm "${file2}.bak"
 rm "${file_out}.bak"
 
-rm pages/reference/Collection.md
-rm pages/reference/sidebar.json
+rm pages-old/reference/Collection.md
+rm pages-old/reference/sidebar.json
