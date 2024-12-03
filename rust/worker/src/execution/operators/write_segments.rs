@@ -1,10 +1,9 @@
-use crate::segment::materialize_logs;
 use crate::segment::metadata_segment::MetadataSegmentError;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::ApplyMaterializedLogError;
-use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::LogMaterializerError;
+use crate::segment::MaterializedLogRecord;
 use crate::segment::SegmentWriter;
 use crate::{
     execution::operator::Operator,
@@ -13,17 +12,11 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_types::Chunk;
-use chroma_types::LogRecord;
-use chroma_types::Segment;
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
 use thiserror::Error;
 use tracing::Instrument;
-use tracing::Span;
 
 #[derive(Error, Debug)]
 pub enum WriteSegmentsOperatorError {
@@ -32,11 +25,11 @@ pub enum WriteSegmentsOperatorError {
     #[error("Log materialization failed {0}")]
     LogMaterializationError(#[from] LogMaterializerError),
     #[error("Materialized logs failed to apply {0}")]
-    ApplyMaterializatedLogsError(#[from] ApplyMaterializedLogError),
+    ApplyMaterializedLogsError(#[from] ApplyMaterializedLogError),
     #[error("Materialized logs failed to apply {0}")]
-    ApplyMaterializatedLogsErrorMetadataSegment(#[from] MetadataSegmentError),
-    #[error("Unitialized writer")]
-    UnintializedWriter,
+    ApplyMaterializedLogsErrorMetadataSegment(#[from] MetadataSegmentError),
+    #[error("Uninitialized writer")]
+    UninitializedWriter,
 }
 
 impl ChromaError for WriteSegmentsOperatorError {
@@ -44,9 +37,9 @@ impl ChromaError for WriteSegmentsOperatorError {
         match self {
             WriteSegmentsOperatorError::LogMaterializationPreparationError(e) => e.code(),
             WriteSegmentsOperatorError::LogMaterializationError(e) => e.code(),
-            WriteSegmentsOperatorError::ApplyMaterializatedLogsError(e) => e.code(),
-            WriteSegmentsOperatorError::ApplyMaterializatedLogsErrorMetadataSegment(e) => e.code(),
-            WriteSegmentsOperatorError::UnintializedWriter => ErrorCodes::Internal,
+            WriteSegmentsOperatorError::ApplyMaterializedLogsError(e) => e.code(),
+            WriteSegmentsOperatorError::ApplyMaterializedLogsErrorMetadataSegment(e) => e.code(),
+            WriteSegmentsOperatorError::UninitializedWriter => ErrorCodes::Internal,
         }
     }
 }
@@ -62,42 +55,37 @@ impl WriteSegmentsOperator {
 
 #[derive(Debug)]
 pub struct WriteSegmentsInput {
-    record_segment_writer: Option<RecordSegmentWriter>,
-    hnsw_segment_writer: Option<Box<DistributedHNSWSegmentWriter>>,
-    metadata_segment_writer: Option<MetadataSegmentWriter<'static>>,
-    chunk: Chunk<LogRecord>,
-    provider: BlockfileProvider,
-    record_segment: Segment,
-    next_offset_id: Arc<AtomicU32>,
+    writers: Option<(
+        RecordSegmentWriter,
+        Box<DistributedHNSWSegmentWriter>,
+        MetadataSegmentWriter<'static>,
+    )>,
+    materialized_logs: Chunk<MaterializedLogRecord>,
 }
 
 impl WriteSegmentsInput {
     pub fn new(
-        record_segment_writer: Option<RecordSegmentWriter>,
-        hnsw_segment_writer: Option<Box<DistributedHNSWSegmentWriter>>,
-        metadata_segment_writer: Option<MetadataSegmentWriter<'static>>,
-        chunk: Chunk<LogRecord>,
-        provider: BlockfileProvider,
-        record_segment: Segment,
-        next_offset_id: Arc<AtomicU32>,
+        writers: Option<(
+            RecordSegmentWriter,
+            Box<DistributedHNSWSegmentWriter>,
+            MetadataSegmentWriter<'static>,
+        )>,
+        materialized_logs: Chunk<MaterializedLogRecord>,
     ) -> Self {
         WriteSegmentsInput {
-            record_segment_writer,
-            hnsw_segment_writer,
-            metadata_segment_writer,
-            chunk,
-            provider,
-            record_segment,
-            next_offset_id,
+            writers,
+            materialized_logs,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct WriteSegmentsOutput {
-    pub(crate) record_segment_writer: Option<RecordSegmentWriter>,
-    pub(crate) hnsw_segment_writer: Option<Box<DistributedHNSWSegmentWriter>>,
-    pub(crate) metadata_segment_writer: Option<MetadataSegmentWriter<'static>>,
+    pub(crate) writers: Option<(
+        RecordSegmentWriter,
+        Box<DistributedHNSWSegmentWriter>,
+        MetadataSegmentWriter<'static>,
+    )>,
 }
 
 #[async_trait]
@@ -109,129 +97,58 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
     }
 
     async fn run(&self, input: &WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
-        tracing::debug!("Materializing N Records: {:?}", input.chunk.len());
-        // Prepare for log materialization.
-        let record_segment_reader: Option<RecordSegmentReader>;
-        match RecordSegmentReader::from_segment(&input.record_segment, &input.provider).await {
-            Ok(reader) => {
-                record_segment_reader = Some(reader);
-            }
-            Err(e) => {
-                match *e {
-                    // Uninitialized segment is fine and means that the record
-                    // segment is not yet initialized in storage.
-                    RecordSegmentReaderCreationError::UninitializedSegment => {
-                        record_segment_reader = None;
-                    }
-                    RecordSegmentReaderCreationError::BlockfileOpenError(e) => {
-                        tracing::error!("Error creating record segment reader {}", e);
-                        return Err(
-                            WriteSegmentsOperatorError::LogMaterializationPreparationError(
-                                RecordSegmentReaderCreationError::BlockfileOpenError(e),
-                            ),
-                        );
-                    }
-                    RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                        tracing::error!("Error creating record segment reader {}", e);
-                        return Err(
-                            WriteSegmentsOperatorError::LogMaterializationPreparationError(
-                                RecordSegmentReaderCreationError::InvalidNumberOfFiles,
-                            ),
-                        );
-                    }
-                    RecordSegmentReaderCreationError::DataRecordNotFound(c) => {
-                        tracing::error!(
-                            "Error creating record segment reader: offset {} not found",
-                            c
-                        );
-                        return Err(
-                            WriteSegmentsOperatorError::LogMaterializationPreparationError(*e),
-                        );
-                    }
-                    RecordSegmentReaderCreationError::UserRecordNotFound(ref c) => {
-                        tracing::error!(
-                            "Error creating record segment reader: user {} not found",
-                            c
-                        );
-                        return Err(
-                            WriteSegmentsOperatorError::LogMaterializationPreparationError(*e),
-                        );
-                    }
-                };
-            }
-        };
-        // Materialize the logs.
-        let res = match materialize_logs(
-            &record_segment_reader,
-            &input.chunk,
-            Some(input.next_offset_id.clone()),
-        )
-        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-        .await
-        {
-            Ok(records) => records,
-            Err(e) => {
-                tracing::error!("Error materializing records {}", e);
-                return Err(WriteSegmentsOperatorError::LogMaterializationError(e));
-            }
-        };
+        let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) = input
+            .writers
+            .as_ref()
+            .ok_or(WriteSegmentsOperatorError::UninitializedWriter)?;
 
-        if !res.is_empty() {
-            // Apply materialized records.
-            match input
-                .record_segment_writer
-                .as_ref()
-                .ok_or(WriteSegmentsOperatorError::UnintializedWriter)?
-                .apply_materialized_log_chunk(res.clone())
-                .instrument(tracing::trace_span!(
-                    "Apply materialized logs to record segment"
-                ))
-                .await
-            {
-                Ok(()) => (),
-                Err(e) => {
-                    return Err(WriteSegmentsOperatorError::ApplyMaterializatedLogsError(e));
-                }
+        // Apply materialized records.
+        match record_segment_writer
+            .apply_materialized_log_chunk(input.materialized_logs.clone())
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to record segment"
+            ))
+            .await
+        {
+            Ok(()) => (),
+            Err(e) => {
+                return Err(WriteSegmentsOperatorError::ApplyMaterializedLogsError(e));
             }
-            tracing::debug!("Applied materialized records to record segment");
-            match input
-                .metadata_segment_writer
-                .as_ref()
-                .ok_or(WriteSegmentsOperatorError::UnintializedWriter)?
-                .apply_materialized_log_chunk(res.clone())
-                .instrument(tracing::trace_span!(
-                    "Apply materialized logs to metadata segment"
-                ))
-                .await
-            {
-                Ok(()) => (),
-                Err(e) => {
-                    return Err(WriteSegmentsOperatorError::ApplyMaterializatedLogsError(e));
-                }
+        }
+        tracing::debug!("Applied materialized records to record segment");
+        match metadata_segment_writer
+            .apply_materialized_log_chunk(input.materialized_logs.clone())
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to metadata segment"
+            ))
+            .await
+        {
+            Ok(()) => (),
+            Err(e) => {
+                return Err(WriteSegmentsOperatorError::ApplyMaterializedLogsError(e));
             }
-            tracing::debug!("Applied materialized records to metadata segment");
-            match input
-                .hnsw_segment_writer
-                .as_ref()
-                .ok_or(WriteSegmentsOperatorError::UnintializedWriter)?
-                .apply_materialized_log_chunk(res)
-                .instrument(tracing::trace_span!(
-                    "Apply materialized logs to HNSW segment"
-                ))
-                .await
-            {
-                Ok(()) => (),
-                Err(e) => {
-                    return Err(WriteSegmentsOperatorError::ApplyMaterializatedLogsError(e));
-                }
+        }
+        tracing::debug!("Applied materialized records to metadata segment");
+        match hnsw_segment_writer
+            .apply_materialized_log_chunk(input.materialized_logs.clone())
+            .instrument(tracing::trace_span!(
+                "Apply materialized logs to HNSW segment"
+            ))
+            .await
+        {
+            Ok(()) => (),
+            Err(e) => {
+                return Err(WriteSegmentsOperatorError::ApplyMaterializedLogsError(e));
             }
         }
 
         tracing::debug!("Applied Materialized Records to HNSW Segment");
         Ok(WriteSegmentsOutput {
-            record_segment_writer: input.record_segment_writer.clone(),
-            hnsw_segment_writer: input.hnsw_segment_writer.clone(),
-            metadata_segment_writer: input.metadata_segment_writer.clone(),
+            writers: Some((
+                record_segment_writer.clone(),
+                hnsw_segment_writer.clone(),
+                metadata_segment_writer.clone(),
+            )),
         })
     }
 }
