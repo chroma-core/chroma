@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Collection, CollectionUuid, Segment, SegmentScope, SegmentType, SegmentUuid};
 use thiserror::Error;
@@ -120,6 +122,27 @@ impl FetchSegmentOperator {
             .pop()
             .ok_or(FetchSegmentError::NoSegment)
     }
+
+    async fn fetch_segments(&self) -> Result<(Segment, Segment, Segment), FetchSegmentError> {
+        let mut segments: HashMap<_, _> = self
+            .sysdb
+            .clone()
+            .get_segments(None, None, None, self.collection_uuid)
+            .await?
+            .into_iter()
+            .map(|segment| (segment.scope.clone(), segment))
+            .collect();
+
+        if let (Some(meta), Some(rec), Some(vec)) = (
+            segments.remove(&SegmentScope::METADATA),
+            segments.remove(&SegmentScope::RECORD),
+            segments.remove(&SegmentScope::VECTOR),
+        ) {
+            Ok((meta, rec, vec))
+        } else {
+            Err(FetchSegmentError::NoSegment)
+        }
+    }
 }
 
 #[async_trait]
@@ -133,11 +156,13 @@ impl Operator<FetchSegmentInput, FetchSegmentOutput> for FetchSegmentOperator {
     async fn run(&self, _: &FetchSegmentInput) -> Result<FetchSegmentOutput, FetchSegmentError> {
         trace!("[{}]: {:?}", self.get_name(), self);
 
+        let (metadata_segment, record_segment, vector_segment) = self.fetch_segments().await?;
+
         Ok(FetchSegmentOutput {
             collection: self.get_collection().await?,
-            metadata_segment: self.get_segment(SegmentScope::METADATA).await?,
-            record_segment: self.get_segment(SegmentScope::RECORD).await?,
-            vector_segment: self.get_segment(SegmentScope::VECTOR).await?,
+            metadata_segment,
+            record_segment,
+            vector_segment,
         })
     }
 }
