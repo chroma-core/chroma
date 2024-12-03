@@ -113,7 +113,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
                     )
                 })
                 .collect::<Vec<_>>();
-            tracing::info!(
+            trace!(
                 "[Debug-Projection] Duplicate user ids found: {:?}",
                 debug_recs
             );

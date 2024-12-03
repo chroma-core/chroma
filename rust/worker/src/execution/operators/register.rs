@@ -8,6 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::trace;
 
 /// The register  operator is responsible for flushing compaction data to the sysdb
 /// as well as updating the log offset in the log service.
@@ -123,7 +124,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
             Err(error) => return Err(RegisterError::FlushCompactionError(error)),
         };
 
-        tracing::debug!(
+        trace!(
             "[Debug-Register] Collection {}: Version {}, Log position {}",
             input.collection_id,
             input.collection_version,

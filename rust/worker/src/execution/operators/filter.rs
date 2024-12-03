@@ -405,7 +405,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
         trace!("[{}]: {:?}", self.get_name(), input);
 
-        tracing::info!("[Debug-Filter] Raw log chunk: {:?}", input.logs);
+        trace!("[Debug-Filter] Raw log chunk: {:?}", input.logs);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -414,7 +414,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         .await
         {
             Ok(reader) => {
-                tracing::info!(
+                trace!(
                     "[Debug-Filter] Record segment reader count: {:?}",
                     reader.count().await.map_err(FilterError::GetError)
                 );
@@ -426,7 +426,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             Err(e) => Err(*e),
         }?;
 
-        tracing::info!(
+        trace!(
             "[Debug-Filter] Record segment reader is None: {:?}",
             record_segment_reader.is_none()
         );
@@ -436,7 +436,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
 
-        tracing::info!("[Debug-Filter] Materialized Logs: {:?}", materialized_logs);
+        trace!("[Debug-Filter] Materialized Logs: {:?}", materialized_logs);
 
         let metadata_log_reader = MetadataLogReader::new(&materialized_logs);
         let log_metadata_provider =
@@ -503,8 +503,8 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                 & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids)
         };
 
-        tracing::info!("[Debug-Filter] Log mask: {:?}", log_offset_ids);
-        tracing::info!("[Debug-Filter] Segment mask: {:?}", compact_offset_ids);
+        trace!("[Debug-Filter] Log mask: {:?}", log_offset_ids);
+        trace!("[Debug-Filter] Segment mask: {:?}", compact_offset_ids);
 
         Ok(FilterOutput {
             log_offset_ids,
