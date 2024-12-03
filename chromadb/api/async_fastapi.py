@@ -124,7 +124,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
-        response = await self._get_client().request(method, url, **cast(Any, kwargs))
+        response = await self._get_client().request(
+            method,
+            url,
+            headers=self._settings.chroma_server_headers,
+            **cast(Any, kwargs),
+        )
         BaseHTTPClient._raise_chroma_error(response)
         return orjson.loads(response.text)
 
