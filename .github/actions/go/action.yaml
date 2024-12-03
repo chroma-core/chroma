@@ -12,8 +12,8 @@ runs:
 
     - name: Install protobuf compiler (protoc)
       run: |
-        apt-get update
-        apt-get install -y wget unzip
+        sudo apt-get update
+        sudo apt-get install -y wget unzip
         wget https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
         unzip protoc-21.12-linux-x86_64.zip -d /usr/local/
         rm protoc-21.12-linux-x86_64.zip
