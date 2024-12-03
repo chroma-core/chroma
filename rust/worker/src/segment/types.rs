@@ -154,7 +154,7 @@ pub struct MaterializedLogRecord<'referred_data> {
     // from the last non null operation.
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
     // then this will contain emb2. None if final operation is Delete.
-    pub(crate) final_embedding: Option<&'referred_data [f32]>,
+    pub(crate) final_embedding: Option<Vec<f32>>,
 }
 
 impl<'referred_data> MaterializedLogRecord<'referred_data> {
@@ -319,12 +319,12 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         if self.final_operation == MaterializedLogOperation::OverwriteExisting
             || self.final_operation == MaterializedLogOperation::AddNew
         {
-            return match self.final_embedding {
+            return match &self.final_embedding {
                 Some(embed) => embed,
                 None => panic!("Expected source of embedding"),
             };
         }
-        return match self.final_embedding {
+        return match &self.final_embedding {
             Some(embed) => embed,
             None => match self.data_record.as_ref() {
                 Some(data_record) => data_record.embedding,
@@ -386,7 +386,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
         };
 
         let embedding = match &log_record.embedding {
-            Some(embedding) => Some(embedding.as_slice()),
+            Some(embedding) => Some(embedding.clone()),
             None => {
                 return Err(LogMaterializerError::EmbeddingMaterialization);
             }
@@ -608,9 +608,7 @@ pub async fn materialize_logs<'me>(
                             }
                         };
                         record_from_map.final_document = log_record.record.document.clone();
-                        if let Some(emb) = log_record.record.embedding.as_ref() {
-                            record_from_map.final_embedding = Some(emb.as_slice());
-                        }
+                        record_from_map.final_embedding = log_record.record.embedding.clone();
                         match record_from_map.final_operation {
                             MaterializedLogOperation::Initial => {
                                 record_from_map.final_operation =
@@ -669,9 +667,7 @@ pub async fn materialize_logs<'me>(
                                         }
                                     };
                                     record_from_map.final_document = log_record.record.document.clone();
-                                    if let Some(emb) = log_record.record.embedding.as_ref() {
-                                        record_from_map.final_embedding = Some(emb.as_slice());
-                                    }
+                                    record_from_map.final_embedding = log_record.record.embedding.clone();
                                     match record_from_map.final_operation {
                                         MaterializedLogOperation::Initial => {
                                             record_from_map.final_operation =
@@ -709,9 +705,7 @@ pub async fn materialize_logs<'me>(
                                 }
                             };
                             record_from_map.final_document = log_record.record.document.clone();
-                            if let Some(emb) = log_record.record.embedding.as_ref() {
-                                record_from_map.final_embedding = Some(emb.as_slice());
-                            }
+                            record_from_map.final_embedding = log_record.record.embedding.clone();
                             // This record is not present on storage yet hence final operation is
                             // AddNew and not UpdateExisting.
                             record_from_map.final_operation = MaterializedLogOperation::AddNew;
@@ -1830,7 +1824,7 @@ mod tests {
                 assert_eq!("embedding_id_3", log.user_id.clone().unwrap());
                 assert!(log.data_record.is_none());
                 assert_eq!("doc3", log.final_document.clone().unwrap());
-                assert_eq!(vec![7.0, 8.0, 9.0], log.final_embedding.unwrap());
+                assert_eq!(vec![7.0, 8.0, 9.0], log.final_embedding.clone().unwrap());
                 assert_eq!(3, log.offset_id);
                 assert_eq!(MaterializedLogOperation::AddNew, log.final_operation);
                 let mut hello_found = 0;
