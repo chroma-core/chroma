@@ -542,7 +542,7 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
                 .0
                 .data_record
                 .as_ref()
-                .and_then(|r| r.document.as_ref().map(|d| d.as_str()));
+                .and_then(|r| r.document.as_deref());
             let new_document = &record.0.final_document;
 
             if matches!(
