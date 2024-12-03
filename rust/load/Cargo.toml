@@ -8,6 +8,7 @@ async-trait = "0.1.83"
 axum = "0.7"
 chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "e364e35c34c660d4e8e862436ea600ddc2f46a1e" }
 chrono = { version = "0.4.38", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 guacamole = { version = "0.9", default-features = false }
 serde.workspace = true
@@ -27,3 +28,4 @@ opentelemetry-otlp = "0.27"
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 tracing.workspace = true
 tower-http = { version = "0.6.2", features = ["trace"] }
+reqwest = { version = "0.12", features = ["json"] }

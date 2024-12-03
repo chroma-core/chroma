@@ -21,9 +21,10 @@ impl From<&dyn crate::DataSet> for Description {
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Status {
+    pub inhibited: bool,
     pub running: Vec<WorkloadSummary>,
     pub data_sets: Vec<Description>,
-    pub workloads: Vec<Description>,
+    pub workloads: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
