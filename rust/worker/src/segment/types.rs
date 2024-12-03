@@ -149,7 +149,7 @@ pub struct MaterializedLogRecord<'referred_data> {
     // This is the final document obtained from the last non null operation.
     // E.g. if log has [Insert(str0), Update(str1), Update(str2), Update()] then this will contain
     // str2. None if final operation is Delete.
-    pub(crate) final_document: Option<&'referred_data str>,
+    pub(crate) final_document: Option<String>,
     // Similar to above, this is the final embedding obtained
     // from the last non null operation.
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
@@ -165,10 +165,10 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         if self.final_operation == MaterializedLogOperation::OverwriteExisting
             || self.final_operation == MaterializedLogOperation::AddNew
         {
-            return self.final_document.map(|doc| doc.to_string());
+            return self.final_document.clone();
         }
-        return match self.final_document {
-            Some(doc) => Some(doc.to_string()),
+        return match self.final_document.clone() {
+            Some(doc) => Some(doc),
             None => match self.data_record.as_ref() {
                 Some(data_record) => data_record.document.map(|doc| doc.to_string()),
                 None => None,
@@ -180,12 +180,9 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         if self.final_operation == MaterializedLogOperation::OverwriteExisting
             || self.final_operation == MaterializedLogOperation::AddNew
         {
-            return match self.final_document {
-                Some(doc) => Some(doc),
-                None => None,
-            };
+            return self.final_document.as_deref();
         }
-        return match self.final_document {
+        return match &self.final_document {
             Some(doc) => Some(doc),
             None => match self.data_record.as_ref() {
                 Some(data_record) => match data_record.document {
@@ -388,7 +385,6 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
             }
         };
 
-        let document = log_record.document.as_deref();
         let embedding = match &log_record.embedding {
             Some(embedding) => Some(embedding.as_slice()),
             None => {
@@ -403,7 +399,7 @@ impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_d
             final_operation: MaterializedLogOperation::AddNew,
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
-            final_document: document,
+            final_document: log_record.document.clone(),
             final_embedding: embedding,
         })
     }
@@ -611,9 +607,7 @@ pub async fn materialize_logs<'me>(
                                 return Err(LogMaterializerError::MetadataMaterialization(e));
                             }
                         };
-                        if let Some(doc) = log_record.record.document.as_ref() {
-                            record_from_map.final_document = Some(doc);
-                        }
+                        record_from_map.final_document = log_record.record.document.clone();
                         if let Some(emb) = log_record.record.embedding.as_ref() {
                             record_from_map.final_embedding = Some(emb.as_slice());
                         }
@@ -674,9 +668,7 @@ pub async fn materialize_logs<'me>(
                                             return Err(LogMaterializerError::MetadataMaterialization(e));
                                         }
                                     };
-                                    if let Some(doc) = log_record.record.document.as_ref() {
-                                        record_from_map.final_document = Some(doc);
-                                    }
+                                    record_from_map.final_document = log_record.record.document.clone();
                                     if let Some(emb) = log_record.record.embedding.as_ref() {
                                         record_from_map.final_embedding = Some(emb.as_slice());
                                     }
@@ -716,9 +708,7 @@ pub async fn materialize_logs<'me>(
                                     return Err(LogMaterializerError::MetadataMaterialization(e));
                                 }
                             };
-                            if let Some(doc) = log_record.record.document.as_ref() {
-                                record_from_map.final_document = Some(doc);
-                            }
+                            record_from_map.final_document = log_record.record.document.clone();
                             if let Some(emb) = log_record.record.embedding.as_ref() {
                                 record_from_map.final_embedding = Some(emb.as_slice());
                             }
@@ -1839,7 +1829,7 @@ mod tests {
                 id3_found += 1;
                 assert_eq!("embedding_id_3", log.user_id.clone().unwrap());
                 assert!(log.data_record.is_none());
-                assert_eq!("doc3", log.final_document.unwrap());
+                assert_eq!("doc3", log.final_document.clone().unwrap());
                 assert_eq!(vec![7.0, 8.0, 9.0], log.final_embedding.unwrap());
                 assert_eq!(3, log.offset_id);
                 assert_eq!(MaterializedLogOperation::AddNew, log.final_operation);
