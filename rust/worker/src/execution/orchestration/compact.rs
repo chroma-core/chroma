@@ -676,8 +676,22 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
             }
         };
 
-        self.write(materialized_result.result, ctx.receiver(), ctx)
-            .await;
+        if materialized_result.result.is_empty() {
+            self.num_write_tasks -= 1;
+
+            if self.num_write_tasks == 0 {
+                // There is nothing to flush, proceed to register
+                self.register(
+                    self.pulled_log_offset.unwrap(),
+                    Arc::new([]),
+                    ctx.receiver(),
+                )
+                .await;
+            }
+        } else {
+            self.write(materialized_result.result, ctx.receiver(), ctx)
+                .await;
+        }
     }
 }
 
