@@ -14,6 +14,9 @@ echo "Created logs dir: $LOGS_DIR"
 PODS=$(kubectl get pods -n $NAMESPACE -o jsonpath='{.items[*].metadata.name}')
 echo "Got all the pods: $PODS"
 
+# Sleep before log dump
+sleep 1m
+
 # Iterate over each pod and get the logs
 for POD in $PODS; do
   echo "Getting logs for pod: $POD"
