@@ -322,7 +322,7 @@ pub struct MetadataDelta<'referred_data> {
     pub metadata_to_insert: HashMap<&'referred_data str, &'referred_data MetadataValue>,
 }
 
-impl<'referred_data> MetadataDelta<'referred_data> {
+impl MetadataDelta<'_> {
     pub fn new() -> Self {
         Self::default()
     }

@@ -1,4 +1,4 @@
-/// This test uses the proptest-state-machine crate to generate a sequence of transitions for a blockfile writer and compares the result after every commit with a reference implementation.
+//! This test uses the proptest-state-machine crate to generate a sequence of transitions for a blockfile writer and compares the result after every commit with a reference implementation.
 
 #[cfg(test)]
 mod tests {
