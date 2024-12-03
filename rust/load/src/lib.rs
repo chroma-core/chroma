@@ -190,15 +190,35 @@ pub struct QueryQuery {
 pub enum Workload {
     #[serde(rename = "nop")]
     Nop,
+    #[serde(rename = "by_name")]
+    ByName(String),
     #[serde(rename = "get")]
     Get(GetQuery),
     #[serde(rename = "query")]
     Query(QueryQuery),
+    #[serde(rename = "hybrid")]
+    Hybrid(Vec<(f64, Workload)>),
 }
 
 impl Workload {
     pub fn description(&self) -> String {
         serde_json::to_string_pretty(self).unwrap()
+    }
+
+    pub fn resolve_by_name(&mut self, workloads: &HashMap<String, Workload>) -> Result<(), Error> {
+        if let Workload::ByName(name) = self {
+            if let Some(workload) = workloads.get(name) {
+                *self = workload.clone();
+            } else {
+                return Err(Error::InvalidRequest(format!("workload not found: {name}")));
+            }
+        }
+        if let Workload::Hybrid(hybrid) = self {
+            for (_, workload) in hybrid {
+                workload.resolve_by_name(workloads)?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn step(
@@ -212,6 +232,12 @@ impl Workload {
                 tracing::info!("nop");
                 Ok(())
             }
+            Workload::ByName(_) => {
+                tracing::error!("cannot step by name; by_name should be resolved");
+                Err(Box::new(Error::InternalError(
+                    "cannot step by name".to_string(),
+                )))
+            }
             Workload::Get(get) => {
                 data_set
                     .get(client, get.clone(), guac)
@@ -223,6 +249,24 @@ impl Workload {
                     .query(client, query.clone(), guac)
                     .instrument(tracing::info_span!("query"))
                     .await
+            }
+            Workload::Hybrid(hybrid) => {
+                let scale: f64 = any(guac);
+                let mut total = scale * hybrid.iter().map(|(p, _)| *p).sum::<f64>();
+                for (p, workload) in hybrid {
+                    if *p < 0.0 {
+                        return Err(Box::new(Error::InvalidRequest(
+                            "hybrid probabilities must be positive".to_string(),
+                        )));
+                    }
+                    if *p >= total {
+                        return Box::pin(workload.step(client, data_set, guac)).await;
+                    }
+                    total -= *p;
+                }
+                Err(Box::new(Error::InternalError(
+                    "miscalculation of total hybrid probabilities".to_string(),
+                )))
             }
         }
     }
@@ -367,21 +411,14 @@ impl LoadService {
         &self,
         name: String,
         data_set: String,
-        workload: String,
+        mut workload: Workload,
         expires: chrono::DateTime<chrono::FixedOffset>,
         throughput: f64,
     ) -> Result<Uuid, Error> {
         let Some(data_set) = self.data_sets().iter().find(|ds| ds.name() == data_set) else {
             return Err(Error::NotFound("data set not found".to_string()));
         };
-        let Some(workload) = self
-            .workloads()
-            .iter()
-            .find(|(name, _)| **name == workload)
-            .map(|(_, wl)| wl)
-        else {
-            return Err(Error::NotFound("workload not found".to_string()));
-        };
+        workload.resolve_by_name(self.workloads())?;
         // SAFETY(rescrv):  Mutex poisoning.
         let mut harness = self.harness.lock().unwrap();
         Ok(harness.start(name, workload.clone(), data_set, expires, throughput))
@@ -669,7 +706,7 @@ mod tests {
         load.start(
             "foo".to_string(),
             "nop".to_string(),
-            "get-no-filter".to_string(),
+            Workload::ByName("get-no-filter".to_string()),
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
             1.0,
         )
