@@ -22,8 +22,6 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::instrument;
@@ -123,8 +121,6 @@ impl CompactionManager {
                     self.hnsw_index_provider.clone(),
                     dispatcher,
                     None,
-                    None,
-                    Arc::new(AtomicU32::new(1)),
                     self.max_compaction_size,
                     self.max_partition_size,
                 );
