@@ -106,7 +106,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             loop_hash = 0
 
         if loop_hash not in self._clients:
-            self._clients[loop_hash] = httpx.AsyncClient(timeout=None)
+            self._clients[loop_hash] = httpx.AsyncClient(
+                timeout=None,
+                headers=self._settings.chroma_server_headers,
+                verify=self._settings.chroma_server_ssl_verify or False,
+            )
 
         return self._clients[loop_hash]
 
@@ -124,12 +128,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
 
-        response = await self._get_client().request(
-            method,
-            url,
-            headers=self._settings.chroma_server_headers,
-            **cast(Any, kwargs),
-        )
+        response = await self._get_client().request(method, url, **cast(Any, kwargs))
         BaseHTTPClient._raise_chroma_error(response)
         return orjson.loads(response.text)
 
