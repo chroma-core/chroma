@@ -1304,6 +1304,7 @@ dependencies = [
  "axum",
  "chromadb",
  "chrono",
+ "figment",
  "guacamole",
  "opentelemetry",
  "opentelemetry-otlp",
