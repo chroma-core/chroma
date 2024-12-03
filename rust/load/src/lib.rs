@@ -169,22 +169,22 @@ impl DocumentQuery {
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct GetQuery {
-    limit: Distribution,
+    pub limit: Distribution,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<MetadataQuery>,
+    pub metadata: Option<MetadataQuery>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    document: Option<DocumentQuery>,
+    pub document: Option<DocumentQuery>,
 }
 
 //////////////////////////////////////////// QueryQuery ////////////////////////////////////////////
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct QueryQuery {
-    limit: Distribution,
+    pub limit: Distribution,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<MetadataQuery>,
+    pub metadata: Option<MetadataQuery>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    document: Option<DocumentQuery>,
+    pub document: Option<DocumentQuery>,
 }
 
 ///////////////////////////////////////////// Workload /////////////////////////////////////////////
@@ -201,6 +201,11 @@ pub enum Workload {
     Query(QueryQuery),
     #[serde(rename = "hybrid")]
     Hybrid(Vec<(f64, Workload)>),
+    #[serde(rename = "delay")]
+    Delay {
+        after: chrono::DateTime<chrono::FixedOffset>,
+        wrap: Box<Workload>,
+    },
 }
 
 impl Workload {
@@ -209,17 +214,23 @@ impl Workload {
     }
 
     pub fn resolve_by_name(&mut self, workloads: &HashMap<String, Workload>) -> Result<(), Error> {
-        if let Workload::ByName(name) = self {
-            if let Some(workload) = workloads.get(name) {
-                *self = workload.clone();
-            } else {
-                return Err(Error::InvalidRequest(format!("workload not found: {name}")));
+        match self {
+            Workload::Nop => {}
+            Workload::ByName(name) => {
+                if let Some(workload) = workloads.get(name) {
+                    *self = workload.clone();
+                } else {
+                    return Err(Error::InvalidRequest(format!("workload not found: {name}")));
+                }
             }
-        }
-        if let Workload::Hybrid(hybrid) = self {
-            for (_, workload) in hybrid {
-                workload.resolve_by_name(workloads)?;
+            Workload::Get(_) => {}
+            Workload::Query(_) => {}
+            Workload::Hybrid(hybrid) => {
+                for (_, workload) in hybrid {
+                    workload.resolve_by_name(workloads)?;
+                }
             }
+            Workload::Delay { after: _, wrap } => wrap.resolve_by_name(workloads)?,
         }
         Ok(())
     }
@@ -255,22 +266,40 @@ impl Workload {
             }
             Workload::Hybrid(hybrid) => {
                 let scale: f64 = any(guac);
-                let mut total = scale * hybrid.iter().map(|(p, _)| *p).sum::<f64>();
+                let mut total = scale
+                    * hybrid
+                        .iter()
+                        .filter_map(|(p, w)| if w.is_active() { Some(*p) } else { None })
+                        .sum::<f64>();
                 for (p, workload) in hybrid {
                     if *p < 0.0 {
                         return Err(Box::new(Error::InvalidRequest(
                             "hybrid probabilities must be positive".to_string(),
                         )));
                     }
-                    if *p >= total {
-                        return Box::pin(workload.step(client, data_set, guac)).await;
+                    if workload.is_active() {
+                        if *p >= total {
+                            return Box::pin(workload.step(client, data_set, guac)).await;
+                        }
+                        total -= *p;
                     }
-                    total -= *p;
                 }
                 Err(Box::new(Error::InternalError(
                     "miscalculation of total hybrid probabilities".to_string(),
                 )))
             }
+            Workload::Delay { after: _, wrap } => Box::pin(wrap.step(client, data_set, guac)).await,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        match self {
+            Workload::Nop => true,
+            Workload::ByName(_) => true,
+            Workload::Get(_) => true,
+            Workload::Query(_) => true,
+            Workload::Hybrid(hybrid) => hybrid.iter().any(|(_, w)| w.is_active()),
+            Workload::Delay { after, wrap } => chrono::Utc::now() >= *after && wrap.is_active(),
         }
     }
 }
@@ -511,6 +540,8 @@ impl LoadService {
             }
             if inhibit.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::info!("inhibited");
+            } else if !spec.workload.is_active() {
+                tracing::debug!("workload inactive");
             } else if let Err(err) = spec
                 .workload
                 .step(&client, &*spec.data_set, &mut guac)
@@ -705,6 +736,21 @@ pub async fn entrypoint() {
     runner.abort();
 }
 
+pub fn humanize_expires(expires: &str) -> Option<String> {
+    if let Ok(expires) = chrono::DateTime::parse_from_rfc3339(expires) {
+        Some(expires.to_rfc3339())
+    } else if let Some(duration) = expires.strip_suffix("s") {
+        let expires = chrono::Utc::now() + chrono::Duration::seconds(duration.trim().parse().ok()?);
+        Some(expires.to_rfc3339())
+    } else if let Some(duration) = expires.strip_suffix("min") {
+        let expires = chrono::Utc::now()
+            + chrono::Duration::seconds(duration.trim().parse::<i64>().ok()? * 60i64);
+        Some(expires.to_rfc3339())
+    } else {
+        Some(expires.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,5 +767,81 @@ mod tests {
         )
         .unwrap();
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    }
+
+    #[test]
+    fn workload_json() {
+        let json = r#"{
+  "hybrid": [
+    [
+      1.0,
+      "nop"
+    ],
+    [
+      1.0,
+      {
+        "by_name": "foo"
+      }
+    ],
+    [
+      1.0,
+      {
+        "get": {
+          "limit": {
+            "Constant": 10
+          }
+        }
+      }
+    ],
+    [
+      1.0,
+      {
+        "query": {
+          "limit": {
+            "Constant": 10
+          }
+        }
+      }
+    ],
+    [
+      1.0,
+      {
+        "delay": {
+          "after": "2021-01-01T00:00:00Z",
+          "wrap": "nop"
+        }
+      }
+    ]
+  ]
+}"#;
+        let workload = Workload::Hybrid(vec![
+            (1.0, Workload::Nop),
+            (1.0, Workload::ByName("foo".to_string())),
+            (
+                1.0,
+                Workload::Get(GetQuery {
+                    limit: Distribution::Constant(10),
+                    document: None,
+                    metadata: None,
+                }),
+            ),
+            (
+                1.0,
+                Workload::Query(QueryQuery {
+                    limit: Distribution::Constant(10),
+                    document: None,
+                    metadata: None,
+                }),
+            ),
+            (
+                1.0,
+                Workload::Delay {
+                    after: chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00+00:00")
+                        .unwrap(),
+                    wrap: Box::new(Workload::Nop),
+                },
+            ),
+        ]);
+        assert_eq!(json, serde_json::to_string_pretty(&workload).unwrap());
     }
 }
