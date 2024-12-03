@@ -65,6 +65,9 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
             &self.embedding
         };
 
+        tracing::info!("[Debug-HNSW] Allow: {:?}", allowed);
+        tracing::info!("[Debug-HNSW] Disallowed: {:?}", disallowed);
+
         let (offset_ids, distances) =
             input
                 .hnsw_reader
