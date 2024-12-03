@@ -390,7 +390,7 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 
 		// Generate new name with timestamp and random number
 		oldName := *collections[0].Collection.Name
-		newName := fmt.Sprintf("deleted_%s_%d_%d", oldName, time.Now().Unix(), rand.Intn(1000))
+		newName := fmt.Sprintf("_deleted_%s_%d_%d", oldName, time.Now().Unix(), rand.Intn(1000))
 
 		dbCollection := &dbmodel.Collection{
 			ID:        deleteCollection.ID.String(),
