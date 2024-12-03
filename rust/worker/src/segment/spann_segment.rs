@@ -293,7 +293,7 @@ mod test {
     };
 
     use crate::segment::{
-        spann_segment::SpannSegmentWriter, LogMaterializer, SegmentFlusher, SegmentWriter,
+        materialize_logs, spann_segment::SpannSegmentWriter, SegmentFlusher, SegmentWriter,
     };
 
     #[tokio::test]
@@ -370,9 +370,7 @@ mod test {
         ];
         let chunked_log = Chunk::new(data.into());
         // Materialize the logs.
-        let materializer = LogMaterializer::new(None, chunked_log, None);
-        let materialized_log = materializer
-            .materialize()
+        let materialized_log = materialize_logs(&None, &chunked_log, None)
             .await
             .expect("Error materializing logs");
         spann_writer
