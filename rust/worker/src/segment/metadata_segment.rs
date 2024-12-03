@@ -539,7 +539,7 @@ impl<'log_records> SegmentWriter<'log_records> for MetadataSegmentWriter<'_> {
         let full_text_writer_batch = records.iter().filter_map(|record| {
             let offset_id = record.0.offset_id;
             let old_document = record.0.data_record.as_ref().and_then(|r| r.document);
-            let new_document = record.0.final_document;
+            let new_document = &record.0.final_document;
 
             if matches!(
                 record.0.final_operation,
