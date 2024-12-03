@@ -605,7 +605,9 @@ mod tests {
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
-    fn gen_knn_request(mut scan_operator: Option<chroma_proto::ScanOperator>) -> chroma_proto::KnnPlan {
+    fn gen_knn_request(
+        mut scan_operator: Option<chroma_proto::ScanOperator>,
+    ) -> chroma_proto::KnnPlan {
         if scan_operator.is_none() {
             scan_operator = Some(scan());
         }

@@ -106,17 +106,14 @@ pub(crate) struct MetadataLogReader<'me> {
 }
 
 impl<'me> MetadataLogReader<'me> {
-    pub(crate) fn new(logs: &'me Chunk<MaterializedLogRecord<'me>>) -> Self {
+    pub(crate) fn new(logs: &'me Chunk<MaterializedLogRecord>) -> Self {
         let mut compact_metadata: HashMap<_, BTreeMap<&MetadataValue, RoaringBitmap>> =
             HashMap::new();
         let mut document = HashMap::new();
         let mut updated_offset_ids = RoaringBitmap::new();
         let mut user_id_to_offset_id = HashMap::new();
         for (log, _) in logs.iter() {
-            if !matches!(
-                log.final_operation,
-                MaterializedLogOperation::Initial | MaterializedLogOperation::AddNew
-            ) {
+            if !matches!(log.final_operation, MaterializedLogOperation::AddNew) {
                 updated_offset_ids.insert(log.offset_id);
             }
             if !matches!(

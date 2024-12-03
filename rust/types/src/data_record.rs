@@ -10,6 +10,29 @@ pub struct DataRecord<'a> {
     pub document: Option<&'a str>,
 }
 
+#[derive(Debug, Clone)]
+pub struct OwnedDataRecord {
+    pub id: String,
+    pub embedding: Vec<f32>,
+    pub metadata: Option<Metadata>,
+    pub document: Option<String>,
+}
+
+impl<'a> From<&DataRecord<'a>> for OwnedDataRecord {
+    fn from(data_record: &DataRecord<'a>) -> Self {
+        let id = data_record.id.to_string();
+        let embedding = data_record.embedding.to_vec();
+        let metadata = data_record.metadata.clone();
+        let document = data_record.document.map(|doc| doc.to_string());
+        OwnedDataRecord {
+            id,
+            embedding,
+            metadata,
+            document,
+        }
+    }
+}
+
 impl DataRecord<'_> {
     pub fn get_size(&self) -> usize {
         let id_size = self.id.len();
@@ -27,5 +50,9 @@ impl DataRecord<'_> {
             None => 0,
         };
         id_size + embedding_size + metadata_size + document_size
+    }
+
+    pub fn to_owned(&self) -> OwnedDataRecord {
+        self.into()
     }
 }

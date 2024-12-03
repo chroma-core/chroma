@@ -65,7 +65,7 @@ impl ChromaError for HnswKnnOperatorError {
 impl HnswKnnOperator {
     async fn get_disallowed_ids<'referred_data>(
         &self,
-        logs: Chunk<MaterializedLogRecord<'_>>,
+        logs: Chunk<MaterializedLogRecord>,
         record_segment_reader: &RecordSegmentReader<'_>,
     ) -> Result<Vec<u32>, Box<dyn ChromaError>> {
         let mut disallowed_ids = Vec::new();

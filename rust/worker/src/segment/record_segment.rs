@@ -61,9 +61,9 @@ pub enum RecordSegmentWriterCreationError {
 }
 
 impl RecordSegmentWriter {
-    async fn construct_and_set_data_record<'a>(
+    async fn construct_and_set_data_record(
         &self,
-        mat_record: &MaterializedLogRecord<'a>,
+        mat_record: &MaterializedLogRecord,
         user_id: &str,
         offset_id: u32,
     ) -> Result<(), ApplyMaterializedLogError> {
@@ -337,10 +337,10 @@ impl ChromaError for ApplyMaterializedLogError {
     }
 }
 
-impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
+impl SegmentWriter for RecordSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: Chunk<MaterializedLogRecord<'a>>,
+        records: Chunk<MaterializedLogRecord>,
     ) -> Result<(), ApplyMaterializedLogError> {
         // The max new offset id introduced by materialized logs is initialized as zero
         // Since offset id should start from 1, we use this to indicate no new offset id
@@ -357,7 +357,11 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .set::<&str, u32>("", log_record.user_id.unwrap(), log_record.offset_id)
+                        .set::<&str, u32>(
+                            "",
+                            log_record.user_id.as_ref().unwrap(),
+                            log_record.offset_id,
+                        )
                         .await
                     {
                         Ok(()) => (),
@@ -370,7 +374,11 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .set::<u32, String>("", log_record.offset_id, log_record.user_id.unwrap().to_string())
+                        .set::<u32, String>(
+                            "",
+                            log_record.offset_id,
+                            log_record.user_id.clone().unwrap(),
+                        )
                         .await
                     {
                         Ok(()) => (),
@@ -382,7 +390,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     match self
                         .construct_and_set_data_record(
                             log_record,
-                            log_record.user_id.unwrap(),
+                            log_record.user_id.as_ref().unwrap(),
                             log_record.offset_id,
                         )
                         .await
@@ -395,7 +403,8 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Set max offset id.
                     max_new_offset_id = max_new_offset_id.max(log_record.offset_id);
                 }
-                MaterializedLogOperation::UpdateExisting | MaterializedLogOperation::OverwriteExisting => {
+                MaterializedLogOperation::UpdateExisting
+                | MaterializedLogOperation::OverwriteExisting => {
                     // Offset id and user id do not need to change. Only data
                     // needs to change. Blockfile does not have Read then write
                     // semantics so we'll delete and insert.
@@ -415,7 +424,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     match self
                         .construct_and_set_data_record(
                             log_record,
-                            log_record.data_record.as_ref().unwrap().id,
+                            &log_record.data_record.as_ref().unwrap().id,
                             log_record.offset_id,
                         )
                         .await
@@ -432,7 +441,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .delete::<&str, u32>("", log_record.data_record.as_ref().unwrap().id)
+                        .delete::<&str, u32>("", &log_record.data_record.as_ref().unwrap().id)
                         .await
                     {
                         Ok(()) => (),
@@ -470,7 +479,6 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                 }
-                MaterializedLogOperation::Initial => panic!("Invariant violation. Materialized logs should not have any logs in the initial state")
             }
         }
         self.max_new_offset_id
