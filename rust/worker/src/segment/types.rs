@@ -602,8 +602,12 @@ pub async fn materialize_logs<'me>(
                                 return Err(LogMaterializerError::MetadataMaterialization(e));
                             }
                         };
-                        record_from_map.final_document = log_record.record.document.clone();
-                        record_from_map.final_embedding = log_record.record.embedding.clone();
+                        if let Some(doc) = &log_record.record.document {
+                            record_from_map.final_document = Some(doc.clone());
+                        }
+                        if let Some(emb) = &log_record.record.embedding {
+                            record_from_map.final_embedding = Some(emb.clone());
+                        }
                         match record_from_map.final_operation {
                             MaterializedLogOperation::Initial => {
                                 record_from_map.final_operation =
@@ -661,8 +665,12 @@ pub async fn materialize_logs<'me>(
                                             return Err(LogMaterializerError::MetadataMaterialization(e));
                                         }
                                     };
-                                    record_from_map.final_document = log_record.record.document.clone();
-                                    record_from_map.final_embedding = log_record.record.embedding.clone();
+                                    if let Some(doc) = &log_record.record.document {
+                                        record_from_map.final_document = Some(doc.clone());
+                                    }
+                                    if let Some(emb) = &log_record.record.embedding {
+                                        record_from_map.final_embedding = Some(emb.clone());
+                                    }
                                     match record_from_map.final_operation {
                                         MaterializedLogOperation::Initial => {
                                             record_from_map.final_operation =
@@ -699,8 +707,12 @@ pub async fn materialize_logs<'me>(
                                     return Err(LogMaterializerError::MetadataMaterialization(e));
                                 }
                             };
-                            record_from_map.final_document = log_record.record.document.clone();
-                            record_from_map.final_embedding = log_record.record.embedding.clone();
+                            if let Some(doc) = &log_record.record.document {
+                                record_from_map.final_document = Some(doc.clone());
+                            }
+                            if let Some(emb) = &log_record.record.embedding {
+                                record_from_map.final_embedding = Some(emb.clone());
+                            }
                             // This record is not present on storage yet hence final operation is
                             // AddNew and not UpdateExisting.
                             record_from_map.final_operation = MaterializedLogOperation::AddNew;
