@@ -5,10 +5,8 @@ use chroma_types::{
     MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, UpdateMetadata,
     UpdateMetadataValue,
 };
-use parking_lot::Mutex;
-use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU32, AtomicUsize};
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -284,7 +282,7 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
     pub fn get_user_id(&self) -> Option<&'me str> {
         // todo: should this be an Option?
         if let Some(id) = self.materialized_log_record.user_id_at_log_index {
-            return Some(self.logs.get(id as usize).unwrap().record.id.as_str());
+            return Some(self.logs.get(id).unwrap().record.id.as_str());
         }
 
         if let Some(data_record) = self.segment_data_record.as_ref() {
@@ -298,7 +296,7 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
         match self.materialized_log_record.final_document_at_log_index {
             Some(offset) => Some(
                 self.logs
-                    .get(offset as usize)
+                    .get(offset)
                     .unwrap()
                     .record
                     .document
@@ -374,7 +372,7 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
         match self.materialized_log_record.final_embedding_at_log_index {
             Some(index) => Some(
                 self.logs
-                    .get(index as usize)
+                    .get(index)
                     .unwrap()
                     .record
                     .embedding
@@ -475,13 +473,10 @@ impl MaterializeLogsResult {
     }
 
     pub fn get(&self, index: usize) -> Option<BorrowedMaterializedLogRecord> {
-        match self.materialized.get(index) {
-            None => None,
-            Some(materialized_log_record) => Some(BorrowedMaterializedLogRecord {
+        self.materialized.get(index).map(|materialized_log_record| BorrowedMaterializedLogRecord {
                 materialized_log_record,
                 logs: &self.logs,
-            }),
-        }
+            })
     }
 }
 
@@ -575,8 +570,7 @@ pub async fn materialize_logs(
                     let operation = existing_id_to_materialized
                         .get(log_record.record.id.as_str())
                         .unwrap()
-                        .final_operation
-                        .clone();
+                        .final_operation;
                     match operation {
                         MaterializedLogOperation::DeleteExisting => {
                             let curr_val = existing_id_to_materialized
@@ -720,8 +714,7 @@ pub async fn materialize_logs(
                     let operation = existing_id_to_materialized
                         .get(log_record.record.id.as_str())
                         .unwrap()
-                        .final_operation
-                        .clone();
+                        .final_operation;
                     match operation {
                                 MaterializedLogOperation::DeleteExisting => {
                                     let curr_val = existing_id_to_materialized.remove(log_record.record.id.as_str()).unwrap();

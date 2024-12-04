@@ -175,7 +175,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             let embedding = log_record.merged_embeddings_ref();
             if should_normalize {
                 let normalized_query = normalized_query.as_ref().expect("Invariant violation. Should have set normalized query if should_normalize is true.");
-                let normalized_embedding = normalize(&embedding[..]);
+                let normalized_embedding = normalize(embedding);
                 let distance = input
                     .distance_metric
                     .distance(&normalized_embedding[..], &normalized_query[..]);
@@ -185,7 +185,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                     distance,
                 });
             } else {
-                let distance = input.distance_metric.distance(&embedding[..], &input.query);
+                let distance = input.distance_metric.distance(embedding, &input.query);
                 heap.push(Entry {
                     user_id: log_record.get_user_id().unwrap(), // todo
                     embedding,
