@@ -5,7 +5,10 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     gcc \
     g++ \
     cmake \
-    autoconf && \
+    autoconf \
+    protobuf-compiler \
+    python3-dev \
+    make && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir /install
 
@@ -16,19 +19,32 @@ COPY ./requirements.txt requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade --prefix="/install" -r requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip if [ "$REBUILD_HNSWLIB" = "true" ]; then pip install --no-binary :all: --force-reinstall --prefix="/install" chroma-hnswlib; fi
 
+# Install gRPC tools for Python
+RUN pip install grpcio grpcio-tools
+
+# Copy source files to build Protobufs
+COPY ./ /chroma
+
+# Generate Protobufs
+WORKDIR /chroma
+RUN make -C idl proto_python
+
 FROM python:3.11-slim-bookworm AS final
 
+# Create working directory
 RUN mkdir /chroma
 WORKDIR /chroma
 
+# Copy entrypoint
 COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
 
 RUN apt-get update --fix-missing && apt-get install -y curl && \
     chmod +x /docker_entrypoint.sh && \
     rm -rf /var/lib/apt/lists/*
 
+# Copy built dependencies and generated Protobufs
 COPY --from=builder /install /usr/local
-COPY ./ /chroma
+COPY --from=builder /chroma /chroma
 
 ENV CHROMA_HOST_ADDR="0.0.0.0"
 ENV CHROMA_HOST_PORT=8000
