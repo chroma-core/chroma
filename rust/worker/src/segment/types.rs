@@ -130,7 +130,7 @@ pub struct MaterializedLogRecord {
     // in the log since data_record will be None in such cases. For other
     // cases, just read from data record.
     // pub(crate) user_id: Option<&'referred_data str>,
-    user_id_at_log_index: Option<i64>, // todo: rename
+    user_id_at_log_index: Option<usize>, // todo: rename
     // There can be several entries in the log for an id. This is the final
     // operation that needs to be done on it. For e.g.
     // If log has [Update, Update, Delete] then final operation is Delete.
@@ -155,14 +155,14 @@ pub struct MaterializedLogRecord {
     // E.g. if log has [Insert(str0), Update(str1), Update(str2), Update()] then this will contain
     // str2. None if final operation is Delete.
     // pub(crate) final_document: Option<&'referred_data str>,
-    final_document_at_log_offset: Option<i64>, // todo: rename
+    final_document_at_log_index: Option<usize>, // todo: rename
 
     // Similar to above, this is the final embedding obtained
     // from the last non null operation.
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
     // then this will contain emb2. None if final operation is Delete.
     // pub(crate) final_embedding: Option<&'referred_data [f32]>,
-    final_embedding_at_log_index: Option<i64>, // todo: rename
+    final_embedding_at_log_index: Option<usize>, // todo: rename
 }
 
 impl MaterializedLogRecord {
@@ -174,23 +174,24 @@ impl MaterializedLogRecord {
             final_operation: MaterializedLogOperation::Initial,
             metadata_to_be_merged: None,
             metadata_to_be_deleted: None,
-            final_document_at_log_offset: None,
+            final_document_at_log_index: None,
             final_embedding_at_log_index: None,
         }
     }
 
     fn from_log_offset(
         offset_id: u32,
+        log_index: usize,
         log_record: &LogRecord,
     ) -> Result<Self, LogMaterializerError> {
-        let final_document_at_log_offset = if log_record.record.document.is_some() {
-            Some(log_record.log_offset)
+        let final_document_at_log_index = if log_record.record.document.is_some() {
+            Some(log_index)
         } else {
             None
         };
 
         let final_embedding_at_log_index = if log_record.record.embedding.is_some() {
-            Some(log_record.log_offset)
+            Some(log_index)
         } else {
             return Err(LogMaterializerError::EmbeddingMaterialization);
         };
@@ -216,11 +217,11 @@ impl MaterializedLogRecord {
         Ok(Self {
             data_record_offset_id: None,
             offset_id,
-            user_id_at_log_index: Some(log_record.log_offset), // todo: is this always derived from the same log?
+            user_id_at_log_index: Some(log_index), // todo: is this always derived from the same log?
             final_operation: MaterializedLogOperation::AddNew,
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
-            final_document_at_log_offset,
+            final_document_at_log_index,
             final_embedding_at_log_index,
         })
     }
@@ -294,7 +295,7 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
     }
 
     pub fn document_ref_from_log(&self) -> Option<&'me str> {
-        match self.materialized_log_record.final_document_at_log_offset {
+        match self.materialized_log_record.final_document_at_log_index {
             Some(offset) => Some(
                 self.logs
                     .get(offset as usize)
@@ -317,7 +318,7 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
     pub fn merged_document_ref(&self) -> Option<&'me str> {
         if self
             .materialized_log_record
-            .final_document_at_log_offset
+            .final_document_at_log_index
             .is_some()
         {
             return self.document_ref_from_log();
@@ -366,10 +367,14 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
     }
 
     pub fn embeddings_ref_from_log(&self) -> Option<&'me [f32]> {
+        println!(
+            "final_embedding_at_log_index: {:?}",
+            self.materialized_log_record.final_embedding_at_log_index
+        );
         match self.materialized_log_record.final_embedding_at_log_index {
-            Some(offset) => Some(
+            Some(index) => Some(
                 self.logs
-                    .get(offset as usize)
+                    .get(index as usize)
                     .unwrap()
                     .record
                     .embedding
@@ -560,7 +565,7 @@ pub async fn materialize_logs(
     // Populate updates to these and fresh records that are being
     // inserted for the first time.
     // async move {
-    for (log_record, _) in logs.iter() {
+    for (log_record, log_index) in logs.iter() {
         match log_record.record.operation {
             Operation::Add => {
                 // If this is an add of a record present in the segment then add
@@ -581,6 +586,7 @@ pub async fn materialize_logs(
                             let mut materialized_record =
                                 match MaterializedLogRecord::from_log_offset(
                                     curr_val.offset_id,
+                                    log_index,
                                     log_record,
                                 ) {
                                     Ok(record) => record,
@@ -611,13 +617,16 @@ pub async fn materialize_logs(
                 else if !new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
                     let next_offset_id =
                         next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    let materialized_record =
-                        match MaterializedLogRecord::from_log_offset(next_offset_id, log_record) {
-                            Ok(record) => record,
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        };
+                    let materialized_record = match MaterializedLogRecord::from_log_offset(
+                        next_offset_id,
+                        log_index,
+                        log_record,
+                    ) {
+                        Ok(record) => record,
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    };
                     new_id_to_materialized
                         .insert(log_record.record.id.as_str(), materialized_record);
                 }
@@ -636,7 +645,7 @@ pub async fn materialize_logs(
                         .get_mut(log_record.record.id.as_str())
                         .unwrap();
                     record_from_map.final_operation = MaterializedLogOperation::DeleteExisting;
-                    record_from_map.final_document_at_log_offset = None;
+                    record_from_map.final_document_at_log_index = None;
                     record_from_map.final_embedding_at_log_index = None;
                     record_from_map.metadata_to_be_merged = None;
                     record_from_map.metadata_to_be_deleted = None;
@@ -684,11 +693,11 @@ pub async fn materialize_logs(
                 };
 
                 if log_record.record.document.is_some() {
-                    record_from_map.final_document_at_log_offset = Some(log_record.log_offset);
+                    record_from_map.final_document_at_log_index = Some(log_index);
                 }
 
                 if log_record.record.embedding.is_some() {
-                    record_from_map.final_embedding_at_log_index = Some(log_record.log_offset);
+                    record_from_map.final_embedding_at_log_index = Some(log_index);
                 }
 
                 match record_from_map.final_operation {
@@ -718,7 +727,7 @@ pub async fn materialize_logs(
                                     let curr_val = existing_id_to_materialized.remove(log_record.record.id.as_str()).unwrap();
                                     // Overwrite.
                                     let mut materialized_record =
-                                        match MaterializedLogRecord::from_log_offset(curr_val.offset_id, log_record) {
+                                        match MaterializedLogRecord::from_log_offset(curr_val.offset_id, log_index, log_record) {
                                             Ok(record) => record,
                                             Err(e) => {
                                                 return Err(e);
@@ -745,11 +754,11 @@ pub async fn materialize_logs(
                                     };
 
                                     if log_record.record.document.is_some() {
-                                        record_from_map.final_document_at_log_offset = Some(log_record.log_offset);
+                                        record_from_map.final_document_at_log_index = Some(log_index);
                                     }
 
                                     if log_record.record.embedding.is_some() {
-                                        record_from_map.final_embedding_at_log_index = Some(log_record.log_offset);
+                                        record_from_map.final_embedding_at_log_index = Some(log_index);
                                     }
 
                                     match record_from_map.final_operation {
@@ -790,11 +799,11 @@ pub async fn materialize_logs(
                     };
 
                     if log_record.record.document.is_some() {
-                        record_from_map.final_document_at_log_offset = Some(log_record.log_offset);
+                        record_from_map.final_document_at_log_index = Some(log_index);
                     }
 
                     if log_record.record.embedding.is_some() {
-                        record_from_map.final_embedding_at_log_index = Some(log_record.log_offset);
+                        record_from_map.final_embedding_at_log_index = Some(log_index);
                     }
 
                     // This record is not present on storage yet hence final operation is
@@ -804,13 +813,16 @@ pub async fn materialize_logs(
                     // Insert.
                     let next_offset =
                         next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    let materialized_record =
-                        match MaterializedLogRecord::from_log_offset(next_offset, log_record) {
-                            Ok(record) => record,
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        };
+                    let materialized_record = match MaterializedLogRecord::from_log_offset(
+                        next_offset,
+                        log_index,
+                        log_record,
+                    ) {
+                        Ok(record) => record,
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    };
                     new_id_to_materialized
                         .insert(log_record.record.id.as_str(), materialized_record);
                 }
