@@ -17,7 +17,7 @@ use super::record_segment::{
 
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
-pub(crate) fn materialize_update_metadata(
+fn materialize_update_metadata(
     update_metdata: &UpdateMetadata,
 ) -> Result<(Metadata, DeletedMetadata), MetadataValueConversionError> {
     let mut metadata = Metadata::new();
@@ -43,7 +43,7 @@ pub(crate) fn materialize_update_metadata(
 
 // Merges update metadata to base metadata, updating
 // the delete list and upsert list.
-pub(crate) fn merge_update_metadata(
+fn merge_update_metadata(
     base_metadata: (&Option<Metadata>, &Option<DeletedMetadata>),
     update_metadata: &Option<UpdateMetadata>,
 ) -> Result<(Option<Metadata>, Option<DeletedMetadata>), MetadataValueConversionError> {
@@ -112,6 +112,11 @@ impl ChromaError for LogMaterializerError {
     }
 }
 
+/// This struct is used internally. It is not exposed to materialized log consumers.
+///
+/// Instead of cloning or holding references to log records/segment data, this struct contains owned values that can be resolved to the referenced data.
+/// E.x. `data_record_offset_id: Option<u32>` is used instead of `data_record: Option<&DataRecord>` to avoid holding references to the data.
+/// This allows `MaterializedLogRecord` (and types above it) to be trivially Send'able.
 #[derive(Debug)]
 struct MaterializedLogRecord {
     // This is the data record read from the record segment for this id.
@@ -172,7 +177,7 @@ impl MaterializedLogRecord {
         }
     }
 
-    fn from_log_offset(
+    fn from_log_record(
         offset_id: u32,
         log_index: usize,
         log_record: &LogRecord,
@@ -210,7 +215,7 @@ impl MaterializedLogRecord {
         Ok(Self {
             data_record_offset_id: None,
             offset_id,
-            user_id_at_log_index: Some(log_index), // todo: is this always derived from the same log?
+            user_id_at_log_index: Some(log_index),
             final_operation: MaterializedLogOperation::AddNew,
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
@@ -220,12 +225,14 @@ impl MaterializedLogRecord {
     }
 }
 
-pub struct BorrowedMaterializedLogRecord<'me> {
-    materialized_log_record: &'me MaterializedLogRecord,
-    logs: &'me Chunk<LogRecord>,
+/// Obtained from a `MaterializeLogsResult`. Provides a borrowed view of a single materialized log record.
+/// You will probably need to call `.hydrate()` on this struct for most use cases, although you can view the offset ID and operation without hydrating.
+pub struct BorrowedMaterializedLogRecord<'log_data> {
+    materialized_log_record: &'log_data MaterializedLogRecord,
+    logs: &'log_data Chunk<LogRecord>,
 }
 
-impl<'me> BorrowedMaterializedLogRecord<'me> {
+impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
     pub fn get_offset_id(&self) -> u32 {
         self.materialized_log_record.offset_id
     }
@@ -234,10 +241,12 @@ impl<'me> BorrowedMaterializedLogRecord<'me> {
         self.materialized_log_record.final_operation
     }
 
-    pub async fn hydrate<'referred_data>(
+    /// Reads any record segment data that this log record may reference and returns a hydrated version of this record.
+    /// The record segment reader passed here **must be over the same set of blockfiles** as the reader that was originally passed to `materialize_logs()`. If the two readers are different, the behavior is undefined.
+    pub async fn hydrate<'segment_data>(
         &self,
-        record_segment_reader: Option<&'referred_data RecordSegmentReader<'referred_data>>,
-    ) -> Result<HydratedMaterializedLogRecord<'me, 'referred_data>, LogMaterializerError> {
+        record_segment_reader: Option<&'segment_data RecordSegmentReader<'segment_data>>,
+    ) -> Result<HydratedMaterializedLogRecord<'log_data, 'segment_data>, LogMaterializerError> {
         let segment_data_record = match self.materialized_log_record.data_record_offset_id {
             Some(offset_id) => match record_segment_reader {
                 Some(reader) => reader.get_data_for_offset_id(offset_id).await?,
@@ -254,14 +263,14 @@ impl<'me> BorrowedMaterializedLogRecord<'me> {
     }
 }
 
-// todo: rename to hydrated?
-pub struct HydratedMaterializedLogRecord<'me, 'referred_data> {
-    materialized_log_record: &'me MaterializedLogRecord,
-    segment_data_record: Option<DataRecord<'referred_data>>,
-    logs: &'me Chunk<LogRecord>,
+/// Obtained from `BorrowedMaterializedLogRecord::hydrate()`. Provides a fully-hydrated view of a single materialized log record.
+pub struct HydratedMaterializedLogRecord<'log_data, 'segment_data> {
+    materialized_log_record: &'log_data MaterializedLogRecord,
+    segment_data_record: Option<DataRecord<'segment_data>>,
+    logs: &'log_data Chunk<LogRecord>,
 }
 
-impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data> {
+impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_data, 'segment_data> {
     pub fn get_offset_id(&self) -> u32 {
         self.materialized_log_record.offset_id
     }
@@ -270,7 +279,7 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
         self.materialized_log_record.final_operation
     }
 
-    pub fn get_user_id(&self) -> &'me str {
+    pub fn get_user_id(&self) -> &'log_data str {
         if let Some(id) = self.materialized_log_record.user_id_at_log_index {
             return self.logs.get(id).unwrap().record.id.as_str();
         }
@@ -282,21 +291,21 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
         }
     }
 
-    pub fn document_ref_from_log(&self) -> Option<&'me str> {
+    pub fn document_ref_from_log(&self) -> Option<&'log_data str> {
         match self.materialized_log_record.final_document_at_log_index {
             Some(offset) => Some(self.logs.get(offset).unwrap().record.document.as_ref()?),
             None => None,
         }
     }
 
-    pub fn document_ref_from_segment(&self) -> Option<&'referred_data str> {
+    pub fn document_ref_from_segment(&self) -> Option<&'segment_data str> {
         self.segment_data_record
             .as_ref()
             .map(|data_record| data_record.document)?
     }
 
     // todo: rename?
-    pub fn merged_document_ref(&self) -> Option<&'me str> {
+    pub fn merged_document_ref(&self) -> Option<&'log_data str> {
         if self
             .materialized_log_record
             .final_document_at_log_index
@@ -347,21 +356,21 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
         final_metadata
     }
 
-    pub fn embeddings_ref_from_log(&self) -> Option<&'me [f32]> {
+    pub fn embeddings_ref_from_log(&self) -> Option<&'log_data [f32]> {
         match self.materialized_log_record.final_embedding_at_log_index {
             Some(index) => Some(self.logs.get(index).unwrap().record.embedding.as_ref()?),
             None => None,
         }
     }
 
-    pub fn embeddings_ref_from_segment(&self) -> Option<&'referred_data [f32]> {
+    pub fn embeddings_ref_from_segment(&self) -> Option<&'segment_data [f32]> {
         self.segment_data_record
             .as_ref()
             .map(|data_record| data_record.embedding)
     }
 
     // todo: rename?
-    pub fn merged_embeddings_ref(&self) -> &'me [f32] {
+    pub fn merged_embeddings_ref(&self) -> &'log_data [f32] {
         if self
             .materialized_log_record
             .final_embedding_at_log_index
@@ -453,9 +462,10 @@ impl MaterializeLogsResult {
     }
 }
 
-impl<'a> IntoIterator for &'a MaterializeLogsResult {
-    type Item = BorrowedMaterializedLogRecord<'a>;
-    type IntoIter = MaterializeLogsResultIter<'a>;
+// IntoIterator is implemented for &'a MaterializeLogsResult rather than MaterializeLogsResult because the iterator needs to hand out values with a lifetime of 'a.
+impl<'log_data> IntoIterator for &'log_data MaterializeLogsResult {
+    type Item = BorrowedMaterializedLogRecord<'log_data>;
+    type IntoIter = MaterializeLogsResultIter<'log_data>;
 
     fn into_iter(self) -> Self::IntoIter {
         MaterializeLogsResultIter {
@@ -466,14 +476,14 @@ impl<'a> IntoIterator for &'a MaterializeLogsResult {
     }
 }
 
-pub struct MaterializeLogsResultIter<'a> {
-    logs: &'a Chunk<LogRecord>,
-    chunk: &'a Chunk<MaterializedLogRecord>,
+pub struct MaterializeLogsResultIter<'log_data> {
+    logs: &'log_data Chunk<LogRecord>,
+    chunk: &'log_data Chunk<MaterializedLogRecord>,
     index: usize,
 }
 
-impl<'a> Iterator for MaterializeLogsResultIter<'a> {
-    type Item = BorrowedMaterializedLogRecord<'a>;
+impl<'log_data> Iterator for MaterializeLogsResultIter<'log_data> {
+    type Item = BorrowedMaterializedLogRecord<'log_data>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.chunk.len() {
@@ -587,7 +597,7 @@ pub async fn materialize_logs(
                                     .unwrap();
                                 // Overwrite.
                                 let mut materialized_record =
-                                    match MaterializedLogRecord::from_log_offset(
+                                    match MaterializedLogRecord::from_log_record(
                                         curr_val.offset_id,
                                         log_index,
                                         log_record,
@@ -620,7 +630,7 @@ pub async fn materialize_logs(
                     else if !new_id_to_materialized.contains_key(log_record.record.id.as_str()) {
                         let next_offset_id =
                             next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        let materialized_record = match MaterializedLogRecord::from_log_offset(
+                        let materialized_record = match MaterializedLogRecord::from_log_record(
                             next_offset_id,
                             log_index,
                             log_record,
@@ -729,7 +739,7 @@ pub async fn materialize_logs(
                                         let curr_val = existing_id_to_materialized.remove(log_record.record.id.as_str()).unwrap();
                                         // Overwrite.
                                         let mut materialized_record =
-                                            match MaterializedLogRecord::from_log_offset(curr_val.offset_id, log_index, log_record) {
+                                            match MaterializedLogRecord::from_log_record(curr_val.offset_id, log_index, log_record) {
                                                 Ok(record) => record,
                                                 Err(e) => {
                                                     return Err(e);
@@ -815,7 +825,7 @@ pub async fn materialize_logs(
                         // Insert.
                         let next_offset =
                             next_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        let materialized_record = match MaterializedLogRecord::from_log_offset(
+                        let materialized_record = match MaterializedLogRecord::from_log_record(
                             next_offset,
                             log_index,
                             log_record,
