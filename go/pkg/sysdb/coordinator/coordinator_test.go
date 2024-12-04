@@ -311,10 +311,15 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	suite.NoError(error)
 	suite.Equal(newCollection.ID, collection.ID)
 	suite.Equal(newCollection.Name, collection.Name)
-	suite.Len(collection_segments, 2)
-	for i, segment := range collection_segments {
-		suite.Equal(segments[i].ID, segment.ID)
+	expected_ids, actual_ids := []types.UniqueID{}, []types.UniqueID{}
+	for _, segment := range segments {
+		expected_ids = append(expected_ids, segment.ID)
 	}
+	for _, segment := range collection_segments {
+		suite.Equal(collection.ID, segment.CollectionID)
+		actual_ids = append(actual_ids, segment.ID)
+	}
+	suite.ElementsMatch(expected_ids, actual_ids)
 
 	// Attempt to create a duplicate collection (should fail)
 	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
