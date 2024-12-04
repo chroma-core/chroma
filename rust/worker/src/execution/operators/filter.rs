@@ -129,7 +129,6 @@ impl<'me> MetadataLogReader<'me> {
             ) {
                 let log = log.hydrate(record_segment_reader.as_ref()).await?;
                 user_id_to_offset_id.insert(log.get_user_id(), log.get_offset_id());
-                // todo
                 let log_metadata = log.merged_metadata();
                 for (key, val) in log_metadata.into_iter() {
                     compact_metadata

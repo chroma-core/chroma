@@ -304,7 +304,6 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
             .map(|data_record| data_record.document)?
     }
 
-    // todo: rename?
     pub fn merged_document_ref(&self) -> Option<&'log_data str> {
         if self
             .materialized_log_record
@@ -324,9 +323,7 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
         }
     }
 
-    // todo: rename?
-    // Performs a deep copy of the metadata so only use it if really
-    // needed. If you only need reference then use merged_metadata_ref below.
+    /// Performs a deep copy of the metadata so only use this if really needed.
     pub fn merged_metadata(&self) -> HashMap<String, MetadataValue> {
         let mut final_metadata;
         if self.materialized_log_record.final_operation
@@ -369,7 +366,6 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
             .map(|data_record| data_record.embedding)
     }
 
-    // todo: rename?
     pub fn merged_embeddings_ref(&self) -> &'log_data [f32] {
         if self
             .materialized_log_record
