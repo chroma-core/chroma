@@ -345,10 +345,9 @@ impl SegmentWriter for RecordSegmentWriter {
         let mut max_new_offset_id = 0;
         let mut count = 0u64;
 
-        for i in 0..materialized.len() {
+        for log_record in &materialized {
             count += 1;
 
-            let log_record = materialized.get(i).unwrap(); // todo
             let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
 
             match log_record.get_operation() {

@@ -85,9 +85,7 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
 
         let mut max_heap = BinaryHeap::with_capacity(self.fetch as usize);
 
-        for i in 0..logs.len() {
-            let log = logs.get(i).unwrap(); // todo
-
+        for log in &logs {
             if !matches!(
                 log.get_operation(),
                 MaterializedLogOperation::DeleteExisting

@@ -69,9 +69,7 @@ impl HnswKnnOperator {
         record_segment_reader: &RecordSegmentReader<'_>,
     ) -> Result<Vec<u32>, Box<dyn ChromaError>> {
         let mut disallowed_ids = Vec::new();
-        for i in 0..logs.len() {
-            let log = logs.get(i).unwrap(); // todo
-
+        for log in &logs {
             // This means that even if an embedding is not updated on the log,
             // we brute force it. Can use the HNSW index also.
             if log.get_operation() == MaterializedLogOperation::DeleteExisting
@@ -162,8 +160,7 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         };
         let mut remaining_allowed_ids: HashSet<&String> =
             HashSet::from_iter(input.allowed_ids.iter());
-        for i in 0..logs.len() {
-            let log = logs.get(i).unwrap(); // todo
+        for log in logs.iter() {
             let log = log.hydrate(Some(&record_segment_reader)).await;
             #[allow(clippy::unnecessary_to_owned)]
             remaining_allowed_ids.remove(&log.get_user_id().to_string());

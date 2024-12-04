@@ -221,16 +221,16 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                         )
                         .await?;
 
-                let mut active_domain = RoaringBitmap::new();
-                for i in 0..materialized_logs.len() {
-                    let log = materialized_logs.get(i).unwrap(); // todo
-                    if !matches!(
-                        log.get_operation(),
-                        MaterializedLogOperation::DeleteExisting
-                    ) {
-                        active_domain.insert(log.get_offset_id());
-                    }
-                }
+                let active_domain: RoaringBitmap = materialized_logs
+                    .iter()
+                    .filter_map(|log| {
+                        (!matches!(
+                            log.get_operation(),
+                            MaterializedLogOperation::DeleteExisting
+                        ))
+                        .then_some(log.get_offset_id())
+                    })
+                    .collect();
                 active_domain - rbm
             }
         };

@@ -244,9 +244,7 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
         record_segment_reader: Option<RecordSegmentReader<'_>>,
         materialized: MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
-        for i in 0..materialized.len() {
-            let record = materialized.get(i).unwrap(); // todo
-
+        for record in &materialized {
             match record.get_operation() {
                 // If embedding is not found in case of adds it means that user
                 // did not supply them and thus we should return an error as

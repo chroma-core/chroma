@@ -92,8 +92,7 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
 
         let mut record_segment_offset_ids: HashSet<_> =
             HashSet::from_iter(input.offset_ids.iter().cloned());
-        for i in 0..materialized_logs.len() {
-            let log = materialized_logs.get(i).unwrap(); // todo
+        for log in &materialized_logs {
             record_segment_offset_ids.remove(&log.get_offset_id());
         }
 

@@ -132,8 +132,7 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
         // Search the log records for the user ids
         let mut remaining_search_user_ids: HashSet<String> =
             HashSet::from_iter(input.search_user_ids.iter().cloned());
-        for i in 0..mat_records.len() {
-            let log_record = mat_records.get(i).unwrap(); // todo
+        for log_record in &mat_records {
             let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
             // Log is the source of truth for these so don't consider these for
             // reading from the segment.

@@ -150,9 +150,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         };
 
         let mut heap = BinaryHeap::with_capacity(input.k);
-        for i in 0..logs.len() {
-            let log_record = logs.get(i).unwrap(); // todo
-
+        for log_record in &logs {
             if log_record.get_operation() == MaterializedLogOperation::DeleteExisting {
                 // Explicitly skip deleted records.
                 continue;

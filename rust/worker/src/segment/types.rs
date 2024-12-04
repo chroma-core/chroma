@@ -448,13 +448,48 @@ impl MaterializeLogsResult {
         self.materialized.len()
     }
 
-    pub fn get(&self, index: usize) -> Option<BorrowedMaterializedLogRecord> {
-        self.materialized
-            .get(index)
-            .map(|materialized_log_record| BorrowedMaterializedLogRecord {
-                materialized_log_record,
-                logs: &self.logs,
-            })
+    pub fn iter(&self) -> MaterializeLogsResultIter {
+        MaterializeLogsResultIter {
+            logs: &self.logs,
+            chunk: &self.materialized,
+            index: 0,
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a MaterializeLogsResult {
+    type Item = BorrowedMaterializedLogRecord<'a>;
+    type IntoIter = MaterializeLogsResultIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        MaterializeLogsResultIter {
+            logs: &self.logs,
+            chunk: &self.materialized,
+            index: 0,
+        }
+    }
+}
+
+pub struct MaterializeLogsResultIter<'a> {
+    logs: &'a Chunk<LogRecord>,
+    chunk: &'a Chunk<MaterializedLogRecord>,
+    index: usize,
+}
+
+impl<'a> Iterator for MaterializeLogsResultIter<'a> {
+    type Item = BorrowedMaterializedLogRecord<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.chunk.len() {
+            let item = BorrowedMaterializedLogRecord {
+                materialized_log_record: self.chunk.get(self.index).unwrap(),
+                logs: self.logs,
+            };
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
     }
 }
 
@@ -1011,11 +1046,11 @@ mod tests {
             .await
             .expect("Error materializing logs");
         let mut res_vec = vec![];
-        for i in 0..res.len() {
-            let record = res.get(i).unwrap().hydrate(some_reader.as_ref()).await;
+        for record in &res {
+            let record = record.hydrate(some_reader.as_ref()).await;
             res_vec.push(record);
         }
-        res_vec.sort_by(|x, y| x.get_user_id().cmp(&y.get_user_id()));
+        res_vec.sort_by(|x, y| x.get_user_id().cmp(y.get_user_id()));
         assert_eq!(1, res_vec.len());
         let emb_1 = &res_vec[0];
         assert_eq!(1, emb_1.get_offset_id());
@@ -1291,11 +1326,11 @@ mod tests {
             .await
             .expect("Error materializing logs");
         let mut res_vec = vec![];
-        for i in 0..res.len() {
-            let record = res.get(i).unwrap().hydrate(some_reader.as_ref()).await;
+        for record in &res {
+            let record = record.hydrate(some_reader.as_ref()).await;
             res_vec.push(record);
         }
-        res_vec.sort_by(|x, y| x.get_user_id().cmp(&y.get_user_id()));
+        res_vec.sort_by(|x, y| x.get_user_id().cmp(y.get_user_id()));
         assert_eq!(1, res_vec.len());
         let emb_1 = &res_vec[0];
         assert_eq!(1, emb_1.get_offset_id());
@@ -1600,11 +1635,11 @@ mod tests {
             .await
             .expect("Error materializing logs");
         let mut res_vec = vec![];
-        for i in 0..res.len() {
-            let record = res.get(i).unwrap().hydrate(some_reader.as_ref()).await;
+        for record in &res {
+            let record = record.hydrate(some_reader.as_ref()).await;
             res_vec.push(record);
         }
-        res_vec.sort_by(|x, y| x.get_user_id().cmp(&y.get_user_id()));
+        res_vec.sort_by(|x, y| x.get_user_id().cmp(y.get_user_id()));
         assert_eq!(1, res_vec.len());
         let emb_1 = &res_vec[0];
         assert_eq!(1, emb_1.get_offset_id());
@@ -1895,8 +1930,7 @@ mod tests {
         let mut id1_found = 0;
         let mut id2_found = 0;
         let mut id3_found = 0;
-        for i in 0..res.len() {
-            let log = res.get(i).unwrap();
+        for log in &res {
             let log = log.hydrate(some_reader.as_ref()).await;
 
             // Embedding 3.

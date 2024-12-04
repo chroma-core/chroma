@@ -114,13 +114,14 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
-        let mut offset_id_to_log_record = HashMap::new();
-        for i in 0..materialized_logs.len() {
-            let log = materialized_logs.get(i).unwrap(); // todo
-            if offset_id_set.contains(&log.get_offset_id()) {
-                offset_id_to_log_record.insert(log.get_offset_id(), log);
-            }
-        }
+        let offset_id_to_log_record: HashMap<_, _> = materialized_logs
+            .iter()
+            .flat_map(|log| {
+                offset_id_set
+                    .contains(&log.get_offset_id())
+                    .then_some((log.get_offset_id(), log))
+            })
+            .collect();
 
         let mut records = Vec::with_capacity(input.offset_ids.len());
 
