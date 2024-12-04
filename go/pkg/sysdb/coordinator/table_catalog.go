@@ -328,7 +328,10 @@ func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID t
 		if e != nil {
 			return e
 		}
-		if len(collections) != 1 {
+		if len(collections) == 0 {
+			return common.ErrCollectionNotFound
+		}
+		if len(collections) > 1 {
 			return common.ErrCollectionUniqueConstraintViolation
 		}
 		collection = collections[0]
