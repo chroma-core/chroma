@@ -16,8 +16,8 @@ apiVersion: v2
 name: distributed-chroma
 description: A helm chart for distributed Chroma
 type: application
-version: 0.1.11
-appVersion: "0.4.23"
+version: 0.1.12
+appVersion: "0.4.24"
 keywords:
   - chroma
   - vector
