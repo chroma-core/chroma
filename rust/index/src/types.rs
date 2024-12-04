@@ -1,26 +1,11 @@
-use chroma_distance::{DistanceFunction, DistanceFunctionError};
-use chroma_error::{ChromaError, ErrorCodes};
-use thiserror::Error;
+use chroma_distance::DistanceFunction;
+use chroma_error::ChromaError;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct IndexConfig {
     pub dimensionality: i32,
     pub distance_function: DistanceFunction,
-}
-
-#[derive(Error, Debug)]
-pub enum IndexConfigFromSegmentError {
-    #[error("Invalid distance function")]
-    InvalidDistanceFunction(#[from] DistanceFunctionError),
-}
-
-impl ChromaError for IndexConfigFromSegmentError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            IndexConfigFromSegmentError::InvalidDistanceFunction(_) => ErrorCodes::InvalidArgument,
-        }
-    }
 }
 
 impl IndexConfig {

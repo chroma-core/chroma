@@ -19,7 +19,7 @@ impl RootConfig {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(
-            Env::prefixed("CHROMA_").map(|k| return k.as_str().replace("__", ".").into()),
+            Env::prefixed("CHROMA_").map(|k| k.as_str().replace("__", ".").into()),
         );
         if std::path::Path::new(path).exists() {
             f = figment::Figment::from(Yaml::file(path)).merge(f);
