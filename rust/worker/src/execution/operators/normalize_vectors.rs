@@ -1,7 +1,6 @@
 use crate::execution::operator::Operator;
 use async_trait::async_trait;
-
-const EPS: f32 = 1e-30;
+use chroma_distance::normalize;
 
 #[derive(Debug)]
 pub struct NormalizeVectorOperator {}
@@ -12,15 +11,6 @@ pub struct NormalizeVectorOperatorInput {
 
 pub struct NormalizeVectorOperatorOutput {
     pub _normalized_vectors: Vec<Vec<f32>>,
-}
-
-pub fn normalize(vector: &[f32]) -> Vec<f32> {
-    let mut norm = 0.0;
-    for x in vector {
-        norm += x * x;
-    }
-    let norm = 1.0 / (norm.sqrt() + EPS);
-    vector.iter().map(|x| x * norm).collect()
 }
 
 #[async_trait]
@@ -75,7 +65,7 @@ mod tests {
         let expected_output = NormalizeVectorOperatorOutput {
             _normalized_vectors: vec![
                 vec![0.26726124, 0.5345225, 0.8017837],
-                vec![0.45584232, 0.5698029, 0.6837635],
+                vec![0.45584232, 0.5698029, 0.68376344],
                 vec![0.5025707, 0.5743665, 0.64616233],
             ],
         };
