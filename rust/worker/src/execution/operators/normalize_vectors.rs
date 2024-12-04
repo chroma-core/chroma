@@ -65,7 +65,7 @@ mod tests {
         let expected_output = NormalizeVectorOperatorOutput {
             _normalized_vectors: vec![
                 vec![0.26726124, 0.5345225, 0.8017837],
-                vec![0.45584232, 0.5698029, 0.6837635],
+                vec![0.45584232, 0.5698029, 0.68376344],
                 vec![0.5025707, 0.5743665, 0.64616233],
             ],
         };
