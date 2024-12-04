@@ -41,6 +41,7 @@ pub enum SegmentType {
     BlockfileMetadata,
     BlockfileRecord,
     Sqlite,
+    Spann,
 }
 
 impl From<SegmentType> for String {
@@ -52,6 +53,7 @@ impl From<SegmentType> for String {
             SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
             SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
+            SegmentType::Spann => "urn:chroma:segment/vector/spann".to_string(),
         }
     }
 }
@@ -65,6 +67,7 @@ impl TryFrom<&str> for SegmentType {
             "urn:chroma:segment/record/blockfile" => Ok(SegmentType::BlockfileRecord),
             "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
             "urn:chroma:segment/metadata/blockfile" => Ok(SegmentType::BlockfileMetadata),
+            "urn:chroma:segment/vector/spann" => Ok(SegmentType::Spann),
             _ => Err(SegmentConversionError::InvalidSegmentType),
         }
     }
@@ -130,16 +133,7 @@ impl TryFrom<chroma_proto::Segment> for Segment {
             Err(e) => return Err(SegmentConversionError::SegmentScopeConversionError(e)),
         };
 
-        let segment_type = match proto_segment.r#type.as_str() {
-            "urn:chroma:segment/vector/hnsw-distributed" => SegmentType::HnswDistributed,
-            "urn:chroma:segment/record/blockfile" => SegmentType::BlockfileRecord,
-            "urn:chroma:segment/metadata/sqlite" => SegmentType::Sqlite,
-            "urn:chroma:segment/metadata/blockfile" => SegmentType::BlockfileMetadata,
-            _ => {
-                println!("Invalid segment type: {}", proto_segment.r#type);
-                return Err(SegmentConversionError::InvalidSegmentType);
-            }
-        };
+        let segment_type: SegmentType = proto_segment.r#type.as_str().try_into()?;
 
         let mut file_paths = HashMap::new();
         let drain = proto_segment.file_paths.drain();

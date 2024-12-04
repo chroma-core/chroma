@@ -1,3 +1,4 @@
+use super::spann_segment::SpannSegmentWriterError;
 use super::types::SegmentWriter;
 use super::{
     HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult, SegmentFlusher,
@@ -322,6 +323,8 @@ pub enum ApplyMaterializedLogError {
     HnswIndex(#[from] Box<dyn ChromaError>),
     #[error("Log materialization error: {0}")]
     Materialization(#[from] LogMaterializerError),
+    #[error("Error applying materialized records to spann segment: {0}")]
+    SpannSegmentError(#[from] SpannSegmentWriterError),
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -334,6 +337,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
             ApplyMaterializedLogError::Materialization(e) => e.code(),
+            ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
         }
     }
 }
