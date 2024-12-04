@@ -36,10 +36,10 @@ use crate::{
 };
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::normalize;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_index::utils::normalize;
 use chroma_index::IndexConfig;
 use chroma_types::{Chunk, Collection, CollectionUuid, LogRecord, Segment, VectorQueryResult};
 use std::collections::HashMap;

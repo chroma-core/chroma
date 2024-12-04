@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::spann::types::SpannIndexFlusher;
+use chroma_index::spann::types::{SpannIndexFlusher, SpannIndexWriterError};
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::SegmentUuid;
@@ -28,12 +29,13 @@ pub(crate) struct SpannSegmentWriter {
     id: SegmentUuid,
 }
 
+// TODO(Sanket): Better error composability here.
 #[derive(Error, Debug)]
 pub enum SpannSegmentWriterError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Segment metadata does not contain distance function")]
-    DistanceFunctionNotFound,
+    #[error("Segment metadata does not contain distance function {0}")]
+    DistanceFunctionNotFound(#[from] DistanceFunctionError),
     #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
     #[error("Invalid file path for HNSW index")]
@@ -46,8 +48,8 @@ pub enum SpannSegmentWriterError {
     MaxHeadIdInvalidFilePath,
     #[error("Error constructing spann index writer")]
     SpannSegmentWriterCreateError,
-    #[error("Error adding record to spann index writer")]
-    SpannSegmentWriterAddRecordError,
+    #[error("Error adding record to spann index writer {0}")]
+    SpannSegmentWriterAddRecordError(#[from] SpannIndexWriterError),
     #[error("Error committing spann index writer")]
     SpannSegmentWriterCommitError,
     #[error("Error flushing spann index writer")]
@@ -61,7 +63,7 @@ impl ChromaError for SpannSegmentWriterError {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
             Self::IndexIdParsingError => ErrorCodes::Internal,
-            Self::DistanceFunctionNotFound => ErrorCodes::Internal,
+            Self::DistanceFunctionNotFound(e) => e.code(),
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
@@ -70,7 +72,7 @@ impl ChromaError for SpannSegmentWriterError {
             Self::NotImplemented => ErrorCodes::Internal,
             Self::SpannSegmentWriterCommitError => ErrorCodes::Internal,
             Self::SpannSegmentWriterFlushError => ErrorCodes::Internal,
-            Self::SpannSegmentWriterAddRecordError => ErrorCodes::Internal,
+            Self::SpannSegmentWriterAddRecordError(e) => e.code(),
         }
     }
 }
@@ -88,8 +90,8 @@ impl SpannSegmentWriter {
         }
         let distance_function = match distance_function_from_segment(segment) {
             Ok(distance_function) => distance_function,
-            Err(_) => {
-                return Err(SpannSegmentWriterError::DistanceFunctionNotFound);
+            Err(e) => {
+                return Err(SpannSegmentWriterError::DistanceFunctionNotFound(*e));
             }
         };
         let (hnsw_id, m, ef_construction, ef_search) = match segment.file_path.get(HNSW_PATH) {
@@ -202,7 +204,7 @@ impl SpannSegmentWriter {
         self.index
             .add(record.offset_id, record.merged_embeddings())
             .await
-            .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
+            .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
 }
 
@@ -210,17 +212,17 @@ struct SpannSegmentFlusher {
     index_flusher: SpannIndexFlusher,
 }
 
-impl<'a> SegmentWriter<'a> for SpannSegmentWriter {
+impl<'referred_data> SegmentWriter<'referred_data> for SpannSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
+        records: chroma_types::Chunk<super::MaterializedLogRecord<'referred_data>>,
     ) -> Result<(), ApplyMaterializedLogError> {
         for (record, _) in records.iter() {
             match record.final_operation {
                 MaterializedLogOperation::AddNew => {
                     self.add(record)
                         .await
-                        .map_err(|_| ApplyMaterializedLogError::BlockfileSet)?;
+                        .map_err(ApplyMaterializedLogError::SpannSegmentError)?;
                 }
                 // TODO(Sanket): Implement other operations.
                 _ => {

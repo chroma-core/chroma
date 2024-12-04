@@ -1,6 +1,6 @@
 use crate::execution::operator::Operator;
 use async_trait::async_trait;
-use chroma_index::utils::normalize;
+use chroma_distance::normalize;
 
 #[derive(Debug)]
 pub struct NormalizeVectorOperator {}
