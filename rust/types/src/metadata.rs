@@ -97,7 +97,7 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MetadataValue {
     Bool(bool),
     Int(i64),
@@ -109,7 +109,25 @@ impl Eq for MetadataValue {}
 
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
 /// We are not planning to support `f64::NaN`s anyway, so the `PartialOrd` and `Ord` should be identical
-impl Ord for &MetadataValue {
+// impl Ord for &MetadataValue {
+//     fn cmp(&self, other: &Self) -> Ordering {
+//         self.partial_cmp(other).unwrap_or(Ordering::Equal)
+//     }
+// }
+
+impl PartialOrd for MetadataValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (MetadataValue::Bool(a), MetadataValue::Bool(b)) => a.partial_cmp(b),
+            (MetadataValue::Int(a), MetadataValue::Int(b)) => a.partial_cmp(b),
+            (MetadataValue::Float(a), MetadataValue::Float(b)) => a.partial_cmp(b),
+            (MetadataValue::Str(a), MetadataValue::Str(b)) => a.partial_cmp(b),
+            _ => None,
+        }
+    }
+}
+
+impl Ord for MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap_or(Ordering::Equal)
     }

@@ -6,6 +6,7 @@ use chroma_types::{
     UpdateMetadataValue,
 };
 use parking_lot::Mutex;
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, AtomicUsize};
 use std::sync::Arc;
@@ -164,187 +165,6 @@ pub struct MaterializedLogRecord {
     final_embedding_at_log_index: Option<i64>, // todo: rename
 }
 
-// impl MaterializedLogRecord {
-//     // Performs a deep copy of the document so only use it if really
-//     // needed. If you only need a reference then use merged_document_ref
-//     // defined below.
-//     pub(crate) fn merged_document(&self) -> Option<String> {
-//         if self.final_operation == MaterializedLogOperation::OverwriteExisting
-//             || self.final_operation == MaterializedLogOperation::AddNew
-//         {
-//             return self.final_document.map(|doc| doc.to_string());
-//         }
-//         match self.final_document {
-//             Some(doc) => Some(doc.to_string()),
-//             None => match self.data_record.as_ref() {
-//                 Some(data_record) => data_record.document.map(|doc| doc.to_string()),
-//                 None => None,
-//             },
-//         }
-//     }
-
-//     pub(crate) fn merged_document_ref(&self) -> Option<&str> {
-//         if self.final_operation == MaterializedLogOperation::OverwriteExisting
-//             || self.final_operation == MaterializedLogOperation::AddNew
-//         {
-//             return match self.final_document {
-//                 Some(doc) => Some(doc),
-//                 None => None,
-//             };
-//         }
-//         match self.final_document {
-//             Some(doc) => Some(doc),
-//             None => match self.data_record.as_ref() {
-//                 Some(data_record) => match data_record.document {
-//                     Some(doc) => Some(doc),
-//                     None => None,
-//                 },
-//                 None => None,
-//             },
-//         }
-//     }
-
-//     // Performs a deep copy of the user id so only use it if really
-//     // needed. If you only need reference then use merged_user_id_ref below.
-//     pub(crate) fn merged_user_id(&self) -> String {
-//         match self.user_id {
-//             Some(id) => id.to_string(),
-//             None => match &self.data_record {
-//                 Some(data_record) => data_record.id.to_string(),
-//                 None => panic!("Expected at least one user id to be set"),
-//             },
-//         }
-//     }
-
-//     pub(crate) fn merged_user_id_ref(&self) -> &str {
-//         match self.user_id {
-//             Some(id) => id,
-//             None => match &self.data_record {
-//                 Some(data_record) => data_record.id,
-//                 None => panic!("Expected at least one user id to be set"),
-//             },
-//         }
-//     }
-
-//     // Performs a deep copy of the metadata so only use it if really
-//     // needed. If you only need reference then use merged_metadata_ref below.
-//     pub(crate) fn merged_metadata(&self) -> HashMap<String, MetadataValue> {
-//         let mut final_metadata;
-//         if self.final_operation == MaterializedLogOperation::OverwriteExisting
-//             || self.final_operation == MaterializedLogOperation::AddNew
-//         {
-//             final_metadata = HashMap::new();
-//         } else {
-//             final_metadata = match self.data_record.as_ref() {
-//                 Some(data_record) => match data_record.metadata {
-//                     Some(ref map) => map.clone(), // auto deref here.
-//                     None => HashMap::new(),
-//                 },
-//                 None => HashMap::new(),
-//             };
-//         }
-//         if let Some(metadata) = self.metadata_to_be_merged.as_ref() {
-//             for (key, value) in metadata {
-//                 final_metadata.insert(key.clone(), value.clone());
-//             }
-//         }
-//         if let Some(metadata) = self.metadata_to_be_deleted.as_ref() {
-//             for key in metadata {
-//                 final_metadata.remove(key);
-//             }
-//         }
-//         final_metadata
-//     }
-
-//     pub(crate) fn metadata_delta<'referred_data>(
-//         &'referred_data self,
-//     ) -> MetadataDelta<'referred_data> {
-//         let mut metadata_delta = MetadataDelta::new();
-//         let mut base_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
-//         if let Some(data_record) = &self.data_record {
-//             if let Some(meta) = &data_record.metadata {
-//                 for (meta_key, meta_val) in meta {
-//                     base_metadata.insert(meta_key, meta_val);
-//                 }
-//             }
-//         }
-//         // Populate updates.
-//         if let Some(meta) = &self.metadata_to_be_merged {
-//             for (meta_key, meta_val) in meta {
-//                 match base_metadata.get(meta_key.as_str()) {
-//                     Some(old_value) => {
-//                         metadata_delta
-//                             .metadata_to_update
-//                             .insert(meta_key.as_str(), (old_value, meta_val));
-//                     }
-//                     None => {
-//                         metadata_delta
-//                             .metadata_to_insert
-//                             .insert(meta_key.as_str(), meta_val);
-//                     }
-//                 }
-//             }
-//         };
-//         // Populate deletes.
-//         if let Some(meta) = &self.metadata_to_be_deleted {
-//             for key in meta {
-//                 if let Some(old_value) = base_metadata.get(key.as_str()) {
-//                     metadata_delta
-//                         .metadata_to_delete
-//                         .insert(key.as_str(), old_value);
-//                 }
-//             }
-//         }
-//         metadata_delta
-//     }
-
-//     // Returns references to metadata present in the materialized log record.
-//     pub(crate) fn merged_metadata_ref(&self) -> HashMap<&str, &MetadataValue> {
-//         let mut final_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
-//         if self.final_operation != MaterializedLogOperation::OverwriteExisting
-//             && self.final_operation != MaterializedLogOperation::AddNew
-//         {
-//             if let Some(data_record) = &self.data_record {
-//                 if let Some(meta) = &data_record.metadata {
-//                     for (meta_key, meta_val) in meta {
-//                         final_metadata.insert(meta_key, meta_val);
-//                     }
-//                 }
-//             }
-//         }
-//         if let Some(meta) = &self.metadata_to_be_merged {
-//             for (meta_key, meta_val) in meta {
-//                 final_metadata.insert(meta_key, meta_val);
-//             }
-//         }
-//         // Remove the deleted metadatas.
-//         if let Some(meta) = &self.metadata_to_be_deleted {
-//             for key in meta {
-//                 final_metadata.remove(key.as_str());
-//             }
-//         }
-//         final_metadata
-//     }
-
-//     pub(crate) fn merged_embeddings(&self) -> &[f32] {
-//         if self.final_operation == MaterializedLogOperation::OverwriteExisting
-//             || self.final_operation == MaterializedLogOperation::AddNew
-//         {
-//             return match self.final_embedding {
-//                 Some(embed) => embed,
-//                 None => panic!("Expected source of embedding"),
-//             };
-//         }
-//         match self.final_embedding {
-//             Some(embed) => embed,
-//             None => match self.data_record.as_ref() {
-//                 Some(data_record) => data_record.embedding,
-//                 None => panic!("Expected at least one source of embedding"),
-//             },
-//         }
-//     }
-// }
-
 impl MaterializedLogRecord {
     fn from_segment_offset_id(offset_id: u32) -> Self {
         Self {
@@ -406,78 +226,6 @@ impl MaterializedLogRecord {
     }
 }
 
-// impl<'referred_data> From<(DataRecord<'referred_data>, u32)>
-//     for MaterializedLogRecord<'referred_data>
-// {
-//     fn from(data_record_info: (DataRecord<'referred_data>, u32)) -> Self {
-//         let data_record = data_record_info.0;
-//         let offset_id = data_record_info.1;
-//         Self {
-//             data_record: Some(data_record),
-//             offset_id,
-//             user_id: None,
-//             final_operation: MaterializedLogOperation::Initial,
-//             metadata_to_be_merged: None,
-//             metadata_to_be_deleted: None,
-//             final_document: None,
-//             final_embedding: None,
-//         }
-//     }
-// }
-
-// // Creates a materialized log record from the corresponding entry
-// // in the log (OperationRecord), offset id in storage where it will be stored (u32)
-// // and user id (str).
-// impl<'referred_data> TryFrom<(&'referred_data OperationRecord, u32, &'referred_data str)>
-//     for MaterializedLogRecord<'referred_data>
-// {
-//     type Error = LogMaterializerError;
-
-//     fn try_from(
-//         log_operation_info: (&'referred_data OperationRecord, u32, &'referred_data str),
-//     ) -> Result<Self, Self::Error> {
-//         let log_record = log_operation_info.0;
-//         let offset_id = log_operation_info.1;
-//         let user_id = log_operation_info.2;
-//         let merged_metadata;
-//         let deleted_metadata;
-//         match &log_record.metadata {
-//             Some(metadata) => match materialize_update_metadata(metadata) {
-//                 Ok(m) => {
-//                     merged_metadata = Some(m.0);
-//                     deleted_metadata = Some(m.1);
-//                 }
-//                 Err(e) => {
-//                     return Err(LogMaterializerError::MetadataMaterialization(e));
-//                 }
-//             },
-//             None => {
-//                 merged_metadata = None;
-//                 deleted_metadata = None;
-//             }
-//         };
-
-//         let document = log_record.document.as_deref();
-//         let embedding = match &log_record.embedding {
-//             Some(embedding) => Some(embedding.as_slice()),
-//             None => {
-//                 return Err(LogMaterializerError::EmbeddingMaterialization);
-//             }
-//         };
-
-//         Ok(Self {
-//             data_record: None,
-//             offset_id,
-//             user_id: Some(user_id),
-//             final_operation: MaterializedLogOperation::AddNew,
-//             metadata_to_be_merged: merged_metadata,
-//             metadata_to_be_deleted: deleted_metadata,
-//             final_document: document,
-//             final_embedding: embedding,
-//         })
-//     }
-// }
-
 pub struct BorrowedMaterializedLogRecord<'me> {
     materialized_log_record: &'me MaterializedLogRecord,
     logs: &'me Chunk<LogRecord>,
@@ -509,9 +257,9 @@ impl<'me> BorrowedMaterializedLogRecord<'me> {
         };
 
         HydratedMaterializedLogRecord {
-            materialized_log_record: &self.materialized_log_record,
+            materialized_log_record: self.materialized_log_record,
             segment_data_record,
-            logs: &self.logs,
+            logs: self.logs,
         }
     }
 }
@@ -522,33 +270,6 @@ pub struct HydratedMaterializedLogRecord<'me, 'referred_data> {
     segment_data_record: Option<DataRecord<'referred_data>>,
     logs: &'me Chunk<LogRecord>,
 }
-
-// impl<'me> HydratedMaterializedLogRecord<'me> {
-//     // todo: rename
-//     async fn create(
-//         materialized_log_record: &'me MaterializedLogRecord,
-//         record_segment_reader: &'me Option<&'me RecordSegmentReader<'_>>,
-//         logs: &'me Chunk<LogRecord>,
-//     ) -> Self {
-//         let segment_data_record = match materialized_log_record.data_record_offset_id {
-//             Some(offset_id) => match record_segment_reader {
-//                 Some(reader) => match reader.get_data_for_offset_id(offset_id).await {
-//                     Ok(Some(data_record)) => Some(data_record),
-//                     Ok(None) => None,
-//                     Err(_) => None, // todo
-//                 },
-//                 None => None,
-//             },
-//             None => None,
-//         };
-
-//         Self {
-//             materialized_log_record,
-//             segment_data_record,
-//             logs,
-//         }
-//     }
-// }
 
 impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data> {
     pub fn get_offset_id(&self) -> u32 {
@@ -639,34 +360,6 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
         if let Some(metadata) = self.materialized_log_record.metadata_to_be_deleted.as_ref() {
             for key in metadata {
                 final_metadata.remove(key);
-            }
-        }
-        final_metadata
-    }
-
-    pub fn merged_metadata_ref(&self) -> HashMap<&'me str, &'me MetadataValue> {
-        let mut final_metadata: HashMap<&'me str, &'me MetadataValue> = HashMap::new();
-        // if self.materialized_log_record.final_operation
-        //     != MaterializedLogOperation::OverwriteExisting
-        //     && self.materialized_log_record.final_operation != MaterializedLogOperation::AddNew
-        // {
-        //     if let Some(data_record) = self.segment_data_record.as_ref() {
-        //         if let Some(meta) = &data_record.metadata {
-        //             for (meta_key, meta_val) in meta {
-        //                 final_metadata.insert(meta_key, meta_val);
-        //             }
-        //         }
-        //     }
-        // }
-        if let Some(meta) = &self.materialized_log_record.metadata_to_be_merged {
-            for (meta_key, meta_val) in meta {
-                final_metadata.insert(meta_key, meta_val);
-            }
-        }
-        // Remove the deleted metadatas.
-        if let Some(meta) = &self.materialized_log_record.metadata_to_be_deleted {
-            for key in meta {
-                final_metadata.remove(key.as_str());
             }
         }
         final_metadata
@@ -767,47 +460,7 @@ pub struct MaterializeLogsResult {
     materialized: Chunk<MaterializedLogRecord>,
 }
 
-// pub struct MaterializedLogsResultIter<'referred_data> {
-//     index: Mutex<usize>,
-//     logs: &'referred_data Chunk<LogRecord>,
-//     materialized: &'referred_data Chunk<MaterializedLogRecord>,
-//     record_segment_reader: Option<&'referred_data RecordSegmentReader<'referred_data>>,
-// }
-
-// impl<'referred_data> MaterializedLogsResultIter<'referred_data> {
-//     pub fn stream_next<'me>(&'me self) -> Option<BorrowedMaterializedLogRecord<'me, 'referred_data>>
-//     where
-//         'referred_data: 'me,
-//     {
-//         let mut index = self.index.lock();
-//         if *index >= self.materialized.len() {
-//             return None;
-//         }
-//         *index += 1;
-
-//         let materialized_log_record = self.materialized.get(*index).unwrap();
-
-//         Some(BorrowedMaterializedLogRecord {
-//             materialized_log_record,
-//             logs: self.logs,
-//             record_segment_reader: &self.record_segment_reader,
-//         })
-//     }
-// }
-
 impl MaterializeLogsResult {
-    // pub fn into_iter<'referred_data>(
-    //     &'referred_data self,
-    //     record_segment_reader: Option<&'referred_data RecordSegmentReader<'referred_data>>, // todo: standardize borrow type
-    // ) -> MaterializedLogsResultIter<'referred_data> {
-    //     MaterializedLogsResultIter {
-    //         index: Mutex::new(0),
-    //         logs: &self.logs,
-    //         materialized: &self.materialized,
-    //         record_segment_reader,
-    //     }
-    // }
-
     pub fn is_empty(&self) -> bool {
         self.materialized.is_empty()
     }

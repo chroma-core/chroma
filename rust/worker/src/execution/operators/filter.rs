@@ -96,7 +96,7 @@ pub(crate) struct MetadataLogReader<'me> {
     // This maps metadata keys to `BTreeMap`s, which further map values to offset ids
     // This mimics the layout in the metadata segment
     // //TODO: Maybe a sorted vector with binary search is more lightweight and performant?
-    compact_metadata: HashMap<&'me str, BTreeMap<&'me MetadataValue, RoaringBitmap>>,
+    compact_metadata: HashMap<String, BTreeMap<MetadataValue, RoaringBitmap>>,
     // This maps offset ids to documents, excluding deleted ones
     document: HashMap<u32, &'me str>,
     // This contains all existing offset ids that are touched by the logs
@@ -111,7 +111,7 @@ impl<'me> MetadataLogReader<'me> {
         logs: &'me MaterializeLogsResult,
         record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
     ) -> Self {
-        let mut compact_metadata: HashMap<_, BTreeMap<&MetadataValue, RoaringBitmap>> =
+        let mut compact_metadata: HashMap<String, BTreeMap<MetadataValue, RoaringBitmap>> =
             HashMap::new();
         let mut document = HashMap::new();
         let mut updated_offset_ids = RoaringBitmap::new();
@@ -135,7 +135,7 @@ impl<'me> MetadataLogReader<'me> {
                 let log = log.hydrate(record_segment_reader.as_ref()).await;
                 user_id_to_offset_id.insert(log.get_user_id().unwrap(), log.get_offset_id());
                 // todo
-                let log_metadata = log.merged_metadata_ref();
+                let log_metadata = log.merged_metadata();
                 for (key, val) in log_metadata.into_iter() {
                     compact_metadata
                         .entry(key)
@@ -159,22 +159,22 @@ impl<'me> MetadataLogReader<'me> {
     pub(crate) fn get(
         &self,
         key: &str,
-        val: &MetadataValue,
+        val: MetadataValue,
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         if let Some(metadata_value_to_offset_ids) = self.compact_metadata.get(key) {
             let bounds = match op {
-                PrimitiveOperator::Equal => (Bound::Included(&val), Bound::Included(&val)),
-                PrimitiveOperator::GreaterThan => (Bound::Excluded(&val), Bound::Unbounded),
-                PrimitiveOperator::GreaterThanOrEqual => (Bound::Included(&val), Bound::Unbounded),
-                PrimitiveOperator::LessThan => (Bound::Unbounded, Bound::Excluded(&val)),
-                PrimitiveOperator::LessThanOrEqual => (Bound::Unbounded, Bound::Included(&val)),
+                PrimitiveOperator::Equal => (Bound::Included(val.clone()), Bound::Included(val)),
+                PrimitiveOperator::GreaterThan => (Bound::Excluded(val), Bound::Unbounded),
+                PrimitiveOperator::GreaterThanOrEqual => (Bound::Included(val), Bound::Unbounded),
+                PrimitiveOperator::LessThan => (Bound::Unbounded, Bound::Excluded(val)),
+                PrimitiveOperator::LessThanOrEqual => (Bound::Unbounded, Bound::Included(val)),
                 PrimitiveOperator::NotEqual => unreachable!(
                     "Inequality filter should be handled above the metadata provider level"
                 ),
             };
             Ok(metadata_value_to_offset_ids
-                .range::<&MetadataValue, _>(bounds)
+                .range(bounds)
                 .map(|(_, v)| v)
                 .fold(RoaringBitmap::new(), BitOr::bitor))
         } else {
@@ -270,7 +270,9 @@ impl<'me> MetadataProvider<'me> {
                     Ok(RoaringBitmap::new())
                 }
             }
-            MetadataProvider::Log(metadata_log_reader) => metadata_log_reader.get(key, val, op),
+            MetadataProvider::Log(metadata_log_reader) => {
+                metadata_log_reader.get(key, val.clone(), op)
+            }
         }
     }
 }
