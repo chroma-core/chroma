@@ -214,20 +214,23 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         let mut materialized_log_offset_ids = match &input.log_offset_ids {
             SignedRoaringBitmap::Include(rbm) => rbm.clone(),
             SignedRoaringBitmap::Exclude(rbm) => {
-                let materialized_logs = materialize_logs(&record_segment_reader, &input.logs, None)
-                    .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-                    .await?;
+                let materialized_logs =
+                    materialize_logs(&record_segment_reader, input.logs.clone(), None)
+                        .instrument(
+                            tracing::trace_span!(parent: Span::current(), "Materialize logs"),
+                        )
+                        .await?;
 
-                let active_domain: RoaringBitmap = materialized_logs
-                    .iter()
-                    .filter_map(|(log, _)| {
-                        (!matches!(
-                            log.final_operation,
-                            MaterializedLogOperation::DeleteExisting
-                        ))
-                        .then_some(log.offset_id)
-                    })
-                    .collect();
+                let mut active_domain = RoaringBitmap::new();
+                for i in 0..materialized_logs.len() {
+                    let log = materialized_logs.get(i).unwrap(); // todo
+                    if !matches!(
+                        log.get_operation(),
+                        MaterializedLogOperation::DeleteExisting
+                    ) {
+                        active_domain.insert(log.get_offset_id());
+                    }
+                }
                 active_domain - rbm
             }
         };

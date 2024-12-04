@@ -73,7 +73,7 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
             Err(e) => Err(*e),
         }?;
 
-        let logs = materialize_logs(&record_segment_reader, &input.logs, None).await?;
+        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
 
         let target_vector;
         let target_embedding = if let DistanceFunction::Cosine = input.distance_function {
@@ -85,24 +85,28 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
 
         let mut max_heap = BinaryHeap::with_capacity(self.fetch as usize);
 
-        for (log, _) in logs.iter() {
+        for i in 0..logs.len() {
+            let log = logs.get(i).unwrap(); // todo
+
             if !matches!(
-                log.final_operation,
+                log.get_operation(),
                 MaterializedLogOperation::DeleteExisting
             ) && match &input.log_offset_ids {
-                SignedRoaringBitmap::Include(rbm) => rbm.contains(log.offset_id),
-                SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(log.offset_id),
+                SignedRoaringBitmap::Include(rbm) => rbm.contains(log.get_offset_id()),
+                SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(log.get_offset_id()),
             } {
+                let log = log.hydrate(record_segment_reader.as_ref()).await;
+
                 let log_vector;
                 let log_embedding = if let DistanceFunction::Cosine = input.distance_function {
-                    log_vector = normalize(log.merged_embeddings());
+                    log_vector = normalize(log.merged_embeddings_ref());
                     &log_vector
                 } else {
-                    log.merged_embeddings()
+                    log.merged_embeddings_ref()
                 };
 
                 let distance = RecordDistance {
-                    offset_id: log.offset_id,
+                    offset_id: log.get_offset_id(),
                     measure: input
                         .distance_function
                         .distance(target_embedding, log_embedding),

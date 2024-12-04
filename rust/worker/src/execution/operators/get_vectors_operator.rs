@@ -122,7 +122,7 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
         };
         // Step 1: Materialize the logs.
         let mat_records =
-            match materialize_logs(&record_segment_reader, &input.log_records, None).await {
+            match materialize_logs(&record_segment_reader, input.log_records.clone(), None).await {
                 Ok(records) => records,
                 Err(e) => {
                     return Err(GetVectorsOperatorError::LogMaterialization(e));
@@ -132,18 +132,22 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
         // Search the log records for the user ids
         let mut remaining_search_user_ids: HashSet<String> =
             HashSet::from_iter(input.search_user_ids.iter().cloned());
-        for (log_record, _) in mat_records.iter() {
+        for i in 0..mat_records.len() {
+            let log_record = mat_records.get(i).unwrap(); // todo
+            let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
             // Log is the source of truth for these so don't consider these for
             // reading from the segment.
             let mut removed = false;
-            if remaining_search_user_ids.contains(log_record.merged_user_id_ref()) {
+            if remaining_search_user_ids.contains(log_record.get_user_id().unwrap()) {
+                // todo
                 removed = true;
-                remaining_search_user_ids.remove(log_record.merged_user_id_ref());
+                remaining_search_user_ids.remove(log_record.get_user_id().unwrap());
+                // todo
             }
-            if removed && log_record.final_operation != MaterializedLogOperation::DeleteExisting {
+            if removed && log_record.get_operation() != MaterializedLogOperation::DeleteExisting {
                 output_vectors.insert(
-                    log_record.merged_user_id(),
-                    log_record.merged_embeddings().to_vec(),
+                    log_record.get_user_id().unwrap().to_string(), // todo
+                    log_record.merged_embeddings_ref().to_vec(),
                 );
             }
         }

@@ -293,12 +293,12 @@ mod tests {
                         }
                     }
                 };
-            let mat_records = materialize_logs(&record_segment_reader, &data, None)
+            let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await
                 .expect("Log materialization failed");
             segment_writer
-                .apply_materialized_log_chunk(mat_records)
+                .apply_materialized_log_chunk(record_segment_reader, mat_records)
                 .await
                 .expect("Apply materializated log failed");
             let flusher = segment_writer

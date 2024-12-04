@@ -1,5 +1,5 @@
-use super::record_segment::ApplyMaterializedLogError;
-use super::{SegmentFlusher, SegmentWriter};
+use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::{MaterializeLogsResult, SegmentFlusher, SegmentWriter};
 use async_trait::async_trait;
 use chroma_distance::{DistanceFunction, DistanceFunctionError};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -238,20 +238,24 @@ impl DistributedHNSWSegmentWriter {
     }
 }
 
-impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
+impl SegmentWriter for DistributedHNSWSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
+        record_segment_reader: Option<RecordSegmentReader<'_>>,
+        materialized: MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
-        for (record, _) in records.iter() {
-            match record.final_operation {
+        for i in 0..materialized.len() {
+            let record = materialized.get(i).unwrap(); // todo
+
+            match record.get_operation() {
                 // If embedding is not found in case of adds it means that user
                 // did not supply them and thus we should return an error as
                 // opposed to panic.
                 MaterializedLogOperation::AddNew
                 | MaterializedLogOperation::UpdateExisting
                 | MaterializedLogOperation::OverwriteExisting => {
-                    let embedding = record.merged_embeddings();
+                    let record = record.hydrate(record_segment_reader.as_ref()).await;
+                    let embedding = record.merged_embeddings_ref();
 
                     let mut index = self.index.inner.upgradable_read();
                     let index_len = index.len();
@@ -265,7 +269,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                         })?;
                     }
 
-                    match index.add(record.offset_id as usize, embedding) {
+                    match index.add(record.get_offset_id() as usize, embedding) {
                         Ok(_) => {}
                         Err(e) => {
                             return Err(ApplyMaterializedLogError::HnswIndex(e));
@@ -277,7 +281,12 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                     // the assumption here is that the materialized log records
                     // contain the correct offset ids pertaining to records that
                     // are actually meant to be deleted.
-                    match self.index.inner.read().delete(record.offset_id as usize) {
+                    match self
+                        .index
+                        .inner
+                        .read()
+                        .delete(record.get_offset_id() as usize)
+                    {
                         Ok(_) => {}
                         Err(e) => {
                             return Err(ApplyMaterializedLogError::HnswIndex(e));

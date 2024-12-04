@@ -22,7 +22,7 @@ use crate::{
         materialize_logs,
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializerError, MaterializedLogRecord,
+        LogMaterializerError, MaterializeLogsResult,
     },
 };
 
@@ -106,24 +106,35 @@ pub(crate) struct MetadataLogReader<'me> {
 }
 
 impl<'me> MetadataLogReader<'me> {
-    pub(crate) fn new(logs: &'me Chunk<MaterializedLogRecord<'me>>) -> Self {
+    // todo: rename? (async)
+    pub(crate) async fn new(
+        logs: &'me MaterializeLogsResult,
+        record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
+    ) -> Self {
         let mut compact_metadata: HashMap<_, BTreeMap<&MetadataValue, RoaringBitmap>> =
             HashMap::new();
         let mut document = HashMap::new();
         let mut updated_offset_ids = RoaringBitmap::new();
         let mut user_id_to_offset_id = HashMap::new();
-        for (log, _) in logs.iter() {
+        // let materialized_iter = logs.into_iter(record_segment_reader);
+
+        // while let Some(log) = materialized_iter.stream_next() {
+        for i in 0..logs.len() {
+            let log = logs.get(i).unwrap(); // todo
+
             if !matches!(
-                log.final_operation,
+                log.get_operation(),
                 MaterializedLogOperation::Initial | MaterializedLogOperation::AddNew
             ) {
-                updated_offset_ids.insert(log.offset_id);
+                updated_offset_ids.insert(log.get_offset_id());
             }
             if !matches!(
-                log.final_operation,
+                log.get_operation(),
                 MaterializedLogOperation::DeleteExisting
             ) {
-                user_id_to_offset_id.insert(log.merged_user_id_ref(), log.offset_id);
+                let log = log.hydrate(record_segment_reader.as_ref()).await;
+                user_id_to_offset_id.insert(log.get_user_id().unwrap(), log.get_offset_id());
+                // todo
                 let log_metadata = log.merged_metadata_ref();
                 for (key, val) in log_metadata.into_iter() {
                     compact_metadata
@@ -131,10 +142,10 @@ impl<'me> MetadataLogReader<'me> {
                         .or_default()
                         .entry(val)
                         .or_default()
-                        .insert(log.offset_id);
+                        .insert(log.get_offset_id());
                 }
                 if let Some(doc) = log.merged_document_ref() {
-                    document.insert(log.offset_id, doc);
+                    document.insert(log.get_offset_id(), doc);
                 }
             }
         }
@@ -418,10 +429,12 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             Err(e) => Err(*e),
         }?;
         let cloned_record_segment_reader = record_segment_reader.clone();
-        let materialized_logs = materialize_logs(&cloned_record_segment_reader, &input.logs, None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
-        let metadata_log_reader = MetadataLogReader::new(&materialized_logs);
+        let materialized_logs =
+            materialize_logs(&cloned_record_segment_reader, input.logs.clone(), None)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
+        let metadata_log_reader =
+            MetadataLogReader::new(&materialized_logs, &record_segment_reader).await;
         let log_metadata_provider =
             MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 
@@ -443,7 +456,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                             .as_slice(),
                     ),
                 );
-                let compact_offset_ids = if let Some(reader) = record_segment_reader {
+                let compact_offset_ids = if let Some(reader) = record_segment_reader.as_ref() {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
                         match reader.get_offset_id_for_user_id(user_id.as_str()).await {

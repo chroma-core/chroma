@@ -1,5 +1,5 @@
-use super::types::{MaterializedLogRecord, SegmentWriter};
-use super::SegmentFlusher;
+use super::types::SegmentWriter;
+use super::{HydratedMaterializedLogRecord, MaterializeLogsResult, SegmentFlusher};
 use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{
@@ -7,9 +7,7 @@ use chroma_blockstore::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
-use chroma_types::{
-    Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid,
-};
+use chroma_types::{DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -61,15 +59,13 @@ pub enum RecordSegmentWriterCreationError {
 }
 
 impl RecordSegmentWriter {
-    async fn construct_and_set_data_record<'a>(
+    async fn construct_and_set_data_record(
         &self,
-        mat_record: &MaterializedLogRecord<'a>,
-        user_id: &str,
-        offset_id: u32,
+        mat_record: &HydratedMaterializedLogRecord<'_, '_>,
     ) -> Result<(), ApplyMaterializedLogError> {
         // Merge data record with updates.
         let updated_document = mat_record.merged_document_ref();
-        let updated_embeddings = mat_record.merged_embeddings();
+        let updated_embeddings = mat_record.merged_embeddings_ref();
         let final_metadata = mat_record.merged_metadata();
         let mut final_metadata_opt = None;
         if !final_metadata.is_empty() {
@@ -77,7 +73,7 @@ impl RecordSegmentWriter {
         }
         // Time to create a data record now.
         let data_record = DataRecord {
-            id: user_id,
+            id: mat_record.get_user_id().unwrap(),
             embedding: updated_embeddings,
             metadata: final_metadata_opt,
             document: updated_document,
@@ -86,7 +82,7 @@ impl RecordSegmentWriter {
             .id_to_data
             .as_ref()
             .unwrap()
-            .set("", offset_id, &data_record)
+            .set("", mat_record.get_offset_id(), &data_record)
             .await
         {
             Ok(_) => (),
@@ -337,19 +333,25 @@ impl ChromaError for ApplyMaterializedLogError {
     }
 }
 
-impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
+impl SegmentWriter for RecordSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: Chunk<MaterializedLogRecord<'a>>,
+        record_segment_reader: Option<RecordSegmentReader<'_>>,
+        materialized: MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
         // The max new offset id introduced by materialized logs is initialized as zero
         // Since offset id should start from 1, we use this to indicate no new offset id
         // has been introduced in the materialized logs
         let mut max_new_offset_id = 0;
         let mut count = 0u64;
-        for (log_record, _) in records.iter() {
+
+        for i in 0..materialized.len() {
             count += 1;
-            match log_record.final_operation {
+
+            let log_record = materialized.get(i).unwrap(); // todo
+            let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
+
+            match log_record.get_operation() {
                 MaterializedLogOperation::AddNew => {
                     // Set all four.
                     // Set user id to offset id.
@@ -357,7 +359,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .set::<&str, u32>("", log_record.user_id.unwrap(), log_record.offset_id)
+                        .set::<&str, u32>("",  log_record.get_user_id().unwrap(), log_record.get_offset_id())
                         .await
                     {
                         Ok(()) => (),
@@ -370,7 +372,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .set::<u32, String>("", log_record.offset_id, log_record.user_id.unwrap().to_string())
+                        .set::<u32, String>("", log_record.get_offset_id(), log_record.get_user_id().unwrap().to_string())
                         .await
                     {
                         Ok(()) => (),
@@ -381,9 +383,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     // Set data record.
                     match self
                         .construct_and_set_data_record(
-                            log_record,
-                            log_record.user_id.unwrap(),
-                            log_record.offset_id,
+                            &log_record,
                         )
                         .await
                     {
@@ -393,7 +393,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         }
                     }
                     // Set max offset id.
-                    max_new_offset_id = max_new_offset_id.max(log_record.offset_id);
+                    max_new_offset_id = max_new_offset_id.max(log_record.get_offset_id());
                 }
                 MaterializedLogOperation::UpdateExisting | MaterializedLogOperation::OverwriteExisting => {
                     // Offset id and user id do not need to change. Only data
@@ -403,7 +403,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_data
                         .as_ref()
                         .unwrap()
-                        .delete::<u32, &DataRecord>("", log_record.offset_id)
+                        .delete::<u32, &DataRecord>("", log_record.get_offset_id())
                         .await
                     {
                         Ok(()) => (),
@@ -414,9 +414,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                     }
                     match self
                         .construct_and_set_data_record(
-                            log_record,
-                            log_record.data_record.as_ref().unwrap().id,
-                            log_record.offset_id,
+                            &log_record,
                         )
                         .await
                     {
@@ -432,7 +430,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .delete::<&str, u32>("", log_record.data_record.as_ref().unwrap().id)
+                        .delete::<&str, u32>("",  log_record.get_user_id().unwrap())
                         .await
                     {
                         Ok(()) => (),
@@ -446,7 +444,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .delete::<u32, String>("", log_record.offset_id)
+                        .delete::<u32, String>("", log_record.get_offset_id())
                         .await
                     {
                         Ok(()) => (),
@@ -460,7 +458,7 @@ impl<'a> SegmentWriter<'a> for RecordSegmentWriter {
                         .id_to_data
                         .as_ref()
                         .unwrap()
-                        .delete::<u32, &DataRecord>("", log_record.offset_id)
+                        .delete::<u32, &DataRecord>("", log_record.get_offset_id())
                         .await
                     {
                         Ok(()) => (),
@@ -1001,12 +999,12 @@ mod tests {
                             let log_chunk = Chunk::new(batch.into());
                             let materialized_logs = future::block_on(materialize_logs(
                                 &None,
-                                &log_chunk,
+                                log_chunk,
                                 Some(curr_offset_id),
                             ))
                             .expect("Should be able to materialize log");
                             future::block_on(
-                                record_writer.apply_materialized_log_chunk(materialized_logs),
+                                record_writer.apply_materialized_log_chunk(None, materialized_logs),
                             )
                             .expect("Should be able to apply materialized log")
                         })

@@ -133,7 +133,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                 }
             }
         };
-        let logs = match materialize_logs(&record_segment_reader, &input.log, None)
+        let logs = match materialize_logs(&record_segment_reader, input.log.clone(), None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
@@ -150,25 +150,29 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
         };
 
         let mut heap = BinaryHeap::with_capacity(input.k);
-        let data_chunk = logs;
-        for data in data_chunk.iter() {
-            let log_record = data.0;
+        for i in 0..logs.len() {
+            let log_record = logs.get(i).unwrap(); // todo
 
-            if log_record.final_operation == MaterializedLogOperation::DeleteExisting {
+            if log_record.get_operation() == MaterializedLogOperation::DeleteExisting {
                 // Explicitly skip deleted records.
                 continue;
             }
+
+            let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
 
             // Skip records that are disallowed. If allowed list is empty then
             // don't exclude anything.
             // Empty allowed list is passed when where filtering is absent.
             // TODO: This should not need to use merged_user_id, which clones the id.
             if !input.allowed_ids.is_empty()
-                && !input.allowed_ids.contains(&log_record.merged_user_id())
+                && !input
+                    .allowed_ids
+                    .contains(&log_record.get_user_id().unwrap().to_string())
+            // todo
             {
                 continue;
             }
-            let embedding = &log_record.merged_embeddings();
+            let embedding = log_record.merged_embeddings_ref();
             if should_normalize {
                 let normalized_query = normalized_query.as_ref().expect("Invariant violation. Should have set normalized query if should_normalize is true.");
                 let normalized_embedding = normalize(&embedding[..]);
@@ -176,14 +180,14 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                     .distance_metric
                     .distance(&normalized_embedding[..], &normalized_query[..]);
                 heap.push(Entry {
-                    user_id: log_record.merged_user_id_ref(),
+                    user_id: log_record.get_user_id().unwrap(), // todo
                     embedding,
                     distance,
                 });
             } else {
                 let distance = input.distance_metric.distance(&embedding[..], &input.query);
                 heap.push(Entry {
-                    user_id: log_record.merged_user_id_ref(),
+                    user_id: log_record.get_user_id().unwrap(), // todo
                     embedding,
                     distance,
                 });
