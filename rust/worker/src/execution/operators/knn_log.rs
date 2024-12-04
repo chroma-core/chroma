@@ -93,7 +93,10 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
                 SignedRoaringBitmap::Include(rbm) => rbm.contains(log.get_offset_id()),
                 SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(log.get_offset_id()),
             } {
-                let log = log.hydrate(record_segment_reader.as_ref()).await;
+                let log = log
+                    .hydrate(record_segment_reader.as_ref())
+                    .await
+                    .map_err(KnnLogError::LogMaterializer)?;
 
                 let log_vector;
                 let log_embedding = if let DistanceFunction::Cosine = input.distance_function {

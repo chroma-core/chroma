@@ -121,11 +121,11 @@ struct MaterializedLogRecord {
     // in the record segment at which the record was found.
     // If not present in the segment then it is the offset id
     // at which it should be inserted.
-    offset_id: u32, // todo: rename to log offset?
+    offset_id: u32,
     // Set only for the records that are being inserted for the first time
     // in the log since data_record will be None in such cases. For other
     // cases, just read from data record.
-    user_id_at_log_index: Option<usize>, // todo: rename
+    user_id_at_log_index: Option<usize>,
     // There can be several entries in the log for an id. This is the final
     // operation that needs to be done on it. For e.g.
     // If log has [Update, Update, Delete] then final operation is Delete.
@@ -146,16 +146,16 @@ struct MaterializedLogRecord {
     // to be disjoint from metadata_to_be_merged i.e. there won't be keys
     // present in both the places.
     metadata_to_be_deleted: Option<HashSet<String>>,
-    // This is the final document obtained from the last non null operation.
+    // This is the log index containing the final document obtained from the last non null operation.
     // E.g. if log has [Insert(str0), Update(str1), Update(str2), Update()] then this will contain
     // str2. None if final operation is Delete.
-    final_document_at_log_index: Option<usize>, // todo: rename
+    final_document_at_log_index: Option<usize>,
 
-    // Similar to above, this is the final embedding obtained
+    // Similar to above, this is the log index containing the final embedding obtained
     // from the last non null operation.
     // E.g. if log has [Insert(emb0), Update(emb1), Update(emb2), Update()]
     // then this will contain emb2. None if final operation is Delete.
-    final_embedding_at_log_index: Option<usize>, // todo: rename
+    final_embedding_at_log_index: Option<usize>,
 }
 
 impl MaterializedLogRecord {
@@ -237,24 +237,20 @@ impl<'me> BorrowedMaterializedLogRecord<'me> {
     pub async fn hydrate<'referred_data>(
         &self,
         record_segment_reader: Option<&'referred_data RecordSegmentReader<'referred_data>>,
-    ) -> HydratedMaterializedLogRecord<'me, 'referred_data> {
+    ) -> Result<HydratedMaterializedLogRecord<'me, 'referred_data>, LogMaterializerError> {
         let segment_data_record = match self.materialized_log_record.data_record_offset_id {
             Some(offset_id) => match record_segment_reader {
-                Some(reader) => match reader.get_data_for_offset_id(offset_id).await {
-                    Ok(Some(data_record)) => Some(data_record),
-                    Ok(None) => None,
-                    Err(_) => None, // todo
-                },
+                Some(reader) => reader.get_data_for_offset_id(offset_id).await?,
                 None => None,
             },
             None => None,
         };
 
-        HydratedMaterializedLogRecord {
+        Ok(HydratedMaterializedLogRecord {
             materialized_log_record: self.materialized_log_record,
             segment_data_record,
             logs: self.logs,
-        }
+        })
     }
 }
 
@@ -1047,7 +1043,7 @@ mod tests {
             .expect("Error materializing logs");
         let mut res_vec = vec![];
         for record in &res {
-            let record = record.hydrate(some_reader.as_ref()).await;
+            let record = record.hydrate(some_reader.as_ref()).await.unwrap();
             res_vec.push(record);
         }
         res_vec.sort_by(|x, y| x.get_user_id().cmp(y.get_user_id()));
@@ -1327,7 +1323,7 @@ mod tests {
             .expect("Error materializing logs");
         let mut res_vec = vec![];
         for record in &res {
-            let record = record.hydrate(some_reader.as_ref()).await;
+            let record = record.hydrate(some_reader.as_ref()).await.unwrap();
             res_vec.push(record);
         }
         res_vec.sort_by(|x, y| x.get_user_id().cmp(y.get_user_id()));
@@ -1636,7 +1632,7 @@ mod tests {
             .expect("Error materializing logs");
         let mut res_vec = vec![];
         for record in &res {
-            let record = record.hydrate(some_reader.as_ref()).await;
+            let record = record.hydrate(some_reader.as_ref()).await.unwrap();
             res_vec.push(record);
         }
         res_vec.sort_by(|x, y| x.get_user_id().cmp(y.get_user_id()));
@@ -1931,7 +1927,7 @@ mod tests {
         let mut id2_found = 0;
         let mut id3_found = 0;
         for log in &res {
-            let log = log.hydrate(some_reader.as_ref()).await;
+            let log = log.hydrate(some_reader.as_ref()).await.unwrap();
 
             // Embedding 3.
             if log.get_user_id() == "embedding_id_3" {

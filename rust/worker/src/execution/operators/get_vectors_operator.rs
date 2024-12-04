@@ -133,7 +133,10 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
         let mut remaining_search_user_ids: HashSet<String> =
             HashSet::from_iter(input.search_user_ids.iter().cloned());
         for log_record in &mat_records {
-            let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
+            let log_record = log_record
+                .hydrate(record_segment_reader.as_ref())
+                .await
+                .map_err(GetVectorsOperatorError::LogMaterialization)?;
             // Log is the source of truth for these so don't consider these for
             // reading from the segment.
             let mut removed = false;

@@ -252,7 +252,10 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
                 MaterializedLogOperation::AddNew
                 | MaterializedLogOperation::UpdateExisting
                 | MaterializedLogOperation::OverwriteExisting => {
-                    let record = record.hydrate(record_segment_reader.as_ref()).await;
+                    let record = record
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
                     let embedding = record.merged_embeddings_ref();
 
                     let mut index = self.index.inner.upgradable_read();

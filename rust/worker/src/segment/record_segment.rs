@@ -1,5 +1,7 @@
 use super::types::SegmentWriter;
-use super::{HydratedMaterializedLogRecord, MaterializeLogsResult, SegmentFlusher};
+use super::{
+    HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult, SegmentFlusher,
+};
 use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{
@@ -318,6 +320,8 @@ pub enum ApplyMaterializedLogError {
     FullTextIndex(#[from] FullTextIndexError),
     #[error("Error writing to hnsw index")]
     HnswIndex(#[from] Box<dyn ChromaError>),
+    #[error("Log materialization error: {0}")]
+    Materialization(#[from] LogMaterializerError),
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -329,6 +333,7 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
             ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
+            ApplyMaterializedLogError::Materialization(e) => e.code(),
         }
     }
 }
@@ -348,7 +353,10 @@ impl SegmentWriter for RecordSegmentWriter {
         for log_record in &materialized {
             count += 1;
 
-            let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
+            let log_record = log_record
+                .hydrate(record_segment_reader.as_ref())
+                .await
+                .map_err(ApplyMaterializedLogError::Materialization)?;
 
             match log_record.get_operation() {
                 MaterializedLogOperation::AddNew => {

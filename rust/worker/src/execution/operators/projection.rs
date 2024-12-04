@@ -129,7 +129,10 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
             let record = match offset_id_to_log_record.get(offset_id) {
                 // The offset id is in the log
                 Some(log) => {
-                    let log = log.hydrate(record_segment_reader.as_ref()).await;
+                    let log = log
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ProjectionError::LogMaterializer)?;
 
                     ProjectionRecord {
                         id: log.get_user_id().to_string(),

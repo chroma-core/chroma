@@ -76,7 +76,13 @@ impl HnswKnnOperator {
                 || log.get_operation() == MaterializedLogOperation::UpdateExisting
                 || log.get_operation() == MaterializedLogOperation::OverwriteExisting
             {
-                let log = log.hydrate(Some(record_segment_reader)).await;
+                let log = log
+                    .hydrate(Some(record_segment_reader))
+                    .await
+                    .map_err(|e| {
+                        Box::new(HnswKnnOperatorError::LogMaterializationError(e))
+                            as Box<dyn ChromaError>
+                    })?;
                 let offset_id = record_segment_reader
                     .get_offset_id_for_user_id(log.get_user_id())
                     .await;
@@ -161,7 +167,13 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         let mut remaining_allowed_ids: HashSet<&String> =
             HashSet::from_iter(input.allowed_ids.iter());
         for log in logs.iter() {
-            let log = log.hydrate(Some(&record_segment_reader)).await;
+            let log = log
+                .hydrate(Some(&record_segment_reader))
+                .await
+                .map_err(|e| {
+                    Box::new(HnswKnnOperatorError::LogMaterializationError(e))
+                        as Box<dyn ChromaError>
+                })?;
             #[allow(clippy::unnecessary_to_owned)]
             remaining_allowed_ids.remove(&log.get_user_id().to_string());
         }

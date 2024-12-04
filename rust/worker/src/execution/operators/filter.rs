@@ -109,7 +109,7 @@ impl<'me> MetadataLogReader<'me> {
     pub(crate) async fn create(
         logs: &'me MaterializeLogsResult,
         record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
-    ) -> Self {
+    ) -> Result<Self, LogMaterializerError> {
         let mut compact_metadata: HashMap<String, BTreeMap<MetadataValue, RoaringBitmap>> =
             HashMap::new();
         let mut document = HashMap::new();
@@ -127,7 +127,7 @@ impl<'me> MetadataLogReader<'me> {
                 log.get_operation(),
                 MaterializedLogOperation::DeleteExisting
             ) {
-                let log = log.hydrate(record_segment_reader.as_ref()).await;
+                let log = log.hydrate(record_segment_reader.as_ref()).await?;
                 user_id_to_offset_id.insert(log.get_user_id(), log.get_offset_id());
                 // todo
                 let log_metadata = log.merged_metadata();
@@ -144,12 +144,12 @@ impl<'me> MetadataLogReader<'me> {
                 }
             }
         }
-        Self {
+        Ok(Self {
             compact_metadata,
             document,
             updated_offset_ids,
             user_id_to_offset_id,
-        }
+        })
     }
     pub(crate) fn get(
         &self,
@@ -431,7 +431,9 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await?;
         let metadata_log_reader =
-            MetadataLogReader::create(&materialized_logs, &record_segment_reader).await;
+            MetadataLogReader::create(&materialized_logs, &record_segment_reader)
+                .await
+                .map_err(FilterError::LogMaterializer)?;
         let log_metadata_provider =
             MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 

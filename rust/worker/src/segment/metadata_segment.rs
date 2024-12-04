@@ -541,7 +541,10 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
 
         let mut full_text_writer_batch = vec![];
         for record in &materialized {
-            let record = record.hydrate(record_segment_reader.as_ref()).await;
+            let record = record
+                .hydrate(record_segment_reader.as_ref())
+                .await
+                .map_err(ApplyMaterializedLogError::Materialization)?;
             let offset_id = record.get_offset_id();
             let old_document = record.document_ref_from_segment();
             let new_document = record.document_ref_from_log();
@@ -587,7 +590,10 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
         for record in &materialized {
             count += 1;
 
-            let record = record.hydrate(record_segment_reader.as_ref()).await;
+            let record = record
+                .hydrate(record_segment_reader.as_ref())
+                .await
+                .map_err(ApplyMaterializedLogError::Materialization)?;
             let segment_offset_id = record.get_offset_id();
             match record.get_operation() {
                 MaterializedLogOperation::AddNew => {

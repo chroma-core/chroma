@@ -156,7 +156,10 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                 continue;
             }
 
-            let log_record = log_record.hydrate(record_segment_reader.as_ref()).await;
+            let log_record = log_record
+                .hydrate(record_segment_reader.as_ref())
+                .await
+                .map_err(BruteForceKnnOperatorError::LogMaterializationError)?;
 
             // Skip records that are disallowed. If allowed list is empty then
             // don't exclude anything.
