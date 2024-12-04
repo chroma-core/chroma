@@ -754,8 +754,20 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	}
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Check if collection exists.
+		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
+		if err != nil {
+			return err
+		}
+		if collection == nil {
+			return common.ErrCollectionNotFound
+		}
+		if collection.IsDeleted {
+			return common.ErrCollectionSoftDeleted
+		}
+
 		// register files to Segment metadata
-		err := tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+		err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
 		if err != nil {
 			return err
 		}
