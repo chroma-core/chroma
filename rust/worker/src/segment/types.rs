@@ -1967,7 +1967,7 @@ mod tests {
                 );
                 assert_eq!(2, log.get_offset_id());
                 assert_eq!(None, log.document_ref_from_log());
-                // assert_eq!(None, log.merged_embeddings_ref());
+                assert_eq!(None, log.embeddings_ref_from_log());
                 assert_eq!(None, log.get_metadata_to_be_merged());
                 assert!(log.get_data_record().is_some());
             } else if log.get_data_record().as_ref().unwrap().id == "embedding_id_1" {
@@ -1978,7 +1978,7 @@ mod tests {
                 );
                 assert_eq!(1, log.get_offset_id());
                 assert_eq!(None, log.document_ref_from_log());
-                // assert_eq!(None, log.merged_embeddings_ref());
+                assert_eq!(None, log.embeddings_ref_from_log());
                 let mut hello_found = 0;
                 let mut hello_again_found = 0;
                 for (key, value) in log.get_metadata_to_be_merged().unwrap() {
