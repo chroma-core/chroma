@@ -153,12 +153,12 @@ impl<'me> MetadataLogReader<'me> {
     pub(crate) fn get(
         &self,
         key: &str,
-        val: MetadataValue,
+        val: &MetadataValue,
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         if let Some(metadata_value_to_offset_ids) = self.compact_metadata.get(key) {
             let bounds = match op {
-                PrimitiveOperator::Equal => (Bound::Included(val.clone()), Bound::Included(val)),
+                PrimitiveOperator::Equal => (Bound::Included(val), Bound::Included(val)),
                 PrimitiveOperator::GreaterThan => (Bound::Excluded(val), Bound::Unbounded),
                 PrimitiveOperator::GreaterThanOrEqual => (Bound::Included(val), Bound::Unbounded),
                 PrimitiveOperator::LessThan => (Bound::Unbounded, Bound::Excluded(val)),
@@ -264,9 +264,7 @@ impl<'me> MetadataProvider<'me> {
                     Ok(RoaringBitmap::new())
                 }
             }
-            MetadataProvider::Log(metadata_log_reader) => {
-                metadata_log_reader.get(key, val.clone(), op)
-            }
+            MetadataProvider::Log(metadata_log_reader) => metadata_log_reader.get(key, val, op),
         }
     }
 }
