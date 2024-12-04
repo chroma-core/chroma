@@ -306,6 +306,16 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 		suite.Equal(segment.ID, segmentResult[0].ID)
 	}
 
+	// The same information should be returned by the GetCollectionWithSegments endpoint
+	collection, collection_segments, error := suite.coordinator.GetCollectionWithSegments(ctx, newCollection.ID)
+	suite.NoError(error)
+	suite.Equal(newCollection.ID, collection.ID)
+	suite.Equal(newCollection.Name, collection.Name)
+	suite.Len(collection_segments, 2)
+	for i, segment := range collection_segments {
+		suite.Equal(segments[i].ID, segment.ID)
+	}
+
 	// Attempt to create a duplicate collection (should fail)
 	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
 	suite.Error(err)

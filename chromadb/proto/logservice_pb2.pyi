@@ -7,7 +7,7 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class PushLogsRequest(_message.Message):
-    __slots__ = ["collection_id", "records"]
+    __slots__ = ("collection_id", "records")
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
@@ -15,13 +15,13 @@ class PushLogsRequest(_message.Message):
     def __init__(self, collection_id: _Optional[str] = ..., records: _Optional[_Iterable[_Union[_chroma_pb2.OperationRecord, _Mapping]]] = ...) -> None: ...
 
 class PushLogsResponse(_message.Message):
-    __slots__ = ["record_count"]
+    __slots__ = ("record_count",)
     RECORD_COUNT_FIELD_NUMBER: _ClassVar[int]
     record_count: int
     def __init__(self, record_count: _Optional[int] = ...) -> None: ...
 
 class PullLogsRequest(_message.Message):
-    __slots__ = ["collection_id", "start_from_offset", "batch_size", "end_timestamp"]
+    __slots__ = ("collection_id", "start_from_offset", "batch_size", "end_timestamp")
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     START_FROM_OFFSET_FIELD_NUMBER: _ClassVar[int]
     BATCH_SIZE_FIELD_NUMBER: _ClassVar[int]
@@ -33,7 +33,7 @@ class PullLogsRequest(_message.Message):
     def __init__(self, collection_id: _Optional[str] = ..., start_from_offset: _Optional[int] = ..., batch_size: _Optional[int] = ..., end_timestamp: _Optional[int] = ...) -> None: ...
 
 class LogRecord(_message.Message):
-    __slots__ = ["log_offset", "record"]
+    __slots__ = ("log_offset", "record")
     LOG_OFFSET_FIELD_NUMBER: _ClassVar[int]
     RECORD_FIELD_NUMBER: _ClassVar[int]
     log_offset: int
@@ -41,13 +41,13 @@ class LogRecord(_message.Message):
     def __init__(self, log_offset: _Optional[int] = ..., record: _Optional[_Union[_chroma_pb2.OperationRecord, _Mapping]] = ...) -> None: ...
 
 class PullLogsResponse(_message.Message):
-    __slots__ = ["records"]
+    __slots__ = ("records",)
     RECORDS_FIELD_NUMBER: _ClassVar[int]
     records: _containers.RepeatedCompositeFieldContainer[LogRecord]
     def __init__(self, records: _Optional[_Iterable[_Union[LogRecord, _Mapping]]] = ...) -> None: ...
 
 class CollectionInfo(_message.Message):
-    __slots__ = ["collection_id", "first_log_offset", "first_log_ts"]
+    __slots__ = ("collection_id", "first_log_offset", "first_log_ts")
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     FIRST_LOG_OFFSET_FIELD_NUMBER: _ClassVar[int]
     FIRST_LOG_TS_FIELD_NUMBER: _ClassVar[int]
@@ -57,19 +57,19 @@ class CollectionInfo(_message.Message):
     def __init__(self, collection_id: _Optional[str] = ..., first_log_offset: _Optional[int] = ..., first_log_ts: _Optional[int] = ...) -> None: ...
 
 class GetAllCollectionInfoToCompactRequest(_message.Message):
-    __slots__ = ["min_compaction_size"]
+    __slots__ = ("min_compaction_size",)
     MIN_COMPACTION_SIZE_FIELD_NUMBER: _ClassVar[int]
     min_compaction_size: int
     def __init__(self, min_compaction_size: _Optional[int] = ...) -> None: ...
 
 class GetAllCollectionInfoToCompactResponse(_message.Message):
-    __slots__ = ["all_collection_info"]
+    __slots__ = ("all_collection_info",)
     ALL_COLLECTION_INFO_FIELD_NUMBER: _ClassVar[int]
     all_collection_info: _containers.RepeatedCompositeFieldContainer[CollectionInfo]
     def __init__(self, all_collection_info: _Optional[_Iterable[_Union[CollectionInfo, _Mapping]]] = ...) -> None: ...
 
 class UpdateCollectionLogOffsetRequest(_message.Message):
-    __slots__ = ["collection_id", "log_offset"]
+    __slots__ = ("collection_id", "log_offset")
     COLLECTION_ID_FIELD_NUMBER: _ClassVar[int]
     LOG_OFFSET_FIELD_NUMBER: _ClassVar[int]
     collection_id: str
@@ -77,5 +77,5 @@ class UpdateCollectionLogOffsetRequest(_message.Message):
     def __init__(self, collection_id: _Optional[str] = ..., log_offset: _Optional[int] = ...) -> None: ...
 
 class UpdateCollectionLogOffsetResponse(_message.Message):
-    __slots__ = []
+    __slots__ = ()
     def __init__(self) -> None: ...
