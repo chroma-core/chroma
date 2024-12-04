@@ -138,15 +138,13 @@ impl Operator<GetVectorsOperatorInput, GetVectorsOperatorOutput> for GetVectorsO
             // Log is the source of truth for these so don't consider these for
             // reading from the segment.
             let mut removed = false;
-            if remaining_search_user_ids.contains(log_record.get_user_id().unwrap()) {
-                // todo
+            if remaining_search_user_ids.contains(log_record.get_user_id()) {
                 removed = true;
-                remaining_search_user_ids.remove(log_record.get_user_id().unwrap());
-                // todo
+                remaining_search_user_ids.remove(log_record.get_user_id());
             }
             if removed && log_record.get_operation() != MaterializedLogOperation::DeleteExisting {
                 output_vectors.insert(
-                    log_record.get_user_id().unwrap().to_string(), // todo
+                    log_record.get_user_id().to_string(),
                     log_record.merged_embeddings_ref().to_vec(),
                 );
             }

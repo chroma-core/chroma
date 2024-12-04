@@ -80,7 +80,7 @@ impl HnswKnnOperator {
             {
                 let log = log.hydrate(Some(record_segment_reader)).await;
                 let offset_id = record_segment_reader
-                    .get_offset_id_for_user_id(log.get_user_id().unwrap()) // todo
+                    .get_offset_id_for_user_id(log.get_user_id())
                     .await;
                 match offset_id {
                     Ok(Some(offset_id)) => disallowed_ids.push(offset_id),
@@ -166,8 +166,7 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
             let log = logs.get(i).unwrap(); // todo
             let log = log.hydrate(Some(&record_segment_reader)).await;
             #[allow(clippy::unnecessary_to_owned)]
-            remaining_allowed_ids.remove(&log.get_user_id().unwrap().to_string());
-            // todo
+            remaining_allowed_ids.remove(&log.get_user_id().to_string());
         }
         // If a filter list is supplied but it does not have anything for the segment, as it implies the data is all in the log
         // then return an empty response.

@@ -73,7 +73,7 @@ impl RecordSegmentWriter {
         }
         // Time to create a data record now.
         let data_record = DataRecord {
-            id: mat_record.get_user_id().unwrap(),
+            id: mat_record.get_user_id(),
             embedding: updated_embeddings,
             metadata: final_metadata_opt,
             document: updated_document,
@@ -359,7 +359,7 @@ impl SegmentWriter for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .set::<&str, u32>("",  log_record.get_user_id().unwrap(), log_record.get_offset_id())
+                        .set::<&str, u32>("",  log_record.get_user_id(), log_record.get_offset_id())
                         .await
                     {
                         Ok(()) => (),
@@ -372,7 +372,7 @@ impl SegmentWriter for RecordSegmentWriter {
                         .id_to_user_id
                         .as_ref()
                         .unwrap()
-                        .set::<u32, String>("", log_record.get_offset_id(), log_record.get_user_id().unwrap().to_string())
+                        .set::<u32, String>("", log_record.get_offset_id(), log_record.get_user_id().to_string())
                         .await
                     {
                         Ok(()) => (),
@@ -430,7 +430,7 @@ impl SegmentWriter for RecordSegmentWriter {
                         .user_id_to_id
                         .as_ref()
                         .unwrap()
-                        .delete::<&str, u32>("",  log_record.get_user_id().unwrap())
+                        .delete::<&str, u32>("",  log_record.get_user_id())
                         .await
                     {
                         Ok(()) => (),

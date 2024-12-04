@@ -167,8 +167,7 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
             if !input.allowed_ids.is_empty()
                 && !input
                     .allowed_ids
-                    .contains(&log_record.get_user_id().unwrap().to_string())
-            // todo
+                    .contains(&log_record.get_user_id().to_string())
             {
                 continue;
             }
@@ -180,14 +179,14 @@ impl Operator<BruteForceKnnOperatorInput, BruteForceKnnOperatorOutput> for Brute
                     .distance_metric
                     .distance(&normalized_embedding[..], &normalized_query[..]);
                 heap.push(Entry {
-                    user_id: log_record.get_user_id().unwrap(), // todo
+                    user_id: log_record.get_user_id(),
                     embedding,
                     distance,
                 });
             } else {
                 let distance = input.distance_metric.distance(embedding, &input.query);
                 heap.push(Entry {
-                    user_id: log_record.get_user_id().unwrap(), // todo
+                    user_id: log_record.get_user_id(),
                     embedding,
                     distance,
                 });

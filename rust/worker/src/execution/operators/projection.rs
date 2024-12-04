@@ -131,7 +131,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                     let log = log.hydrate(record_segment_reader.as_ref()).await;
 
                     ProjectionRecord {
-                        id: log.get_user_id().unwrap().to_string(), // todo
+                        id: log.get_user_id().to_string(),
                         document: log
                             .merged_document_ref()
                             .filter(|_| self.document)

@@ -106,8 +106,7 @@ pub(crate) struct MetadataLogReader<'me> {
 }
 
 impl<'me> MetadataLogReader<'me> {
-    // todo: rename? (async)
-    pub(crate) async fn new(
+    pub(crate) async fn create(
         logs: &'me MaterializeLogsResult,
         record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
     ) -> Self {
@@ -116,9 +115,7 @@ impl<'me> MetadataLogReader<'me> {
         let mut document = HashMap::new();
         let mut updated_offset_ids = RoaringBitmap::new();
         let mut user_id_to_offset_id = HashMap::new();
-        // let materialized_iter = logs.into_iter(record_segment_reader);
 
-        // while let Some(log) = materialized_iter.stream_next() {
         for i in 0..logs.len() {
             let log = logs.get(i).unwrap(); // todo
 
@@ -133,7 +130,7 @@ impl<'me> MetadataLogReader<'me> {
                 MaterializedLogOperation::DeleteExisting
             ) {
                 let log = log.hydrate(record_segment_reader.as_ref()).await;
-                user_id_to_offset_id.insert(log.get_user_id().unwrap(), log.get_offset_id());
+                user_id_to_offset_id.insert(log.get_user_id(), log.get_offset_id());
                 // todo
                 let log_metadata = log.merged_metadata();
                 for (key, val) in log_metadata.into_iter() {
@@ -436,7 +433,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await?;
         let metadata_log_reader =
-            MetadataLogReader::new(&materialized_logs, &record_segment_reader).await;
+            MetadataLogReader::create(&materialized_logs, &record_segment_reader).await;
         let log_metadata_provider =
             MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 

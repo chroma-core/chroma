@@ -274,16 +274,15 @@ impl<'me, 'referred_data: 'me> HydratedMaterializedLogRecord<'me, 'referred_data
         self.materialized_log_record.final_operation
     }
 
-    pub fn get_user_id(&self) -> Option<&'me str> {
-        // todo: should this be an Option?
+    pub fn get_user_id(&self) -> &'me str {
         if let Some(id) = self.materialized_log_record.user_id_at_log_index {
-            return Some(self.logs.get(id).unwrap().record.id.as_str());
+            return self.logs.get(id).unwrap().record.id.as_str();
         }
 
         if let Some(data_record) = self.segment_data_record.as_ref() {
-            Some(data_record.id)
+            data_record.id
         } else {
-            None
+            panic!("Expected at least one source of user id")
         }
     }
 
@@ -1022,7 +1021,7 @@ mod tests {
         assert_eq!(1, emb_1.get_offset_id());
         assert_eq!("number", emb_1.merged_document_ref().unwrap());
         assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings_ref());
-        assert_eq!("embedding_id_1", emb_1.get_user_id().unwrap());
+        assert_eq!("embedding_id_1", emb_1.get_user_id());
         let mut res_metadata = HashMap::new();
         res_metadata.insert(
             String::from("hello"),
@@ -1302,7 +1301,7 @@ mod tests {
         assert_eq!(1, emb_1.get_offset_id());
         assert_eq!("doc1", emb_1.merged_document_ref().unwrap());
         assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings_ref());
-        assert_eq!("embedding_id_1", emb_1.get_user_id().unwrap());
+        assert_eq!("embedding_id_1", emb_1.get_user_id());
         let mut res_metadata = HashMap::new();
         res_metadata.insert(
             String::from("hello"),
@@ -1611,7 +1610,7 @@ mod tests {
         assert_eq!(1, emb_1.get_offset_id());
         assert_eq!("number", emb_1.merged_document_ref().unwrap());
         assert_eq!(&[7.0, 8.0, 9.0], emb_1.merged_embeddings_ref());
-        assert_eq!("embedding_id_1", emb_1.get_user_id().unwrap());
+        assert_eq!("embedding_id_1", emb_1.get_user_id());
         let mut res_metadata = HashMap::new();
         res_metadata.insert(
             String::from("hello"),
@@ -1901,9 +1900,9 @@ mod tests {
             let log = log.hydrate(some_reader.as_ref()).await;
 
             // Embedding 3.
-            if log.get_user_id().unwrap() == "embedding_id_3" {
+            if log.get_user_id() == "embedding_id_3" {
                 id3_found += 1;
-                assert_eq!("embedding_id_3", log.get_user_id().unwrap());
+                assert_eq!("embedding_id_3", log.get_user_id());
                 assert!(log.get_data_record().is_none());
                 assert_eq!("doc3", log.document_ref_from_log().unwrap());
                 assert_eq!(vec![7.0, 8.0, 9.0], log.merged_embeddings_ref());
@@ -1933,7 +1932,6 @@ mod tests {
                 assert_eq!(2, log.get_offset_id());
                 assert_eq!(None, log.document_ref_from_log());
                 // assert_eq!(None, log.merged_embeddings_ref());
-                // assert_eq!(None, log.get_user_id());
                 assert_eq!(None, log.get_metadata_to_be_merged());
                 assert!(log.get_data_record().is_some());
             } else if log.get_data_record().as_ref().unwrap().id == "embedding_id_1" {
@@ -1945,7 +1943,6 @@ mod tests {
                 assert_eq!(1, log.get_offset_id());
                 assert_eq!(None, log.document_ref_from_log());
                 // assert_eq!(None, log.merged_embeddings_ref());
-                // assert_eq!(None, log.get_user_id());
                 let mut hello_found = 0;
                 let mut hello_again_found = 0;
                 for (key, value) in log.get_metadata_to_be_merged().unwrap() {
