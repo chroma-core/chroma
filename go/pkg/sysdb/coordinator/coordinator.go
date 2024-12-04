@@ -104,7 +104,7 @@ func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.Uni
 }
 
 func (s *Coordinator) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
-	return nil, nil, nil
+	return s.catalog.GetCollectionWithSegments(ctx, collectionID)
 }
 
 func (s *Coordinator) GetSoftDeletedCollections(ctx context.Context, collectionID *string, tenantID string, databaseName string, limit int32) ([]*model.Collection, error) {

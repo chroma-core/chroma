@@ -313,6 +313,40 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return collections, nil
 }
 
+func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollections")
+		defer span.End()
+	}
+
+	var collection *model.Collection
+	var segments []*model.Segment
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		collections, e := tc.GetCollections(ctx, collectionID, nil, "", "", nil, nil)
+		if e != nil {
+			return e
+		}
+		if len(collections) != 1 {
+			return common.ErrCollectionUniqueConstraintViolation
+		}
+		collection = collections[0]
+
+		segments, e = tc.GetSegments(ctx, types.NilUniqueID(), nil, nil, collectionID)
+		if e != nil {
+			return e
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return collection, segments, nil
+}
+
 func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection, softDelete bool) error {
 	if softDelete {
 		return tc.softDeleteCollection(ctx, deleteCollection)
