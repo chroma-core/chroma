@@ -16,6 +16,7 @@ pub struct SpannKnnMergeInput {
     pub records: Vec<Vec<RecordDistance>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct SpannKnnMergeOutput {
     pub merged_records: Vec<RecordDistance>,
