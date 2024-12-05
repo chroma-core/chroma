@@ -59,6 +59,6 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@v4
       - name: Package Helm chart
-        run: helm package chart
+        run: helm package k8s/distributed-chroma
       - name: Publish Helm chart
         run: helm push distributed-chroma-${{ needs.detect-version-change.outputs.version }}.tgz oci://${{ vars.AWS_ECR_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/charts
