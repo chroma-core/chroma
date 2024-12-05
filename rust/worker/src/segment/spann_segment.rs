@@ -4,7 +4,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::{
-    SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError,
+    SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
@@ -327,6 +327,8 @@ pub enum SpannSegmentReaderError {
     SpannSegmentReaderCreateError,
     #[error("Spann segment is uninitialized")]
     UninitializedSegment,
+    #[error("Error reading key")]
+    KeyReadError,
 }
 
 impl ChromaError for SpannSegmentReaderError {
@@ -340,6 +342,7 @@ impl ChromaError for SpannSegmentReaderError {
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
             Self::SpannSegmentReaderCreateError => ErrorCodes::Internal,
             Self::UninitializedSegment => ErrorCodes::Internal,
+            Self::KeyReadError => ErrorCodes::Internal,
         }
     }
 }
@@ -455,6 +458,16 @@ impl<'me> SpannSegmentReader<'me> {
             index_reader,
             id: segment.id,
         })
+    }
+
+    pub async fn fetch_posting_list(
+        &self,
+        head_id: u32,
+    ) -> Result<Vec<SpannPosting>, SpannSegmentReaderError> {
+        self.index_reader
+            .fetch_posting_list(head_id)
+            .await
+            .map_err(|_| SpannSegmentReaderError::KeyReadError)
     }
 }
 

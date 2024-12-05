@@ -1384,6 +1384,8 @@ pub enum SpannIndexReaderError {
     BlockfileReaderConstructionError,
     #[error("Spann index uninitialized")]
     UninitializedIndex,
+    #[error("Error reading posting list")]
+    PostingListReadError,
 }
 
 impl ChromaError for SpannIndexReaderError {
@@ -1392,8 +1394,15 @@ impl ChromaError for SpannIndexReaderError {
             Self::HnswIndexConstructionError => ErrorCodes::Internal,
             Self::BlockfileReaderConstructionError => ErrorCodes::Internal,
             Self::UninitializedIndex => ErrorCodes::Internal,
+            Self::PostingListReadError => ErrorCodes::Internal,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct SpannPosting {
+    pub doc_offset_id: u32,
+    pub doc_embedding: Vec<f32>,
 }
 
 #[derive(Clone)]
@@ -1401,6 +1410,7 @@ pub struct SpannIndexReader<'me> {
     pub posting_lists: BlockfileReader<'me, u32, SpannPostingList<'me>>,
     pub hnsw_index: HnswIndexRef,
     pub versions_map: BlockfileReader<'me, u32, u32>,
+    pub dimensionality: usize,
 }
 
 impl<'me> SpannIndexReader<'me> {
@@ -1490,7 +1500,51 @@ impl<'me> SpannIndexReader<'me> {
             posting_lists: postings_list_reader,
             hnsw_index: hnsw_reader,
             versions_map: versions_map_reader,
+            dimensionality,
         })
+    }
+
+    async fn is_outdated(
+        &self,
+        doc_offset_id: u32,
+        doc_version: u32,
+    ) -> Result<bool, SpannIndexReaderError> {
+        let actual_version = self
+            .versions_map
+            .get("", doc_offset_id)
+            .await
+            .map_err(|_| SpannIndexReaderError::PostingListReadError)?
+            .ok_or(SpannIndexReaderError::PostingListReadError)?;
+        Ok(actual_version == 0 || doc_version < actual_version)
+    }
+
+    pub async fn fetch_posting_list(
+        &self,
+        head_id: u32,
+    ) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
+        let res = self
+            .posting_lists
+            .get("", head_id)
+            .await
+            .map_err(|_| SpannIndexReaderError::PostingListReadError)?
+            .ok_or(SpannIndexReaderError::PostingListReadError)?;
+
+        let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
+        for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
+            if self
+                .is_outdated(*doc_offset_id, res.doc_versions[index])
+                .await?
+            {
+                continue;
+            }
+            posting_lists.push(SpannPosting {
+                doc_offset_id: *doc_offset_id,
+                doc_embedding: res.doc_embeddings
+                    [index * self.dimensionality..(index + 1) * self.dimensionality]
+                    .to_vec(),
+            });
+        }
+        Ok(posting_lists)
     }
 }
 
