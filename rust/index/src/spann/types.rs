@@ -1674,22 +1674,32 @@ mod tests {
         {
             // Posting list should have 100 points.
             let pl_read_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_read_guard
+            let pl1 = pl_read_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", emb_1_id)
                 .await
                 .expect("Error getting posting list")
                 .unwrap();
-            assert_eq!(pl.0.len(), 100);
-            assert_eq!(pl.1.len(), 100);
-            assert_eq!(pl.2.len(), 200);
-            let pl = pl_read_guard
+            let pl2 = pl_read_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", emb_2_id)
                 .await
                 .expect("Error getting posting list")
                 .unwrap();
-            assert_eq!(pl.0.len(), 1);
-            assert_eq!(pl.1.len(), 1);
-            assert_eq!(pl.2.len(), 2);
+            // Only two combinations possible.
+            if pl1.0.len() == 100 {
+                assert_eq!(pl1.1.len(), 100);
+                assert_eq!(pl1.2.len(), 200);
+                assert_eq!(pl2.0.len(), 1);
+                assert_eq!(pl2.1.len(), 1);
+                assert_eq!(pl2.2.len(), 2);
+            } else if pl2.0.len() == 100 {
+                assert_eq!(pl2.1.len(), 100);
+                assert_eq!(pl2.2.len(), 200);
+                assert_eq!(pl1.0.len(), 1);
+                assert_eq!(pl1.1.len(), 1);
+                assert_eq!(pl1.2.len(), 2);
+            } else {
+                panic!("Invalid posting list lengths");
+            }
         }
         // Next insert 99 points in the region of (1000.0, 1000.0)
         for i in 102..=200 {
@@ -2029,7 +2039,7 @@ mod tests {
                 version_map_guard.versions_map.insert(100 + point as u32, 1);
             }
         }
-        // Delete 60 points each from the centers. Since merge_threshold is 40, this should
+        // Delete 60 points each from the centers. Since merge_threshold is 50, this should
         // trigger a merge between the two centers.
         for point in 1..=60 {
             writer
