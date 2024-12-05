@@ -61,4 +61,4 @@ jobs:
       - name: Package Helm chart
         run: helm package chart
       - name: Publish Helm chart
-        run: helm push distributed-chroma-${{ needs.detect-version-change.outputs.version }}.tgz oci://${{ vars.AWS_ECR_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/oss-charts
+        run: helm push distributed-chroma-${{ needs.detect-version-change.outputs.version }}.tgz oci://${{ vars.AWS_ECR_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/charts
