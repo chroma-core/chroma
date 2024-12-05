@@ -22,6 +22,8 @@ from chromadb.proto.coordinator_pb2 import (
     DeleteSegmentRequest,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse,
     GetDatabaseRequest,
     GetSegmentsRequest,
     GetTenantRequest,
@@ -33,6 +35,7 @@ from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Collection,
+    CollectionSegments,
     Database,
     Metadata,
     OptionalArgument,
@@ -360,6 +363,21 @@ class GrpcSysDB(SysDB):
         except grpc.RpcError as e:
             logger.error(
                 f"Failed to get collections with id {id}, name {name}, tenant {tenant}, database {database} due to error: {e}"
+            )
+            raise InternalError()
+
+    @overrides
+    def get_collection_with_segments(self, collection_id: UUID) -> CollectionSegments:
+        try:
+            request = GetCollectionWithSegmentsRequest(id=collection_id.hex)
+            response: GetCollectionWithSegmentsResponse = self._sys_db_stub.GetCollectionWithSegments(request)
+            return CollectionSegments(
+                collection=from_proto_collection(response.collection),
+                segments=[from_proto_segment(segment) for segment in response.segments]
+            )
+        except grpc.RpcError as e:
+            logger.error(
+                f"Failed to get collection {collection_id} and its segments due to error: {e}"
             )
             raise InternalError()
 
