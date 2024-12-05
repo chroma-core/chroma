@@ -13,6 +13,7 @@ use super::knn::RecordDistance;
 
 #[derive(Debug)]
 pub struct SpannBfPlInput {
+    // TODO(Sanket): We might benefit from a flat structure which might be more cache friendly.
     // Posting list data.
     posting_list: Vec<SpannPosting>,
     // Number of results to return.
@@ -25,6 +26,7 @@ pub struct SpannBfPlInput {
     query: Vec<f32>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct SpannBfPlOutput {
     records: Vec<RecordDistance>,
@@ -42,6 +44,7 @@ impl ChromaError for SpannBfPlError {
 #[derive(Debug)]
 pub struct SpannBfPlOperator {}
 
+#[allow(dead_code)]
 impl SpannBfPlOperator {
     pub fn new() -> Box<Self> {
         Box::new(SpannBfPlOperator {})
