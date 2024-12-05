@@ -44,6 +44,8 @@ pub trait Index<C> {
         disallow_ids: &[usize],
     ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>>;
     fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>>;
+    fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>>;
+    fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>>;
 }
 
 /// The persistent index trait.
