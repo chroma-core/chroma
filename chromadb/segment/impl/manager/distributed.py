@@ -88,7 +88,7 @@ class DistributedSegmentManager(SegmentManager):
     def get_collection_segments(self, collection_id: UUID) -> CollectionSegments:
         if collection_id not in self._collection_segment_cache:
             self._collection_segment_cache[collection_id] = self._sysdb.get_collection_with_segments(collection_id)
-        return self._segment_cache[collection_id]
+        return self._collection_segment_cache[collection_id]
 
     @trace_method(
         "DistributedSegmentManager.get_endpoint",
