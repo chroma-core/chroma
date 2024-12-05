@@ -781,7 +781,7 @@ impl SpannIndexWriter {
                 self.distance_function.clone(),
                 INITIAL_LAMBDA,
             );
-            let clustering_output =
+            clustering_output =
                 cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
             // TODO(Sanket): Not sure how this can happen. The reference implementation
             // just includes one point from the entire list in this case.
