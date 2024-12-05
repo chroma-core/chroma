@@ -7,7 +7,7 @@ from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
 from chromadb.errors import VersionMismatchError
 from chromadb.execution.executor.abstract import Executor
-from chromadb.execution.expression.operator import Scan, SegmentScan
+from chromadb.execution.expression.operator import Scan
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.proto import convert
 
@@ -15,7 +15,6 @@ from chromadb.proto.query_executor_pb2_grpc import QueryExecutorStub
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
-from chromadb.types import SegmentScope
 
 
 def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
@@ -55,7 +54,6 @@ class DistributedExecutor(Executor):
     @overrides
     def count(self, plan: CountPlan) -> int:
         executor = self._grpc_executuor_stub(plan.scan)
-        plan.scan = self._segment_scan(plan.scan)
         try:
             count_result = executor.Count(convert.to_proto_count_plan(plan))
         except grpc.RpcError as rpc_error:
@@ -70,7 +68,6 @@ class DistributedExecutor(Executor):
     @overrides
     def get(self, plan: GetPlan) -> GetResult:
         executor = self._grpc_executuor_stub(plan.scan)
-        plan.scan = self._segment_scan(plan.scan)
         try:
             get_result = executor.Get(convert.to_proto_get_plan(plan))
         except grpc.RpcError as rpc_error:
@@ -118,7 +115,6 @@ class DistributedExecutor(Executor):
     @overrides
     def knn(self, plan: KNNPlan) -> QueryResult:
         executor = self._grpc_executuor_stub(plan.scan)
-        plan.scan = self._segment_scan(plan.scan)
         try:
             knn_result = executor.KNN(convert.to_proto_knn_plan(plan))
         except grpc.RpcError as rpc_error:
@@ -181,18 +177,10 @@ class DistributedExecutor(Executor):
             included=plan.projection.included,
         )
 
-    def _segment_scan(self, scan: Scan) -> SegmentScan:
-        collection_segments = self._manager.get_collection_segments(scan.collection.id)
-        scope_to_segment = {segment["scope"]: segment["id"] for segment in collection_segments["segments"]}
-        return SegmentScan(
-            collection=collection_segments["collection"],
-            knn_id=scope_to_segment[SegmentScope.VECTOR],
-            metadata_id=scope_to_segment[SegmentScope.METADATA],
-            record_id=scope_to_segment[SegmentScope.RECORD],
-        )
-
     def _grpc_executuor_stub(self, scan: Scan) -> QueryExecutorStub:
-        grpc_url = self._manager.get_endpoint(scan.collection.id)
+        # Since grpc endpoint is endpoint is determined by collection uuid,
+        # the endpoint should be the same for all segments of the same collection
+        grpc_url = self._manager.get_endpoint(scan.record)
         if grpc_url not in self._grpc_stub_pool:
             channel = grpc.insecure_channel(grpc_url)
             interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]

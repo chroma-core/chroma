@@ -13,7 +13,7 @@ from chromadb.execution.expression.operator import (
     Filter,
     Limit,
     Projection,
-    SegmentScan,
+    Scan,
 )
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.types import (
@@ -568,12 +568,12 @@ def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDoc
     return response
 
 
-def to_proto_scan(scan: SegmentScan) -> query_pb.ScanOperator:
+def to_proto_scan(scan: Scan) -> query_pb.ScanOperator:
     return query_pb.ScanOperator(
         collection=to_proto_collection(scan.collection),
-        knn_id=scan.knn_id.hex,
-        metadata_id=scan.metadata_id.hex,
-        record_id=scan.record_id.hex,
+        knn_id=scan.knn["id"].hex,
+        metadata_id=scan.metadata["id"].hex,
+        record_id=scan.record["id"].hex,
     )
 
 
