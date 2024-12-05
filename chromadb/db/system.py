@@ -4,6 +4,7 @@ from uuid import UUID
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.types import (
     Collection,
+    CollectionSegments,
     Database,
     Tenant,
     Metadata,
@@ -126,6 +127,16 @@ class SysDB(Component):
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Find collections by id or name. If name is provided, tenant and database must also be provided."""
+        pass
+
+    @abstractmethod
+    def get_collection_with_segments(
+        self,
+        collection_id: UUID
+    ) -> CollectionSegments:
+        """Get a consistent snapshot of a collection by id. This will return a collection with segment
+        information that matches the collection version and log position. 
+        """
         pass
 
     @abstractmethod

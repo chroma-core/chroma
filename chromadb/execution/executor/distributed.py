@@ -182,14 +182,13 @@ class DistributedExecutor(Executor):
         )
 
     def _segment_scan(self, scan: Scan) -> SegmentScan:
-        knn = self._manager.get_segment(scan.collection.id, SegmentScope.VECTOR)
-        metadata = self._manager.get_segment(scan.collection.id, SegmentScope.METADATA)
-        record = self._manager.get_segment(scan.collection.id, SegmentScope.RECORD)
+        collection_segments = self._manager.get_collection_segments(scan.collection.id)
+        scope_to_segment = {segment["scope"]: segment["id"] for segment in collection_segments["segments"]}
         return SegmentScan(
-            collection=scan.collection,
-            knn_id=knn["id"],
-            metadata_id=metadata["id"],
-            record_id=record["id"],
+            collection=collection_segments["collection"],
+            knn_id=scope_to_segment[SegmentScope.VECTOR],
+            metadata_id=scope_to_segment[SegmentScope.VECTOR],
+            record_id=scope_to_segment[SegmentScope.VECTOR],
         )
 
     def _grpc_executuor_stub(self, scan: Scan) -> QueryExecutorStub:

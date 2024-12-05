@@ -1,4 +1,3 @@
-from collections import defaultdict
 from threading import Lock
 from typing import Dict, Sequence
 from uuid import UUID, uuid4
@@ -19,7 +18,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.types import Collection, Operation, Segment, SegmentScope
+from chromadb.types import Collection, CollectionSegments, Operation, Segment, SegmentScope
 
 
 class DistributedSegmentManager(SegmentManager):
@@ -27,9 +26,9 @@ class DistributedSegmentManager(SegmentManager):
     _system: System
     _opentelemetry_client: OpenTelemetryClient
     _instances: Dict[UUID, SegmentImplementation]
-    _segment_cache: Dict[
-        UUID, Dict[SegmentScope, Segment]
-    ]  # collection_id -> scope -> segment
+    _collection_segment_cache: Dict[
+        UUID, CollectionSegments
+    ]  # collection_id -> (collection_with_version, segments)
     _segment_directory: SegmentDirectory
     _lock: Lock
     # _segment_server_stubs: Dict[str, SegmentServerStub]  # grpc_url -> grpc stub
@@ -41,7 +40,7 @@ class DistributedSegmentManager(SegmentManager):
         self._system = system
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
-        self._segment_cache = defaultdict(dict)
+        self._collection_segment_cache = {}
         self._lock = Lock()
 
     @trace_method(
@@ -83,26 +82,23 @@ class DistributedSegmentManager(SegmentManager):
         return [s["id"] for s in segments]
 
     @trace_method(
-        "DistributedSegmentManager.get_segment",
+        "DistributedSegmentManager.get_collection_segments",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def get_segment(self, collection_id: UUID, scope: SegmentScope) -> Segment:
-        if scope not in self._segment_cache[collection_id]:
-            # For now, there is exactly one segment per scope for a given collection
-            segment = self._sysdb.get_segments(collection=collection_id, scope=scope)[0]
-            self._segment_cache[collection_id][scope] = segment
-        return self._segment_cache[collection_id][scope]
+    def get_collection_segments(self, collection_id: UUID) -> CollectionSegments:
+        if collection_id not in self._collection_segment_cache:
+            self._collection_segment_cache[collection_id] = self._sysdb.get_collection_with_segments(collection_id)
+        return self._segment_cache[collection_id]
 
     @trace_method(
         "DistributedSegmentManager.get_endpoint",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
     def get_endpoint(self, collection_id: UUID) -> str:
-        # Get grpc endpoint from record segment. Since grpc endpoint is endpoint is
-        # determined by collection uuid, the endpoint should be the same for all
-        # segments of the same collection
-        record_segment = self.get_segment(collection_id, SegmentScope.RECORD)
-        return self._segment_directory.get_segment_endpoint(record_segment)
+        # Since grpc endpoint is endpoint is determined by collection uuid,
+        # the endpoint should be the same for all segments of the same collection
+        segment = self.get_collection_segments(collection_id)["segments"][0]
+        return self._segment_directory.get_segment_endpoint(segment)
 
     @trace_method(
         "DistributedSegmentManager.hint_use_collection",
