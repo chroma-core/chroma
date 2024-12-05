@@ -28,7 +28,7 @@ dependencies = [
   'opentelemetry-exporter-otlp-proto-grpc>=1.2.0',
   'opentelemetry-instrumentation-fastapi>=0.41b0',
   'opentelemetry-sdk>=1.2.0',
-  'tokenizers >= 0.13.2',
+  'tokenizers >= 0.13.2, <= 0.20.3',
   'pypika >= 0.48.9',
   'tqdm >= 4.65.0',
   'overrides >= 7.3.1',

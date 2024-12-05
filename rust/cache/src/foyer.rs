@@ -234,7 +234,7 @@ impl<'a> Stopwatch<'a> {
     }
 }
 
-impl<'a> Drop for Stopwatch<'a> {
+impl Drop for Stopwatch<'_> {
     fn drop(&mut self) {
         let elapsed = self.1.elapsed().as_micros() as u64;
         self.0.record(elapsed, &[]);

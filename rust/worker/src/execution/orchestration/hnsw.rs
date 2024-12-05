@@ -17,7 +17,6 @@ use crate::execution::operators::merge_knn_results::{
     MergeKnnBruteForceResultInput, MergeKnnResultsOperator, MergeKnnResultsOperatorInput,
     MergeKnnResultsOperatorOutput,
 };
-use crate::execution::operators::normalize_vectors::normalize;
 use crate::execution::operators::pull_log::PullLogsOutput;
 use crate::execution::operators::record_segment_prefetch::{
     Keys, OffsetIdToDataKeys, OffsetIdToUserIdKeys, RecordSegmentPrefetchIoInput,
@@ -26,9 +25,9 @@ use crate::execution::operators::record_segment_prefetch::{
 };
 use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::{
-    distance_function_from_segment, DistributedHNSWSegmentFromSegmentError,
-    DistributedHNSWSegmentReader,
+    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
+use crate::segment::utils::distance_function_from_segment;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError, SysDb};
 use crate::system::{ComponentContext, ComponentHandle, System};
 use crate::{
@@ -37,6 +36,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_distance::normalize;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;

@@ -49,7 +49,9 @@ class DistributedSegmentManager(SegmentManager):
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
     @override
-    def prepare_segments_for_new_collection(self, collection: Collection) -> Sequence[Segment]:
+    def prepare_segments_for_new_collection(
+        self, collection: Collection
+    ) -> Sequence[Segment]:
         vector_segment = Segment(
             id=uuid4(),
             type=SegmentType.HNSW_DISTRIBUTED.value,
@@ -88,8 +90,6 @@ class DistributedSegmentManager(SegmentManager):
         if scope not in self._segment_cache[collection_id]:
             # For now, there is exactly one segment per scope for a given collection
             segment = self._sysdb.get_segments(collection=collection_id, scope=scope)[0]
-            # TODO: Register a callback to update the segment when it gets moved
-            # self._segment_directory.register_updated_segment_callback()
             self._segment_cache[collection_id][scope] = segment
         return self._segment_cache[collection_id][scope]
 

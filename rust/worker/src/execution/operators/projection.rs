@@ -10,8 +10,9 @@ use tracing::{error, trace, Instrument, Span};
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializerError,
     },
 };
 
@@ -104,10 +105,8 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
             }
             Err(e) => Err(*e),
         }?;
-        let materializer =
-            LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
-        let materialized_logs = materializer
-            .materialize()
+
+        let materialized_logs = materialize_logs(&record_segment_reader, &input.logs, None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
 

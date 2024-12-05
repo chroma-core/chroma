@@ -1,16 +1,18 @@
+use crate::segment::utils::distance_function_from_segment;
+
 use super::record_segment::ApplyMaterializedLogError;
+use super::utils::hnsw_params_from_segment;
 use super::{SegmentFlusher, SegmentWriter};
 use async_trait::async_trait;
-use chroma_distance::{DistanceFunction, DistanceFunctionError};
+use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{Index, IndexUuid};
-use chroma_index::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
 use chroma_types::SegmentUuid;
-use chroma_types::{get_metadata_value_as, MaterializedLogOperation, MetadataValue, Segment};
+use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -71,56 +73,6 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
     }
 }
 
-fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParamsFromSegment {
-    let metadata = match &segment.metadata {
-        Some(metadata) => metadata,
-        None => {
-            return HnswIndexParamsFromSegment {
-                m: DEFAULT_HNSW_M,
-                ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
-                ef_search: DEFAULT_HNSW_EF_SEARCH,
-            };
-        }
-    };
-
-    let m = match get_metadata_value_as::<i64>(metadata, "hnsw:M") {
-        Ok(m) => m as usize,
-        Err(_) => DEFAULT_HNSW_M,
-    };
-    let ef_construction = match get_metadata_value_as::<i64>(metadata, "hnsw:construction_ef") {
-        Ok(ef_construction) => ef_construction as usize,
-        Err(_) => DEFAULT_HNSW_EF_CONSTRUCTION,
-    };
-    let ef_search = match get_metadata_value_as::<i64>(metadata, "hnsw:search_ef") {
-        Ok(ef_search) => ef_search as usize,
-        Err(_) => DEFAULT_HNSW_EF_SEARCH,
-    };
-
-    HnswIndexParamsFromSegment {
-        m,
-        ef_construction,
-        ef_search,
-    }
-}
-
-pub fn distance_function_from_segment(
-    segment: &Segment,
-) -> Result<DistanceFunction, Box<DistributedHNSWSegmentFromSegmentError>> {
-    let space = match segment.metadata {
-        Some(ref metadata) => match metadata.get("hnsw:space") {
-            Some(MetadataValue::Str(space)) => space,
-            _ => "l2",
-        },
-        None => "l2",
-    };
-    match DistanceFunction::try_from(space) {
-        Ok(distance_function) => Ok(distance_function),
-        Err(e) => Err(Box::new(
-            DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(e),
-        )),
-    }
-}
-
 impl DistributedHNSWSegmentWriter {
     pub(crate) fn new(
         index: HnswIndexRef,
@@ -176,7 +128,9 @@ impl DistributedHNSWSegmentWriter {
             let distance_function = match distance_function_from_segment(segment) {
                 Ok(distance_function) => distance_function,
                 Err(e) => {
-                    return Err(e);
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
+                    ));
                 }
             };
 
@@ -208,7 +162,9 @@ impl DistributedHNSWSegmentWriter {
             let distance_function = match distance_function_from_segment(segment) {
                 Ok(distance_function) => distance_function,
                 Err(e) => {
-                    return Err(e);
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
+                    ));
                 }
             };
             let index = match hnsw_index_provider
@@ -373,37 +329,40 @@ impl DistributedHNSWSegmentReader {
             };
             let index_uuid = IndexUuid(index_uuid);
 
-            let index =
-                match hnsw_index_provider
-                    .get(&index_uuid, &segment.collection)
-                    .await
-                {
-                    Some(index) => index,
-                    None => {
-                        let distance_function = match distance_function_from_segment(segment) {
-                            Ok(distance_function) => distance_function,
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        };
-                        match hnsw_index_provider
-                            .open(
-                                &index_uuid,
-                                &segment.collection,
-                                dimensionality as i32,
-                                distance_function,
-                            )
-                            .await
-                        {
-                            Ok(index) => index,
-                            Err(e) => return Err(Box::new(
+            let index = match hnsw_index_provider
+                .get(&index_uuid, &segment.collection)
+                .await
+            {
+                Some(index) => index,
+                None => {
+                    let distance_function = match distance_function_from_segment(segment) {
+                        Ok(distance_function) => distance_function,
+                        Err(e) => {
+                            return Err(Box::new(
+                                DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
+                            ));
+                        }
+                    };
+                    match hnsw_index_provider
+                        .open(
+                            &index_uuid,
+                            &segment.collection,
+                            dimensionality as i32,
+                            distance_function,
+                        )
+                        .await
+                    {
+                        Ok(index) => index,
+                        Err(e) => {
+                            return Err(Box::new(
                                 DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
                                     *e,
                                 ),
-                            )),
+                            ))
                         }
                     }
-                };
+                }
+            };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
                 index, segment.id,

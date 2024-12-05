@@ -1,7 +1,6 @@
 use std::sync::atomic::AtomicU32;
 
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
-use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
 use chroma_types::{
     test_segment, Chunk, Collection, CollectionUuid, LogRecord, OperationRecord, Segment,
     SegmentScope,
@@ -10,12 +9,11 @@ use chroma_types::{
 use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
 
 use super::{
-    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter, LogMaterializer,
+    materialize_logs, metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter,
     SegmentFlusher, SegmentWriter,
 };
 
 pub struct TestSegment {
-    pub hnsw_provider: HnswIndexProvider,
     pub blockfile_provider: BlockfileProvider,
     pub collection: Collection,
     pub metadata_segment: Segment,
@@ -25,13 +23,14 @@ pub struct TestSegment {
 
 impl TestSegment {
     // WARN: The size of the log chunk should not be too large
-    async fn compact_log(&mut self, logs: Chunk<LogRecord>, offset: usize) {
-        let materializer =
-            LogMaterializer::new(None, logs, Some(AtomicU32::new(offset as u32).into()));
-        let materialized_logs = materializer
-            .materialize()
-            .await
-            .expect("Should be able to materialize log.");
+    async fn compact_log(&mut self, logs: Chunk<LogRecord>, next_offset: usize) {
+        let materialized_logs = materialize_logs(
+            &None,
+            &logs,
+            Some(AtomicU32::new(next_offset as u32).into()),
+        )
+        .await
+        .expect("Should be able to materialize log.");
 
         let mut metadata_writer =
             MetadataSegmentWriter::from_segment(&self.metadata_segment, &self.blockfile_provider)
@@ -82,8 +81,7 @@ impl TestSegment {
                 chunk
                     .first()
                     .copied()
-                    .expect("The chunk of offset ids to generate should not be empty.")
-                    - 1,
+                    .expect("The chunk of offset ids to generate should not be empty."),
             )
             .await;
         }
@@ -104,7 +102,6 @@ impl Default for TestSegment {
             version: 0,
         };
         Self {
-            hnsw_provider: test_hnsw_index_provider(),
             blockfile_provider: test_arrow_blockfile_provider(2 << 22),
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),

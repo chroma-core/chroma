@@ -35,14 +35,14 @@ rayon = { workspace = true }
 criterion = { workspace = true }
 chroma-benchmark = { workspace = true }
 proptest = { workspace = true }
-indicatif = "0.17.8"
-anyhow = "1.0.89"
+indicatif = "0.17.9"
+anyhow = "1.0.93"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
 
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.2"
 
 [[bench]]
 name = "full_text"

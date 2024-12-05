@@ -21,7 +21,7 @@ pypika>=0.48.9
 PyYAML>=6.0.0
 rich>=10.11.0
 tenacity>=8.2.3
-tokenizers>=0.13.2
+tokenizers>=0.13.2,<=0.20.3
 tqdm>=4.65.0
 typer>=0.9.0
 typing_extensions>=4.5.0

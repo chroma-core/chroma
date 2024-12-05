@@ -43,6 +43,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_types::Chunk;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
+use std::sync::atomic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -94,13 +95,19 @@ pub struct CompactOrchestrator {
     record_segment: Option<Segment>,
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
+    // Shared writers
+    writers: Option<(
+        RecordSegmentWriter,
+        Box<DistributedHNSWSegmentWriter>,
+        MetadataSegmentWriter<'static>,
+    )>,
     // number of write segments tasks
     num_write_tasks: i32,
     // Result Channel
     result_channel:
         Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
-    // Current max offset id.
-    curr_max_offset_id: Arc<AtomicU32>,
+    // Next offset id
+    next_offset_id: Arc<AtomicU32>,
     max_compaction_size: usize,
     max_partition_size: usize,
 }
@@ -174,7 +181,7 @@ impl CompactOrchestrator {
             tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
         >,
         record_segment: Option<Segment>,
-        curr_max_offset_id: Arc<AtomicU32>,
+        next_offset_id: Arc<AtomicU32>,
         max_compaction_size: usize,
         max_partition_size: usize,
     ) -> Self {
@@ -193,9 +200,10 @@ impl CompactOrchestrator {
             num_write_tasks: 0,
             result_channel,
             record_segment,
-            curr_max_offset_id,
+            next_offset_id,
             max_compaction_size,
             max_partition_size,
+            writers: None,
         }
     }
 
@@ -275,16 +283,16 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::Write;
 
-        let writer_res = self.get_segment_writers().await;
-        let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) = match writer_res
-        {
-            Ok(writers) => writers,
-            Err(e) => {
-                tracing::error!("Error creating writers for compaction {:?}", e);
-                terminate_with_error(self.result_channel.take(), e, ctx);
-                return;
-            }
-        };
+        if let Err(e) = self.init_segment_writers().await {
+            tracing::error!("Error creating writers for compaction {:?}", e);
+            terminate_with_error(self.result_channel.take(), e, ctx);
+            return;
+        }
+        let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
+            match self.writers.clone() {
+                Some((rec, hnsw, mt)) => (Some(rec), Some(hnsw), Some(mt)),
+                None => (None, None, None),
+            };
 
         self.num_write_tasks = partitions.len() as i32;
         for parition in partitions.iter() {
@@ -299,7 +307,7 @@ impl CompactOrchestrator {
                     .as_ref()
                     .expect("WriteSegmentsInput: Record segment not set in the input")
                     .clone(),
-                self.curr_max_offset_id.clone(),
+                self.next_offset_id.clone(),
             );
             let task = wrap(operator, input, self_address.clone());
             match self.dispatcher.send(task, Some(Span::current())).await {
@@ -374,16 +382,7 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn get_segment_writers(
-        &mut self,
-    ) -> Result<
-        (
-            RecordSegmentWriter,
-            Box<DistributedHNSWSegmentWriter>,
-            MetadataSegmentWriter<'static>,
-        ),
-        Box<dyn ChromaError>,
-    > {
+    async fn init_segment_writers(&mut self) -> Result<(), Box<dyn ChromaError>> {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
@@ -433,10 +432,15 @@ impl CompactOrchestrator {
         tracing::debug!("Record Segment Writer created");
         match RecordSegmentReader::from_segment(record_segment, &self.blockfile_provider).await {
             Ok(reader) => {
-                self.curr_max_offset_id = reader.get_current_max_offset_id();
+                self.next_offset_id = Arc::new(AtomicU32::new(
+                    reader
+                        .get_current_max_offset_id()
+                        .load(atomic::Ordering::SeqCst)
+                        + 1,
+                ));
             }
             Err(_) => {
-                self.curr_max_offset_id = Arc::new(AtomicU32::new(0));
+                self.next_offset_id = Arc::new(AtomicU32::new(1));
             }
         };
         self.record_segment = Some(record_segment.clone()); // auto deref.
@@ -489,29 +493,28 @@ impl CompactOrchestrator {
             return Err(Box::new(GetSegmentWritersError::NoHnswSegmentFound));
         }
         let hnsw_segment = hnsw_segment.unwrap();
-        let dimension = collection
-            .dimension
-            .expect("Dimension is required in the compactor");
+        if let Some(dim) = collection.dimension {
+            let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
+                hnsw_segment,
+                dim as usize,
+                self.hnsw_index_provider.clone(),
+            )
+            .await
+            {
+                Ok(writer) => writer,
+                Err(e) => {
+                    println!("Error creating HNSW Segment Writer: {:?}", e);
+                    return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
+                }
+            };
+            self.writers = Some((
+                record_segment_writer,
+                hnsw_segment_writer,
+                mt_segment_writer,
+            ))
+        }
 
-        let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
-            hnsw_segment,
-            dimension as usize,
-            self.hnsw_index_provider.clone(),
-        )
-        .await
-        {
-            Ok(writer) => writer,
-            Err(e) => {
-                println!("Error creating HNSW Segment Writer: {:?}", e);
-                return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
-            }
-        };
-
-        Ok((
-            record_segment_writer,
-            hnsw_segment_writer,
-            mt_segment_writer,
-        ))
+        Ok(())
     }
 
     pub(crate) async fn run(mut self) -> Result<CompactionResponse, Box<dyn ChromaError>> {
@@ -623,13 +626,21 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
             }
         };
         if self.num_write_tasks == 0 {
-            self.flush_s3(
+            if let (Some(rec), Some(hnsw), Some(mt)) = (
                 output.record_segment_writer,
                 output.hnsw_segment_writer,
                 output.metadata_segment_writer,
-                ctx.receiver(),
-            )
-            .await;
+            ) {
+                self.flush_s3(rec, hnsw, mt, ctx.receiver()).await;
+            } else {
+                // There is nothing to flush, proceed to register
+                self.register(
+                    self.pulled_log_offset.unwrap(),
+                    Arc::new([]),
+                    ctx.receiver(),
+                )
+                .await;
+            }
         }
     }
 }

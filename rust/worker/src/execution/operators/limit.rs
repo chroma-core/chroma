@@ -11,8 +11,9 @@ use tracing::{trace, Instrument, Span};
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializerError,
     },
 };
 
@@ -213,10 +214,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         let mut materialized_log_offset_ids = match &input.log_offset_ids {
             SignedRoaringBitmap::Include(rbm) => rbm.clone(),
             SignedRoaringBitmap::Exclude(rbm) => {
-                let materializer =
-                    LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
-                let materialized_logs = materializer
-                    .materialize()
+                let materialized_logs = materialize_logs(&record_segment_reader, &input.logs, None)
                     .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                     .await?;
 

@@ -10,8 +10,9 @@ use tonic::async_trait;
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializerError,
     },
 };
 
@@ -72,8 +73,7 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
             Err(e) => Err(*e),
         }?;
 
-        let materializer = LogMaterializer::new(record_segment_reader, input.logs.clone(), None);
-        let logs = materializer.materialize().await?;
+        let logs = materialize_logs(&record_segment_reader, &input.logs, None).await?;
 
         let target_vector;
         let target_embedding = if let DistanceFunction::Cosine = input.distance_function {

@@ -82,7 +82,7 @@ pub(crate) fn assign<H: Hasher>(
     }
 
     match max_member {
-        Some(max_member) => return Ok(max_member.as_ref().to_string()),
+        Some(max_member) => Ok(max_member.as_ref().to_string()),
         None => Err(AssignmentError::NoMembers),
     }
 }
