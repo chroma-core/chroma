@@ -19,6 +19,7 @@ tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
+opentelemetry-http = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 
 # Unlikely to be used in the workspace.

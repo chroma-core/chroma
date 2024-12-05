@@ -28,6 +28,7 @@ futures = "0.3"
 num_cpus = "1.16.0"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
+opentelemetry-http = { version = "0.27", features = ["reqwest"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 prost = "0.13"

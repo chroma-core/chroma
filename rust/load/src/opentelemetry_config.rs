@@ -5,7 +5,7 @@
 
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
@@ -71,8 +71,10 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     )]);
 
     // Prepare tracer.
+    let client = reqwest::Client::new();
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
+        .with_http_client(client)
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build span exporter");
@@ -88,8 +90,10 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // global::set_tracer_provider(tracer_provider);
 
     // Prepare meter.
+    let client = reqwest::Client::new();
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
+        .with_http_client(client)
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build metric exporter");
