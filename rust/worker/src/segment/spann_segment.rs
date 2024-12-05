@@ -345,12 +345,14 @@ impl ChromaError for SpannSegmentReaderError {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct SpannSegmentReader<'me> {
     index_reader: SpannIndexReader<'me>,
     id: SegmentUuid,
 }
 
 impl<'me> SpannSegmentReader<'me> {
+    #[allow(dead_code)]
     pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
