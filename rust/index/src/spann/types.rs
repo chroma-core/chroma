@@ -1402,7 +1402,6 @@ impl ChromaError for SpannIndexReaderError {
 #[derive(Debug)]
 pub struct SpannPosting {
     pub doc_offset_id: u32,
-    pub doc_version: u32,
     pub doc_embedding: Vec<f32>,
 }
 
@@ -1540,7 +1539,6 @@ impl<'me> SpannIndexReader<'me> {
             }
             posting_lists.push(SpannPosting {
                 doc_offset_id: *doc_offset_id,
-                doc_version: res.doc_versions[index],
                 doc_embedding: res.doc_embeddings
                     [index * self.dimensionality..(index + 1) * self.dimensionality]
                     .to_vec(),

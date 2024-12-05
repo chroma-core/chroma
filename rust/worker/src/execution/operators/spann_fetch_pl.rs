@@ -4,7 +4,7 @@ use thiserror::Error;
 use tonic::async_trait;
 
 use crate::{
-    execution::operator::Operator,
+    execution::operator::{Operator, OperatorType},
     segment::spann_segment::{SpannSegmentReader, SpannSegmentReaderContext},
 };
 
@@ -14,6 +14,7 @@ pub struct SpannFetchPlInput {
     head_id: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct SpannFetchPlOutput {
     posting_list: Vec<SpannPosting>,
@@ -40,6 +41,7 @@ impl ChromaError for SpannFetchPlError {
 pub struct SpannFetchPlOperator {}
 
 impl SpannFetchPlOperator {
+    #[allow(dead_code)]
     pub fn new() -> Box<Self> {
         Box::new(SpannFetchPlOperator {})
     }
@@ -66,5 +68,10 @@ impl Operator<SpannFetchPlInput, SpannFetchPlOutput> for SpannFetchPlOperator {
             .await
             .map_err(|_| SpannFetchPlError::SpannSegmentReaderError)?;
         Ok(SpannFetchPlOutput { posting_list })
+    }
+
+    // This operator is IO bound.
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IO
     }
 }

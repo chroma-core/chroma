@@ -8,8 +8,8 @@ use chroma_index::spann::types::{
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
+use chroma_types::SegmentUuid;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
-use chroma_types::{SegmentUuid, SpannPostingList};
 use thiserror::Error;
 use tonic::async_trait;
 use uuid::Uuid;
