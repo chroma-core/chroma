@@ -11,6 +11,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct SpannCentersSearchInput {
+    // TODO(Sanket): Ship the reader instead of constructing here.
     reader_context: SpannSegmentReaderContext,
     // Assumes that query is already normalized in case of cosine.
     query: Vec<f32>,
@@ -20,6 +21,7 @@ pub struct SpannCentersSearchInput {
     distance_function: DistanceFunction,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct SpannCentersSearchOutput {
     center_ids: Vec<usize>,
@@ -46,6 +48,7 @@ impl ChromaError for SpannCentersSearchError {
 pub struct SpannCentersSearchOperator {}
 
 impl SpannCentersSearchOperator {
+    #[allow(dead_code)]
     pub fn new() -> Box<Self> {
         Box::new(SpannCentersSearchOperator {})
     }
