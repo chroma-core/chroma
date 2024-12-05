@@ -342,6 +342,7 @@ fn init_centers(
     let mut lambda = 0.0;
     // Randomly choose centers.
     for _ in 0..num_iters {
+        // TODO(Sanket): Instead of copying full centers, we can use indices to avoid copying.
         let mut centers = vec![vec![0.0; input.embedding_dimension]; input.k];
         for center in centers.iter_mut() {
             let random_center = rand::thread_rng().gen_range(input.first..batch_end);
