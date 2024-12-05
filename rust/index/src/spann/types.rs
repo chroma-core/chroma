@@ -627,7 +627,6 @@ impl SpannIndexWriter {
             }
             // Candidate for reassignment.
             assigned_ids.insert(*doc_offset_id);
-            // TODO(Sanket): Implement reassign.
             self.reassign(
                 *doc_offset_id,
                 doc_versions[index],
@@ -787,7 +786,35 @@ impl SpannIndexWriter {
             // just includes one point from the entire list in this case.
             if clustering_output.num_clusters <= 1 {
                 tracing::warn!("Clustering split the posting list into only 1 cluster");
-                panic!("Clustering split the posting list into only 1 cluster");
+                let mut single_doc_offset_ids = Vec::with_capacity(1);
+                let mut single_doc_versions = Vec::with_capacity(1);
+                let mut single_doc_embeddings = Vec::with_capacity(self.dimensionality);
+                let label = clustering_output.cluster_labels.iter().nth(0);
+                match label {
+                    Some((index, _)) => {
+                        single_doc_offset_ids.push(doc_offset_ids[*index]);
+                        single_doc_versions.push(doc_versions[*index]);
+                        single_doc_embeddings.extend_from_slice(
+                            &doc_embeddings
+                                [*index * self.dimensionality..(*index + 1) * self.dimensionality],
+                        );
+                    }
+                    None => {
+                        tracing::warn!("No points in the posting list");
+                        return Ok(());
+                    }
+                }
+                let single_posting_list = SpannPostingList {
+                    doc_offset_ids: &single_doc_offset_ids,
+                    doc_versions: &single_doc_versions,
+                    doc_embeddings: &single_doc_embeddings,
+                };
+                write_guard
+                    .set("", head_id, &single_posting_list)
+                    .await
+                    .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+
+                return Ok(());
             } else {
                 new_posting_lists.push(Vec::with_capacity(
                     clustering_output.cluster_counts[0] * self.dimensionality,
@@ -810,6 +837,7 @@ impl SpannIndexWriter {
                 let mut same_head = false;
                 for k in 0..2 {
                     // Update the existing head.
+                    // TODO(Sanket): Need to understand what this achieves.
                     if !same_head
                         && self
                             .distance_function
