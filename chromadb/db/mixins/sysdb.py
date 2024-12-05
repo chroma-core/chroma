@@ -24,6 +24,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.ingest import Producer
 from chromadb.types import (
+    CollectionSegments,
     Database,
     OptionalArgument,
     Segment,
@@ -487,6 +488,13 @@ class SqlSysDB(SqlDB, SysDB):
                 collections = collections[offset:]
 
             return collections
+
+    @override
+    def get_collection_with_segments(self, collection_id: UUID) -> CollectionSegments:
+        return CollectionSegments(
+            collection=self.get_collections(id=collection_id)[0],
+            segments=self.get_segments(collection=collection_id),
+        )
 
     @trace_method("SqlSysDB.delete_segment", OpenTelemetryGranularity.ALL)
     @override
