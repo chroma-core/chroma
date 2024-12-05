@@ -701,8 +701,9 @@ impl SpannIndexWriter {
         let clustering_output;
         {
             let write_guard = self.posting_list_writer.lock().await;
-            // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
-            // deletes it.
+            if self.is_head_deleted(head_id as usize).await? {
+                return Ok(());
+            }
             let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = write_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
                 .await
@@ -1017,6 +1018,7 @@ impl SpannIndexWriter {
         let hnsw_read_guard = self.hnsw_index.inner.read();
         let hnsw_emb = hnsw_read_guard.get(head_id);
         // TODO(Sanket): Check for exact error.
+        // TODO(Sanket): We should get this information from hnswlib and not rely on error.
         if hnsw_emb.is_err() || hnsw_emb.unwrap().is_none() {
             return Ok(true);
         }
@@ -1273,6 +1275,7 @@ impl SpannIndexWriter {
     }
 
     // TODO(Sanket): Hook in the gc policy.
+    // TODO(Sanket): Garbage collect HNSW also.
     pub async fn garbage_collect(&self) -> Result<(), SpannIndexWriterError> {
         // Get all the heads.
         let non_deleted_heads;
