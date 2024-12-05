@@ -84,6 +84,7 @@ pub struct SpannKnnOrchestrator {
     // overhead.
 }
 
+#[allow(dead_code)]
 impl SpannKnnOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -96,12 +97,12 @@ impl SpannKnnOrchestrator {
         query_embedding: Vec<f32>,
         knn_projection: KnnProjectionOperator,
     ) -> Self {
-        let normalized_query_emb;
-        if knn_filter_output.distance_function == DistanceFunction::Cosine {
-            normalized_query_emb = normalize(&query_embedding);
-        } else {
-            normalized_query_emb = query_embedding;
-        }
+        let normalized_query_emb =
+            if knn_filter_output.distance_function == DistanceFunction::Cosine {
+                normalize(&query_embedding)
+            } else {
+                query_embedding
+            };
         Self {
             blockfile_provider,
             hnsw_provider,
