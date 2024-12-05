@@ -10,6 +10,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct SpannFetchPlInput {
+    // TODO(Sanket): Ship the reader instead of constructing here.
     reader_context: SpannSegmentReaderContext,
     head_id: u32,
 }
