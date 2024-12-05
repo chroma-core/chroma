@@ -26,9 +26,6 @@ class DistributedSegmentManager(SegmentManager):
     _system: System
     _opentelemetry_client: OpenTelemetryClient
     _instances: Dict[UUID, SegmentImplementation]
-    _collection_segment_cache: Dict[
-        UUID, CollectionSegments
-    ]  # collection_id -> (collection_with_version, segments)
     _segment_directory: SegmentDirectory
     _lock: Lock
     # _segment_server_stubs: Dict[str, SegmentServerStub]  # grpc_url -> grpc stub
@@ -40,7 +37,6 @@ class DistributedSegmentManager(SegmentManager):
         self._system = system
         self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
-        self._collection_segment_cache = {}
         self._lock = Lock()
 
     @trace_method(
@@ -82,22 +78,10 @@ class DistributedSegmentManager(SegmentManager):
         return [s["id"] for s in segments]
 
     @trace_method(
-        "DistributedSegmentManager.get_collection_segments",
-        OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
-    )
-    def get_collection_segments(self, collection_id: UUID) -> CollectionSegments:
-        if collection_id not in self._collection_segment_cache:
-            self._collection_segment_cache[collection_id] = self._sysdb.get_collection_with_segments(collection_id)
-        return self._collection_segment_cache[collection_id]
-
-    @trace_method(
         "DistributedSegmentManager.get_endpoint",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def get_endpoint(self, collection_id: UUID) -> str:
-        # Since grpc endpoint is endpoint is determined by collection uuid,
-        # the endpoint should be the same for all segments of the same collection
-        segment = self.get_collection_segments(collection_id)["segments"][0]
+    def get_endpoint(self, segment: Segment) -> str:
         return self._segment_directory.get_segment_endpoint(segment)
 
     @trace_method(

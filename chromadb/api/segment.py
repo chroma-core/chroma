@@ -580,7 +580,7 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        coll = self._get_collection(collection_id)
+        scan = self._scan(collection_id)
 
         # TODO: Replace with unified validation
         if where is not None:
@@ -619,7 +619,7 @@ class SegmentAPI(ServerAPI):
 
         return self._executor.get(
             GetPlan(
-                Scan(coll),
+                scan,
                 Filter(ids, where, where_document),
                 Limit(offset or 0, limit),
                 Projection(
@@ -676,7 +676,7 @@ class SegmentAPI(ServerAPI):
                 """
             )
 
-        coll = self._get_collection(collection_id)
+        scan = self._scan(collection_id)
 
         self._quota_enforcer.enforce(
             action=Action.DELETE,
@@ -690,7 +690,7 @@ class SegmentAPI(ServerAPI):
 
         if (where or where_document) or not ids:
             ids_to_delete = self._executor.get(
-                GetPlan(Scan(coll), Filter(ids, where, where_document))
+                GetPlan(scan, Filter(ids, where, where_document))
             )["ids"]
         else:
             ids_to_delete = ids
@@ -701,7 +701,7 @@ class SegmentAPI(ServerAPI):
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
+        self._validate_embedding_record_set(scan.collection, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -726,8 +726,7 @@ class SegmentAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
-        coll = self._get_collection(collection_id)
-        return self._executor.count(CountPlan(Scan(coll)))
+        return self._executor.count(CountPlan(self._scan(collection_id)))
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
     # We retry on version mismatch errors because the version of the collection
@@ -785,9 +784,9 @@ class SegmentAPI(ServerAPI):
         if where_document is not None:
             validate_where_document(where_document)
 
-        coll = self._get_collection(collection_id)
+        scan = self._scan(collection_id)
         for embedding in query_embeddings:
-            self._validate_dimension(coll, len(embedding), update=False)
+            self._validate_dimension(scan.collection, len(embedding), update=False)
 
         self._quota_enforcer.enforce(
             action=Action.QUERY,
@@ -800,7 +799,7 @@ class SegmentAPI(ServerAPI):
 
         return self._executor.knn(
             KNNPlan(
-                Scan(coll),
+                scan,
                 KNN(query_embeddings, n_results),
                 Filter(None, where, where_document),
                 Projection(
@@ -892,6 +891,18 @@ class SegmentAPI(ServerAPI):
                 f"Collection {collection_id} does not exist."
             )
         return collections[0]
+
+    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.ALL)
+    def _scan(self, collection_id: UUID) -> Scan:
+        collection_segments = self._sysdb.get_collection_with_segments(collection_id)
+        scope_to_segment = {segment["scope"]: segment for segment in collection_segments["segments"]}
+        return Scan(
+            collection=collection_segments["collection"],
+            knn=scope_to_segment[t.SegmentScope.VECTOR],
+            metadata=scope_to_segment[t.SegmentScope.METADATA],
+            # Local chroma do not have record segment
+            record=scope_to_segment.get(t.SegmentScope.RECORD, None),  # type: ignore[arg-type]
+        )
 
 
 def _records(

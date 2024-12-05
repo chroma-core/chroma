@@ -15,7 +15,7 @@ from chromadb.api.configuration import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
-from chromadb.errors import NotFoundError, UniqueConstraintError
+from chromadb.errors import InvalidCollectionException, NotFoundError, UniqueConstraintError
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -491,8 +491,13 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def get_collection_with_segments(self, collection_id: UUID) -> CollectionSegments:
+        collections = self.get_collections(id=collection_id)
+        if len(collections) == 0:
+            raise InvalidCollectionException(
+                f"Collection {collection_id} does not exist."
+            )
         return CollectionSegments(
-            collection=self.get_collections(id=collection_id)[0],
+            collection=collections[0],
             segments=self.get_segments(collection=collection_id),
         )
 

@@ -376,6 +376,8 @@ class GrpcSysDB(SysDB):
                 segments=[from_proto_segment(segment) for segment in response.segments]
             )
         except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
             logger.error(
                 f"Failed to get collection {collection_id} and its segments due to error: {e}"
             )
