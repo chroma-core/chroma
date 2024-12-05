@@ -72,8 +72,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
 
     // Prepare tracer.
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
+        .with_http()
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build span exporter");
@@ -90,8 +89,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
 
     // Prepare meter.
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-        .with_tonic()
-        .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
+        .with_http()
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build metric exporter");
