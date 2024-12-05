@@ -18,10 +18,12 @@ use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
 
+pub mod bit_difference;
 pub mod config;
 pub mod data_sets;
 pub mod opentelemetry_config;
 pub mod rest;
+pub mod words;
 pub mod workloads;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
@@ -104,16 +106,25 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         gq: GetQuery,
         guac: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error>>;
+
     async fn query(
         &self,
         client: &ChromaClient,
         vq: QueryQuery,
         guac: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error>>;
+
+    async fn upsert(
+        &self,
+        client: &ChromaClient,
+        uq: UpsertQuery,
+        guac: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /////////////////////////////////////////// Distribution ///////////////////////////////////////////
 
+/// Distribution size and shape.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum Distribution {
     Constant(usize),
@@ -134,6 +145,17 @@ impl Distribution {
             }
         }
     }
+}
+
+/////////////////////////////////////////////// Skew ///////////////////////////////////////////////
+
+/// Distribution shape, without size.
+#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub enum Skew {
+    #[serde(rename = "uniform")]
+    Uniform,
+    #[serde(rename = "zipf")]
+    Zipf { theta: f64 },
 }
 
 /////////////////////////////////////////// MetadataQuery //////////////////////////////////////////
@@ -172,6 +194,7 @@ impl DocumentQuery {
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct GetQuery {
+    pub skew: Skew,
     pub limit: Distribution,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MetadataQuery>,
@@ -183,11 +206,40 @@ pub struct GetQuery {
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct QueryQuery {
+    pub skew: Skew,
     pub limit: Distribution,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MetadataQuery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document: Option<DocumentQuery>,
+}
+
+//////////////////////////////////////////// KeySelector ///////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "type")]
+pub enum KeySelector {
+    #[serde(rename = "index")]
+    Index(usize),
+    #[serde(rename = "random")]
+    Random(Skew),
+}
+
+//////////////////////////////////////////// UpsertQuery ///////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct UpsertQuery {
+    pub key: KeySelector,
+    pub batch_size: usize,
+    pub associativity: f64,
+}
+
+/////////////////////////////////////////// WorkloadState //////////////////////////////////////////
+
+#[derive(Clone)]
+pub struct WorkloadState {
+    seq_no: u64,
+    guac: Guacamole,
 }
 
 ///////////////////////////////////////////// Workload /////////////////////////////////////////////
@@ -209,6 +261,10 @@ pub enum Workload {
         after: chrono::DateTime<chrono::FixedOffset>,
         wrap: Box<Workload>,
     },
+    #[serde(rename = "load")]
+    Load,
+    #[serde(rename = "random")]
+    RandomUpsert(KeySelector),
 }
 
 impl Workload {
@@ -234,6 +290,8 @@ impl Workload {
                 }
             }
             Workload::Delay { after: _, wrap } => wrap.resolve_by_name(workloads)?,
+            Workload::Load => {}
+            Workload::RandomUpsert(_) => {}
         }
         Ok(())
     }
@@ -242,7 +300,7 @@ impl Workload {
         &self,
         client: &ChromaClient,
         data_set: &dyn DataSet,
-        guac: &mut Guacamole,
+        state: &mut WorkloadState,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             Workload::Nop => {
@@ -257,18 +315,18 @@ impl Workload {
             }
             Workload::Get(get) => {
                 data_set
-                    .get(client, get.clone(), guac)
+                    .get(client, get.clone(), &mut state.guac)
                     .instrument(tracing::info_span!("get"))
                     .await
             }
             Workload::Query(query) => {
                 data_set
-                    .query(client, query.clone(), guac)
+                    .query(client, query.clone(), &mut state.guac)
                     .instrument(tracing::info_span!("query"))
                     .await
             }
             Workload::Hybrid(hybrid) => {
-                let scale: f64 = any(guac);
+                let scale: f64 = any(&mut state.guac);
                 let mut total = scale
                     * hybrid
                         .iter()
@@ -282,7 +340,7 @@ impl Workload {
                     }
                     if workload.is_active() {
                         if *p >= total {
-                            return Box::pin(workload.step(client, data_set, guac)).await;
+                            return Box::pin(workload.step(client, data_set, state)).await;
                         }
                         total -= *p;
                     }
@@ -291,7 +349,41 @@ impl Workload {
                     "miscalculation of total hybrid probabilities".to_string(),
                 )))
             }
-            Workload::Delay { after: _, wrap } => Box::pin(wrap.step(client, data_set, guac)).await,
+            Workload::Delay { after: _, wrap } => {
+                Box::pin(wrap.step(client, data_set, state)).await
+            }
+            Workload::Load => {
+                data_set
+                    .upsert(
+                        client,
+                        UpsertQuery {
+                            key: KeySelector::Index(state.seq_no as usize),
+                            batch_size: 100,
+                            // Associativity is the ratio of documents in a cluster to documents
+                            // written by the workload.  It is ignored for load.
+                            associativity: 0.0,
+                        },
+                        &mut state.guac,
+                    )
+                    .instrument(tracing::info_span!("load"))
+                    .await
+            }
+            Workload::RandomUpsert(key) => {
+                data_set
+                    .upsert(
+                        client,
+                        UpsertQuery {
+                            key: key.clone(),
+                            batch_size: 100,
+                            // Associativity is the ratio of documents in a cluster to documents
+                            // written by the workload.  It is ignored for load.
+                            associativity: 0.0,
+                        },
+                        &mut state.guac,
+                    )
+                    .instrument(tracing::info_span!("load"))
+                    .await
+            }
         }
     }
 
@@ -303,6 +395,8 @@ impl Workload {
             Workload::Query(_) => true,
             Workload::Hybrid(hybrid) => hybrid.iter().any(|(_, w)| w.is_active()),
             Workload::Delay { after, wrap } => chrono::Utc::now() >= *after && wrap.is_active(),
+            Workload::Load => true,
+            Workload::RandomUpsert(_) => true,
         }
     }
 }
@@ -545,7 +639,9 @@ impl LoadService {
                 }
             }
         });
+        let mut seq_no = 0u64;
         while !done.load(std::sync::atomic::Ordering::Relaxed) {
+            seq_no += 1;
             let delay = interarrival_duration(spec.throughput)(&mut guac);
             next_op += delay;
             let now = Instant::now();
@@ -560,10 +656,11 @@ impl LoadService {
                 let workload = spec.workload.clone();
                 let client = Arc::clone(&client);
                 let data_set = Arc::clone(&spec.data_set);
-                let mut guacamole = Guacamole::new(any(&mut guac));
+                let guac = Guacamole::new(any(&mut guac));
+                let mut state = WorkloadState { seq_no, guac };
                 let fut = async move {
                     workload
-                        .step(&client, &*data_set, &mut guacamole)
+                        .step(&client, &*data_set, &mut state)
                         .await
                         .map_err(|err| {
                             tracing::error!("workload failed: {err:?}");
@@ -812,6 +909,11 @@ mod tests {
       1.0,
       {
         "get": {
+          "skew": {
+            "zipf": {
+              "theta": 0.999
+            }
+          },
           "limit": {
             "Constant": 10
           }
@@ -822,6 +924,11 @@ mod tests {
       1.0,
       {
         "query": {
+          "skew": {
+            "zipf": {
+              "theta": 0.999
+            }
+          },
           "limit": {
             "Constant": 10
           }
@@ -845,6 +952,7 @@ mod tests {
             (
                 1.0,
                 Workload::Get(GetQuery {
+                    skew: Skew::Zipf { theta: 0.999 },
                     limit: Distribution::Constant(10),
                     document: None,
                     metadata: None,
@@ -853,6 +961,7 @@ mod tests {
             (
                 1.0,
                 Workload::Query(QueryQuery {
+                    skew: Skew::Zipf { theta: 0.999 },
                     limit: Distribution::Constant(10),
                     document: None,
                     metadata: None,

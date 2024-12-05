@@ -1,4 +1,4 @@
-use chroma_load::{Distribution, GetQuery, QueryQuery, Workload};
+use chroma_load::{Distribution, GetQuery, QueryQuery, Skew, Workload};
 
 fn main() {
     let w = Workload::Hybrid(vec![
@@ -7,6 +7,7 @@ fn main() {
         (
             1.0,
             Workload::Get(GetQuery {
+                skew: Skew::Zipf { theta: 0.999 },
                 limit: Distribution::Constant(10),
                 document: None,
                 metadata: None,
@@ -15,6 +16,7 @@ fn main() {
         (
             1.0,
             Workload::Query(QueryQuery {
+                skew: Skew::Zipf { theta: 0.999 },
                 limit: Distribution::Constant(10),
                 document: None,
                 metadata: None,
