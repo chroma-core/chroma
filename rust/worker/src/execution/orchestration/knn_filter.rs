@@ -2,7 +2,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::Segment;
+use chroma_types::{CollectionSegments, Segment};
 use thiserror::Error;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tonic::async_trait;
@@ -14,7 +14,6 @@ use crate::{
         operator::{wrap, TaskError, TaskResult},
         operators::{
             fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-            fetch_segment::{FetchSegmentError, FetchSegmentOperator, FetchSegmentOutput},
             filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
             knn_hnsw::KnnHnswError,
             knn_log::KnnLogError,
@@ -38,12 +37,8 @@ use crate::{
 pub enum KnnError {
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
-    #[error("Empty collection")]
-    EmptyCollection,
     #[error("Error running Fetch Log Operator: {0}")]
     FetchLog(#[from] FetchLogError),
-    #[error("Error running Fetch Segment Operator: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
     #[error("Error running Filter Operator: {0}")]
     Filter(#[from] FilterError),
     #[error("Error creating hnsw segment reader: {0}")]
@@ -74,9 +69,7 @@ impl ChromaError for KnnError {
     fn code(&self) -> ErrorCodes {
         match self {
             KnnError::Channel(e) => e.code(),
-            KnnError::EmptyCollection => ErrorCodes::Internal,
             KnnError::FetchLog(e) => e.code(),
-            KnnError::FetchSegment(e) => e.code(),
             KnnError::Filter(e) => e.code(),
             KnnError::HnswReader(e) => e.code(),
             KnnError::KnnLog(e) => e.code(),
@@ -118,6 +111,38 @@ pub struct KnnFilterOutput {
 
 type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 
+/// The `KnnFilterOrchestrator` chains a sequence of operators in sequence to evaluate
+/// the first half of a `<collection>.query(...)` query from the user
+///
+/// # Pipeline
+/// ```text
+///       ┌────────────┐           
+///       │            │           
+///       │  on_start  │           
+///       │            │           
+///       └──────┬─────┘           
+///              │                 
+///              ▼                 
+///    ┌────────────────────┐      
+///    │                    │      
+///    │  FetchLogOperator  │      
+///    │                    │      
+///    └─────────┬──────────┘      
+///              │                 
+///              ▼                 
+///    ┌───────────────────┐       
+///    │                   │       
+///    │   FilterOperator  │       
+///    │                   │       
+///    └─────────┬─────────┘       
+///              │                 
+///              ▼                 
+///     ┌──────────────────┐       
+///     │                  │       
+///     │  result_channel  │       
+///     │                  │       
+///     └──────────────────┘       
+/// ```
 #[derive(Debug)]
 pub struct KnnFilterOrchestrator {
     // Orchestrator parameters
@@ -126,13 +151,14 @@ pub struct KnnFilterOrchestrator {
     hnsw_provider: HnswIndexProvider,
     queue: usize,
 
-    // Fetch logs and segments
-    fetch_log: FetchLogOperator,
-    fetch_segment: FetchSegmentOperator,
+    // Collection segments
+    collection_segments: CollectionSegments,
 
-    // Fetch output
-    fetch_log_output: Option<FetchLogOutput>,
-    fetch_segment_output: Option<FetchSegmentOutput>,
+    // Fetch logs
+    fetch_log: FetchLogOperator,
+
+    // Fetched logs
+    fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
     filter: FilterOperator,
@@ -147,8 +173,8 @@ impl KnnFilterOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         hnsw_provider: HnswIndexProvider,
         queue: usize,
+        collection_segments: CollectionSegments,
         fetch_log: FetchLogOperator,
-        fetch_segment: FetchSegmentOperator,
         filter: FilterOperator,
     ) -> Self {
         Self {
@@ -156,10 +182,9 @@ impl KnnFilterOrchestrator {
             dispatcher,
             hnsw_provider,
             queue,
+            collection_segments,
             fetch_log,
-            fetch_segment,
-            fetch_log_output: None,
-            fetch_segment_output: None,
+            fetched_logs: None,
             filter,
             result_channel: None,
         }
@@ -182,27 +207,6 @@ impl KnnFilterOrchestrator {
         tracing::error!("Error running orchestrator: {}", &knn_err);
         terminate_with_error(self.result_channel.take(), knn_err, ctx);
     }
-
-    async fn try_start_filter_operator(&mut self, ctx: &ComponentContext<Self>) {
-        if let (Some(logs), Some(segments)) = (
-            self.fetch_log_output.as_ref(),
-            self.fetch_segment_output.as_ref(),
-        ) {
-            let task = wrap(
-                Box::new(self.filter.clone()),
-                FilterInput {
-                    logs: logs.clone(),
-                    blockfile_provider: self.blockfile_provider.clone(),
-                    metadata_segment: segments.metadata_segment.clone(),
-                    record_segment: segments.record_segment.clone(),
-                },
-                ctx.receiver(),
-            );
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -216,16 +220,10 @@ impl Component for KnnFilterOrchestrator {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        let log_task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
-        let segment_task = wrap(Box::new(self.fetch_segment.clone()), (), ctx.receiver());
-        if let Err(err) = self.dispatcher.send(log_task, Some(Span::current())).await {
+        let task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
+        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
             self.terminate_with_error(ctx, err);
-        } else if let Err(err) = self
-            .dispatcher
-            .send(segment_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
+            return;
         }
     }
 }
@@ -246,37 +244,22 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
                 return;
             }
         };
-        self.fetch_log_output = Some(output);
-        self.try_start_filter_operator(ctx).await;
-    }
-}
 
-#[async_trait]
-impl Handler<TaskResult<FetchSegmentOutput, FetchSegmentError>> for KnnFilterOrchestrator {
-    type Result = ();
+        self.fetched_logs = Some(output.clone());
 
-    async fn handle(
-        &mut self,
-        message: TaskResult<FetchSegmentOutput, FetchSegmentError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
-        };
-
-        // If dimension is not set and segment is uninitialized,  we assume
-        // this is a query on empty collection, so we return early here
-        if output.collection.dimension.is_none() && output.vector_segment.file_path.is_empty() {
-            self.terminate_with_error(ctx, KnnError::EmptyCollection);
-            return;
+        let task = wrap(
+            Box::new(self.filter.clone()),
+            FilterInput {
+                logs: output,
+                blockfile_provider: self.blockfile_provider.clone(),
+                metadata_segment: self.collection_segments.metadata_segment.clone(),
+                record_segment: self.collection_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+        );
+        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+            self.terminate_with_error(ctx, err);
         }
-
-        self.fetch_segment_output = Some(output);
-        self.try_start_filter_operator(ctx).await;
     }
 }
 
@@ -296,26 +279,23 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 return;
             }
         };
-        let segments = self
-            .fetch_segment_output
-            .take()
-            .expect("FetchSegmentOperator should have finished already");
-        let collection_dimension = match segments.collection.dimension {
+        let collection_dimension = match self.collection_segments.collection.dimension {
             Some(dimension) => dimension as u32,
             None => {
                 self.terminate_with_error(ctx, KnnError::NoCollectionDimension);
                 return;
             }
         };
-        let distance_function = match distance_function_from_segment(&segments.vector_segment) {
-            Ok(distance_function) => distance_function,
-            Err(_) => {
-                self.terminate_with_error(ctx, KnnError::InvalidDistanceFunction);
-                return;
-            }
-        };
+        let distance_function =
+            match distance_function_from_segment(&self.collection_segments.vector_segment) {
+                Ok(distance_function) => distance_function,
+                Err(_) => {
+                    self.terminate_with_error(ctx, KnnError::InvalidDistanceFunction);
+                    return;
+                }
+            };
         let hnsw_reader = match DistributedHNSWSegmentReader::from_segment(
-            &segments.vector_segment,
+            &self.collection_segments.vector_segment,
             collection_dimension as usize,
             self.hnsw_provider.clone(),
         )
@@ -335,14 +315,14 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             if chan
                 .send(Ok(KnnFilterOutput {
                     logs: self
-                        .fetch_log_output
+                        .fetched_logs
                         .take()
                         .expect("FetchLogOperator should have finished already"),
                     distance_function,
                     filter_output: output,
                     hnsw_reader,
-                    record_segment: segments.record_segment,
-                    vector_segment: segments.vector_segment,
+                    record_segment: self.collection_segments.record_segment.clone(),
+                    vector_segment: self.collection_segments.vector_segment.clone(),
                     dimension: collection_dimension as usize,
                 }))
                 .is_err()
