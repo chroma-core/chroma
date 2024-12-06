@@ -9,20 +9,20 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct SpannFetchPlInput {
+pub(crate) struct SpannFetchPlInput {
     // TODO(Sanket): Ship the reader instead of constructing here.
-    reader_context: SpannSegmentReaderContext,
-    head_id: u32,
+    pub(crate) reader_context: SpannSegmentReaderContext,
+    pub(crate) head_id: u32,
 }
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct SpannFetchPlOutput {
-    posting_list: Vec<SpannPosting>,
+pub(crate) struct SpannFetchPlOutput {
+    pub(crate) posting_list: Vec<SpannPosting>,
 }
 
 #[derive(Error, Debug)]
-pub enum SpannFetchPlError {
+pub(crate) enum SpannFetchPlError {
     #[error("Error creating spann segment reader")]
     SpannSegmentReaderCreationError,
     #[error("Error querying reader")]
@@ -38,8 +38,8 @@ impl ChromaError for SpannFetchPlError {
     }
 }
 
-#[derive(Debug)]
-pub struct SpannFetchPlOperator {}
+#[derive(Debug, Clone)]
+pub(crate) struct SpannFetchPlOperator {}
 
 impl SpannFetchPlOperator {
     #[allow(dead_code)]

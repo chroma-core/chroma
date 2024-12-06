@@ -7,22 +7,22 @@ use crate::execution::operator::Operator;
 use super::knn::RecordDistance;
 
 #[derive(Clone, Debug)]
-pub struct SpannKnnMergeOperator {
-    pub k: u32,
+pub(crate) struct SpannKnnMergeOperator {
+    pub(crate) k: u32,
 }
 
 #[derive(Debug)]
-pub struct SpannKnnMergeInput {
-    pub records: Vec<Vec<RecordDistance>>,
+pub(crate) struct SpannKnnMergeInput {
+    pub(crate) records: Vec<Vec<RecordDistance>>,
 }
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct SpannKnnMergeOutput {
-    pub merged_records: Vec<RecordDistance>,
+pub(crate) struct SpannKnnMergeOutput {
+    pub(crate) merged_records: Vec<RecordDistance>,
 }
 
-pub type SpannKnnMergeError = ();
+pub(crate) type SpannKnnMergeError = ();
 
 struct RecordHeapEntry {
     distance: f32,

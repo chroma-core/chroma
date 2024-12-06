@@ -12,28 +12,28 @@ use crate::execution::operator::Operator;
 use super::knn::RecordDistance;
 
 #[derive(Debug)]
-pub struct SpannBfPlInput {
+pub(crate) struct SpannBfPlInput {
     // TODO(Sanket): We might benefit from a flat structure which might be more cache friendly.
     // Posting list data.
-    posting_list: Vec<SpannPosting>,
+    pub(crate) posting_list: Vec<SpannPosting>,
     // Number of results to return.
-    k: usize,
+    pub(crate) k: usize,
     // Bitmap of records to include/exclude.
-    filter: SignedRoaringBitmap,
+    pub(crate) filter: SignedRoaringBitmap,
     // Distance function.
-    distance_function: DistanceFunction,
+    pub(crate) distance_function: DistanceFunction,
     // Query embedding.
-    query: Vec<f32>,
+    pub(crate) query: Vec<f32>,
 }
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct SpannBfPlOutput {
-    records: Vec<RecordDistance>,
+pub(crate) struct SpannBfPlOutput {
+    pub(crate) records: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
-pub enum SpannBfPlError {}
+pub(crate) enum SpannBfPlError {}
 
 impl ChromaError for SpannBfPlError {
     fn code(&self) -> ErrorCodes {
@@ -41,12 +41,13 @@ impl ChromaError for SpannBfPlError {
     }
 }
 
-#[derive(Debug)]
-pub struct SpannBfPlOperator {}
+#[derive(Debug, Clone)]
+pub(crate) struct SpannBfPlOperator {}
 
 #[allow(dead_code)]
 impl SpannBfPlOperator {
-    pub fn new() -> Box<Self> {
+    #[allow(dead_code)]
+    pub(crate) fn new() -> Box<Self> {
         Box::new(SpannBfPlOperator {})
     }
 }
