@@ -368,6 +368,7 @@ class SqlSysDB(SqlDB, SysDB):
                         scope=scope,
                         collection=collection,
                         metadata=metadata,
+                        file_paths={},
                     )
                 )
 

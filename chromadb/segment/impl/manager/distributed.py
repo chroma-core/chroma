@@ -55,6 +55,7 @@ class DistributedSegmentManager(SegmentManager):
             metadata=PersistentHnswParams.extract(collection.metadata)
             if collection.metadata
             else None,
+            file_paths={},
         )
         metadata_segment = Segment(
             id=uuid4(),
@@ -62,6 +63,7 @@ class DistributedSegmentManager(SegmentManager):
             scope=SegmentScope.METADATA,
             collection=collection.id,
             metadata=None,
+            file_paths={},
         )
         record_segment = Segment(
             id=uuid4(),
@@ -69,6 +71,7 @@ class DistributedSegmentManager(SegmentManager):
             scope=SegmentScope.RECORD,
             collection=collection.id,
             metadata=None,
+            file_paths={},
         )
         return [vector_segment, record_segment, metadata_segment]
 

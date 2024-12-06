@@ -176,6 +176,7 @@ class Segment(TypedDict):
     scope: SegmentScope
     collection: UUID
     metadata: Optional[Metadata]
+    file_paths: Mapping[str, Sequence[str]]
 
 class CollectionSegments(TypedDict):
     collection: Collection
