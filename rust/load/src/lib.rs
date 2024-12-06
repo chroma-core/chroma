@@ -401,6 +401,58 @@ impl Workload {
     }
 }
 
+//////////////////////////////////////////// Throughput ////////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub enum Throughput {
+    /// Target a constant throughput.
+    #[serde(rename = "constant")]
+    Constant(f64),
+    /// Operate in a sinusoidal fashion, oscillating between min and max throughput over
+    /// periodicity seconds.
+    #[serde(rename = "sinusoidal")]
+    Sinusoidal {
+        /// Trough throughput.
+        min: f64,
+        /// Peak throughput.
+        max: f64,
+        /// Periodicity in seconds.
+        periodicity: usize,
+    },
+    /// Sawtooth throughput, increasing linearly from min to max throughput over periodicity
+    #[serde(rename = "sawtooth")]
+    Sawtooth {
+        /// Starting throughput.
+        min: f64,
+        /// Ending throughput.
+        max: f64,
+        /// Periodicity in seconds.
+        periodicity: usize,
+    },
+}
+
+impl std::fmt::Display for Throughput {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Throughput::Constant(throughput) => write!(f, "constant: {}", throughput),
+            Throughput::Sinusoidal {
+                min,
+                max,
+                periodicity,
+            } => {
+                write!(f, "sinusoidal: {} to {} over {}s", min, max, periodicity)
+            }
+            Throughput::Sawtooth {
+                min,
+                max,
+                periodicity,
+            } => {
+                write!(f, "sawtooth: {} to {} over {}s", min, max, periodicity)
+            }
+        }
+    }
+}
+
 ////////////////////////////////////////// RunningWorkload /////////////////////////////////////////
 
 #[derive(Clone, Debug)]
@@ -410,7 +462,7 @@ pub struct RunningWorkload {
     workload: Workload,
     data_set: Arc<dyn DataSet>,
     expires: chrono::DateTime<chrono::FixedOffset>,
-    throughput: f64,
+    throughput: Throughput,
 }
 
 impl RunningWorkload {
@@ -428,7 +480,7 @@ pub struct WorkloadSummary {
     pub workload: serde_json::Value,
     pub data_set: serde_json::Value,
     pub expires: String,
-    pub throughput: f64,
+    pub throughput: Throughput,
 }
 
 //////////////////////////////////////////// LoadHarness ///////////////////////////////////////////
@@ -449,7 +501,7 @@ impl LoadHarness {
         workload: Workload,
         data_set: &Arc<dyn DataSet>,
         expires: chrono::DateTime<chrono::FixedOffset>,
-        throughput: f64,
+        throughput: Throughput,
     ) -> Uuid {
         let uuid = Uuid::new_v4();
         let data_set = Arc::clone(data_set);
@@ -542,7 +594,7 @@ impl LoadService {
         data_set: String,
         mut workload: Workload,
         expires: chrono::DateTime<chrono::FixedOffset>,
-        throughput: f64,
+        throughput: Throughput,
     ) -> Result<Uuid, Error> {
         let Some(data_set) = self.data_sets().iter().find(|ds| ds.name() == data_set) else {
             return Err(Error::NotFound("data set not found".to_string()));
@@ -628,7 +680,7 @@ impl LoadService {
         let client = Arc::new(client());
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(spec.throughput.ceil() as usize);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
         let _ = tx
             .send(tokio::spawn(async move { Ok::<(), Error>(()) }))
             .await;
@@ -640,9 +692,33 @@ impl LoadService {
             }
         });
         let mut seq_no = 0u64;
+        let start = Instant::now();
         while !done.load(std::sync::atomic::Ordering::Relaxed) {
             seq_no += 1;
-            let delay = interarrival_duration(spec.throughput)(&mut guac);
+            let throughput = match spec.throughput {
+                Throughput::Constant(throughput) => throughput,
+                Throughput::Sinusoidal {
+                    min,
+                    max,
+                    periodicity,
+                } => {
+                    let elapsed = start.elapsed().as_secs_f64();
+                    let period = periodicity as f64;
+                    let phase = (elapsed / period).fract();
+                    min + 0.5 * (max - min) * (1.0 + phase.sin())
+                }
+                Throughput::Sawtooth {
+                    min,
+                    max,
+                    periodicity,
+                } => {
+                    let elapsed = start.elapsed().as_secs_f64();
+                    let period = periodicity as f64;
+                    let phase = (elapsed / period).fract();
+                    min + (max - min) * phase
+                }
+            };
+            let delay = interarrival_duration(throughput)(&mut guac);
             next_op += delay;
             let now = Instant::now();
             if next_op > now {
@@ -885,7 +961,7 @@ mod tests {
             "nop".to_string(),
             Workload::ByName("get-no-filter".to_string()),
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
-            1.0,
+            Throughput::Constant(1.0),
         )
         .unwrap();
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
