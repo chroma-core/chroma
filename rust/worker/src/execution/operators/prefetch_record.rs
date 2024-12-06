@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Chunk, LogRecord, Segment};
 use thiserror::Error;
 use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
@@ -16,16 +14,15 @@ use crate::{
     },
 };
 
+use super::projection::ProjectionInput;
+
 /// The `PrefetchRecordOperator` prefetches the relevant records from the record segments to the cache
 ///
 /// # Parameters
 /// None
 ///
 /// # Inputs
-/// - `logs`: The latest logs of the collection
-/// - `blockfile_provider`: The blockfile provider
-/// - `record_segment`: The record segment information
-/// - `offset_ids`: The offset ids of the records to prefetch
+/// Identical to ProjectionInput
 ///
 /// # Outputs
 /// None
@@ -35,13 +32,7 @@ use crate::{
 #[derive(Debug)]
 pub struct PrefetchRecordOperator {}
 
-#[derive(Debug)]
-pub struct PrefetchRecordInput {
-    pub logs: Chunk<LogRecord>,
-    pub blockfile_provider: BlockfileProvider,
-    pub record_segment: Segment,
-    pub offset_ids: Vec<u32>,
-}
+pub type PrefetchRecordInput = ProjectionInput;
 
 pub type PrefetchRecordOutput = ();
 

@@ -1,5 +1,6 @@
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::CollectionSegments;
 use thiserror::Error;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tonic::async_trait;
@@ -11,13 +12,9 @@ use crate::{
         operator::{wrap, TaskError, TaskResult},
         operators::{
             fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-            fetch_segment::{FetchSegmentError, FetchSegmentOperator, FetchSegmentOutput},
             filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
             limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
-            prefetch_record::{
-                PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator,
-                PrefetchRecordOutput,
-            },
+            prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
             projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
         },
         orchestration::common::terminate_with_error,
@@ -31,8 +28,6 @@ pub enum GetError {
     Channel(#[from] ChannelError),
     #[error("Error running Fetch Log Operator: {0}")]
     FetchLog(#[from] FetchLogError),
-    #[error("Error running Fetch Segment Operator: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
     #[error("Error running Filter Operator: {0}")]
     Filter(#[from] FilterError),
     #[error("Error running Limit Operator: {0}")]
@@ -50,7 +45,6 @@ impl ChromaError for GetError {
         match self {
             GetError::Channel(e) => e.code(),
             GetError::FetchLog(e) => e.code(),
-            GetError::FetchSegment(e) => e.code(),
             GetError::Filter(e) => e.code(),
             GetError::Limit(e) => e.code(),
             GetError::Panic(_) => ErrorCodes::Aborted,
@@ -81,62 +75,47 @@ type GetResult = Result<GetOutput, GetError>;
 ///
 /// # Pipeline
 /// ```text
-///                       ┌────────────┐
-///                       │            │
-///           ┌───────────┤  on_start  ├────────────────┐
-///           │           │            │                │
-///           │           └────────────┘                │
-///           │                                         │
-///           ▼                                         ▼
-///  ┌────────────────────┐            ┌────────────────────────┐
-///  │                    │            │                        │
-///  │  FetchLogOperator  │            │  FetchSegmentOperator  │
-///  │                    │            │                        │
-///  └────────┬───────────┘            └────────────────┬───────┘
-///           │                                         │
-///           │                                         │
-///           │     ┌─────────────────────────────┐     │
-///           │     │                             │     │
-///           └────►│  try_start_filter_operator  │◄────┘
-///                 │                             │
-///                 └────────────┬────────────────┘
-///                              │
-///                              ▼
-///                    ┌───────────────────┐
-///                    │                   │
-///                    │   FilterOperator  │
-///                    │                   │
-///                    └─────────┬─────────┘
-///                              │
-///                              ▼
-///                     ┌─────────────────┐
-///                     │                 │
-///                     │  LimitOperator  │
-///                     │                 │
-///                     └────────┬────────┘
-///                              │
-///                              ▼
-///                   ┌──────────────────────┐
-///                   │                      │
-///                   │  ProjectionOperator  │
-///                   │                      │
-///                   └──────────┬───────────┘
-///                              │
-///                              ▼
-///                     ┌──────────────────┐
-///                     │                  │
-///                     │  result_channel  │
-///                     │                  │
-///                     └──────────────────┘
+///       ┌────────────┐           
+///       │            │           
+///       │  on_start  │           
+///       │            │           
+///       └──────┬─────┘           
+///              │                 
+///              ▼                 
+///    ┌────────────────────┐      
+///    │                    │      
+///    │  FetchLogOperator  │      
+///    │                    │      
+///    └─────────┬──────────┘      
+///              │                 
+///              ▼                 
+///    ┌───────────────────┐       
+///    │                   │       
+///    │   FilterOperator  │       
+///    │                   │       
+///    └─────────┬─────────┘       
+///              │                 
+///              ▼                 
+///     ┌─────────────────┐        
+///     │                 │        
+///     │  LimitOperator  │        
+///     │                 │        
+///     └────────┬────────┘        
+///              │                 
+///              ▼                 
+///   ┌──────────────────────┐     
+///   │                      │     
+///   │  ProjectionOperator  │     
+///   │                      │     
+///   └──────────┬───────────┘     
+///              │                 
+///              ▼                 
+///     ┌──────────────────┐       
+///     │                  │       
+///     │  result_channel  │       
+///     │                  │       
+///     └──────────────────┘       
 /// ```
-///
-/// # State tracking
-/// As suggested by the pipeline diagram above, the orchestrator only need to
-/// keep track of the outputs from `FetchLogOperator` and `FetchSegmentOperator`.
-/// The orchestrator invokes `try_start_filter_operator` when it receives output
-/// from either operators, and if both outputs are present it composes the input
-/// for `FilterOperator` and proceeds with execution. The outputs of other
-/// operators are directly forwarded without being tracked by the orchestrator.
 #[derive(Debug)]
 pub struct GetOrchestrator {
     // Orchestrator parameters
@@ -144,13 +123,14 @@ pub struct GetOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
 
-    // Fetch logs and segments
-    fetch_log: FetchLogOperator,
-    fetch_segment: FetchSegmentOperator,
+    // Collection segments
+    collection_segments: CollectionSegments,
 
-    // Fetch output
-    fetch_log_output: Option<FetchLogOutput>,
-    fetch_segment_output: Option<FetchSegmentOutput>,
+    // Fetch logs
+    fetch_log: FetchLogOperator,
+
+    // Fetched logs
+    fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
     filter: FilterOperator,
@@ -167,8 +147,8 @@ impl GetOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
+        segments: CollectionSegments,
         fetch_log: FetchLogOperator,
-        fetch_segment: FetchSegmentOperator,
         filter: FilterOperator,
         limit: LimitOperator,
         projection: ProjectionOperator,
@@ -177,10 +157,9 @@ impl GetOrchestrator {
             blockfile_provider,
             dispatcher,
             queue,
+            collection_segments: segments,
             fetch_log,
-            fetch_segment,
-            fetch_log_output: None,
-            fetch_segment_output: None,
+            fetched_logs: None,
             filter,
             limit,
             projection,
@@ -205,28 +184,6 @@ impl GetOrchestrator {
         tracing::error!("Error running orchestrator: {}", &get_err);
         terminate_with_error(self.result_channel.take(), get_err, ctx);
     }
-
-    /// Try to start the filter operator once both `FetchLogOperator` and `FetchSegmentOperator` completes
-    async fn try_start_filter_operator(&mut self, ctx: &ComponentContext<Self>) {
-        if let (Some(logs), Some(segments)) = (
-            self.fetch_log_output.as_ref(),
-            self.fetch_segment_output.as_ref(),
-        ) {
-            let task = wrap(
-                Box::new(self.filter.clone()),
-                FilterInput {
-                    logs: logs.clone(),
-                    blockfile_provider: self.blockfile_provider.clone(),
-                    metadata_segment: segments.metadata_segment.clone(),
-                    record_segment: segments.record_segment.clone(),
-                },
-                ctx.receiver(),
-            );
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -240,16 +197,8 @@ impl Component for GetOrchestrator {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        let log_task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
-        let segment_task = wrap(Box::new(self.fetch_segment.clone()), (), ctx.receiver());
-        if let Err(err) = self.dispatcher.send(log_task, Some(Span::current())).await {
-            self.terminate_with_error(ctx, err);
-            return;
-        } else if let Err(err) = self
-            .dispatcher
-            .send(segment_task, Some(Span::current()))
-            .await
-        {
+        let task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
+        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
             self.terminate_with_error(ctx, err);
             return;
         }
@@ -272,29 +221,22 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
                 return;
             }
         };
-        self.fetch_log_output = Some(output);
-        self.try_start_filter_operator(ctx).await;
-    }
-}
 
-#[async_trait]
-impl Handler<TaskResult<FetchSegmentOutput, FetchSegmentError>> for GetOrchestrator {
-    type Result = ();
+        self.fetched_logs = Some(output.clone());
 
-    async fn handle(
-        &mut self,
-        message: TaskResult<FetchSegmentOutput, FetchSegmentError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
-        };
-        self.fetch_segment_output = Some(output);
-        self.try_start_filter_operator(ctx).await;
+        let task = wrap(
+            Box::new(self.filter.clone()),
+            FilterInput {
+                logs: output,
+                blockfile_provider: self.blockfile_provider.clone(),
+                metadata_segment: self.collection_segments.metadata_segment.clone(),
+                record_segment: self.collection_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+        );
+        if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
+            self.terminate_with_error(ctx, err);
+        }
     }
 }
 
@@ -318,17 +260,12 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
             Box::new(self.limit.clone()),
             LimitInput {
                 logs: self
-                    .fetch_log_output
+                    .fetched_logs
                     .as_ref()
                     .expect("FetchLogOperator should have finished already")
                     .clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self
-                    .fetch_segment_output
-                    .as_ref()
-                    .expect("FetchSegmentOperator should have finished already")
-                    .record_segment
-                    .clone(),
+                record_segment: self.collection_segments.record_segment.clone(),
                 log_offset_ids: output.log_offset_ids,
                 compact_offset_ids: output.compact_offset_ids,
             },
@@ -357,24 +294,21 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             }
         };
 
+        let input = ProjectionInput {
+            logs: self
+                .fetched_logs
+                .as_ref()
+                .expect("FetchLogOperator should have finished already")
+                .clone(),
+            blockfile_provider: self.blockfile_provider.clone(),
+            record_segment: self.collection_segments.record_segment.clone(),
+            offset_ids: output.offset_ids.iter().collect(),
+        };
+
         // Prefetch records before projection
         let prefetch_task = wrap(
             Box::new(PrefetchRecordOperator {}),
-            PrefetchRecordInput {
-                logs: self
-                    .fetch_log_output
-                    .as_ref()
-                    .expect("FetchLogOperator should have finished already")
-                    .clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self
-                    .fetch_segment_output
-                    .as_ref()
-                    .expect("FetchSegmentOperator should have finished already")
-                    .record_segment
-                    .clone(),
-                offset_ids: output.offset_ids.iter().collect(),
-            },
+            input.clone(),
             ctx.receiver(),
         );
         if let Err(err) = self
@@ -385,25 +319,7 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             self.terminate_with_error(ctx, err);
         }
 
-        let task = wrap(
-            Box::new(self.projection.clone()),
-            ProjectionInput {
-                logs: self
-                    .fetch_log_output
-                    .as_ref()
-                    .expect("FetchLogOperator should have finished already")
-                    .clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self
-                    .fetch_segment_output
-                    .as_ref()
-                    .expect("FetchSegmentOperator should have finished already")
-                    .record_segment
-                    .clone(),
-                offset_ids: output.offset_ids.into_iter().collect(),
-            },
-            ctx.receiver(),
-        );
+        let task = wrap(Box::new(self.projection.clone()), input, ctx.receiver());
         if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
             self.terminate_with_error(ctx, err);
         }
