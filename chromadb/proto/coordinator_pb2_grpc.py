@@ -70,6 +70,11 @@ class SysDBStub(object):
                 request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.SerializeToString,
                 response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.FromString,
                 )
+        self.GetCollectionWithSegments = channel.unary_unary(
+                '/chroma.SysDB/GetCollectionWithSegments',
+                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionWithSegmentsRequest.SerializeToString,
+                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionWithSegmentsResponse.FromString,
+                )
         self.UpdateCollection = channel.unary_unary(
                 '/chroma.SysDB/UpdateCollection',
                 request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.SerializeToString,
@@ -166,6 +171,12 @@ class SysDBServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetCollectionWithSegments(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def UpdateCollection(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -253,6 +264,11 @@ def add_SysDBServicer_to_server(servicer, server):
                     servicer.GetCollections,
                     request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.FromString,
                     response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.SerializeToString,
+            ),
+            'GetCollectionWithSegments': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetCollectionWithSegments,
+                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionWithSegmentsRequest.FromString,
+                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionWithSegmentsResponse.SerializeToString,
             ),
             'UpdateCollection': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdateCollection,
@@ -473,6 +489,23 @@ class SysDB(object):
         return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/GetCollections',
             chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetCollectionWithSegments(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/GetCollectionWithSegments',
+            chromadb_dot_proto_dot_coordinator__pb2.GetCollectionWithSegmentsRequest.SerializeToString,
+            chromadb_dot_proto_dot_coordinator__pb2.GetCollectionWithSegmentsResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

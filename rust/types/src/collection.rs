@@ -1,5 +1,5 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::chroma_proto;
+use crate::{chroma_proto, ConversionError, Segment};
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 use uuid::Uuid;
@@ -85,6 +85,43 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             database: proto_collection.database,
             log_position: proto_collection.log_position,
             version: proto_collection.version,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CollectionSegments {
+    pub collection: Collection,
+    pub metadata_segment: Segment,
+    pub record_segment: Segment,
+    pub vector_segment: Segment,
+}
+
+impl TryFrom<chroma_proto::ScanOperator> for CollectionSegments {
+    type Error = ConversionError;
+
+    fn try_from(value: chroma_proto::ScanOperator) -> Result<Self, ConversionError> {
+        Ok(Self {
+            collection: value
+                .collection
+                .ok_or(ConversionError::DecodeError)?
+                .try_into()
+                .map_err(|_| ConversionError::DecodeError)?,
+            metadata_segment: value
+                .metadata
+                .ok_or(ConversionError::DecodeError)?
+                .try_into()
+                .map_err(|_| ConversionError::DecodeError)?,
+            record_segment: value
+                .record
+                .ok_or(ConversionError::DecodeError)?
+                .try_into()
+                .map_err(|_| ConversionError::DecodeError)?,
+            vector_segment: value
+                .knn
+                .ok_or(ConversionError::DecodeError)?
+                .try_into()
+                .map_err(|_| ConversionError::DecodeError)?,
         })
     }
 }

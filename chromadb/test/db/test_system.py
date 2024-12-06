@@ -174,6 +174,7 @@ def sample_segment(collection_id: uuid.UUID = uuid.uuid4(),
         scope=scope,
         collection=collection_id,
         metadata=metadata,
+        file_paths={},
     )
 
 # region Collection tests
@@ -287,6 +288,7 @@ def test_update_collections(sysdb: SysDB) -> None:
                 scope=SegmentScope.VECTOR,
                 collection=coll.id,
                 metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+                file_paths={},
             )
         ],
         metadata=coll["metadata"],
@@ -335,6 +337,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
                 scope=SegmentScope.VECTOR,
                 collection=collection.id,
                 metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+                file_paths={},
             )
         ],
         metadata=collection["metadata"],
@@ -355,6 +358,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
                 scope=SegmentScope.VECTOR,
                 collection=sample_collections[1].id,
                 metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+                file_paths={},
             )
         ], # This could have been empty - [].
         metadata=collection["metadata"],
@@ -377,6 +381,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
                 scope=SegmentScope.VECTOR,
                 collection=sample_collections[1].id,
                 metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+                file_paths={},
             )
         ],
         get_or_create=True,
@@ -396,6 +401,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
                 scope=SegmentScope.VECTOR,
                 collection=sample_collections[2].id,
                 metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+                file_paths={},
             )
         ],
         get_or_create=False,
@@ -417,6 +423,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
                     scope=SegmentScope.VECTOR,
                     collection=sample_collections[2].id,
                     metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+                    file_paths={},
                 )
             ],
             metadata=collection["metadata"],
@@ -439,6 +446,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
                 scope=SegmentScope.VECTOR,
                 collection=sample_collections[2].id,
                 metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+                file_paths={},
             )
         ],
         get_or_create=True,
@@ -765,6 +773,7 @@ sample_segments = [
         scope=SegmentScope.VECTOR,
         collection=sample_collections[0].id,
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
+        file_paths={},
     ),
     Segment(
         id=uuid.UUID("11111111-d7d7-413b-92e1-731098a6e492"),
@@ -772,6 +781,7 @@ sample_segments = [
         scope=SegmentScope.VECTOR,
         collection=sample_collections[1].id,
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
+        file_paths={},
     ),
 ]
 
@@ -860,6 +870,7 @@ def test_update_segment(sysdb: SysDB) -> None:
         scope=SegmentScope.VECTOR,
         collection=sample_collections[0].id,
         metadata=metadata,
+        file_paths={},
     )
 
     sysdb.reset_state()
