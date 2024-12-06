@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::{Workload, WorkloadSummary};
+use crate::{Throughput, Workload, WorkloadSummary};
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Description {
@@ -33,7 +33,7 @@ pub struct StartRequest {
     pub workload: Workload,
     pub data_set: String,
     pub expires: String,
-    pub throughput: f64,
+    pub throughput: Throughput,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
