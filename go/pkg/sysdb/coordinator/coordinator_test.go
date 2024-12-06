@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -1134,6 +1135,18 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	results, err = suite.coordinator.GetCollections(ctx, testCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(results)
+
+	// Do a flush collection compaction
+	flushCollectionInfo, err := suite.coordinator.FlushCollectionCompaction(ctx, &model.FlushCollectionCompaction{
+		ID:       testCollection.ID,
+		TenantID: testCollection.TenantID,
+	})
+	// The flush collection compaction should fail because the collection is soft deleted.
+	suite.Error(err)
+	// Check for ErrCollectionSoftDeleted error.
+	suite.True(errors.Is(err, common.ErrCollectionSoftDeleted))
+	// Check that the flush collection info is nil.
+	suite.Nil(flushCollectionInfo)
 
 	// Verify collection appears in soft deleted list
 	id = testCollection.ID.String()
