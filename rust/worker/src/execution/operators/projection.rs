@@ -42,7 +42,7 @@ pub struct ProjectionOperator {
     pub metadata: bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ProjectionInput {
     pub logs: Chunk<LogRecord>,
     pub blockfile_provider: BlockfileProvider,
