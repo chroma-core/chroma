@@ -129,6 +129,7 @@ segment_definition = Segment(
     scope=SegmentScope.METADATA,
     collection=uuid.UUID(int=0),
     metadata=None,
+    file_paths={},
 )
 
 segment_definition2 = Segment(
@@ -137,6 +138,7 @@ segment_definition2 = Segment(
     scope=SegmentScope.METADATA,
     collection=uuid.UUID(int=1),
     metadata=None,
+    file_paths={},
 )
 
 
