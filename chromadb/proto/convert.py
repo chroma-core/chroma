@@ -161,6 +161,7 @@ def from_proto_segment(segment: chroma_pb.Segment) -> Segment:
         metadata=from_proto_metadata(segment.metadata)
         if segment.HasField("metadata")
         else None,
+        file_paths={name: [path for path in paths.paths] for name, paths in segment.file_paths.items()}
     )
 
 
@@ -173,6 +174,7 @@ def to_proto_segment(segment: Segment) -> chroma_pb.Segment:
         metadata=None
         if segment["metadata"] is None
         else to_proto_update_metadata(segment["metadata"]),
+        file_paths={name: chroma_pb.FilePaths(paths=paths) for name, paths in segment["file_paths"].items()}
     )
 
 
