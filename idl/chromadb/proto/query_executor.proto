@@ -6,9 +6,9 @@ import "chromadb/proto/chroma.proto";
 
 message ScanOperator {
     Collection collection = 1;
-    string knn_id = 2;
-    string metadata_id = 3;
-    string record_id = 4;
+    Segment knn = 2;
+    Segment metadata = 3;
+    Segment record = 4;
 }
 
 message FilterOperator {
