@@ -14,13 +14,13 @@ title: JS Client
 
 Creates a new ChromaClient instance.
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `ChromaClientParams` | The parameters for creating a new client |
 
-**`Example`**
+**Example**
 
 ```typescript
 const client = new ChromaClient({
@@ -36,17 +36,17 @@ const client = new ChromaClient({
 
 Counts all collections.
 
-#### Returns
+**Returns**
 
 `Promise`\<`number`\>
 
 A promise that resolves to the number of collections.
 
-**`Throws`**
+**Throws**
 
 If there is an issue counting the collections.
 
-**`Example`**
+**Example**
 
 ```typescript
 const collections = await client.countCollections();
@@ -60,27 +60,27 @@ ___
 
 Creates a new collection with the specified properties.
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `CreateCollectionParams` | The parameters for creating a new collection. |
 
-#### Returns
+**Returns**
 
 `Promise`\<[`Collection`](Collection.Collection.md)\>
 
 A promise that resolves to the created collection.
 
-**`Throws`**
+**Throws**
 
 If the client is unable to connect to the server.
 
-**`Throws`**
+**Throws**
 
 If there is an issue creating the collection.
 
-**`Example`**
+**Example**
 
 ```typescript
 const collection = await client.createCollection({
@@ -99,23 +99,23 @@ ___
 
 Deletes a collection with the specified name.
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `DeleteCollectionParams` | The parameters for deleting a collection. |
 
-#### Returns
+**Returns**
 
 `Promise`\<`void`\>
 
 A promise that resolves when the collection is deleted.
 
-**`Throws`**
+**Throws**
 
 If there is an issue deleting the collection.
 
-**`Example`**
+**Example**
 
 ```typescript
 await client.deleteCollection({
@@ -131,23 +131,23 @@ ___
 
 Gets a collection with the specified name.
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `GetCollectionParams` | The parameters for getting a collection. |
 
-#### Returns
+**Returns**
 
 `Promise`\<[`Collection`](Collection.Collection.md)\>
 
 A promise that resolves to the collection.
 
-**`Throws`**
+**Throws**
 
 If there is an issue getting the collection.
 
-**`Example`**
+**Example**
 
 ```typescript
 const collection = await client.getCollection({
@@ -163,23 +163,23 @@ ___
 
 Gets or creates a collection with the specified properties.
 
-#### Parameters
+**Parameters**
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
 | `params` | `CreateCollectionParams` | The parameters for creating a new collection. |
 
-#### Returns
+**Returns**
 
 `Promise`\<[`Collection`](Collection.Collection.md)\>
 
 A promise that resolves to the got or created collection.
 
-**`Throws`**
+**Throws**
 
 If there is an issue getting or creating the collection.
 
-**`Example`**
+**Example**
 
 ```typescript
 const collection = await client.getOrCreateCollection({
@@ -198,17 +198,17 @@ ___
 
 Returns a heartbeat from the Chroma API.
 
-#### Returns
+**Returns**
 
 `Promise`\<`number`\>
 
 A promise that resolves to the heartbeat from the Chroma API.
 
-**`Throws`**
+**Throws**
 
 If the client is unable to connect to the server.
 
-**`Example`**
+**Example**
 
 ```typescript
 const heartbeat = await client.heartbeat();
@@ -222,23 +222,23 @@ ___
 
 Lists all collections.
 
-#### Parameters
+**Parameters**
 
 | Name | Type |
 | :------ | :------ |
 | `«destructured»` | `ListCollectionsParams` |
 
-#### Returns
+**Returns**
 
 `Promise`\<`CollectionParams`[]\>
 
 A promise that resolves to a list of collection names.
 
-**`Throws`**
+**Throws**
 
 If there is an issue listing the collections.
 
-**`Example`**
+**Example**
 
 ```typescript
 const collections = await client.listCollections({
@@ -255,21 +255,21 @@ ___
 
 Resets the state of the object by making an API call to the reset endpoint.
 
-#### Returns
+**Returns**
 
 `Promise`\<`boolean`\>
 
 A promise that resolves when the reset operation is complete.
 
-**`Throws`**
+**Throws**
 
 If the client is unable to connect to the server.
 
-**`Throws`**
+**Throws**
 
 If the server experienced an error while the state.
 
-**`Example`**
+**Example**
 
 ```typescript
 await client.reset();
@@ -283,17 +283,17 @@ ___
 
 Returns the version of the Chroma API.
 
-#### Returns
+**Returns**
 
 `Promise`\<`string`\>
 
 A promise that resolves to the version of the Chroma API.
 
-**`Throws`**
+**Throws**
 
 If the client is unable to connect to the server.
 
-**`Example`**
+**Example**
 
 ```typescript
 const version = await client.version();
