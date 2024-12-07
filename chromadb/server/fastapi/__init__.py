@@ -19,8 +19,7 @@ from fastapi import FastAPI as _FastAPI, Response, Request, Body
 from fastapi.responses import JSONResponse, ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from fastapi import HTTPException, status
-
+from fastapi import status
 from chromadb.api.configuration import CollectionConfigurationInternal
 from pydantic import BaseModel
 from chromadb.api.types import (
@@ -41,7 +40,6 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.api import ServerAPI
 from chromadb.errors import (
     ChromaError,
-    InvalidDimensionException,
     InvalidHTTPVersion,
     RateLimitError,
     QuotaError,
@@ -773,46 +771,42 @@ class FastAPI(Server):
         collection_id: str,
         body: AddEmbedding = Body(...),
     ) -> bool:
-        try:
-
-            def process_add(request: Request, raw_body: bytes) -> bool:
-                add = validate_model(AddEmbedding, orjson.loads(raw_body))
-                self.auth_request(
-                    request.headers,
-                    AuthzAction.ADD,
-                    tenant,
-                    database_name,
-                    collection_id,
-                )
-                self._set_request_context(request=request)
-                add_attributes_to_current_span({"tenant": tenant})
-                return self._api._add(
-                    collection_id=_uuid(collection_id),
-                    ids=add.ids,
-                    embeddings=cast(
-                        Embeddings,
-                        convert_list_embeddings_to_np(add.embeddings)
-                        if add.embeddings
-                        else None,
-                    ),
-                    metadatas=add.metadatas,  # type: ignore
-                    documents=add.documents,  # type: ignore
-                    uris=add.uris,  # type: ignore
-                    tenant=tenant,
-                    database=database_name,
-                )
-
-            return cast(
-                bool,
-                await to_thread.run_sync(
-                    process_add,
-                    request,
-                    await request.body(),
-                    limiter=self._capacity_limiter,
-                ),
+        def process_add(request: Request, raw_body: bytes) -> bool:
+            add = validate_model(AddEmbedding, orjson.loads(raw_body))
+            self.auth_request(
+                request.headers,
+                AuthzAction.ADD,
+                tenant,
+                database_name,
+                collection_id,
             )
-        except InvalidDimensionException as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            self._set_request_context(request=request)
+            add_attributes_to_current_span({"tenant": tenant})
+            return self._api._add(
+                collection_id=_uuid(collection_id),
+                ids=add.ids,
+                embeddings=cast(
+                    Embeddings,
+                    convert_list_embeddings_to_np(add.embeddings)
+                    if add.embeddings
+                    else None,
+                ),
+                metadatas=add.metadatas,  # type: ignore
+                documents=add.documents,  # type: ignore
+                uris=add.uris,  # type: ignore
+                tenant=tenant,
+                database=database_name,
+            )
+
+        return cast(
+            bool,
+            await to_thread.run_sync(
+                process_add,
+                request,
+                await request.body(),
+                limiter=self._capacity_limiter,
+            ),
+        )
 
     @trace_method("FastAPI.update", OpenTelemetryGranularity.OPERATION)
     async def update(
@@ -1639,42 +1633,38 @@ class FastAPI(Server):
     async def add_v1(
         self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
     ) -> bool:
-        try:
-
-            def process_add(request: Request, raw_body: bytes) -> bool:
-                add = validate_model(AddEmbedding, orjson.loads(raw_body))
-                self.auth_and_get_tenant_and_database_for_request(
-                    request.headers,
-                    AuthzAction.ADD,
-                    None,
-                    None,
-                    collection_id,
-                )
-                return self._api._add(
-                    collection_id=_uuid(collection_id),
-                    ids=add.ids,
-                    embeddings=cast(
-                        Embeddings,
-                        convert_list_embeddings_to_np(add.embeddings)
-                        if add.embeddings
-                        else None,
-                    ),
-                    metadatas=add.metadatas,  # type: ignore
-                    documents=add.documents,  # type: ignore
-                    uris=add.uris,  # type: ignore
-                )
-
-            return cast(
-                bool,
-                await to_thread.run_sync(
-                    process_add,
-                    request,
-                    await request.body(),
-                    limiter=self._capacity_limiter,
-                ),
+        def process_add(request: Request, raw_body: bytes) -> bool:
+            add = validate_model(AddEmbedding, orjson.loads(raw_body))
+            self.auth_and_get_tenant_and_database_for_request(
+                request.headers,
+                AuthzAction.ADD,
+                None,
+                None,
+                collection_id,
             )
-        except InvalidDimensionException as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return self._api._add(
+                collection_id=_uuid(collection_id),
+                ids=add.ids,
+                embeddings=cast(
+                    Embeddings,
+                    convert_list_embeddings_to_np(add.embeddings)
+                    if add.embeddings
+                    else None,
+                ),
+                metadatas=add.metadatas,  # type: ignore
+                documents=add.documents,  # type: ignore
+                uris=add.uris,  # type: ignore
+            )
+
+        return cast(
+            bool,
+            await to_thread.run_sync(
+                process_add,
+                request,
+                await request.body(),
+                limiter=self._capacity_limiter,
+            ),
+        )
 
     @trace_method("FastAPI.update_v1", OpenTelemetryGranularity.OPERATION)
     async def update_v1(
