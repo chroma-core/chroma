@@ -10,6 +10,7 @@ from chromadb.db.base import (
     ParameterValue,
     get_sql,
 )
+from chromadb.errors import InvalidArgumentError
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
     OpenTelemetryGranularity,
@@ -129,7 +130,7 @@ class SqliteMetadataSegment(MetadataReader):
         offset = offset or 0
 
         if limit < 0:
-            raise ValueError("Limit cannot be negative")
+            raise InvalidArgumentError("Limit cannot be negative")
 
         select_clause = [
             embeddings_t.id,
@@ -587,8 +588,8 @@ class SqliteMetadataSegment(MetadataReader):
                     else embeddings_t.id.notin(sq)
                 )
             else:
-                raise ValueError(f"Unknown where_doc operator {k}")
-        raise ValueError("Empty where_doc")
+                raise InvalidArgumentError(f"Unknown where_doc operator {k}")
+        raise InvalidArgumentError("Empty where_doc")
 
     @trace_method("SqliteMetadataSegment.delete", OpenTelemetryGranularity.ALL)
     @override

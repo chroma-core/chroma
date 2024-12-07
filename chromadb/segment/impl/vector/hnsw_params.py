@@ -3,6 +3,8 @@ import re
 from typing import Any, Callable, Dict, Union
 
 from chromadb.types import Metadata
+from chromadb.errors import InvalidArgumentError
+
 
 
 Validator = Callable[[Union[str, int, float]], bool]
@@ -38,9 +40,9 @@ class Params:
         # Validate it
         for param, value in metadata.items():
             if param not in validators:
-                raise ValueError(f"Unknown HNSW parameter: {param}")
+                raise InvalidArgumentError(f"Unknown HNSW parameter: {param}")
             if not validators[param](value):
-                raise ValueError(f"Invalid value for HNSW parameter: {param} = {value}")
+                raise InvalidArgumentError(f"Invalid value for HNSW parameter: {param} = {value}")
 
 
 class HnswParams(Params):
