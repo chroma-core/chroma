@@ -1,11 +1,11 @@
 import logging
-from typing import Union, cast
-
-import httpx
+from typing import Union, cast, Optional
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL_NAME = "chroma/all-minilm-l6-v2-f32"
 
 
 class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -13,17 +13,25 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     This class is used to generate embeddings for a list of texts using the Ollama Embedding API (https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
     """
 
-    def __init__(self, url: str, model_name: str) -> None:
+    def __init__(
+        self, url: Optional[str] = None, model_name: Optional[str] = DEFAULT_MODEL_NAME
+    ) -> None:
         """
         Initialize the Ollama Embedding Function.
 
         Args:
-            url (str): The URL of the Ollama Server.
-            model_name (str): The name of the model to use for text embeddings. E.g. "nomic-embed-text" (see https://ollama.com/library for available models).
+            url (str): The Base URL of the Ollama Server (default: "http://localhost:11434").
+            model_name (str): The name of the model to use for text embeddings. E.g. "nomic-embed-text" (see defaults to "chroma/all-minilm-l6-v2-f32", for available models see https://ollama.com/library).
         """
-        self._api_url = f"{url}"
-        self._model_name = model_name
-        self._session = httpx.Client()
+
+        try:
+            from ollama import Client
+        except ImportError:
+            raise ValueError(
+                "The ollama python package is not installed. Please install it with `pip install ollama`"
+            )
+        self._client = Client(host=url)
+        self._model_name = model_name or DEFAULT_MODEL_NAME
 
     def __call__(self, input: Union[Documents, str]) -> Embeddings:
         """
@@ -36,23 +44,10 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             Embeddings: The embeddings for the texts.
 
         Example:
-            >>> ollama_ef = OllamaEmbeddingFunction(url="http://localhost:11434/api/embeddings", model_name="nomic-embed-text")
+            >>> ollama_ef = OllamaEmbeddingFunction()
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = ollama_ef(texts)
         """
-        # Call Ollama Server API for each document
-        texts = input if isinstance(input, list) else [input]
-        embeddings = [
-            self._session.post(
-                self._api_url, json={"model": self._model_name, "prompt": text}
-            ).json()
-            for text in texts
-        ]
-        return cast(
-            Embeddings,
-            [
-                embedding["embedding"]
-                for embedding in embeddings
-                if "embedding" in embedding
-            ],
-        )
+        # Call Ollama client
+        response = self._client.embed(model=self._model_name, input=input)
+        return cast(Embeddings, response["embeddings"])
