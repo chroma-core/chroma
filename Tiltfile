@@ -9,7 +9,7 @@ docker_build(
 docker_build(
   'local:log-service',
   '.',
-  only=['go/'],
+  only=['go/', 'idl/'],
   dockerfile='./go/Dockerfile',
   target='logservice'
 )
