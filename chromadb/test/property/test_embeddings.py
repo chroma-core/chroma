@@ -13,7 +13,6 @@ from chromadb.api.types import (
     Embeddings,
     Include,
     IDs,
-    validate_embeddings,
     normalize_embeddings,
 )
 from chromadb.config import System
@@ -42,6 +41,7 @@ from chromadb.test.utils.wait_for_version_increase import (
     wait_for_version_increase,
     get_collection_version,
 )
+from chromadb.utils.validators import validate_embeddings
 
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
