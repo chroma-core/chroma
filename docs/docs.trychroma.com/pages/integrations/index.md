@@ -13,17 +13,18 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 {% special_table %}
 {% /special_table %}
 
-|              | Python | JS |
-|--------------|-----------|---------------|
-| [OpenAI](/integrations/openai) | ✅  | ✅ |
-| [Google Gemini](/integrations/google-gemini) | ✅  | ✅ |
-| [Cohere](/integrations/cohere) | ✅  | ✅ |
-| [Hugging Face](/integrations/hugging-face) | ✅  | ➖ |
-| [Instructor](/integrations/instructor) | ✅  | ➖ |
+|                                                                    | Python | JS |
+|--------------------------------------------------------------------|-----------|---------------|
+| [OpenAI](/integrations/openai)                                     | ✅  | ✅ |
+| [Google Gemini](/integrations/google-gemini)                       | ✅  | ✅ |
+| [Cohere](/integrations/cohere)                                     | ✅  | ✅ |
+| [Hugging Face](/integrations/hugging-face)                         | ✅  | ➖ |
+| [Instructor](/integrations/instructor)                             | ✅  | ➖ |
 | [Hugging Face Embedding Server](/integrations/hugging-face-server) | ✅  | ✅ |
-| [Jina AI](/integrations/jinaai) | ✅  | ✅ |
-| [Roboflow](/integrations/roboflow) | ✅  | ➖ |
-| [Ollama Embeddings](/integrations/ollama) | ✅  | ✅ |
+| [Jina AI](/integrations/jinaai)                                    | ✅  | ✅ |
+| [Roboflow](/integrations/roboflow)                                 | ✅  | ➖ |
+| [Ollama Embeddings](/integrations/ollama)                          | ✅  | ✅ |
+| [LangChain Embeddings](/integrations/langchain)                       | ✅  | ✅ |
 
 
 ***
