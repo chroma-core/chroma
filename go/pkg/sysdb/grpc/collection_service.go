@@ -148,6 +148,35 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	return res, nil
 }
 
+func (s *Server) GetCollectionWithSegments(ctx context.Context, req *coordinatorpb.GetCollectionWithSegmentsRequest) (*coordinatorpb.GetCollectionWithSegmentsResponse, error) {
+	collectionID := req.Id
+
+	res := &coordinatorpb.GetCollectionWithSegmentsResponse{}
+
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	if err != nil {
+		log.Error("GetCollectionWithSegments failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	collection, segments, err := s.coordinator.GetCollectionWithSegments(ctx, parsedCollectionID)
+	if err != nil {
+		log.Error("GetCollectionWithSegments failed. ", zap.Error(err), zap.Stringp("collection_id", &collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res.Collection = convertCollectionToProto(collection)
+	segmentpbList := make([]*coordinatorpb.Segment, 0, len(segments))
+	for _, segment := range segments {
+		segmentpb := convertSegmentToProto(segment)
+		segmentpbList = append(segmentpbList, segmentpb)
+	}
+	res.Segments = segmentpbList
+
+	log.Info("GetCollectionWithSegments succeeded", zap.String("request", req.String()), zap.String("response", res.String()))
+	return res, nil
+}
+
 func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.DeleteCollectionRequest) (*coordinatorpb.DeleteCollectionResponse, error) {
 	collectionID := req.GetId()
 	res := &coordinatorpb.DeleteCollectionResponse{}
