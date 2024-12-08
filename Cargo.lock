@@ -1314,6 +1314,7 @@ dependencies = [
  "reqwest 0.12.9",
  "serde",
  "serde_json",
+ "siphasher",
  "tokio",
  "tower-http 0.6.2",
  "tracing",
@@ -5313,6 +5314,12 @@ dependencies = [
  "digest",
  "rand_core",
 ]
+
+[[package]]
+name = "siphasher"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
 
 [[package]]
 name = "sketches-ddsketch"
