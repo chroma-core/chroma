@@ -181,6 +181,20 @@ class GetCollectionsResponse(_message.Message):
     collections: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.Collection]
     def __init__(self, collections: _Optional[_Iterable[_Union[_chroma_pb2.Collection, _Mapping]]] = ...) -> None: ...
 
+class GetCollectionWithSegmentsRequest(_message.Message):
+    __slots__ = ["id"]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    def __init__(self, id: _Optional[str] = ...) -> None: ...
+
+class GetCollectionWithSegmentsResponse(_message.Message):
+    __slots__ = ["collection", "segments"]
+    COLLECTION_FIELD_NUMBER: _ClassVar[int]
+    SEGMENTS_FIELD_NUMBER: _ClassVar[int]
+    collection: _chroma_pb2.Collection
+    segments: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.Segment]
+    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., segments: _Optional[_Iterable[_Union[_chroma_pb2.Segment, _Mapping]]] = ...) -> None: ...
+
 class UpdateCollectionRequest(_message.Message):
     __slots__ = ["id", "name", "dimension", "metadata", "reset_metadata"]
     ID_FIELD_NUMBER: _ClassVar[int]

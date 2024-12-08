@@ -27,8 +27,8 @@ use crate::{
 
 use super::knn_filter::{KnnError, KnnFilterOutput, KnnResult};
 
-/// The `knn` module contains two orchestrator: `KnnFilterOrchestrator` and `KnnOrchestrator`.
-/// When used together, they carry out the evaluation of a `<collection>.query(...)` query
+/// The `KnnOrchestrator` finds the nearest neighbor of a target embedding given the search domain.
+/// When used together with `KnnFilterOrchestrator`, they evaluate a `<collection>.query(...)` query
 /// for the user. We breakdown the evaluation into two parts because a `<collection>.query(...)`
 /// is inherently multiple queries sharing the same filter criteria. Thus we first evaluate
 /// the filter criteria with `KnnFilterOrchestrator`. Then we spawn a `KnnOrchestrator` for each
@@ -38,53 +38,23 @@ use super::knn_filter::{KnnError, KnnFilterOutput, KnnResult};
 ///
 /// # Pipeline
 /// ```text
-///                                                           │
-///                                                           │
-///                                                           │
-///                            ┌────────────────────────────  │  ───────────────────────────────┐
-///                            │                              ▼                                 │
-///                            │                       ┌────────────┐    KnnFilterOrchestrator  │
-///                            │                       │            │                           │
-///                            │           ┌───────────┤  on_start  ├────────────────┐          │
-///                            │           │           │            │                │          │
-///                            │           │           └────────────┘                │          │
-///                            │           │                                         │          │
-///                            │           ▼                                         ▼          │
-///                            │  ┌────────────────────┐            ┌────────────────────────┐  │
-///                            │  │                    │            │                        │  │
-///                            │  │  FetchLogOperator  │            │  FetchSegmentOperator  │  │
-///                            │  │                    │            │                        │  │
-///                            │  └────────┬───────────┘            └────────────────┬───────┘  │
-///                            │           │                                         │          │
-///                            │           │                                         │          │
-///                            │           │     ┌─────────────────────────────┐     │          │
-///                            │           │     │                             │     │          │
-///                            │           └────►│  try_start_filter_operator  │◄────┘          │
-///                            │                 │                             │                │
-///                            │                 └────────────┬────────────────┘                │
-///                            │                              │                                 │
-///                            │                              ▼                                 │
-///                            │                    ┌───────────────────┐                       │
-///                            │                    │                   │                       │
-///                            │                    │   FilterOperator  │                       │
-///                            │                    │                   │                       │
-///                            │                    └─────────┬─────────┘                       │
-///                            │                              │                                 │
-///                            │                              ▼                                 │
-///                            │                     ┌──────────────────┐                       │
-///                            │                     │                  │                       │
-///                            │                     │  result_channel  │                       │
-///                            │                     │                  │                       │
-///                            │                     └────────┬─────────┘                       │
-///                            │                              │                                 │
-///                            └────────────────────────────  │  ───────────────────────────────┘
-///                                                           │
-///                                                           │
-///                                                           │
-///                        ┌──────────────────────────────────┴─────────────────────────────────────┐
-///                        │                                                                        │
-///                        │                    ... One branch per embedding ...                    │
-///                        │                                                                        │
+///                                                           │                                                               
+///                                                           │                                                               
+///                                                           │                                                               
+///                                                           │                                                               
+///                                                           ▼                                                               
+///                                               ┌───────────────────────┐                                                   
+///                                               │                       │                                                   
+///                                               │ KnnFilterOrchestrator │                                                   
+///                                               │                       │                                                   
+///                                               └───────────┬───────────┘                                                   
+///                                                           │                                                               
+///                                                           │                                                               
+///                                                           │                                                               
+///                        ┌──────────────────────────────────┴─────────────────────────────────────┐                         
+///                        │                                                                        │                         
+///                        │                    ... One branch per embedding ...                    │                         
+///                        │                                                                        │                         
 /// ┌────────────────────  │  ─────────────────────┐                         ┌────────────────────  │  ─────────────────────┐
 /// │                      ▼                       │                         │                      ▼                       │
 /// │               ┌────────────┐ KnnOrchestrator │                         │               ┌────────────┐ KnnOrchestrator │
@@ -129,27 +99,18 @@ use super::knn_filter::{KnnError, KnnFilterOutput, KnnResult};
 /// │             └────────┬─────────┘             │                         │             └────────┬─────────┘             │
 /// │                      │                       │                         │                      │                       │
 /// └────────────────────  │  ─────────────────────┘                         └────────────────────  │  ─────────────────────┘
-///                        │                                                                        │
-///                        │                                                                        │
-///                        │                                                                        │
-///                        │                           ┌────────────────┐                           │
-///                        │                           │                │                           │
-///                        └──────────────────────────►│  try_join_all  │◄──────────────────────────┘
-///                                                    │                │
-///                                                    └───────┬────────┘
-///                                                            │
-///                                                            │
-///                                                            ▼
+///                        │                                                                        │                         
+///                        │                                                                        │                         
+///                        │                                                                        │                         
+///                        │                           ┌────────────────┐                           │                         
+///                        │                           │                │                           │                         
+///                        └──────────────────────────►│  try_join_all  │◄──────────────────────────┘                         
+///                                                    │                │                                                     
+///                                                    └───────┬────────┘                                                     
+///                                                            │                                                              
+///                                                            │                                                              
+///                                                            ▼                                                              
 /// ```
-///
-/// # State tracking
-/// Similar to the `GetOrchestrator`, the `KnnFilterOrchestrator` need to keep track of the outputs from
-/// `FetchLogOperator` and `FetchSegmentOperator`. For `KnnOrchestrator`, it needs to track the outputs from
-/// `KnnLogOperator` and `KnnHnswOperator`. It invokes `try_start_knn_merge_operator` when it receives outputs
-/// from either operators, and if both outputs are present it composes the input for `KnnMergeOperator` and
-/// proceeds with execution. The outputs of other operators are directly forwarded without being tracked
-/// by the orchestrator.
-
 #[derive(Debug)]
 pub struct KnnOrchestrator {
     // Orchestrator parameters

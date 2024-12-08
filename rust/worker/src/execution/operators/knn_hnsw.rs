@@ -3,6 +3,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SignedRoaringBitmap;
 use thiserror::Error;
 use tonic::async_trait;
+use tracing::trace;
 
 use crate::{
     execution::operator::Operator, segment::distributed_hnsw_segment::DistributedHNSWSegmentReader,
@@ -64,6 +65,9 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
         } else {
             &self.embedding
         };
+
+        trace!("[Debug-HNSW] Allow: {:?}", allowed);
+        trace!("[Debug-HNSW] Disallowed: {:?}", disallowed);
 
         let (offset_ids, distances) =
             input

@@ -1,4 +1,5 @@
 use tonic::async_trait;
+use tracing::trace;
 
 use crate::execution::operator::Operator;
 
@@ -42,6 +43,11 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
     type Error = KnnMergeError;
 
     async fn run(&self, input: &KnnMergeInput) -> Result<KnnMergeOutput, KnnMergeError> {
+        trace!(
+            "[Debug-Merge] Merging: {:?} <=> {:?}",
+            input.first_distances,
+            input.second_distances,
+        );
         let mut fetch = self.fetch;
         let mut first_index = 0;
         let mut second_index = 0;

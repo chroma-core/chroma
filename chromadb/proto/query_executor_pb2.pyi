@@ -7,16 +7,16 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class ScanOperator(_message.Message):
-    __slots__ = ["collection", "knn_id", "metadata_id", "record_id"]
+    __slots__ = ["collection", "knn", "metadata", "record"]
     COLLECTION_FIELD_NUMBER: _ClassVar[int]
-    KNN_ID_FIELD_NUMBER: _ClassVar[int]
-    METADATA_ID_FIELD_NUMBER: _ClassVar[int]
-    RECORD_ID_FIELD_NUMBER: _ClassVar[int]
+    KNN_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    RECORD_FIELD_NUMBER: _ClassVar[int]
     collection: _chroma_pb2.Collection
-    knn_id: str
-    metadata_id: str
-    record_id: str
-    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., knn_id: _Optional[str] = ..., metadata_id: _Optional[str] = ..., record_id: _Optional[str] = ...) -> None: ...
+    knn: _chroma_pb2.Segment
+    metadata: _chroma_pb2.Segment
+    record: _chroma_pb2.Segment
+    def __init__(self, collection: _Optional[_Union[_chroma_pb2.Collection, _Mapping]] = ..., knn: _Optional[_Union[_chroma_pb2.Segment, _Mapping]] = ..., metadata: _Optional[_Union[_chroma_pb2.Segment, _Mapping]] = ..., record: _Optional[_Union[_chroma_pb2.Segment, _Mapping]] = ...) -> None: ...
 
 class FilterOperator(_message.Message):
     __slots__ = ["ids", "where", "where_document"]

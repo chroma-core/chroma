@@ -4,7 +4,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SegmentScope {
     VECTOR,
     METADATA,
