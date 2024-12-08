@@ -48,6 +48,16 @@ pnpm add chromadb chromadb-default-embed # [!code $]
 ```
 
 {% /codetab %}
+{% codetab label="bun" %}
+
+```bash {% codetab=true %}
+bun install chromadb chromadb-default-embed # [!code $]
+
+# If you run into issues when connecting to default_tenant,
+# try using the latest version of Bun (>=1.1.38).
+```
+
+{% /codetab %}
 {% /codetabs %}
 
 Install chroma via `pypi` to easily run the backend server. ([Docker](./deployment/docker) also available)
