@@ -19,7 +19,7 @@ This embedding function relies on the `cohere` python package, which you can ins
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 cohere_ef  = embedding_functions.CohereEmbeddingFunction(api_key="YOUR_API_KEY",  model_name="large")
-cohere_ef(texts=["document1","document2"])
+cohere_ef(["document1","document2"])
 ```
 
 {% /tab %}
@@ -61,7 +61,7 @@ multilingual_texts  = [ 'Hello from Cohere!', 'مرحبًا من كوهير!',
         'Ciao da Cohere!', '您好，来自 Cohere！',
         'कोहिअर से नमस्ते!'  ]
 
-cohere_ef(texts=multilingual_texts)
+cohere_ef(multilingual_texts)
 
 ```
 
