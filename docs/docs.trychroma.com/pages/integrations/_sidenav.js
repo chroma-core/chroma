@@ -25,4 +25,10 @@ export const items = [
           { href: '/integrations/openlit', children: 'OpenLIT' },
       ]
     },
+    {
+      title: 'Libraries',
+      links: [
+        { href: '/integrations/testcontainers', children: 'Testcontainers' },
+      ]
+    }
   ];
