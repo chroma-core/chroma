@@ -39,6 +39,7 @@ We welcome pull requests to add new Integrations to the community.
 
 |              | Python | JS |
 |--------------|-----------|---------------|
+| [Autogen](/integrations/autogen) | ✅  | ➖ |
 | [🦜️🔗 Langchain](/integrations/langchain) | ✅  | ✅ |
 | [🦙 LlamaIndex](/integrations/llamaindex) | ✅  | ✅ |
 | [Braintrust](/integrations/braintrust) | ✅  | ✅ |
