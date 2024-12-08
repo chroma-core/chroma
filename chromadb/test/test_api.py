@@ -1,6 +1,7 @@
 # type: ignore
 import traceback
 import httpx
+import json
 
 import chromadb
 from chromadb.errors import ChromaError
@@ -733,6 +734,41 @@ def test_where_validation_query(client):
     collection = client.create_collection("test_where_validation")
     with pytest.raises(ValueError, match="where"):
         collection.query(query_embeddings=[0, 0, 0], where={"value": {"nested": "5"}})
+
+
+def test_validation_context(client):
+    """Test that the validation_context decorator properly re-raises exceptions
+    with keyword-only arguments"""
+    client.reset()
+
+    mock_request = httpx.Request("POST", "https://embedding.com")
+    mock_response = httpx.Response(
+        status_code=500,
+        content=json.dumps({"error": "test error"}).encode(),
+        request=mock_request,
+    )
+
+    # An error with keyword-only arguments (namely, request and response)
+    ef_error = httpx.HTTPStatusError(
+        message="Some HTTP error", request=mock_request, response=mock_response
+    )
+
+    class MockEmbeddingFunction:
+        def __call__(self, input):
+            raise ef_error
+
+    ef = MockEmbeddingFunction()
+    collection = client.create_collection("test", embedding_function=ef)
+
+    with pytest.raises(
+        httpx.HTTPStatusError, match="Some HTTP error in add."
+    ) as exc_info:
+        # This should trigger the validation_context wrapper
+        collection.add(ids=["test1"], documents=["test document"])
+
+    # Verify the original keyword arguments are preserved
+    assert exc_info.value.response == mock_response
+    assert exc_info.value.request == mock_request
 
 
 operator_records = {
