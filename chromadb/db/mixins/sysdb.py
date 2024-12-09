@@ -24,7 +24,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.ingest import Producer
 from chromadb.types import (
-    CollectionSegments,
+    CollectionAndSegments,
     Database,
     OptionalArgument,
     Segment,
@@ -491,13 +491,13 @@ class SqlSysDB(SqlDB, SysDB):
             return collections
 
     @override
-    def get_collection_with_segments(self, collection_id: UUID) -> CollectionSegments:
+    def get_collection_with_segments(self, collection_id: UUID) -> CollectionAndSegments:
         collections = self.get_collections(id=collection_id)
         if len(collections) == 0:
             raise InvalidCollectionException(
                 f"Collection {collection_id} does not exist."
             )
-        return CollectionSegments(
+        return CollectionAndSegments(
             collection=collections[0],
             segments=self.get_segments(collection=collection_id),
         )

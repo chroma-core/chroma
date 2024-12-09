@@ -35,7 +35,7 @@ from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.types import (
     Collection,
-    CollectionSegments,
+    CollectionAndSegments,
     Database,
     Metadata,
     OptionalArgument,
@@ -367,11 +367,11 @@ class GrpcSysDB(SysDB):
             raise InternalError()
 
     @overrides
-    def get_collection_with_segments(self, collection_id: UUID) -> CollectionSegments:
+    def get_collection_with_segments(self, collection_id: UUID) -> CollectionAndSegments:
         try:
             request = GetCollectionWithSegmentsRequest(id=collection_id.hex)
             response: GetCollectionWithSegmentsResponse = self._sys_db_stub.GetCollectionWithSegments(request)
-            return CollectionSegments(
+            return CollectionAndSegments(
                 collection=from_proto_collection(response.collection),
                 segments=[from_proto_segment(segment) for segment in response.segments]
             )

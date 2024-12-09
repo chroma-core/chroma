@@ -178,7 +178,7 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
     file_paths: Mapping[str, Sequence[str]]
 
-class CollectionSegments(TypedDict):
+class CollectionAndSegments(TypedDict):
     collection: Collection
     segments: Sequence[Segment]
 

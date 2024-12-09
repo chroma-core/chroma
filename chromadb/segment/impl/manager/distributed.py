@@ -18,7 +18,7 @@ from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.types import Collection, CollectionSegments, Operation, Segment, SegmentScope
+from chromadb.types import Collection, CollectionAndSegments, Operation, Segment, SegmentScope
 
 
 class DistributedSegmentManager(SegmentManager):

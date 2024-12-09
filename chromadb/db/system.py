@@ -4,7 +4,7 @@ from uuid import UUID
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.types import (
     Collection,
-    CollectionSegments,
+    CollectionAndSegments,
     Database,
     Tenant,
     Metadata,
@@ -133,7 +133,7 @@ class SysDB(Component):
     def get_collection_with_segments(
         self,
         collection_id: UUID
-    ) -> CollectionSegments:
+    ) -> CollectionAndSegments:
         """Get a consistent snapshot of a collection by id. This will return a collection with segment
         information that matches the collection version and log position. 
         """
