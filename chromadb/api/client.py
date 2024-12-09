@@ -328,6 +328,7 @@ class Client(SharedSystemClient, ClientAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
     ) -> GetResult:
         return self._server._get(
             collection_id=collection_id,
@@ -342,6 +343,7 @@ class Client(SharedSystemClient, ClientAPI):
             page_size=page_size,
             where_document=where_document,
             include=include,
+            max_distance=max_distance,
         )
 
     def _delete(
@@ -369,6 +371,7 @@ class Client(SharedSystemClient, ClientAPI):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
     ) -> QueryResult:
         return self._server._query(
             collection_id=collection_id,
@@ -379,6 +382,7 @@ class Client(SharedSystemClient, ClientAPI):
             where=where,
             where_document=where_document,
             include=include,
+            max_distance=max_distance,
         )
 
     @override

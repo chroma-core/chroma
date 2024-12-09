@@ -227,7 +227,8 @@ class BaseAPI(ABC):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = IncludeMetadataDocumentsEmbeddings,
+        include: Include = IncludeMetadataDocumentsEmbeddings,  # type: ignore
+        max_distance: Optional[float] = None,
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
@@ -277,7 +278,8 @@ class BaseAPI(ABC):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = IncludeMetadataDocumentsEmbeddingsDistances,
+        include: Include = IncludeMetadataDocumentsEmbeddingsDistances,  # type: ignore
+        max_distance: Optional[float] = None,
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
@@ -648,6 +650,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -708,6 +711,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

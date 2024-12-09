@@ -134,6 +134,12 @@ class LocalExecutor(Executor):
             )
             knns = self._vector_segment(plan.scan.collection).query_vectors(query)
 
+        if plan.max_distance is not None:
+            knns = [
+                [r for r in result if r["distance"] <= plan.max_distance]
+                for result in knns
+            ]
+
         ids = [[r["id"] for r in result] for result in knns]
         embeddings = None
         documents = None

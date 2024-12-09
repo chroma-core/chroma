@@ -35,7 +35,8 @@ class QueryEmbedding(BaseModel):
     where_document: Optional[Dict[Any, Any]] = None
     query_embeddings: List[Any]
     n_results: int = 10
-    include: Include = IncludeMetadataDocumentsDistances
+    include: Include = IncludeMetadataDocumentsDistances  # type: ignore
+    max_distance: Optional[float] = None
 
 
 class GetEmbedding(BaseModel):
@@ -45,7 +46,7 @@ class GetEmbedding(BaseModel):
     sort: Optional[str] = None
     limit: Optional[int] = None
     offset: Optional[int] = None
-    include: Include = IncludeMetadataDocuments
+    include: Include = IncludeMetadataDocuments  # type: ignore
 
 
 class DeleteEmbedding(BaseModel):
