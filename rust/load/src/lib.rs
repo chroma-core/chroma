@@ -1,3 +1,17 @@
+//! chroma-load is the load generator for Chroma.
+//!
+//! This library is conceptually separates the notion of a workload from the notion of a data set.
+//! Data sets map onto collections in Chroma, but there can be many data sets per collection.
+//! Effectively, a data set is a way to specify what it means to get, query, or upsert.
+//!
+//! Workloads specify a way to manipulate a data set.  They specify data-agnostic ways to get,
+//! query, or upsert.  The workload type is compositional and recursive, so workloads can specify
+//! blends of other workloads.
+//!
+//! The load harness provides a way to start and stop (workload, data set) pairs.  The nature of
+//! the types means any workload can run against any data set (though the results may not be
+//! meaningful except to be some form of load).
+
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -30,11 +44,17 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
+/// Errors that can occur in the load service.
+// TODO(rescrv):  Implement ChromaError.
 #[derive(Debug)]
 pub enum Error {
+    /// The requested resource was not found.
     NotFound(String),
+    /// The request was invalid.
     InvalidRequest(String),
+    /// An internal error occurred.
     InternalError(String),
+    /// A request to chroma failed.
     FailWorkload(String),
 }
 
@@ -68,11 +88,15 @@ impl axum::response::IntoResponse for Error {
 
 ////////////////////////////////////////////// client //////////////////////////////////////////////
 
+/// Instantiate a new Chroma client.  This will use the CHROMA_HOST environment variable (or
+/// http://localhost:8000 when unset) as the argument to [client_for_url].
 pub fn client() -> ChromaClient {
     let url = std::env::var("CHROMA_HOST").unwrap_or_else(|_| "http://localhost:8000".into());
     client_for_url(url)
 }
 
+/// Create a new Chroma client for the given URL.  This will use the CHROMA_TOKEN environment
+/// variable if set, or no authentication if unset.
 pub fn client_for_url(url: String) -> ChromaClient {
     if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
         ChromaClient::new(ChromaClientOptions {
@@ -94,12 +118,27 @@ pub fn client_for_url(url: String) -> ChromaClient {
 
 ////////////////////////////////////////////// DataSet /////////////////////////////////////////////
 
+/// A data set is an abstraction over a Chroma collection.  It is designed to allow callers to use
+/// get/query/upsert without worrying about the semantics of a particular data set.  A valid
+/// [GetQuery], [QueryQuery], or [UpsertQuery] should work for any data set or return an explicit
+/// error.
 #[async_trait::async_trait]
 pub trait DataSet: std::fmt::Debug + Send + Sync {
+    /// A human-readable name for the data set.  This will be used for starting workloads to pair
+    /// them to a data set.
     fn name(&self) -> String;
+
+    /// A human-readable description of the data set.  This will be used in the status endpoint.
     fn description(&self) -> String;
+
+    /// A JSON representation of the data set.  This will be used in the status endpoint when
+    /// requesting JSON.
     fn json(&self) -> serde_json::Value;
 
+    /// Get documents from the data set.
+    ///
+    /// The semantics of this call is that it should loosely translate to a non-vector query,
+    /// whatever that means for the implementor of the data set.
     async fn get(
         &self,
         client: &ChromaClient,
@@ -107,6 +146,10 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         guac: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
+    /// Query documents from the data set.
+    ///
+    /// The semantics of this call correspond to a vector query, whatever that means for the
+    /// implementor of the data set.
     async fn query(
         &self,
         client: &ChromaClient,
@@ -114,6 +157,10 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         guac: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
+    /// Upsert documents into the data set.
+    ///
+    /// The semantics of this call correspond to writing documents into the data set, whatever that
+    /// means for the implementor of the data set.
     async fn upsert(
         &self,
         client: &ChromaClient,
@@ -127,13 +174,18 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
 /// Distribution size and shape.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum Distribution {
+    /// Draw a constant value.
     Constant(usize),
+    /// Draw from an exponential distribution with the given average.
     Exponential(f64),
+    /// Draw from a uniform distribution between min and max.
     Uniform(usize, usize),
+    /// Draw from a Zipf distribution with the given number of elements and theta (<1.0).
     Zipf(u64, f64),
 }
 
 impl Distribution {
+    /// Given Guacamole, generate a sample from the distribution.
     pub fn sample(&self, guac: &mut Guacamole) -> usize {
         match self {
             Distribution::Constant(n) => *n,
@@ -152,21 +204,27 @@ impl Distribution {
 /// Distribution shape, without size.
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum Skew {
+    /// A uniform skew introduces no bias in the selection.
     #[serde(rename = "uniform")]
     Uniform,
+    /// A Zipf skew is skewed according to theta.  Theta=0.0 is uniform, theta=1.0-\epsilon is very
+    /// skewed.  Try 0.9 and add nines for skew.
     #[serde(rename = "zipf")]
     Zipf { theta: f64 },
 }
 
 /////////////////////////////////////////// MetadataQuery //////////////////////////////////////////
 
+/// A metadata query specifies a metadata filter in Chroma.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum MetadataQuery {
+    /// A raw metadata query simply copies the provided filter spec.
     #[serde(rename = "raw")]
     Raw(serde_json::Value),
 }
 
 impl MetadataQuery {
+    /// Convert the metadata query into a JSON value suitable for use in a Chroma query.
     pub fn into_where_metadata(self, _: &mut Guacamole) -> serde_json::Value {
         match self {
             MetadataQuery::Raw(json) => json,
@@ -176,13 +234,16 @@ impl MetadataQuery {
 
 /////////////////////////////////////////// DocumentQuery //////////////////////////////////////////
 
+/// A document query specifies a document filter in Chroma.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum DocumentQuery {
+    // A raw document query simply copies the provided filter spec.
     #[serde(rename = "raw")]
     Raw(serde_json::Value),
 }
 
 impl DocumentQuery {
+    /// Convert the document query into a JSON value suitable for use in a Chroma query.
     pub fn into_where_document(self, _: &mut Guacamole) -> serde_json::Value {
         match self {
             DocumentQuery::Raw(json) => json,
@@ -192,6 +253,15 @@ impl DocumentQuery {
 
 ///////////////////////////////////////////// GetQuery /////////////////////////////////////////////
 
+/// A get query specifies a get operation in Chroma.
+///
+/// This roughly corresponds to a skew in popularity of a key (note that it's not a distribution
+/// because the distribution requires a size and that comes when bound to the workload).
+///
+/// The limit specifies a distribution of request sizes.  (note that it's a distribution and not a
+/// skew because we specify the size as part of the query spec).
+///
+/// Then there are metadata and document filters, which are optional.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct GetQuery {
     pub skew: Skew,
@@ -204,6 +274,15 @@ pub struct GetQuery {
 
 //////////////////////////////////////////// QueryQuery ////////////////////////////////////////////
 
+/// A query query specifies a vector query operation in Chroma.
+///
+/// This roughly corresponds to a skew in popularity of a vector (note that it's not a distribution
+/// because the distribution requires a size and that comes when bound to the workload).
+///
+/// The limit specifies a distribution of request sizes.  (note that it's a distribution and not a
+/// skew because we specify the size as part of the query spec).
+///
+/// Then there are metadata and document filters, which are optional.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct QueryQuery {
     pub skew: Skew,
@@ -216,26 +295,39 @@ pub struct QueryQuery {
 
 //////////////////////////////////////////// KeySelector ///////////////////////////////////////////
 
+/// A means of selecting a key for upsert.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type")]
 pub enum KeySelector {
+    /// Select a key by index.  If the index is out of bounds, the behavior is defined to wrap.
     #[serde(rename = "index")]
     Index(usize),
+    /// Select a key by skew.  The skew is used to select a key from the distribution of keys the
+    /// data set has available for upsert.
     #[serde(rename = "random")]
     Random(Skew),
 }
 
 //////////////////////////////////////////// UpsertQuery ///////////////////////////////////////////
 
+/// An upsert query specifies an upsert operation in Chroma.
+///
+/// The batch will be selected using the provided key.  The batch size is the number of documents
+/// to upsert in a single operation.  The associativity is the ratio is data set defined, but
+/// generally means that denser operations will take place with higher values.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct UpsertQuery {
+    /// Select the document ID to upsert.
     pub key: KeySelector,
+    /// The number of documents to upsert in a single operation.
     pub batch_size: usize,
+    /// The associativity of the upsert operation.  Implementation-defined meaning.
     pub associativity: f64,
 }
 
 /////////////////////////////////////////// WorkloadState //////////////////////////////////////////
 
+/// The state of a workload.
 #[derive(Clone)]
 pub struct WorkloadState {
     seq_no: u64,
@@ -244,34 +336,46 @@ pub struct WorkloadState {
 
 ///////////////////////////////////////////// Workload /////////////////////////////////////////////
 
+/// A workload is a description of a set of operations to perform against a data set.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum Workload {
+    /// No Operatioon; do nothing.
     #[serde(rename = "nop")]
     Nop,
+    /// Resolve the workload by name.
     #[serde(rename = "by_name")]
     ByName(String),
+    /// Get documents from the data set according to the query.
     #[serde(rename = "get")]
     Get(GetQuery),
+    /// Query documents from the data set according to the query.
     #[serde(rename = "query")]
     Query(QueryQuery),
+    /// A hybrid workload is a blend of other workloads.  The blend is specified as a list of other
+    /// valid workload.  The probabilities are normalized to 1.0 before selection.
     #[serde(rename = "hybrid")]
     Hybrid(Vec<(f64, Workload)>),
+    /// Delay the workload until after the specified time.
     #[serde(rename = "delay")]
     Delay {
         after: chrono::DateTime<chrono::FixedOffset>,
         wrap: Box<Workload>,
     },
+    /// Load the data set.  Will repeatedly load until the time expires.
     #[serde(rename = "load")]
     Load,
+    /// Randomly upsert a document.
     #[serde(rename = "random")]
     RandomUpsert(KeySelector),
 }
 
 impl Workload {
+    /// A human-readable description of the workload.
     pub fn description(&self) -> String {
         serde_json::to_string_pretty(self).unwrap()
     }
 
+    /// Resolve named workload references to the actual workloads they reference.
     pub fn resolve_by_name(&mut self, workloads: &HashMap<String, Workload>) -> Result<(), Error> {
         match self {
             Workload::Nop => {}
@@ -296,6 +400,7 @@ impl Workload {
         Ok(())
     }
 
+    /// Do one operation of the workload against the data set.
     pub async fn step(
         &self,
         client: &ChromaClient,
@@ -387,6 +492,7 @@ impl Workload {
         }
     }
 
+    /// True if the workload is active, which means it may interact with Chroma.
     pub fn is_active(&self) -> bool {
         match self {
             Workload::Nop => true,
@@ -403,6 +509,7 @@ impl Workload {
 
 //////////////////////////////////////////// Throughput ////////////////////////////////////////////
 
+/// A throughput specification.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub enum Throughput {
     /// Target a constant throughput.
@@ -455,6 +562,8 @@ impl std::fmt::Display for Throughput {
 
 ////////////////////////////////////////// RunningWorkload /////////////////////////////////////////
 
+/// A running workload is a workload that has been bound to a data set at a given throughput.  It
+/// is assigned a name, uuid, and expiration time.
 #[derive(Clone, Debug)]
 pub struct RunningWorkload {
     uuid: Uuid,
@@ -466,6 +575,7 @@ pub struct RunningWorkload {
 }
 
 impl RunningWorkload {
+    /// A human-readable description of the running workload.
     pub fn description(&self) -> String {
         format!("{}/{}", self.uuid, self.data_set.name())
     }
@@ -473,28 +583,38 @@ impl RunningWorkload {
 
 ////////////////////////////////////////// WorkloadSummary /////////////////////////////////////////
 
+/// A summary of a workload.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct WorkloadSummary {
+    /// The UUID of the workload.
     pub uuid: Uuid,
+    /// The name of the workload.
     pub name: String,
+    /// The workload itself.
     pub workload: serde_json::Value,
+    /// The data set the workload is bound to.
     pub data_set: serde_json::Value,
+    /// The expiration time of the workload.
     pub expires: String,
+    /// The throughput of the workload.
     pub throughput: Throughput,
 }
 
 //////////////////////////////////////////// LoadHarness ///////////////////////////////////////////
 
+/// A load harness is a collection of running workloads.
 #[derive(Debug)]
 pub struct LoadHarness {
     running: Vec<RunningWorkload>,
 }
 
 impl LoadHarness {
+    /// The status of the load harness.
     pub fn status(&self) -> Vec<RunningWorkload> {
         self.running.clone()
     }
 
+    /// Start a workload on the load harness.
     pub fn start(
         &mut self,
         name: String,
@@ -516,6 +636,7 @@ impl LoadHarness {
         uuid
     }
 
+    /// Stop a workload on the load harness.
     pub fn stop(&mut self, uuid: Uuid) -> bool {
         let old_sz = self.running.len();
         self.running.retain(|w| w.uuid != uuid);
@@ -526,6 +647,7 @@ impl LoadHarness {
 
 //////////////////////////////////////////// LoadService ///////////////////////////////////////////
 
+/// The load service is a collection of data sets and workloads that can be started and stopped.
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct LoadService {
@@ -537,6 +659,7 @@ pub struct LoadService {
 }
 
 impl LoadService {
+    /// Create a new load service from the given data sets and workloads.
     pub fn new(data_sets: Vec<Arc<dyn DataSet>>, workloads: HashMap<String, Workload>) -> Self {
         LoadService {
             inhibit: Arc::new(AtomicBool::new(false)),
@@ -547,28 +670,35 @@ impl LoadService {
         }
     }
 
+    /// Inhibit the load service.  This stops all activity in perpetuity until a call to uninhibit.
+    /// Even subsequent calls to start will not do anything until a call to uninhibit.
     pub fn inhibit(&self) {
         self.inhibit
             .store(true, std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Uninhibit the load service.  This allows activity to resume.
     pub fn uninhibit(&self) {
         self.inhibit
             .store(false, std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Check if the load service is inhibited.
     pub fn is_inhibited(&self) -> bool {
         self.inhibit.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Get the data sets in the load service.
     pub fn data_sets(&self) -> &[Arc<dyn DataSet>] {
         &self.data_sets
     }
 
+    /// Get the workloads in the load service.
     pub fn workloads(&self) -> &HashMap<String, Workload> {
         &self.workloads
     }
 
+    /// Get the status of the load service.
     pub fn status(&self) -> Vec<WorkloadSummary> {
         let running = {
             // SAFETY(rescrv): Mutex poisoning.
@@ -588,6 +718,7 @@ impl LoadService {
             .collect()
     }
 
+    /// Start a workload on the load service.
     pub fn start(
         &self,
         name: String,
@@ -605,6 +736,7 @@ impl LoadService {
         Ok(harness.start(name, workload.clone(), data_set, expires, throughput))
     }
 
+    /// Stop a workload on the load service.
     pub fn stop(&self, uuid: Uuid) -> Result<(), Error> {
         // SAFETY(rescrv): Mutex poisoning.
         let mut harness = self.harness.lock().unwrap();
@@ -615,6 +747,7 @@ impl LoadService {
         }
     }
 
+    /// Run the load service in perpetuity.
     pub async fn run(&self) -> ! {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let _ = tx.send(tokio::task::spawn(async {}));
