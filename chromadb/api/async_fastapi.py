@@ -34,9 +34,9 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     CollectionMetadata,
-    validate_batch,
     convert_np_embeddings_to_list,
 )
+from chromadb.utils.validators import validate_batch
 
 
 logger = logging.getLogger(__name__)
