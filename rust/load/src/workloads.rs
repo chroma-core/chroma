@@ -4,6 +4,7 @@ use crate::{
     Distribution, DocumentQuery, GetQuery, KeySelector, MetadataQuery, QueryQuery, Skew, Workload,
 };
 
+/// Return a map of all pre-configured workloads.
 pub fn all_workloads() -> HashMap<String, Workload> {
     HashMap::from_iter([
         (

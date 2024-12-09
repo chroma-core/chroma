@@ -10,6 +10,7 @@ use crate::{bit_difference, DataSet, Error, GetQuery, QueryQuery, UpsertQuery};
 
 //////////////////////////////////////////////// Nop ///////////////////////////////////////////////
 
+/// A data set that does nothing.
 #[derive(Debug)]
 pub struct NopDataSet;
 
@@ -60,8 +61,9 @@ impl DataSet for NopDataSet {
 
 /////////////////////////////////////////// Tiny Stories ///////////////////////////////////////////
 
+/// A data set of tiny stories.
 #[derive(Clone, Debug)]
-struct TinyStoriesDataSet {
+pub struct TinyStoriesDataSet {
     name: &'static str,
     model: &'static str,
     size: usize,
@@ -263,6 +265,7 @@ const TINY_STORIES_DATA_SETS: &[TinyStoriesDataSet] = &[
 
 /////////////////////////////////////////// All Data Sets //////////////////////////////////////////
 
+/// Get all data sets.
 pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
     let mut data_sets = vec![Arc::new(NopDataSet) as _];
     for data_set in TINY_STORIES_DATA_SETS {
