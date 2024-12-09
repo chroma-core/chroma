@@ -70,11 +70,11 @@ class Collection(CollectionCommon["ServerAPI"]):
             None
 
         Raises:
-            ValueError: If you don't provide either embeddings or documents
-            ValueError: If the length of ids, embeddings, metadatas, or documents don't match
-            ValueError: If you don't provide an embedding function and don't provide embeddings
-            ValueError: If you provide both embeddings and documents
-            ValueError: If you provide an id that already exists
+            InvalidArgumentError: If you don't provide either embeddings or documents
+            InvalidArgumentError: If the length of ids, embeddings, metadatas, or documents don't match
+            InvalidArgumentError: If you don't provide an embedding function and don't provide embeddings
+            InvalidArgumentError: If you provide both embeddings and documents
+            InvalidArgumentError: If you provide an id that already exists
 
         """
 
@@ -200,10 +200,10 @@ class Collection(CollectionCommon["ServerAPI"]):
             QueryResult: A QueryResult object containing the results.
 
         Raises:
-            ValueError: If you don't provide either query_embeddings, query_texts, or query_images
-            ValueError: If you provide both query_embeddings and query_texts
-            ValueError: If you provide both query_embeddings and query_images
-            ValueError: If you provide both query_texts and query_images
+            InvalidArgumentError: If you don't provide either query_embeddings, query_texts, or query_images
+            InvalidArgumentError: If you provide both query_embeddings and query_texts
+            InvalidArgumentError: If you provide both query_embeddings and query_images
+            InvalidArgumentError: If you provide both query_texts and query_images
 
         """
 
@@ -366,7 +366,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             None
 
         Raises:
-            ValueError: If you don't provide either ids, where, or where_document
+            InvalidArgumentError: If you don't provide either ids, where, or where_document
         """
         delete_request = self._validate_and_prepare_delete_request(
             ids, where, where_document

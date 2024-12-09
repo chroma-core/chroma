@@ -20,7 +20,10 @@ from chromadb.auth import (
     AuthError,
 )
 from chromadb.config import System
-from chromadb.errors import ChromaAuthError
+from chromadb.errors import (
+    ChromaAuthError,
+    InvalidArgumentError
+)
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryGranularity,
     trace_method,
@@ -56,7 +59,7 @@ valid_token_chars = set(string.digits + string.ascii_letters + string.punctuatio
 def _check_token(token: str) -> None:
     token_str = str(token)
     if not all(c in valid_token_chars for c in token_str):
-        raise ValueError(
+        raise InvalidArgumentError(
             "Invalid token. Must contain only ASCII letters, digits, and punctuation."
         )
 
@@ -69,7 +72,7 @@ allowed_token_headers = [
 
 def _check_allowed_token_headers(token_header: str) -> None:
     if token_header not in allowed_token_headers:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Invalid token transport header: {token_header}. "
             f"Must be one of {allowed_token_headers}"
         )
@@ -169,7 +172,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
         self._users = cast(List[User], yaml.safe_load("\n".join(creds))["users"])
         for user in self._users:
             if "tokens" not in user:
-                raise ValueError("User missing tokens")
+                raise InvalidArgumentError("User missing tokens")
             if "tenant" not in user:
                 user["tenant"] = "*"
             if "databases" not in user:
@@ -180,7 +183,7 @@ class TokenAuthenticationServerProvider(ServerAuthenticationProvider):
                     token in self._token_user_mapping
                     and self._token_user_mapping[token] != user
                 ):
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         f"Token {token} already in use: wanted to use it for "
                         f"user {user['id']} but it's already in use by "
                         f"user {self._token_user_mapping[token]}"

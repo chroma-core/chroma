@@ -13,6 +13,7 @@ import pytest
 from chromadb.api import AdminAPI
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import Settings, System
+from chromadb.errors import InvalidArgumentError
 from chromadb.test.conftest import (
     ClientFactories,
     fastapi_fixture_admin_and_singleton_tenant_db_user,
@@ -105,7 +106,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
             # thanks to the above overriding of get_tenant_model(),
             # the underlying state machine test should always expect an error
             # when it sends the request, so shouldn't try to update the model.
-            raise ValueError("trying to overwrite the model for singleton??")
+            raise InvalidArgumentError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant] = model
 
     @overrides
@@ -121,7 +122,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
             # thanks to the above overriding of has_database_for_tenant(),
             # the underlying state machine test should always expect an error
             # when it sends the request, so shouldn't try to update the model.
-            raise ValueError("trying to overwrite the model for singleton??")
+            raise InvalidArgumentError("trying to overwrite the model for singleton??")
         self.tenant_to_database_to_model[tenant][database] = database_model
 
     @overrides

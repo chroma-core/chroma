@@ -2,6 +2,7 @@ import logging
 from typing import Any, List, Union
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings, Images
+from chromadb.errors import InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,7 @@ def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
     try:
         from langchain_core.embeddings import Embeddings as LangchainEmbeddings
     except ImportError:
-        raise ValueError(
+        raise InvalidArgumentError(
             "The langchain_core python package is not installed. Please install it with `pip install langchain-core`"
         )
 
@@ -40,7 +41,7 @@ def create_langchain_embedding(langchain_embdding_fn: Any):  # type: ignore
             if hasattr(self.embedding_function, "embed_image"):
                 return self.embedding_function.embed_image(uris)  # type: ignore
             else:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "The provided embedding function does not support image embeddings."
                 )
 

@@ -14,6 +14,7 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
+from chromadb.errors import InvalidArgumentError
 from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
@@ -76,7 +77,7 @@ def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
     elif op == "$lte":
         return key in metadata and metadata[key] <= val
     else:
-        raise ValueError("Unknown operator: {}".format(key))
+        raise InvalidArgumentError("Unknown operator: {}".format(key))
 
 
 def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
@@ -110,7 +111,7 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
             return re.search(expr, doc) is None
         return expr not in doc
     else:
-        raise ValueError("Unknown operator: {}".format(key))
+        raise InvalidArgumentError("Unknown operator: {}".format(key))
 
 
 EMPTY_DICT: Dict[Any, Any] = {}

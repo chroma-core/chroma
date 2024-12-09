@@ -15,6 +15,8 @@ from chromadb.api.types import (
     is_document,
     is_image,
 )
+from chromadb.errors import InvalidArgumentError
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
         try:
             self._PILImage = importlib.import_module("PIL.Image")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
