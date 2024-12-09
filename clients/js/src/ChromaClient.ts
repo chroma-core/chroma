@@ -290,7 +290,7 @@ export class ChromaClient {
   /**
    * Lists all collections.
    *
-   * @returns {Promise<CollectionType[]>} A promise that resolves to a list of collection names.
+   * @returns {Promise<string[]>} A promise that resolves to a list of collection names.
    * @param {PositiveInteger} [params.limit] - Optional limit on the number of items to get.
    * @param {PositiveInteger} [params.offset] - Optional offset on the items to get.
    * @throws {Error} If there is an issue listing the collections.
@@ -304,7 +304,7 @@ export class ChromaClient {
    * ```
    */
   async listCollections({ limit, offset }: ListCollectionsParams = {}): Promise<
-    CollectionParams[]
+    string[]
   > {
     await this.init();
     return (await this.api.listCollections(
@@ -313,7 +313,7 @@ export class ChromaClient {
       limit,
       offset,
       this.api.options,
-    )) as CollectionParams[];
+    )) as string[];
   }
 
   /**
