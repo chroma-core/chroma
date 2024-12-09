@@ -185,13 +185,17 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     segments_created_with_collection = []
     for collection in sample_collections:
         logger.debug(f"Creating collection: {collection.name}")
-        segment = sample_segment(collection_id=collection.id)
-        segments_created_with_collection.append(segment)
+        segments = [
+            sample_segment(collection_id=collection.id, scope=SegmentScope.METADATA),
+            sample_segment(collection_id=collection.id, scope=SegmentScope.RECORD),
+            sample_segment(collection_id=collection.id, scope=SegmentScope.VECTOR),
+        ]
+        segments_created_with_collection.extend(segments)
         sysdb.create_collection(
             id=collection.id,
             name=collection.name,
             configuration=collection.get_configuration(),
-            segments=[segment],
+            segments=segments,
             metadata=collection["metadata"],
             dimension=collection["dimension"],
         )
@@ -223,6 +227,12 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
         result = sysdb.get_collections(id=collection["id"])
         assert result == [collection]
 
+    # Verify segment information
+    for collection in sample_collections:
+        collection_with_segments_result = sysdb.get_collection_with_segments(collection.id)
+        assert collection_with_segments_result["collection"] == collection
+        assert all([segment["id"] == collection.id for segment in collection_with_segments_result["segments"]])
+        
     # Delete
     c1 = sample_collections[0]
     sysdb.delete_collection(id=c1.id)
