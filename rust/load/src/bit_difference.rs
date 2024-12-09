@@ -118,6 +118,7 @@ impl From<[u8; EMBEDDING_BYTES]> for Document {
             .iter()
             .enumerate()
             .filter_map(|(idx, word)| {
+                // If the idx'th bit is set...
                 if embedding[idx >> 3] & (1 << (idx & 0x7)) != 0 {
                     Some(*word)
                 } else {
