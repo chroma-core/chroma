@@ -1,5 +1,6 @@
 export { ChromaClient } from "./ChromaClient";
 export { AdminClient } from "./AdminClient";
+export { Collection } from "./Collection";
 export { CloudClient } from "./CloudClient";
 export type { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 export { OpenAIEmbeddingFunction } from "./embeddings/OpenAIEmbeddingFunction";
