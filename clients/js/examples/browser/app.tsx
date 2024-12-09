@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ChromaClient } from "../../src/ChromaClient";
 import { Collection } from "../../src/types";
+import CryptoJS from "crypto-js";
 
 const SAMPLE_DOCUMENTS = [
   "apple",
@@ -14,7 +15,18 @@ const SAMPLE_DOCUMENTS = [
 const hashString = async (message: string) => {
   const encoder = new TextEncoder();
   const data = encoder.encode(message);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  let hashBuffer;
+  if (crypto.subtle) {
+    hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  } else {
+    const hash = CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(message));
+    hashBuffer = new Uint8Array(hash.words.map(word => [
+      (word >> 24) & 0xff,
+      (word >> 16) & 0xff,
+      (word >> 8) & 0xff,
+      word & 0xff
+    ]).flat());
+  }
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 };
