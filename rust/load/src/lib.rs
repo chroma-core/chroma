@@ -567,41 +567,6 @@ impl PartialEq for Workload {
     }
 }
 
-/*
-/// A workload is a description of a set of operations to perform against a data set.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum Workload {
-    /// No Operatioon; do nothing.
-    #[serde(rename = "nop")]
-    Nop,
-    /// Resolve the workload by name.
-    #[serde(rename = "by_name")]
-    ByName(String),
-    /// Get documents from the data set according to the query.
-    #[serde(rename = "get")]
-    Get(GetQuery),
-    /// Query documents from the data set according to the query.
-    #[serde(rename = "query")]
-    Query(QueryQuery),
-    /// A hybrid workload is a blend of other workloads.  The blend is specified as a list of other
-    /// valid workload.  The probabilities are normalized to 1.0 before selection.
-    #[serde(rename = "hybrid")]
-    Hybrid(Vec<(f64, Workload)>),
-    /// Delay the workload until after the specified time.
-    #[serde(rename = "delay")]
-    Delay {
-        after: chrono::DateTime<chrono::FixedOffset>,
-        wrap: Box<Workload>,
-    },
-    /// Load the data set.  Will repeatedly load until the time expires.
-    #[serde(rename = "load")]
-    Load,
-    /// Randomly upsert a document.
-    #[serde(rename = "random")]
-    RandomUpsert(KeySelector),
-}
- */
-
 //////////////////////////////////////////// Throughput ////////////////////////////////////////////
 
 /// A throughput specification.
@@ -861,8 +826,11 @@ impl LoadService {
         }
     }
 
-    /// Set the persistent path.
-    pub fn set_persistent_path(&mut self, persistent_path: Option<String>) -> Result<(), Error> {
+    /// Set the persistent path and load its contents.
+    pub fn set_persistent_path_and_load(
+        &mut self,
+        persistent_path: Option<String>,
+    ) -> Result<(), Error> {
         if let Some(persistent_path) = persistent_path {
             self.persistent_path = Some(persistent_path);
             self.load_persistent()?;
@@ -1282,7 +1250,7 @@ pub async fn entrypoint() {
 
     opentelemetry_config::init_otel_tracing(&config.service_name, &config.otel_endpoint);
     let mut load = LoadService::default();
-    if let Err(err) = load.set_persistent_path(config.persistent_state_path.clone()) {
+    if let Err(err) = load.set_persistent_path_and_load(config.persistent_state_path.clone()) {
         tracing::warn!("failed to load persistent state: {:?}", err);
     }
     let load = Arc::new(load);
@@ -1448,7 +1416,7 @@ mod tests {
         std::fs::remove_file(TEST_PATH).ok();
         // First verse.
         let mut load = LoadService::default();
-        load.set_persistent_path(Some(TEST_PATH.to_string()))
+        load.set_persistent_path_and_load(Some(TEST_PATH.to_string()))
             .unwrap();
         println!("FINDME {}:{}", file!(), line!());
         load.start(
@@ -1477,7 +1445,7 @@ mod tests {
             assert!(harness.running.is_empty());
         }
         println!("FINDME {}:{}", file!(), line!());
-        load.set_persistent_path(Some(TEST_PATH.to_string()))
+        load.set_persistent_path_and_load(Some(TEST_PATH.to_string()))
             .unwrap();
         {
             // SAFETY(rescrv):  Mutex poisoning.
