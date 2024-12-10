@@ -1,6 +1,6 @@
 //! chroma-load is the load generator for Chroma.
 //!
-//! This library is conceptually separates the notion of a workload from the notion of a data set.
+//! This library conceptually separates the notion of a workload from the notion of a data set.
 //! Data sets map onto collections in Chroma, but there can be many data sets per collection.
 //! Effectively, a data set is a way to specify what it means to get, query, or upsert.
 //!
