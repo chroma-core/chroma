@@ -9,9 +9,9 @@ interface HeadingProps {
   className?: string;
 }
 
-export function Heading({ id = '', level = 1, children, className }: HeadingProps): JSX.Element {
+export function Heading({ id = '', level = 1, children, className }: HeadingProps) {
   const router = useRouter();
-  const Component = `h${level}` as keyof JSX.IntrinsicElements; // This type assertion helps to ensure that Component is a valid JSX element tag
+  const Component = `h${level}`;
 
   const isDocs = router.pathname.startsWith('/docs');
 
@@ -34,30 +34,27 @@ export function Heading({ id = '', level = 1, children, className }: HeadingProp
     className = 'text-sm mb-4 mt-4 font-semibold';
   }
 
-
-  const link = (
-    <Component className={['heading', className].filter(Boolean).join(' ')}>
-      <div id={id} />
-      {children}
-      <a
-      onClick={(e) => {
-        e.preventDefault();
-        navigator.clipboard.writeText(`${window.location.origin}${router.pathname}#${id}`);
-        // replacestate with the current url
-        window.history.replaceState(null, '', `${window.location.origin}${router.pathname}#${id}`);
-      }}
-      className="text-gray-500 hover:text-gray-700 ml-2 cursor-pointer href-anchor"
-      >
-        #
-      </a>
-    </Component>
+  const link = React.createElement(
+      Component,
+      { className: ['heading', className].filter(Boolean).join(' ') },
+      React.createElement('div', { id }),
+      children,
+      React.createElement(
+          'a',
+          {
+            onClick: (e) => {
+              e.preventDefault();
+              navigator.clipboard.writeText(`${window.location.origin}${router.pathname}#${id}`);
+              // Replace state with the current URL
+              window.history.replaceState(null, '', `${window.location.origin}${router.pathname}#${id}`);
+            },
+            className: 'text-gray-500 hover:text-gray-700 ml-2 cursor-pointer href-anchor',
+          },
+          '#'
+      )
   );
 
-  return isDocs && level !== 1 ? (
-    <a href={`#${id}`}>
-      {link}
-    </a>
-  ) : (
-    link
-  );
+  return isDocs && level !== 1
+      ? React.createElement('a', { href: `#${id}` }, link)
+      : link;
 }
