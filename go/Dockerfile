@@ -1,4 +1,4 @@
-FROM golang:bookworm as builder
+FROM golang:bookworm AS builder
 WORKDIR /build-dir
 RUN apt-get update && apt-get install -y make git bash
 
@@ -10,14 +10,12 @@ ADD ./go/ ./
 ENV GOCACHE=/root/.cache/go-build
 RUN --mount=type=cache,target="/root/.cache/go-build" make
 
-FROM debian:bookworm-slim as sysdb
+FROM debian:bookworm-slim AS logservice
+COPY --from=builder /build-dir/bin/logservice .
+ENV PATH=$PATH:./
+CMD ["./logservice"]
+
+FROM debian:bookworm-slim AS sysdb
 COPY --from=builder /build-dir/bin/coordinator .
 ENV PATH=$PATH:./
-
 CMD /bin/bash
-
-
-FROM debian:bookworm-slim as logservice
-WORKDIR /app
-COPY --from=builder /build-dir/bin/logservice .
-CMD ["./logservice"]
