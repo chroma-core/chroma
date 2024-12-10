@@ -525,6 +525,7 @@ pub async fn rng_query(
     rng_epsilon: f32,
     rng_factor: f32,
     distance_function: DistanceFunction,
+    apply_rng_rule: bool,
 ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), RngQueryError> {
     let mut nearby_ids: Vec<usize> = vec![];
     let mut nearby_distances: Vec<f32> = vec![];
@@ -550,6 +551,9 @@ pub async fn rng_query(
                 .ok_or(RngQueryError::HnswSearchError)?;
             embeddings.push(emb);
         }
+    }
+    if !apply_rng_rule {
+        return Ok((nearby_ids, nearby_distances, embeddings));
     }
     // Apply the RNG rule to prune.
     let mut res_ids = vec![];

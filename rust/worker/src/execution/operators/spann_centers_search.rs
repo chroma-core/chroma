@@ -78,6 +78,7 @@ impl Operator<SpannCentersSearchInput, SpannCentersSearchOutput> for SpannCenter
             input.rng_epsilon,
             input.rng_factor,
             input.distance_function.clone(),
+            false,
         )
         .await
         .map_err(|_| SpannCentersSearchError::RngQueryError)?;

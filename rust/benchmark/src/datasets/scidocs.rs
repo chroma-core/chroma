@@ -83,6 +83,7 @@ impl RecordDataset for SciDocsDataset {
                     Ok(Record {
                         document: parsed.text,
                         metadata,
+                        embedding: None,
                     })
                 }
                 Err(e) => Err(e.into()),

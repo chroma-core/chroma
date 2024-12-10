@@ -85,6 +85,7 @@ impl RecordDataset for MicrosoftMarcoQueriesDataset {
                     Ok(Record {
                         document: content,
                         metadata,
+                        embedding: None,
                     })
                 }
                 Err(e) => Err(e.into()),
