@@ -47,7 +47,7 @@
     "dist"
   ],
   "scripts": {
-    "test": "jest --runInBand",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "test:functional": "jest --runInBand --testPathIgnorePatterns=test/auth.*.test.ts",
     "test:update": "jest --runInBand --updateSnapshot",
     "prebuild": "rimraf dist",
@@ -69,10 +69,14 @@
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
-    "openai": "^3.0.0 || ^4.0.0"
+    "openai": "^3.0.0 || ^4.0.0",
+    "@langchain/core": "^0.3.10"
   },
   "peerDependenciesMeta": {
     "@google/generative-ai": {
+      "optional": true
+    },
+    "@langchain/core": {
       "optional": true
     },
     "cohere-ai": {
