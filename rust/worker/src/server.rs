@@ -9,7 +9,7 @@ use chroma_types::{
         self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
         KnnBatchResult, KnnPlan,
     },
-    CollectionUuid, Segment,
+    CollectionSegments, CollectionUuid, Segment,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -20,11 +20,11 @@ use crate::{
     config::QueryServiceConfig,
     execution::{
         dispatcher::Dispatcher,
-        operators::{
-            fetch_log::FetchLogOperator, fetch_segment::FetchSegmentOperator,
-            knn_projection::KnnProjectionOperator,
+        operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
+        orchestration::{
+            get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
+            CountQueryOrchestrator,
         },
-        orchestration::{get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::{KnnError, KnnFilterOrchestrator}, CountQueryOrchestrator},
     },
     log::log::Log,
     sysdb::sysdb::SysDb,
@@ -131,51 +131,17 @@ impl WorkerServer {
         self.system = Some(system);
     }
 
-    fn decompose_proto_scan(
-        &self,
-        scan: chroma_proto::ScanOperator,
-    ) -> Result<(FetchLogOperator, FetchSegmentOperator), Status> {
-        let collection = scan
-            .collection
-            .ok_or(Status::invalid_argument("Invalid Collection"))?;
-
-        let collection_uuid = CollectionUuid::from_str(&collection.id)
-            .map_err(|_| Status::invalid_argument("Invalid Collection UUID"))?;
-
-        let metadata_segment = scan
-            .metadata
-            .ok_or(Status::invalid_argument("Invalid metadata segment"))?;
-        let record_segment = scan
-            .record
-            .ok_or(Status::invalid_argument("Invalid record segment"))?;
-        let vector_segment = scan
-            .knn
-            .ok_or(Status::invalid_argument("Invalid vector segment"))?;
-
-        let metadata_uuid = Segment::try_from(metadata_segment)?.id;
-        let record_uuid = Segment::try_from(record_segment)?.id;
-        let vector_uuid = Segment::try_from(vector_segment)?.id;
-
-        Ok((
-            FetchLogOperator {
-                log_client: self.log.clone(),
-                // TODO: Make this configurable
-                batch_size: 100,
-                // The collection log position is inclusive, and we want to start from the next log
-                // Note that we query using the incoming log position this is critical for correctness
-                start_log_offset_id: collection.log_position as u32 + 1,
-                maximum_fetch_count: None,
-                collection_uuid,
-            },
-            FetchSegmentOperator {
-                sysdb: self.sysdb.clone(),
-                collection_uuid,
-                collection_version: collection.version as u32,
-                metadata_uuid,
-                record_uuid,
-                vector_uuid,
-            },
-        ))
+    fn fetch_log(&self, collection_segments: &CollectionSegments) -> FetchLogOperator {
+        FetchLogOperator {
+            log_client: self.log.clone(),
+            // TODO: Make this configurable
+            batch_size: 100,
+            // The collection log position is inclusive, and we want to start from the next log
+            // Note that we query using the incoming log position this is critical for correctness
+            start_log_offset_id: collection_segments.collection.log_position as u32 + 1,
+            maximum_fetch_count: None,
+            collection_uuid: collection_segments.collection.collection_id,
+        }
     }
 
     async fn orchestrate_count(
@@ -223,7 +189,8 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let (fetch_log_operator, fetch_segment_operator) = self.decompose_proto_scan(scan)?;
+        let collection_segments = scan.try_into()?;
+        let fetch_log = self.fetch_log(&collection_segments);
 
         let filter = get_inner
             .filter
@@ -242,8 +209,8 @@ impl WorkerServer {
             self.clone_dispatcher()?,
             // TODO: Make this configurable
             1000,
-            fetch_log_operator,
-            fetch_segment_operator,
+            collection_segments,
+            fetch_log,
             filter.try_into()?,
             limit.into(),
             projection.into(),
@@ -268,7 +235,9 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let (fetch_log_operator, fetch_segment_operator) = self.decompose_proto_scan(scan)?;
+        let collection_segments = scan.try_into()?;
+
+        let fetch_log = self.fetch_log(&collection_segments);
 
         let filter = knn_inner
             .filter
@@ -288,27 +257,32 @@ impl WorkerServer {
             return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
         }
 
+        // If dimension is not set and segment is uninitialized, we assume
+        // this is a query on empty collection, so we return early here
+        if collection_segments.collection.dimension.is_none()
+            && collection_segments.vector_segment.file_path.is_empty()
+        {
+            return Ok(Response::new(to_proto_knn_batch_result(
+                once(Default::default())
+                    .cycle()
+                    .take(knn.embeddings.len())
+                    .collect(),
+            )?));
+        }
+
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
             self.hnsw_index_provider.clone(),
             // TODO: Make this configurable
             1000,
-            fetch_log_operator,
-            fetch_segment_operator,
+            collection_segments,
+            fetch_log,
             filter.try_into()?,
         );
 
         let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
             Ok(output) => output,
-            Err(KnnError::EmptyCollection) => {
-                return Ok(Response::new(to_proto_knn_batch_result(
-                    once(Default::default())
-                        .cycle()
-                        .take(knn.embeddings.len())
-                        .collect(),
-                )?));
-            }
             Err(e) => {
                 return Err(Status::new(e.code().into(), e.to_string()));
             }
@@ -479,12 +453,12 @@ mod tests {
         chroma_proto::ScanOperator {
             collection: Some(chroma_proto::Collection {
                 id: collection_id.clone(),
-                name: "Test-Collection".to_string(),
+                name: "test-collection".to_string(),
                 configuration_json_str: String::new(),
                 metadata: None,
                 dimension: None,
-                tenant: "Test-Tenant".to_string(),
-                database: "Test-Database".to_string(),
+                tenant: "test-tenant".to_string(),
+                database: "test-database".to_string(),
                 log_position: 0,
                 version: 0,
             }),
@@ -568,29 +542,6 @@ mod tests {
     async fn validate_get_plan() {
         let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
         let mut scan_operator = scan();
-        let request = chroma_proto::GetPlan {
-            scan: Some(scan_operator.clone()),
-            filter: Some(chroma_proto::FilterOperator {
-                ids: None,
-                r#where: None,
-                where_document: None,
-            }),
-            limit: Some(chroma_proto::LimitOperator {
-                skip: 0,
-                fetch: None,
-            }),
-            projection: Some(chroma_proto::ProjectionOperator {
-                document: false,
-                embedding: false,
-                metadata: false,
-            }),
-        };
-
-        // segment or collection not found
-        let response = executor.get(request.clone()).await;
-        assert!(response.is_err());
-        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
-
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),
             filter: None,
@@ -767,11 +718,6 @@ mod tests {
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(
-            err.message().to_lowercase().contains("uuid"),
-            "{}",
-            err.message()
-        );
     }
 
     #[tokio::test]
@@ -796,11 +742,6 @@ mod tests {
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(
-            err.message().to_lowercase().contains("uuid"),
-            "{}",
-            err.message()
-        );
     }
 
     #[tokio::test]
@@ -824,11 +765,6 @@ mod tests {
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(
-            err.message().to_lowercase().contains("uuid"),
-            "{}",
-            err.message()
-        );
     }
 
     #[tokio::test]
@@ -852,10 +788,5 @@ mod tests {
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(
-            err.message().to_lowercase().contains("uuid"),
-            "{}",
-            err.message()
-        );
     }
 }
