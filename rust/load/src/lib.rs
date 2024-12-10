@@ -28,6 +28,9 @@ use chromadb::v2::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHea
 use chromadb::v2::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{Guacamole, Zipf};
+use opentelemetry::global;
+use opentelemetry::metrics::Counter;
+use opentelemetry::{Key, KeyValue, Value};
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -84,6 +87,26 @@ impl axum::response::IntoResponse for Error {
             .body((body.trim().to_string() + "\n").into())
             .expect("response and status are always valid")
     }
+}
+
+////////////////////////////////////////////// Metrics /////////////////////////////////////////////
+
+#[derive(Debug)]
+pub struct Metrics {
+    /// The number of times an individual workload step was inhibited.  It will not be tracked as
+    /// inactive or stepped.
+    inhibited: Counter<u64>,
+    /// The number of times an individual workload step was inactive.  It will not be tracked as
+    /// inhibited or stepped.
+    inactive: Counter<u64>,
+    /// The number of times an individual workload was stepped.
+    step: Counter<u64>,
+    /// The number of times a workload issued a get against a data set.
+    get: Counter<u64>,
+    /// The number of times a workload issued a query against a data set.
+    query: Counter<u64>,
+    /// The number of times a workload issued an upsert against a data set.
+    upsert: Counter<u64>,
 }
 
 ////////////////////////////////////////////// client //////////////////////////////////////////////
@@ -432,6 +455,7 @@ impl Workload {
     pub async fn step(
         &self,
         client: &ChromaClient,
+        metrics: &Metrics,
         data_set: &dyn DataSet,
         state: &mut WorkloadState,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -447,12 +471,26 @@ impl Workload {
                 )))
             }
             Workload::Get(get) => {
+                metrics.get.add(
+                    1,
+                    &[KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 data_set
                     .get(client, get.clone(), &mut state.guac)
                     .instrument(tracing::info_span!("get"))
                     .await
             }
             Workload::Query(query) => {
+                metrics.query.add(
+                    1,
+                    &[KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 data_set
                     .query(client, query.clone(), &mut state.guac)
                     .instrument(tracing::info_span!("query"))
@@ -473,7 +511,7 @@ impl Workload {
                     }
                     if workload.is_active() {
                         if *p >= total {
-                            return Box::pin(workload.step(client, data_set, state)).await;
+                            return Box::pin(workload.step(client, metrics, data_set, state)).await;
                         }
                         total -= *p;
                     }
@@ -483,9 +521,16 @@ impl Workload {
                 )))
             }
             Workload::Delay { after: _, wrap } => {
-                Box::pin(wrap.step(client, data_set, state)).await
+                Box::pin(wrap.step(client, metrics, data_set, state)).await
             }
             Workload::Load => {
+                metrics.upsert.add(
+                    1,
+                    &[KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 data_set
                     .upsert(
                         client,
@@ -502,6 +547,13 @@ impl Workload {
                     .await
             }
             Workload::RandomUpsert(key) => {
+                metrics.upsert.add(
+                    1,
+                    &[KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 data_set
                     .upsert(
                         client,
@@ -805,6 +857,7 @@ impl LoadHarness {
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct LoadService {
+    metrics: Metrics,
     inhibit: Arc<AtomicBool>,
     harness: Mutex<LoadHarness>,
     running: Mutex<HashMap<Uuid, (Arc<AtomicBool>, tokio::task::JoinHandle<()>)>>,
@@ -816,7 +869,23 @@ pub struct LoadService {
 impl LoadService {
     /// Create a new load service from the given data sets and workloads.
     pub fn new(data_sets: Vec<Arc<dyn DataSet>>, workloads: HashMap<String, Workload>) -> Self {
+        let meter = global::meter("chroma");
+        let inhibited = meter.u64_counter("inhibited").build();
+        let inactive = meter.u64_counter("inactive").build();
+        let step = meter.u64_counter("step").build();
+        let get = meter.u64_counter("get").build();
+        let query = meter.u64_counter("query").build();
+        let upsert = meter.u64_counter("upsert").build();
+        let metrics = Metrics {
+            inhibited,
+            inactive,
+            step,
+            get,
+            query,
+            upsert,
+        };
         LoadService {
+            metrics,
             inhibit: Arc::new(AtomicBool::new(false)),
             harness: Mutex::new(LoadHarness { running: vec![] }),
             running: Mutex::new(HashMap::default()),
@@ -916,7 +985,7 @@ impl LoadService {
     }
 
     /// Run the load service in perpetuity.
-    pub async fn run(&self) -> ! {
+    pub async fn run(self: &Arc<Self>) -> ! {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let _ = tx.send(tokio::task::spawn(async {}));
         let _reclaimer = tokio::spawn(async move {
@@ -958,12 +1027,13 @@ impl LoadService {
                 if let Entry::Vacant(entry) = running.entry(declared.uuid) {
                     tracing::info!("spawning workload {}", declared.uuid);
                     let root = tracing::info_span!(parent: None, "workload");
+                    let this = Arc::clone(self);
                     let done = Arc::new(AtomicBool::new(false));
                     let done_p = Arc::clone(&done);
                     let inhibit = Arc::clone(&self.inhibit);
                     let task = tokio::task::spawn(async move {
                         let _enter = root.enter();
-                        Self::run_one_workload(done, inhibit, declared)
+                        this.run_one_workload(done, inhibit, declared)
                             .instrument(tracing::info_span!("run one workload"))
                             .await
                     });
@@ -974,6 +1044,7 @@ impl LoadService {
     }
 
     async fn run_one_workload(
+        self: Arc<Self>,
         done: Arc<AtomicBool>,
         inhibit: Arc<AtomicBool>,
         spec: RunningWorkload,
@@ -1027,17 +1098,39 @@ impl LoadService {
             }
             if inhibit.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::info!("inhibited");
+                self.metrics.inhibited.add(
+                    1,
+                    &[KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(spec.data_set.name()),
+                    )],
+                );
             } else if !spec.workload.is_active() {
                 tracing::debug!("workload inactive");
+                self.metrics.inactive.add(
+                    1,
+                    &[KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(spec.data_set.name()),
+                    )],
+                );
             } else {
                 let workload = spec.workload.clone();
+                let this = Arc::clone(&self);
                 let client = Arc::clone(&client);
                 let data_set = Arc::clone(&spec.data_set);
                 let guac = Guacamole::new(any(&mut guac));
                 let mut state = WorkloadState { seq_no, guac };
                 let fut = async move {
+                    this.metrics.step.add(
+                        1,
+                        &[KeyValue::new(
+                            Key::from_static_str("data_set"),
+                            Value::from(data_set.name()),
+                        )],
+                    );
                     workload
-                        .step(&client, &*data_set, &mut state)
+                        .step(&client, &this.metrics, &*data_set, &mut state)
                         .await
                         .map_err(|err| {
                             tracing::error!("workload failed: {err:?}");
