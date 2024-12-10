@@ -91,6 +91,8 @@ jobs:
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
       - name: Build and push prerelease Docker image
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
         uses: depot/build-push-action@v1
