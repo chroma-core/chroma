@@ -2,6 +2,9 @@ use super::super::operator::wrap;
 use crate::compactor::CompactionJob;
 use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskResult;
+use crate::execution::operators::fetch_log::FetchLogError;
+use crate::execution::operators::fetch_log::FetchLogOperator;
+use crate::execution::operators::fetch_log::FetchLogOutput;
 use crate::execution::operators::flush_s3::FlushS3Input;
 use crate::execution::operators::flush_s3::FlushS3Operator;
 use crate::execution::operators::flush_s3::FlushS3Output;
@@ -9,9 +12,6 @@ use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionOutput;
-use crate::execution::operators::pull_log::PullLogsInput;
-use crate::execution::operators::pull_log::PullLogsOperator;
-use crate::execution::operators::pull_log::PullLogsOutput;
 use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
@@ -22,7 +22,6 @@ use crate::execution::operators::write_segments::WriteSegmentsOperatorError;
 use crate::execution::operators::write_segments::WriteSegmentsOutput;
 use crate::execution::orchestration::common::terminate_with_error;
 use crate::log::log::Log;
-use crate::log::log::PullLogsError;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::RecordSegmentReader;
@@ -46,8 +45,6 @@ use core::panic;
 use std::sync::atomic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 use thiserror::Error;
 use tracing::Span;
 use uuid::Uuid;
@@ -144,8 +141,8 @@ impl ChromaError for GetSegmentWritersError {
 
 #[derive(Error, Debug)]
 enum CompactionError {
-    #[error(transparent)]
-    SystemTimeError(#[from] std::time::SystemTimeError),
+    #[error("Task dispatch failed")]
+    DispatchFailure,
     #[error("Result channel dropped")]
     ResultChannelDropped,
 }
@@ -207,44 +204,28 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn pull_logs(
+    async fn fetch_log(
         &mut self,
-        self_address: Box<dyn ReceiverForMessage<TaskResult<PullLogsOutput, PullLogsError>>>,
+        self_address: Box<dyn ReceiverForMessage<TaskResult<FetchLogOutput, FetchLogError>>>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::PullLogs;
-        let operator = PullLogsOperator::new(self.log.clone());
-        let collection_id = self.collection_id;
-        let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
-        let end_timestamp = match end_timestamp {
-            // TODO: change protobuf definition to use u64 instead of i64
-            Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
-            Err(e) => {
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(CompactionError::SystemTimeError(e)),
-                    ctx,
-                );
-                return;
-            }
+        let operator = FetchLogOperator {
+            log_client: self.log.clone(),
+            batch_size: 100,
+            start_log_offset_id: self.compaction_job.offset as u32,
+            maximum_fetch_count: Some(self.max_compaction_size as u32),
+            collection_uuid: self.collection_id,
         };
-        let input = PullLogsInput::new(
-            collection_id,
-            // Here we do not need to be inclusive since the compaction job
-            // offset is the one after the last compaction offset
-            self.compaction_job.offset,
-            100,
-            Some(self.max_compaction_size as i32),
-            Some(end_timestamp),
-        );
-        let task = wrap(operator, input, self_address);
+        let task = wrap(Box::new(operator), (), self_address);
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 tracing::error!("Error dispatching pull logs for compaction {:?}", e);
-                panic!(
-                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
-                    e
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(CompactionError::DispatchFailure),
+                    ctx,
                 );
             }
         }
@@ -542,23 +523,23 @@ impl Component for CompactOrchestrator {
     }
 
     async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
-        self.pull_logs(ctx.receiver(), ctx).await;
+        self.fetch_log(ctx.receiver(), ctx).await;
     }
 }
 
 // ============== Handlers ==============
 #[async_trait]
-impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CompactOrchestrator {
+impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<PullLogsOutput, PullLogsError>,
+        message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         let message = message.into_inner();
         let records = match message {
-            Ok(result) => result.logs(),
+            Ok(result) => result,
             Err(e) => {
                 terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
                 return;
