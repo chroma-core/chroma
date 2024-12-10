@@ -1,7 +1,9 @@
 import httpx
-from typing import Optional, Sequence
+from typing import Optional, Sequence, List
 from uuid import UUID
 from overrides import override
+
+from chromadb.api.models.Collection import CollectionName
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
@@ -152,17 +154,11 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     @override
     async def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
-    ) -> Sequence[AsyncCollection]:
+    ) -> List[CollectionName]:
         models = await self._server.list_collections(
             limit, offset, tenant=self.tenant, database=self.database
         )
-        return [
-            AsyncCollection(
-                client=self._server,
-                model=model,
-            )
-            for model in models
-        ]
+        return [CollectionName(model.name) for model in models]
 
     @override
     async def count_collections(self) -> int:

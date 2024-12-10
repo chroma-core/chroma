@@ -89,7 +89,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         colls = self.client.list_collections()
         assert len(colls) == len(self.model)
         for c in colls:
-            assert c.name in self.model
+            assert c in self.model
 
     # @rule for list_collections with limit and offset
     @rule(
