@@ -12,18 +12,25 @@ use crate::{
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
-pub fn manifest_path(timestamp: u128) -> String {
-    format!("manifest/MANIFEST.{}", timestamp)
+fn to_hex(n: u64) -> String {
+    format!("{:016x}", n)
 }
 
-pub fn manifest_timestamp(path: &str) -> Result<u128, Error> {
+fn from_hex(s: &str) -> Result<u64, Error> {
+    u64::from_str_radix(s, 16)
+        .map_err(|e| Error::CorruptManifest(format!("unparseable hexdigest: {e:?}")))
+}
+
+pub fn manifest_path(timestamp: u64) -> String {
+    format!("manifest/MANIFEST.{}", to_hex(u64::MAX - timestamp))
+}
+
+pub fn manifest_timestamp(path: &str) -> Result<u64, Error> {
     let timestamp = path
         .strip_prefix("manifest/MANIFEST.")
         .ok_or_else(|| Error::CorruptManifest(format!("unparseable manifest path: {}", path,)))?;
-    let timestamp = timestamp.parse::<u128>().map_err(|e| {
-        Error::CorruptManifest(format!("unparseable manifest timestamp in {}: {e}", path,))
-    })?;
-    Ok(timestamp)
+    let timestamp = from_hex(timestamp)?;
+    Ok(u64::MAX - timestamp)
 }
 
 pub fn snapshot_path(setsum: sst::Setsum) -> String {
@@ -124,16 +131,18 @@ pub struct NextPointer {
 }
 
 impl NextPointer {
-    pub fn generate(current: u128) -> Self {
-        let mut now_micros = SystemTime::now()
+    pub fn generate(current: u64) -> Self {
+        let mut now_millis: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("the system will never go back to before the UNIX epoch")
-            .as_micros();
-        if now_micros <= current {
-            now_micros = current + 1;
+            .as_millis()
+            .try_into()
+            .expect("millis since epoch should always fit u64");
+        if now_millis <= current {
+            now_millis = current + 1;
         }
         NextPointer {
-            path_to_manifest: manifest_path(now_micros),
+            path_to_manifest: manifest_path(now_millis),
         }
     }
 }
@@ -510,7 +519,7 @@ impl Manifest {
         let this = Path::from(manifest_path(0));
         let next = NextPointer::generate(0);
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.0"),
+            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             setsum: sst::Setsum::default(),
             snapshots: vec![],
             fragments: vec![],
@@ -556,7 +565,7 @@ impl Manifest {
         let mut seen: HashMap<String, usize> = HashMap::default();
         let mut fetched: HashMap<Path, Manifest> = HashMap::default();
         let mut blessed_writer = None;
-        let mut blessed_timestamp = 0u128;
+        let mut blessed_timestamp = 0u64;
         // Fetch the manifests in reverse order until we hit a stopping condition.
         for (timestamp, path) in candidate_paths.iter() {
             let object = match object_store.get(path).await {
@@ -597,8 +606,8 @@ impl Manifest {
             for (timestamp, path) in candidate_paths.iter() {
                 if let Some(mut manifest) = fetched.remove(path) {
                     fn forms_a_chain(
-                        blessed_timestamp: u128,
-                        timestamp: u128,
+                        blessed_timestamp: u64,
+                        timestamp: u64,
                         manifest: &Manifest,
                         fetched: &HashMap<Path, Manifest>,
                         alpha: usize,
@@ -697,16 +706,18 @@ mod tests {
 
     #[test]
     fn paths() {
-        assert_eq!("manifest/MANIFEST.0", manifest_path(0));
-        assert_eq!(0, manifest_timestamp("manifest/MANIFEST.0").unwrap());
+        assert_eq!("manifest/MANIFEST.ffffffffffffffff", manifest_path(0));
         assert_eq!(
-            "manifest/MANIFEST.340282366920938463463374607431768211455",
-            manifest_path(u128::MAX)
+            0,
+            manifest_timestamp("manifest/MANIFEST.ffffffffffffffff").unwrap()
         );
         assert_eq!(
-            u128::MAX,
-            manifest_timestamp("manifest/MANIFEST.340282366920938463463374607431768211455")
-                .unwrap()
+            "manifest/MANIFEST.0000000000000000",
+            manifest_path(u64::MAX)
+        );
+        assert_eq!(
+            u64::MAX,
+            manifest_timestamp("manifest/MANIFEST.0000000000000000").unwrap()
         );
     }
 
@@ -746,7 +757,7 @@ mod tests {
             setsum: sst::Setsum::default(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.0"),
+            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
             snapshots: vec![],
@@ -789,7 +800,7 @@ mod tests {
             .unwrap(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.0"),
+            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -804,7 +815,7 @@ mod tests {
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.0"),
+            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
@@ -845,7 +856,7 @@ mod tests {
             .unwrap(),
         };
         let mut manifest = Manifest {
-            path: String::from("manifest/MANIFEST.0"),
+            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             writer: "manifest writer 1".to_string(),
             setsum: sst::Setsum::default(),
             snapshots: vec![],
@@ -862,7 +873,7 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST.0"),
+                path: String::from("manifest/MANIFEST.ffffffffffffffff"),
                 writer: "manifest writer 1".to_string(),
                 setsum: sst::Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -913,7 +924,7 @@ mod tests {
         };
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST.0"),
+                path: String::from("manifest/MANIFEST.ffffffffffffffff"),
                 writer: "log initializer".to_string(),
                 setsum: sst::Setsum::default(),
                 snapshots: vec![],

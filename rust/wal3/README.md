@@ -105,7 +105,7 @@ Visually, it looks like this:
 
 ```text
    ┌──────────────────┐   ┌──────────────────┐
-   │ MANIFEST.0       │   │ MANIFEST.i       │
+   │ MANIFEST(0)      │   │ MANIFEST(i)      │
    │            next ─│──▶│            next ─│──▶
 ◀──│─ prev            │◀──│─ prev            │
    └──────────────────┘   └──────────────────┘
@@ -130,9 +130,9 @@ Invariants of the manifest:
 - fragment.start is strictly increasing.
 - The range (shards.fragments.start, shards.fragments.limit) is disjoint for all fragments in a
   manifest.  No other shard will have overlap with log position.
-- MANIFEST.0 always exists to anchor the log as existing.  It will have dangling prev and next
+- MANIFEST(0) always exists to anchor the log as existing.  It will have dangling prev and next
   pointers after garbage collection.  It is simply a marker that says that a manifest was once
-  properly initialized.
+  properly initialized.  It is written as `MANIFEST.ffffffffffffffff`.
 
 ### Shard Structure
 
@@ -173,8 +173,8 @@ shard0000/0000000000000007_1728663515748_1728663515749_907d0b286e6128d70cb413a7c
 shard0000/0000000000000006_1728663515647_1728663515748_0b068270eef2daf302cc89fcd3e3547002e2bd6f5fbaf0e31a456eaad776404b.log
 shard0000/0000000000000008_1728663515749_1728663515858_e3efc5726f2f9dbe51c1515cc4a66efbfdc7f8164a85a4815a48fc06969d5942.log
 shardXXXX/...
-manifest/MANIFEST.0
-manifest/MANIFEST.1728663515390
+manifest/MANIFEST.fffffe6d83a00f01
+manifest/MANIFEST.ffffffffffffffff
 ```
 
 This means approximately 3,500 writes per second for each shard and the manifest.  We can have as
@@ -248,8 +248,8 @@ sufficiently frequently and the garbage collection occurs significantly infreque
 guarantee system safety.  Therefore:
 
 - A writer must be sufficiently up-to-date that it has loaded a link in the manifest chain that is
-  not yet garbage collected.  This is because a writer that believes it can write to MANIFEST.N must
-  be sure that MANIFEST.N has never existed; if it existed and was garbage collected, the log
+  not yet garbage collected.  This is because a writer that believes it can write to MANIFEST(N)
+  must be sure that MANIFEST(N) has never existed; if it existed and was garbage collected, the log
   breaks.  Verifiers will detect this case, but it's effectively a split brain and should be
   avoided.  To avoid this, writers must restart within the garbage collection interval.
 - A reader writing a _new_ cursor, or a cursor that goes back in time must complete the operation in
@@ -271,7 +271,8 @@ An end-to-end walkthrough of the write path is as follows:
 
 0.  The writer is initialized with a set of options.  This includes the object store to write to,
     the number of shards to write, and any other configuration such as throttling.
-1.  The writer reads the existing manifest.  If there is no manifest, it creates a new MANIFEST.0
+1.  The writer reads the existing manifest.  If there is no manifest, it creates a new initial
+    manifest and writes it to the object store.
 2.  A client calls `writer.append` with a stream ID and a message.  The writer checks to see if the
     stream is open and then adds the work to the shard manager.
 3.  If there is sufficient work available or sufficient time has passed and there is a shard that
@@ -319,21 +320,22 @@ However, we can support concurrent writes to the manifest by using a more comple
 single writer to the log *knows* every write that it has in flight.  Why not simply do advanced
 writes of the manifest?
 
-The worst case is that we see something that looks like this on crash:
+The worst case is that we see something that looks like this on crash (note that we're showing
+manifest indices sequentially here, but the encoding would reverse them):
 
 ```text
    ┌──────────────────┐   ┌──────────────────┐                          ┌──────────────────┐
-   │ MANIFEST.0       │   │ MANIFEST.i       │                          │ MANIFEST.k       │
+   │ MANIFEST(0)      │   │ MANIFEST(i)      │                          │ MANIFEST(k)      │
    │            next ─│──▶│            next ─│──▶                    ──▶│            next ─│──▶
 ◀──│─ prev            │◀──│─ prev            │◀──                    ◀──│─ prev            │
    └──────────────────┘   └──────────────────┘                          └──────────────────┘
 ```
 
-MANIFEST.k has been written, but is not connected to the chain of manifests going back to the most
+MANIFEST(k) has been written, but is not connected to the chain of manifests going back to the most
 recent garbage collection.  It is, therefore, garbage.
 
 Note that this garbage is not something for other writers to deal with---only the garbage collector
-will have to know about and deal with MANIFEST.k.
+will have to know about and deal with MANIFEST(k).
 
 This impacts zero-action recovery:  On open, the log writer will have to check for garbage manifests
 and prune all but the most recent one that is linked into the chain.  Without this optimization, it
@@ -497,7 +499,7 @@ The direct way to handle this would be to write a snapshot every N writes and em
 
 ```text
    ┌──────────────────┐   ┌──────────────────┐
-   │ MANIFEST.0       │   │ MANIFEST.i       │
+   │ MANIFEST(0)      │   │ MANIFEST(i)      │
    │            next ─│──▶│            next ─│──▶
 ◀──│─ prev            │◀──│─ prev    snap    │
    └──────────────────┘   └────────────│─────┘
@@ -509,7 +511,7 @@ The direct way to handle this would be to write a snapshot every N writes and em
 
 This requires writing a new snapshot everytime a new manifest that exceeds the size is written.
 This would be the straight-forward way to handle this, except that it requires writing SNAPSHOT.x
-before writing MANIFEST.i and a naive implementation would introduce latency.  The manifest writer
+before writing MANIFEST(i) and a naive implementation would introduce latency.  The manifest writer
 is a hot path and we don't want to introduce an extra round trip.
 
 Instead, we are able to leverage the fact that a manifest's prefix is immutable and under control of
@@ -652,6 +654,15 @@ configurable value that is set to 20ms by default, and takes effect for both bat
 shard fragments and batching manifest deltas into manifests.  We expect that in the worst case we
 will see 2RTT + 2*batch_interval + empirical.  The empirical value is unknown at time of this
 writing.
+
+## Reversed Manifest Storage Order
+
+In this document, we've referred to MANIFEST(i) to represent manifest i.  This is a simplification
+in that MANIFEST(i) is not named `MANIFEST.{i}`, but rather `MANIFEST.{u64::MAX - i}`.  This trick
+enables readers to discover the latest manifest fast no matter how many manifests there are.
+
+To directly translate MANIFEST(i) to MANIFEST.i would mean that the reader would have to scan the
+entire listing of every manifest to discover the latest one.
 
 # Failure Scenarios
 
