@@ -11,9 +11,8 @@ docker_build(
   '.',
   only=['go/'],
   dockerfile='./go/Dockerfile',
-  target='logservice'
+  target='log-service'
 )
-
 
 docker_build(
   'local:sysdb-migration',
