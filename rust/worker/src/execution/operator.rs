@@ -65,6 +65,7 @@ where
 #[derive(Debug)]
 pub(super) struct TaskResult<Output, Error> {
     result: Result<Output, TaskError<Error>>,
+    #[allow(dead_code)]
     task_id: Uuid,
 }
 
@@ -73,6 +74,7 @@ impl<Output, Error> TaskResult<Output, Error> {
         self.result
     }
 
+    #[allow(dead_code)]
     pub(super) fn id(&self) -> Uuid {
         self.task_id
     }
@@ -101,6 +103,7 @@ pub(crate) type TaskMessage = Box<dyn TaskWrapper>;
 pub(crate) trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
     async fn run(&self);
+    #[allow(dead_code)]
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
 }
