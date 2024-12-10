@@ -10,7 +10,7 @@ ADD ./go/ ./
 ENV GOCACHE=/root/.cache/go-build
 RUN --mount=type=cache,target="/root/.cache/go-build" make
 
-FROM debian:bookworm-slim AS log-service
+FROM debian:bookworm-slim AS logservice
 COPY --from=builder /build-dir/bin/logservice .
 ENV PATH=$PATH:./
 CMD ["./logservice"]
