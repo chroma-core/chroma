@@ -87,6 +87,7 @@ impl RecordDataset for WikipediaDataset {
                 Ok(Record {
                     document: parsed.body,
                     metadata,
+                    embedding: None,
                 })
             }
             Err(e) => Err(e.into()),

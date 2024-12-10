@@ -7,23 +7,24 @@ use crate::execution::operator::Operator;
 use super::knn::RecordDistance;
 
 #[derive(Clone, Debug)]
-pub(crate) struct SpannKnnMergeOperator {
-    pub(crate) k: u32,
+pub struct SpannKnnMergeOperator {
+    pub k: u32,
 }
 
 #[derive(Debug)]
-pub(crate) struct SpannKnnMergeInput {
-    pub(crate) records: Vec<Vec<RecordDistance>>,
+pub struct SpannKnnMergeInput {
+    pub records: Vec<Vec<RecordDistance>>,
 }
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub(crate) struct SpannKnnMergeOutput {
-    pub(crate) merged_records: Vec<RecordDistance>,
+pub struct SpannKnnMergeOutput {
+    pub merged_records: Vec<RecordDistance>,
 }
 
-pub(crate) type SpannKnnMergeError = ();
+pub type SpannKnnMergeError = ();
 
+#[derive(Debug)]
 struct RecordHeapEntry {
     distance: f32,
     offset_id: u32,
@@ -32,7 +33,7 @@ struct RecordHeapEntry {
 
 impl Ord for RecordHeapEntry {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.distance.total_cmp(&other.distance)
+        other.distance.total_cmp(&self.distance)
     }
 }
 
@@ -61,6 +62,7 @@ impl Operator<SpannKnnMergeInput, SpannKnnMergeOutput> for SpannKnnMergeOperator
         let mut pq = BinaryHeap::with_capacity(input.records.len());
         let mut indices = Vec::with_capacity(input.records.len());
         for (index, records) in input.records.iter().enumerate() {
+            indices.push(0);
             if records.is_empty() {
                 continue;
             }
@@ -69,7 +71,6 @@ impl Operator<SpannKnnMergeInput, SpannKnnMergeOutput> for SpannKnnMergeOperator
                 offset_id: records[0].offset_id,
                 array_index: index,
             });
-            indices.push(0);
         }
         let mut count = 0;
         let mut result = Vec::with_capacity(self.k as usize);
@@ -94,5 +95,79 @@ impl Operator<SpannKnnMergeInput, SpannKnnMergeOutput> for SpannKnnMergeOperator
         Ok(SpannKnnMergeOutput {
             merged_records: result,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::execution::operator::Operator;
+
+    // Basic operator test.
+    #[tokio::test]
+    async fn test_spann_knn_merge_operator() {
+        use crate::execution::operators::knn::RecordDistance;
+        use crate::execution::operators::spann_knn_merge::{
+            SpannKnnMergeInput, SpannKnnMergeOperator,
+        };
+
+        let input = SpannKnnMergeInput {
+            records: vec![
+                vec![
+                    RecordDistance {
+                        offset_id: 1,
+                        measure: 0.1,
+                    },
+                    RecordDistance {
+                        offset_id: 2,
+                        measure: 0.5,
+                    },
+                    RecordDistance {
+                        offset_id: 3,
+                        measure: 1.0,
+                    },
+                ],
+                vec![
+                    RecordDistance {
+                        offset_id: 4,
+                        measure: 0.3,
+                    },
+                    RecordDistance {
+                        offset_id: 5,
+                        measure: 0.4,
+                    },
+                    RecordDistance {
+                        offset_id: 6,
+                        measure: 0.6,
+                    },
+                ],
+                vec![
+                    RecordDistance {
+                        offset_id: 7,
+                        measure: 0.7,
+                    },
+                    RecordDistance {
+                        offset_id: 8,
+                        measure: 0.8,
+                    },
+                    RecordDistance {
+                        offset_id: 9,
+                        measure: 0.9,
+                    },
+                ],
+            ],
+        };
+
+        let operator = SpannKnnMergeOperator { k: 5 };
+        let mut output = operator.run(&input).await.unwrap();
+
+        assert_eq!(output.merged_records.len(), 5);
+        output
+            .merged_records
+            .sort_by(|a, b| a.offset_id.partial_cmp(&b.offset_id).unwrap());
+        assert_eq!(output.merged_records[0].offset_id, 1);
+        assert_eq!(output.merged_records[1].offset_id, 2);
+        assert_eq!(output.merged_records[2].offset_id, 4);
+        assert_eq!(output.merged_records[3].offset_id, 5);
+        assert_eq!(output.merged_records[4].offset_id, 6);
     }
 }

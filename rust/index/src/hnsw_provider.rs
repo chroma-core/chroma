@@ -493,7 +493,7 @@ impl HnswIndexProvider {
                 .await;
             match res {
                 Ok(_) => {
-                    println!("Flushed hnsw index file: {}", file);
+                    tracing::info!("Flushed hnsw index file: {}", file);
                 }
                 Err(e) => {
                     return Err(Box::new(HnswIndexProviderFlushError::StoragePutError(e)));

@@ -371,6 +371,7 @@ impl SpannIndexWriter {
             QUERY_EPSILON,
             RNG_FACTOR,
             self.distance_function.clone(),
+            true,
         )
         .await
         .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)
@@ -1236,6 +1237,9 @@ impl SpannIndexWriter {
         }
         // Iterate over all the heads and gc heads.
         for head_id in non_deleted_heads.into_iter() {
+            if self.is_head_deleted(head_id).await? {
+                return Ok(());
+            }
             let head_embedding = self
                 .hnsw_index
                 .inner

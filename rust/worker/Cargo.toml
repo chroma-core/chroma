@@ -78,3 +78,7 @@ harness = false
 [[bench]]
 name = "limit"
 harness = false
+
+[[bench]]
+name = "spann"
+harness = false
