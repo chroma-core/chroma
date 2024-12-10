@@ -51,10 +51,11 @@ sysdb:
       memory: '512Mi'
   flags:
 
+
 logService:
   image:
     repository: 'local'
-    tag: 'log-service'
+    tag: 'logservice'
   env:
   - name: OPTL_TRACING_ENDPOINT
     value: 'value: "otel-collector:4317"'
@@ -72,7 +73,6 @@ queryService:
     hostPath: '/local/cache/chroma'
     mountPath: '/cache/'
   replicaCount: 2
-
 
 compactionService:
   image:
