@@ -97,9 +97,11 @@ impl DataSet for TinyStoriesDataSet {
 
     fn json(&self) -> serde_json::Value {
         serde_json::json!({
-            "name": self.name,
-            "model": self.model,
-            "size": self.size,
+            "tiny_stories": {
+                "name": self.name,
+                "model": self.model,
+                "size": self.size,
+            }
         })
     }
 
@@ -307,4 +309,14 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
         }
     }
     data_sets
+}
+
+/// Get a data set from a particular JSON value.
+pub fn from_json(json: &serde_json::Value) -> Option<Arc<dyn DataSet>> {
+    // NOTE(rescrv):  I don't like that we use json attributes to identify data sets, but it's the
+    // only robust way I can think of that's not encoding everything to strings or reworking the
+    // data set type to be an enum.
+    all_data_sets()
+        .into_iter()
+        .find(|data_set| data_set.json() == *json)
 }

@@ -302,7 +302,9 @@ impl DataSet for SyntheticDataSet {
     }
 
     fn json(&self) -> serde_json::Value {
-        serde_json::json! {{}}
+        serde_json::json! {{
+            "bit_difference": self.collection,
+        }}
     }
 
     async fn get(
