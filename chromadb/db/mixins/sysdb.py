@@ -15,7 +15,7 @@ from chromadb.api.configuration import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
-from chromadb.errors import NotFoundError, UniqueConstraintError
+from chromadb.errors import InvalidCollectionException, NotFoundError, UniqueConstraintError
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -24,6 +24,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.ingest import Producer
 from chromadb.types import (
+    CollectionAndSegments,
     Database,
     OptionalArgument,
     Segment,
@@ -367,6 +368,7 @@ class SqlSysDB(SqlDB, SysDB):
                         scope=scope,
                         collection=collection,
                         metadata=metadata,
+                        file_paths={},
                     )
                 )
 
@@ -487,6 +489,18 @@ class SqlSysDB(SqlDB, SysDB):
                 collections = collections[offset:]
 
             return collections
+
+    @override
+    def get_collection_with_segments(self, collection_id: UUID) -> CollectionAndSegments:
+        collections = self.get_collections(id=collection_id)
+        if len(collections) == 0:
+            raise InvalidCollectionException(
+                f"Collection {collection_id} does not exist."
+            )
+        return CollectionAndSegments(
+            collection=collections[0],
+            segments=self.get_segments(collection=collection_id),
+        )
 
     @trace_method("SqlSysDB.delete_segment", OpenTelemetryGranularity.ALL)
     @override

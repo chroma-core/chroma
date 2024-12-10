@@ -176,7 +176,11 @@ class Segment(TypedDict):
     scope: SegmentScope
     collection: UUID
     metadata: Optional[Metadata]
+    file_paths: Mapping[str, Sequence[str]]
 
+class CollectionAndSegments(TypedDict):
+    collection: Collection
+    segments: Sequence[Segment]
 
 # SeqID can be one of three types of value in our current and future plans:
 # 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar

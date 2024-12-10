@@ -92,6 +92,7 @@ jobs:
         platform: ["depot-ubuntu-22.04-16"]
         test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/api/test_collection.py",
+                   "chromadb/test/api/test_limit_offset.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",

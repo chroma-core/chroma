@@ -13,7 +13,7 @@ from chromadb.execution.expression.operator import (
     Filter,
     Limit,
     Projection,
-    SegmentScan,
+    Scan,
 )
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.types import (
@@ -161,6 +161,7 @@ def from_proto_segment(segment: chroma_pb.Segment) -> Segment:
         metadata=from_proto_metadata(segment.metadata)
         if segment.HasField("metadata")
         else None,
+        file_paths={name: [path for path in paths.paths] for name, paths in segment.file_paths.items()}
     )
 
 
@@ -173,6 +174,7 @@ def to_proto_segment(segment: Segment) -> chroma_pb.Segment:
         metadata=None
         if segment["metadata"] is None
         else to_proto_update_metadata(segment["metadata"]),
+        file_paths={name: chroma_pb.FilePaths(paths=paths) for name, paths in segment["file_paths"].items()}
     )
 
 
@@ -568,12 +570,12 @@ def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDoc
     return response
 
 
-def to_proto_scan(scan: SegmentScan) -> query_pb.ScanOperator:
+def to_proto_scan(scan: Scan) -> query_pb.ScanOperator:
     return query_pb.ScanOperator(
         collection=to_proto_collection(scan.collection),
-        knn_id=scan.knn_id.hex,
-        metadata_id=scan.metadata_id.hex,
-        record_id=scan.record_id.hex,
+        knn_id=scan.knn["id"].hex,
+        metadata_id=scan.metadata["id"].hex,
+        record_id=scan.record["id"].hex,
     )
 
 
