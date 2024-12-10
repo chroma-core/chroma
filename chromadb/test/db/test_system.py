@@ -231,7 +231,7 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     for collection in sample_collections:
         collection_with_segments_result = sysdb.get_collection_with_segments(collection.id)
         assert collection_with_segments_result["collection"] == collection
-        assert all([segment["id"] == collection.id for segment in collection_with_segments_result["segments"]])
+        assert all([segment["collection"] == collection.id for segment in collection_with_segments_result["segments"]])
         
     # Delete
     c1 = sample_collections[0]
