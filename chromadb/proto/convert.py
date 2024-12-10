@@ -573,9 +573,9 @@ def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDoc
 def to_proto_scan(scan: Scan) -> query_pb.ScanOperator:
     return query_pb.ScanOperator(
         collection=to_proto_collection(scan.collection),
-        knn_id=scan.knn["id"].hex,
-        metadata_id=scan.metadata["id"].hex,
-        record_id=scan.record["id"].hex,
+        knn=to_proto_segment(scan.knn),
+        metadata=to_proto_segment(scan.metadata),
+        record=to_proto_segment(scan.record),
     )
 
 
