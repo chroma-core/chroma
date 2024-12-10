@@ -774,6 +774,7 @@ impl RecordSegmentReader<'_> {
         self.curr_max_offset_id.clone()
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_user_id_for_offset_id(
         &self,
         offset_id: u32,
@@ -940,6 +941,7 @@ impl RecordSegmentReader<'_> {
             .await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn prefetch_id_to_user_id(&self, keys: &[u32]) {
         let prefixes = vec![""; keys.len()];
         self.id_to_user_id
