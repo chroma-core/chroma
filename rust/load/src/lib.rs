@@ -199,6 +199,22 @@ impl Distribution {
     }
 }
 
+impl Eq for Distribution {}
+
+impl PartialEq for Distribution {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Distribution::Constant(a), Distribution::Constant(b)) => a == b,
+            (Distribution::Exponential(a), Distribution::Exponential(b)) => a.total_cmp(b).is_eq(),
+            (Distribution::Uniform(a, b), Distribution::Uniform(c, d)) => a == c && b == d,
+            (Distribution::Zipf(a, b), Distribution::Zipf(c, d)) => {
+                a == c && b.total_cmp(d).is_eq()
+            }
+            _ => false,
+        }
+    }
+}
+
 /////////////////////////////////////////////// Skew ///////////////////////////////////////////////
 
 /// Distribution shape, without size.
@@ -213,10 +229,22 @@ pub enum Skew {
     Zipf { theta: f64 },
 }
 
+impl Eq for Skew {}
+
+impl PartialEq for Skew {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Skew::Uniform, Skew::Uniform) => true,
+            (Skew::Zipf { theta: a }, Skew::Zipf { theta: b }) => a.total_cmp(b).is_eq(),
+            _ => false,
+        }
+    }
+}
+
 /////////////////////////////////////////// MetadataQuery //////////////////////////////////////////
 
 /// A metadata query specifies a metadata filter in Chroma.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum MetadataQuery {
     /// A raw metadata query simply copies the provided filter spec.
     #[serde(rename = "raw")]
@@ -235,7 +263,7 @@ impl MetadataQuery {
 /////////////////////////////////////////// DocumentQuery //////////////////////////////////////////
 
 /// A document query specifies a document filter in Chroma.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum DocumentQuery {
     // A raw document query simply copies the provided filter spec.
     #[serde(rename = "raw")]
@@ -262,7 +290,7 @@ impl DocumentQuery {
 /// skew because we specify the size as part of the query spec).
 ///
 /// Then there are metadata and document filters, which are optional.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetQuery {
     pub skew: Skew,
     pub limit: Distribution,
@@ -283,7 +311,7 @@ pub struct GetQuery {
 /// skew because we specify the size as part of the query spec).
 ///
 /// Then there are metadata and document filters, which are optional.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct QueryQuery {
     pub skew: Skew,
     pub limit: Distribution,
@@ -296,7 +324,7 @@ pub struct QueryQuery {
 //////////////////////////////////////////// KeySelector ///////////////////////////////////////////
 
 /// A means of selecting a key for upsert.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type")]
 pub enum KeySelector {
     /// Select a key by index.  If the index is out of bounds, the behavior is defined to wrap.
@@ -507,6 +535,38 @@ impl Workload {
     }
 }
 
+impl Eq for Workload {}
+
+impl PartialEq for Workload {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Workload::Nop, Workload::Nop) => true,
+            (Workload::ByName(a), Workload::ByName(b)) => a == b,
+            (Workload::Get(a), Workload::Get(b)) => a == b,
+            (Workload::Query(a), Workload::Query(b)) => a == b,
+            (Workload::Hybrid(a), Workload::Hybrid(b)) => {
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(b.iter())
+                        .all(|(a, b)| a.0.total_cmp(&b.0).is_eq() && a.1 == b.1)
+            }
+            (
+                Workload::Delay {
+                    after: a,
+                    wrap: a_wrap,
+                },
+                Workload::Delay {
+                    after: b,
+                    wrap: b_wrap,
+                },
+            ) => a == b && a_wrap == b_wrap,
+            (Workload::Load, Workload::Load) => true,
+            (Workload::RandomUpsert(a), Workload::RandomUpsert(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 //////////////////////////////////////////// Throughput ////////////////////////////////////////////
 
 /// A throughput specification.
@@ -560,6 +620,49 @@ impl std::fmt::Display for Throughput {
     }
 }
 
+impl Eq for Throughput {}
+
+impl PartialEq for Throughput {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Throughput::Constant(a), Throughput::Constant(b)) => a == b,
+            (
+                Throughput::Sinusoidal {
+                    min: amin,
+                    max: amax,
+                    periodicity: aperiodicity,
+                },
+                Throughput::Sinusoidal {
+                    min: bmin,
+                    max: bmax,
+                    periodicity: bperiodicity,
+                },
+            ) => {
+                amin.total_cmp(bmin).is_eq()
+                    && amax.total_cmp(bmax).is_eq()
+                    && aperiodicity == bperiodicity
+            }
+            (
+                Throughput::Sawtooth {
+                    min: amin,
+                    max: amax,
+                    periodicity: aperiodicity,
+                },
+                Throughput::Sawtooth {
+                    min: bmin,
+                    max: bmax,
+                    periodicity: bperiodicity,
+                },
+            ) => {
+                amin.total_cmp(bmin).is_eq()
+                    && amax.total_cmp(bmax).is_eq()
+                    && aperiodicity == bperiodicity
+            }
+            _ => false,
+        }
+    }
+}
+
 ////////////////////////////////////////// RunningWorkload /////////////////////////////////////////
 
 /// A running workload is a workload that has been bound to a data set at a given throughput.  It
@@ -581,6 +684,36 @@ impl RunningWorkload {
     }
 }
 
+impl From<WorkloadSummary> for Option<RunningWorkload> {
+    fn from(s: WorkloadSummary) -> Self {
+        if let Some(data_set) = data_sets::from_json(&s.data_set) {
+            Some(RunningWorkload {
+                uuid: s.uuid,
+                name: s.name,
+                workload: s.workload,
+                data_set,
+                expires: s.expires,
+                throughput: s.throughput,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl Eq for RunningWorkload {}
+
+impl PartialEq for RunningWorkload {
+    fn eq(&self, other: &Self) -> bool {
+        self.uuid == other.uuid
+            && self.name == other.name
+            && self.workload == other.workload
+            && self.data_set.json() == other.data_set.json()
+            && self.expires == other.expires
+            && self.throughput == other.throughput
+    }
+}
+
 ////////////////////////////////////////// WorkloadSummary /////////////////////////////////////////
 
 /// A summary of a workload.
@@ -591,13 +724,34 @@ pub struct WorkloadSummary {
     /// The name of the workload.
     pub name: String,
     /// The workload itself.
-    pub workload: serde_json::Value,
+    pub workload: Workload,
     /// The data set the workload is bound to.
     pub data_set: serde_json::Value,
     /// The expiration time of the workload.
-    pub expires: String,
+    pub expires: chrono::DateTime<chrono::FixedOffset>,
     /// The throughput of the workload.
     pub throughput: Throughput,
+}
+
+impl From<RunningWorkload> for WorkloadSummary {
+    fn from(r: RunningWorkload) -> Self {
+        WorkloadSummary {
+            uuid: r.uuid,
+            name: r.name,
+            workload: r.workload,
+            data_set: r.data_set.json(),
+            expires: r.expires,
+            throughput: r.throughput,
+        }
+    }
+}
+
+//////////////////////////////////////////// SavedState ////////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SavedState {
+    inhibited: bool,
+    running: Vec<WorkloadSummary>,
 }
 
 //////////////////////////////////////////// LoadHarness ///////////////////////////////////////////
@@ -656,6 +810,7 @@ pub struct LoadService {
     running: Mutex<HashMap<Uuid, (Arc<AtomicBool>, tokio::task::JoinHandle<()>)>>,
     data_sets: Vec<Arc<dyn DataSet>>,
     workloads: HashMap<String, Workload>,
+    persistent_path: Option<String>,
 }
 
 impl LoadService {
@@ -667,20 +822,37 @@ impl LoadService {
             running: Mutex::new(HashMap::default()),
             data_sets,
             workloads,
+            persistent_path: None,
         }
+    }
+
+    /// Set the persistent path and load its contents.
+    pub fn set_persistent_path_and_load(
+        &mut self,
+        persistent_path: Option<String>,
+    ) -> Result<(), Error> {
+        if let Some(persistent_path) = persistent_path {
+            self.persistent_path = Some(persistent_path);
+            self.load_persistent()?;
+        }
+        Ok(())
     }
 
     /// Inhibit the load service.  This stops all activity in perpetuity until a call to uninhibit.
     /// Even subsequent calls to start will not do anything until a call to uninhibit.
-    pub fn inhibit(&self) {
+    pub fn inhibit(&self) -> Result<(), Error> {
         self.inhibit
-            .store(true, std::sync::atomic::Ordering::Relaxed)
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.save_persistent()?;
+        Ok(())
     }
 
     /// Uninhibit the load service.  This allows activity to resume.
-    pub fn uninhibit(&self) {
+    pub fn uninhibit(&self) -> Result<(), Error> {
         self.inhibit
-            .store(false, std::sync::atomic::Ordering::Relaxed)
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.save_persistent()?;
+        Ok(())
     }
 
     /// Check if the load service is inhibited.
@@ -705,17 +877,7 @@ impl LoadService {
             let harness = self.harness.lock().unwrap();
             harness.status()
         };
-        running
-            .into_iter()
-            .map(|r| WorkloadSummary {
-                uuid: r.uuid,
-                name: r.name,
-                workload: serde_json::to_value(r.workload).unwrap(),
-                data_set: r.data_set.json(),
-                expires: r.expires.to_rfc3339(),
-                throughput: r.throughput,
-            })
-            .collect()
+        running.into_iter().map(WorkloadSummary::from).collect()
     }
 
     /// Start a workload on the load service.
@@ -731,9 +893,13 @@ impl LoadService {
             return Err(Error::NotFound("data set not found".to_string()));
         };
         workload.resolve_by_name(self.workloads())?;
-        // SAFETY(rescrv):  Mutex poisoning.
-        let mut harness = self.harness.lock().unwrap();
-        Ok(harness.start(name, workload.clone(), data_set, expires, throughput))
+        let res = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let mut harness = self.harness.lock().unwrap();
+            Ok(harness.start(name, workload.clone(), data_set, expires, throughput))
+        };
+        self.save_persistent()?;
+        res
     }
 
     /// Stop a workload on the load service.
@@ -741,6 +907,8 @@ impl LoadService {
         // SAFETY(rescrv): Mutex poisoning.
         let mut harness = self.harness.lock().unwrap();
         if harness.stop(uuid) {
+            drop(harness);
+            self.save_persistent()?;
             Ok(())
         } else {
             Err(Error::NotFound("uuid not found".to_string()))
@@ -882,6 +1050,55 @@ impl LoadService {
         drop(tx);
         reaper.await.unwrap();
     }
+
+    fn load_persistent(&self) -> Result<(), Error> {
+        if let Some(persistent_path) = self.persistent_path.as_ref() {
+            // SAFETY(rescrv): Mutex poisoning.
+            let mut harness = self.harness.lock().unwrap();
+            harness.running.clear();
+            let saved_state_json = match std::fs::read_to_string(persistent_path) {
+                Ok(saved_state_json) => saved_state_json,
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::NotFound {
+                        return Ok(());
+                    } else {
+                        return Err(Error::InternalError(err.to_string()));
+                    }
+                }
+            };
+            let saved_state: SavedState = serde_json::from_str(&saved_state_json)
+                .map_err(|err| Error::InternalError(err.to_string()))?;
+            self.inhibit
+                .store(saved_state.inhibited, std::sync::atomic::Ordering::Relaxed);
+            for workload in saved_state.running {
+                if let Some(running) = <Option<RunningWorkload>>::from(workload) {
+                    harness.running.push(running);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn save_persistent(&self) -> Result<(), Error> {
+        if let Some(persistent_path) = self.persistent_path.as_ref() {
+            // SAFETY(rescrv): Mutex poisoning.
+            let harness = self.harness.lock().unwrap();
+            let saved_state = SavedState {
+                inhibited: self.is_inhibited(),
+                running: harness
+                    .running
+                    .iter()
+                    .cloned()
+                    .map(WorkloadSummary::from)
+                    .collect(),
+            };
+            let saved_state_json = serde_json::to_string_pretty(&saved_state)
+                .map_err(|err| Error::InternalError(err.to_string()))?;
+            std::fs::write(persistent_path, saved_state_json.as_bytes())
+                .map_err(|err| Error::InternalError(err.to_string()))?;
+        }
+        Ok(())
+    }
 }
 
 impl Default for LoadService {
@@ -974,7 +1191,7 @@ POST /uninhibit stop inhibiting load generation.
             } else {
                 for running in state.load.status() {
                     output.push_str(&format!("\n## {}\n", running.name));
-                    output.push_str(&format!("Workload: {}\n", running.workload));
+                    output.push_str(&format!("Workload: {:?}\n", running.workload));
                     output.push_str(&format!("Data Set: {}\n", running.data_set));
                     output.push_str(&format!("Expires: {}\n", running.expires));
                     output.push_str(&format!("Throughput: {}\n", running.throughput));
@@ -1014,12 +1231,12 @@ async fn stop(
 }
 
 async fn inhibit(State(state): State<AppState>) -> Result<String, Error> {
-    state.load.inhibit();
+    state.load.inhibit()?;
     Ok("inhibited\n".to_string())
 }
 
 async fn uninhibit(State(state): State<AppState>) -> Result<String, Error> {
-    state.load.uninhibit();
+    state.load.uninhibit()?;
     Ok("uninhibited\n".to_string())
 }
 
@@ -1032,7 +1249,11 @@ pub async fn entrypoint() {
     let config = config.load_service;
 
     opentelemetry_config::init_otel_tracing(&config.service_name, &config.otel_endpoint);
-    let load = Arc::new(LoadService::default());
+    let mut load = LoadService::default();
+    if let Err(err) = load.set_persistent_path_and_load(config.persistent_state_path.clone()) {
+        tracing::warn!("failed to load persistent state: {:?}", err);
+    }
+    let load = Arc::new(load);
     let state = AppState {
         load: Arc::clone(&load),
     };
@@ -1186,5 +1407,52 @@ mod tests {
             ),
         ]);
         assert_eq!(json, serde_json::to_string_pretty(&workload).unwrap());
+    }
+
+    #[test]
+    fn workload_save_restore() {
+        const TEST_PATH: &str = "workload_save_restore.test.json";
+        println!("FINDME {}:{}", file!(), line!());
+        std::fs::remove_file(TEST_PATH).ok();
+        // First verse.
+        let mut load = LoadService::default();
+        load.set_persistent_path_and_load(Some(TEST_PATH.to_string()))
+            .unwrap();
+        println!("FINDME {}:{}", file!(), line!());
+        load.start(
+            "foo".to_string(),
+            "nop".to_string(),
+            Workload::ByName("get-no-filter".to_string()),
+            (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
+            Throughput::Constant(1.0),
+        )
+        .unwrap();
+        println!("FINDME {}:{}", file!(), line!());
+        let expected = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let harness = load.harness.lock().unwrap();
+            assert_eq!(1, harness.running.len());
+            harness.running[0].clone()
+        };
+        drop(load);
+        println!("FINDME {}:{}", file!(), line!());
+        println!("expected: {:?}", expected);
+        // Second verse.
+        let mut load = LoadService::default();
+        {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let harness = load.harness.lock().unwrap();
+            assert!(harness.running.is_empty());
+        }
+        println!("FINDME {}:{}", file!(), line!());
+        load.set_persistent_path_and_load(Some(TEST_PATH.to_string()))
+            .unwrap();
+        {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let harness = load.harness.lock().unwrap();
+            assert_eq!(1, harness.running.len());
+            assert_eq!(expected, harness.running[0]);
+        }
+        std::fs::remove_file(TEST_PATH).ok();
     }
 }
