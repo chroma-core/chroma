@@ -105,7 +105,7 @@ Visually, it looks like this:
 
 ```text
    ┌──────────────────┐   ┌──────────────────┐
-   │ MANIFEST.0       │   │ MANIFEST.i       │
+   │ MANIFEST(0)      │   │ MANIFEST(i)      │
    │            next ─│──▶│            next ─│──▶
 ◀──│─ prev            │◀──│─ prev            │
    └──────────────────┘   └──────────────────┘
@@ -130,9 +130,9 @@ Invariants of the manifest:
 - fragment.start is strictly increasing.
 - The range (shards.fragments.start, shards.fragments.limit) is disjoint for all fragments in a
   manifest.  No other shard will have overlap with log position.
-- MANIFEST.0 always exists to anchor the log as existing.  It will have dangling prev and next
+- MANIFEST(0) always exists to anchor the log as existing.  It will have dangling prev and next
   pointers after garbage collection.  It is simply a marker that says that a manifest was once
-  properly initialized.
+  properly initialized.  It is written as `MANIFEST.ffffffffffffffff`.
 
 ### Shard Structure
 
@@ -173,8 +173,8 @@ shard0000/0000000000000007_1728663515748_1728663515749_907d0b286e6128d70cb413a7c
 shard0000/0000000000000006_1728663515647_1728663515748_0b068270eef2daf302cc89fcd3e3547002e2bd6f5fbaf0e31a456eaad776404b.log
 shard0000/0000000000000008_1728663515749_1728663515858_e3efc5726f2f9dbe51c1515cc4a66efbfdc7f8164a85a4815a48fc06969d5942.log
 shardXXXX/...
-manifest/MANIFEST.0
-manifest/MANIFEST.1728663515390
+manifest/MANIFEST.fffffe6d83a00f01
+manifest/MANIFEST.ffffffffffffffff
 ```
 
 This means approximately 3,500 writes per second for each shard and the manifest.  We can have as
@@ -248,8 +248,8 @@ sufficiently frequently and the garbage collection occurs significantly infreque
 guarantee system safety.  Therefore:
 
 - A writer must be sufficiently up-to-date that it has loaded a link in the manifest chain that is
-  not yet garbage collected.  This is because a writer that believes it can write to MANIFEST.N must
-  be sure that MANIFEST.N has never existed; if it existed and was garbage collected, the log
+  not yet garbage collected.  This is because a writer that believes it can write to MANIFEST(N)
+  must be sure that MANIFEST(N) has never existed; if it existed and was garbage collected, the log
   breaks.  Verifiers will detect this case, but it's effectively a split brain and should be
   avoided.  To avoid this, writers must restart within the garbage collection interval.
 - A reader writing a _new_ cursor, or a cursor that goes back in time must complete the operation in
@@ -271,7 +271,8 @@ An end-to-end walkthrough of the write path is as follows:
 
 0.  The writer is initialized with a set of options.  This includes the object store to write to,
     the number of shards to write, and any other configuration such as throttling.
-1.  The writer reads the existing manifest.  If there is no manifest, it creates a new MANIFEST.0
+1.  The writer reads the existing manifest.  If there is no manifest, it creates a new initial
+    manifest and writes it to the object store.
 2.  A client calls `writer.append` with a stream ID and a message.  The writer checks to see if the
     stream is open and then adds the work to the shard manager.
 3.  If there is sufficient work available or sufficient time has passed and there is a shard that
@@ -319,21 +320,22 @@ However, we can support concurrent writes to the manifest by using a more comple
 single writer to the log *knows* every write that it has in flight.  Why not simply do advanced
 writes of the manifest?
 
-The worst case is that we see something that looks like this on crash:
+The worst case is that we see something that looks like this on crash (note that we're showing
+manifest indices sequentially here, but the encoding would reverse them):
 
 ```text
    ┌──────────────────┐   ┌──────────────────┐                          ┌──────────────────┐
-   │ MANIFEST.0       │   │ MANIFEST.i       │                          │ MANIFEST.k       │
+   │ MANIFEST(0)      │   │ MANIFEST(i)      │                          │ MANIFEST(k)      │
    │            next ─│──▶│            next ─│──▶                    ──▶│            next ─│──▶
 ◀──│─ prev            │◀──│─ prev            │◀──                    ◀──│─ prev            │
    └──────────────────┘   └──────────────────┘                          └──────────────────┘
 ```
 
-MANIFEST.k has been written, but is not connected to the chain of manifests going back to the most
+MANIFEST(k) has been written, but is not connected to the chain of manifests going back to the most
 recent garbage collection.  It is, therefore, garbage.
 
 Note that this garbage is not something for other writers to deal with---only the garbage collector
-will have to know about and deal with MANIFEST.k.
+will have to know about and deal with MANIFEST(k).
 
 This impacts zero-action recovery:  On open, the log writer will have to check for garbage manifests
 and prune all but the most recent one that is linked into the chain.  Without this optimization, it
@@ -490,14 +492,14 @@ this another way and the number of bytes written to object storage for the manif
 the number of writes to the manifest.  This is a problem because each manifest write is
 incrementally more expensive than the previous write.
 
-To compensate, the manifest writer needs to periodically write a snapshot of the manifest that
-contains a prefix of the manifest that it won't rewrite.  This is a form of fragmentation.
+To compensate, the manifest writer periodically writes a snapshot of the manifest that contains a
+prefix of the manifest that it won't rewrite.  This is a form of fragmentation.
 
-One way to handle this would be to write a snapshot every N writes and embed the snapshots.
+The direct way to handle this would be to write a snapshot every N writes and embed the snapshots.
 
 ```text
    ┌──────────────────┐   ┌──────────────────┐
-   │ MANIFEST.0       │   │ MANIFEST.i       │
+   │ MANIFEST(0)      │   │ MANIFEST(i)      │
    │            next ─│──▶│            next ─│──▶
 ◀──│─ prev            │◀──│─ prev    snap    │
    └──────────────────┘   └────────────│─────┘
@@ -509,52 +511,74 @@ One way to handle this would be to write a snapshot every N writes and embed the
 
 This requires writing a new snapshot everytime a new manifest that exceeds the size is written.
 This would be the straight-forward way to handle this, except that it requires writing SNAPSHOT.x
-before writing MANIFEST.i and that's a problem.  The manifest writer is a hot path and we don't want
-to introduce an extra round trip.
+before writing MANIFEST(i) and a naive implementation would introduce latency.  The manifest writer
+is a hot path and we don't want to introduce an extra round trip.
 
-Instead, we can leverage the fact that a manifest is just a list of shard fragments, a prev and next
-pointer, and a setsum.  The setsum of the manifest minus the setsum of its previous manifest (both
-of which are embedded within a manifest) tells the setsum of everything that is new to the manifest.
-Similarly, the set of files contained within the manifest must be the same as what will roll up into
-the snapshot.  This means that we can simply treat the prior manifest as a snapshot and disregard
-the prev/next/snapshot pointers within the snapshot when parsing.  A manifest and a snapshot are
-both valid lists of shard fragments with accompanying setsums; the fact that one contains pointers
-is immaterial to this fact.
+Instead, we are able to leverage the fact that a manifest's prefix is immutable and under control of
+the writer.  The writer can write a snapshot of the manifest at any time, and then use it in the
+first manifest that it starts writing after the snapshot completes.  The question then becomes what
+the structure of the manifest/snapshot/fragment pointer-rich data structure looks like.
 
-To leverage this fact, we will not write explicit snapshots, but instead store pointers to manifests
-as snapshots.  When rolling a snapshot follow the following algorithm:
+Back-of-the-envelope calculations show that a single manifest is not sufficiently large to hold a
+whole log efficiently.  The same calculations show that a tree of manifests composing a single root
+node with a single level of interior nodes and a single level of leaves is sufficient to capture any
+log that we currently design for from a stationary perspective.
 
-- Construct a new empty manifest that points to the current manifest.  We will install this as a new
-  manifest.
-- Copy all snapshots from the latest manifest into the new manifest.
-- Refer to the latest manifest as the newest snapshot.
-- Install the new manifest.  What you get looks something like this:
+Keeping a perfectly balanced tree is hard, however.  And since the root of the multi-rooted tree is
+a manifest, we rewrite the indirect pointers to the tree each time that we write a new manifest.
+The bulk of this manifest is the indirect pointers to the interior nodes of the tree.
+
+We can do better, however, by recognizing that the tree is skewed in its access pattern.  Readers
+that read the whole tree will not be bothered by having to walk a tree of manifests, but readers
+that are looking to do a query of the tail of the log should be able to do so without having to walk
+multiple manifests.
+
+To this end, we introduce a second level of indirection in the manifest so that we will have a root,
+two levels of interior nodes, and a level of leaves.  The root will point to the interior nodes, the
+first level of interior nodes point to the second level, and that level points to the leaves.
+
+This is, strictly speaking, an optimization, but one that will allow us to scale the log to beyond
+all forseeable current requirements.  20-25 pointers in the root, or 2kB are all that's needed to
+capture a log that's more than a petabyte in size.  Compare that to 5k pointers or 329kB for a
+single manifest.  We're dealing with kilobytes per manifest for a log that's petabytes, but when
+each manifest targets < 1MB in size, the difference at write time is apparent in the latency.
+
+Consequently, the manifest and its transitive references will be a four-level tree.
+
+### Interplay Between Garbage Collection and Snapshots
+
+The manifest compaction strategy is designed to reduce the cost of writing the manifest, but it
+incurs a cost for garbage collection.  To garbage collect an arbitary prefix of the log
+fragment-by-fragment would require rewriting the snapshots that partially cover the prefix and
+contain data that is not to be garbage collected.  This is complex.
+
+To side-step this problem we will introduce intentional fragmentation of the manifest and snapshots
+to align to the garbage collection interval.  This will guarantee that at most one interval worth of
+garbage that could be compacted is left uncompacted.
+
+### Interplay Between Snapshots and Setsum
+
+The setsum mechanism protects the snapshot mechanism.  Each pointer to a snapshot embeds within the
+pointer itself a reference to the setsum of the pointed-to snapshot.  The following example shows
+how to balance setsums.
 
 ```text
-┐   ┌──────────────────┐   ┌──────────────────┐
-│   │ MANIFEST.i       │   │ MANIFEST.j       │
-│──▶│            next ─│──▶│            next ─│──▶
-│◀──│─ prev    snap    │◀──│─ prev  snap[x, i]│
-┘   └────────────│─────┘   └─────────────│──│─┘
-                 │   ↑                   │  │
-                 │   └───────────────────│──┘
-                 ↓                       │
-       ┌──────────────────┐              │
-       │ SNAPSHOT.x       │◀─────────────┘
-       └──────────────────┘
+┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐┌───┐
+│ A ││ B ││ C ││ D ││ E ││ F ││ G ││ H ││ I ││ J │
+└───┘└───┘└───┘└───┘└───┘└───┘└───┘└───┘└───┘└───┘
+└───────────────── setsum(A - J) ────────────────┘
+
+└── setsum(A - D) ─┘
+                    └─────── setsum(E - J) ──────┘
+
+setsum(A - J) = setsum(A - D) + setsum(E - J)
 ```
 
-A rats nest of pointers, but it enables writing new manifests that are constant in size without
-having to write rollup snapshots of the manifest.
-
-Effectively the manifests form a tree with one internal node and many leaves.  Each manifest is a
-file of the form "manifest/MANIFEST.1730146801207827" with references of the form
-"shard03/000000000000025a_1730146851138_1730146851140_544c43c0ba56f62b024644e1567ce7ce0fa5fc752929ac94001f4b81ba2f0418.log"
-contained within.  Each shard fragment is currently 256 bytes, so a 1MB manifest will include at
-most 4096 references to shard fragments.  The snapshot references are another 66 bytes each, so a
-fully-loaded manifest will have up to ~15k snapshot references, each of which has 4096 references.
-This imposes a limit of ~65M shard fragments referenced by a manifest.  A 2MB manifest will hold
-~260M shard fragments, and a 4MB manifest will hold ~1B shard fragments.  8MB gets us ~4B fragments.
+To compact the manifest's pointers A-D, wal3 would write a new snapshot under `setsum(A-D)`.  Once
+that snapshot is written, the manifest next manifest to write replaces the fragments A, B, C, D with
+a single snapshot.A-D.  The setsum of the new manifest is setsum(A-D) + setsum(E-J), which conserves
+the setsum(A-J), providing some measure of proof that integrity is assured and no data is lost from
+the log when compacting.
 
 ## Snapshotting of the Log
 
@@ -630,6 +654,15 @@ configurable value that is set to 20ms by default, and takes effect for both bat
 shard fragments and batching manifest deltas into manifests.  We expect that in the worst case we
 will see 2RTT + 2*batch_interval + empirical.  The empirical value is unknown at time of this
 writing.
+
+## Reversed Manifest Storage Order
+
+In this document, we've referred to MANIFEST(i) to represent manifest i.  This is a simplification
+in that MANIFEST(i) is not named `MANIFEST.{i}`, but rather `MANIFEST.{u64::MAX - i}`.  This trick
+enables readers to discover the latest manifest fast no matter how many manifests there are.
+
+To directly translate MANIFEST(i) to MANIFEST.i would mean that the reader would have to scan the
+entire listing of every manifest to discover the latest one.
 
 # Failure Scenarios
 
