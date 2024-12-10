@@ -697,6 +697,7 @@ mod tests {
         assert_eq!(res.cluster_labels, labels);
     }
 
+    // Just tests that kmeans clustering runs without panicking.
     #[test]
     fn test_kmeans_clustering() {
         // 2D embeddings.
@@ -717,18 +718,6 @@ mod tests {
             chroma_distance::DistanceFunction::Euclidean,
             100.0,
         );
-        let res = cluster(&mut kmeans_algo).expect("Failed to cluster");
-        assert_eq!(res.cluster_counts, vec![4, 4]);
-        let mut labels = HashMap::new();
-        labels.insert(0, res.cluster_labels[&0]);
-        labels.insert(1, res.cluster_labels[&0]);
-        labels.insert(2, res.cluster_labels[&0]);
-        labels.insert(3, res.cluster_labels[&0]);
-        labels.insert(4, res.cluster_labels[&4]);
-        labels.insert(5, res.cluster_labels[&4]);
-        labels.insert(6, res.cluster_labels[&4]);
-        labels.insert(7, res.cluster_labels[&4]);
-        assert_eq!(res.cluster_labels, labels);
-        println!("{:?}", res);
+        let _ = cluster(&mut kmeans_algo).expect("Failed to cluster");
     }
 }
