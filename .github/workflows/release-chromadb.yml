@@ -68,6 +68,10 @@ jobs:
   release-docker:
     name: Publish to DockerHub and GHCR
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     needs:
       - check-tag
       - get-version
@@ -89,20 +93,22 @@ jobs:
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push prerelease Docker image
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
-        uses: docker/build-push-action@v3.2.0
+        uses: depot/build-push-action@v1
         with:
           context: .
           platforms: ${{ env.PLATFORMS }}
           push: true
           tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version}},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}"
+          project: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Build and push release Docker image
         if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
-        uses: docker/build-push-action@v3.2.0
+        uses: depot/build-push-action@v1
         with:
           context: .
           platforms: ${{ env.PLATFORMS }}
           push: true
           tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.GHCR_IMAGE_NAME }}:latest,${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
+          project: ${{ vars.DEPOT_PROJECT_ID }}
 
   release-pypi:
     name: Publish to PyPI
