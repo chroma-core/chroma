@@ -24,20 +24,17 @@ pub struct TestSegment {
 impl TestSegment {
     // WARN: The size of the log chunk should not be too large
     async fn compact_log(&mut self, logs: Chunk<LogRecord>, next_offset: usize) {
-        let materialized_logs = materialize_logs(
-            &None,
-            &logs,
-            Some(AtomicU32::new(next_offset as u32).into()),
-        )
-        .await
-        .expect("Should be able to materialize log.");
+        let materialized_logs =
+            materialize_logs(&None, logs, Some(AtomicU32::new(next_offset as u32).into()))
+                .await
+                .expect("Should be able to materialize log.");
 
         let mut metadata_writer =
             MetadataSegmentWriter::from_segment(&self.metadata_segment, &self.blockfile_provider)
                 .await
                 .expect("Should be able to initialize metadata writer.");
         metadata_writer
-            .apply_materialized_log_chunk(materialized_logs.clone())
+            .apply_materialized_log_chunk(None, materialized_logs.clone())
             .await
             .expect("Should be able to apply materialized logs.");
         metadata_writer
@@ -57,7 +54,7 @@ impl TestSegment {
                 .await
                 .expect("Should be able to initiaize record writer.");
         record_writer
-            .apply_materialized_log_chunk(materialized_logs)
+            .apply_materialized_log_chunk(None, materialized_logs)
             .await
             .expect("Should be able to apply materialized log.");
 

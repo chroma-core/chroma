@@ -1,5 +1,5 @@
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::{materialize_logs, LogMaterializerError, MaterializedLogRecord};
+use crate::segment::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
 use crate::{
     execution::operator::Operator,
     segment::{
@@ -65,20 +65,26 @@ impl ChromaError for HnswKnnOperatorError {
 impl HnswKnnOperator {
     async fn get_disallowed_ids<'referred_data>(
         &self,
-        logs: Chunk<MaterializedLogRecord<'_>>,
+        logs: MaterializeLogsResult,
         record_segment_reader: &RecordSegmentReader<'_>,
     ) -> Result<Vec<u32>, Box<dyn ChromaError>> {
         let mut disallowed_ids = Vec::new();
-        for item in logs.iter() {
-            let log = item.0;
+        for log in &logs {
             // This means that even if an embedding is not updated on the log,
             // we brute force it. Can use the HNSW index also.
-            if log.final_operation == MaterializedLogOperation::DeleteExisting
-                || log.final_operation == MaterializedLogOperation::UpdateExisting
-                || log.final_operation == MaterializedLogOperation::OverwriteExisting
+            if log.get_operation() == MaterializedLogOperation::DeleteExisting
+                || log.get_operation() == MaterializedLogOperation::UpdateExisting
+                || log.get_operation() == MaterializedLogOperation::OverwriteExisting
             {
+                let log = log
+                    .hydrate(Some(record_segment_reader))
+                    .await
+                    .map_err(|e| {
+                        Box::new(HnswKnnOperatorError::LogMaterializationError(e))
+                            as Box<dyn ChromaError>
+                    })?;
                 let offset_id = record_segment_reader
-                    .get_offset_id_for_user_id(log.merged_user_id_ref())
+                    .get_offset_id_for_user_id(log.get_user_id())
                     .await;
                 match offset_id {
                     Ok(Some(offset_id)) => disallowed_ids.push(offset_id),
@@ -148,7 +154,7 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
             },
         };
         let some_reader = Some(record_segment_reader.clone());
-        let logs = match materialize_logs(&some_reader, &input.logs, None)
+        let logs = match materialize_logs(&some_reader, input.logs.clone(), None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await
         {
@@ -160,9 +166,16 @@ impl Operator<HnswKnnOperatorInput, HnswKnnOperatorOutput> for HnswKnnOperator {
         };
         let mut remaining_allowed_ids: HashSet<&String> =
             HashSet::from_iter(input.allowed_ids.iter());
-        for (log, _) in logs.iter() {
+        for log in logs.iter() {
+            let log = log
+                .hydrate(Some(&record_segment_reader))
+                .await
+                .map_err(|e| {
+                    Box::new(HnswKnnOperatorError::LogMaterializationError(e))
+                        as Box<dyn ChromaError>
+                })?;
             #[allow(clippy::unnecessary_to_owned)]
-            remaining_allowed_ids.remove(&log.merged_user_id_ref().to_string());
+            remaining_allowed_ids.remove(&log.get_user_id().to_string());
         }
         // If a filter list is supplied but it does not have anything for the segment, as it implies the data is all in the log
         // then return an empty response.
