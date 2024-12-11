@@ -92,8 +92,6 @@ func ServerGrpcInterceptor(ctx context.Context, req interface{}, info *grpc.Unar
 	// Set the status to OK upon success.
 	span.SetStatus(otelCode.Ok, "ok")
 	span.SetAttributes(attribute.String("rpc.status_code", "ok"))
-	log.Info("RPC call", zap.String("method", info.FullMethod), zap.String("status", "ok"))
-
 	return h, nil
 }
 
