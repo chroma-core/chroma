@@ -90,14 +90,14 @@ impl TryFrom<chroma_proto::Collection> for Collection {
 }
 
 #[derive(Clone, Debug)]
-pub struct CollectionSegments {
+pub struct CollectionAndSegments {
     pub collection: Collection,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
     pub vector_segment: Segment,
 }
 
-impl TryFrom<chroma_proto::ScanOperator> for CollectionSegments {
+impl TryFrom<chroma_proto::ScanOperator> for CollectionAndSegments {
     type Error = ConversionError;
 
     fn try_from(value: chroma_proto::ScanOperator) -> Result<Self, ConversionError> {

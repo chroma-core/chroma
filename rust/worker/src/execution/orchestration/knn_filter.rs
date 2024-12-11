@@ -2,7 +2,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::{CollectionSegments, Segment};
+use chroma_types::{CollectionAndSegments, Segment};
 use thiserror::Error;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tonic::async_trait;
@@ -152,7 +152,7 @@ pub struct KnnFilterOrchestrator {
     queue: usize,
 
     // Collection segments
-    collection_segments: CollectionSegments,
+    collection_and_segments: CollectionAndSegments,
 
     // Fetch logs
     fetch_log: FetchLogOperator,
@@ -173,7 +173,7 @@ impl KnnFilterOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         hnsw_provider: HnswIndexProvider,
         queue: usize,
-        collection_segments: CollectionSegments,
+        collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
         filter: FilterOperator,
     ) -> Self {
@@ -182,7 +182,7 @@ impl KnnFilterOrchestrator {
             dispatcher,
             hnsw_provider,
             queue,
-            collection_segments,
+            collection_and_segments,
             fetch_log,
             fetched_logs: None,
             filter,
@@ -252,8 +252,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
             FilterInput {
                 logs: output,
                 blockfile_provider: self.blockfile_provider.clone(),
-                metadata_segment: self.collection_segments.metadata_segment.clone(),
-                record_segment: self.collection_segments.record_segment.clone(),
+                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
         );
@@ -279,7 +279,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 return;
             }
         };
-        let collection_dimension = match self.collection_segments.collection.dimension {
+        let collection_dimension = match self.collection_and_segments.collection.dimension {
             Some(dimension) => dimension as u32,
             None => {
                 self.terminate_with_error(ctx, KnnError::NoCollectionDimension);
@@ -287,7 +287,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             }
         };
         let distance_function =
-            match distance_function_from_segment(&self.collection_segments.vector_segment) {
+            match distance_function_from_segment(&self.collection_and_segments.vector_segment) {
                 Ok(distance_function) => distance_function,
                 Err(_) => {
                     self.terminate_with_error(ctx, KnnError::InvalidDistanceFunction);
@@ -295,7 +295,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 }
             };
         let hnsw_reader = match DistributedHNSWSegmentReader::from_segment(
-            &self.collection_segments.vector_segment,
+            &self.collection_and_segments.vector_segment,
             collection_dimension as usize,
             self.hnsw_provider.clone(),
         )
@@ -321,8 +321,8 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                     distance_function,
                     filter_output: output,
                     hnsw_reader,
-                    record_segment: self.collection_segments.record_segment.clone(),
-                    vector_segment: self.collection_segments.vector_segment.clone(),
+                    record_segment: self.collection_and_segments.record_segment.clone(),
+                    vector_segment: self.collection_and_segments.vector_segment.clone(),
                     dimension: collection_dimension as usize,
                 }))
                 .is_err()

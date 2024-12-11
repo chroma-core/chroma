@@ -1,6 +1,6 @@
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::CollectionSegments;
+use chroma_types::CollectionAndSegments;
 use thiserror::Error;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tonic::async_trait;
@@ -124,7 +124,7 @@ pub struct GetOrchestrator {
     queue: usize,
 
     // Collection segments
-    collection_segments: CollectionSegments,
+    collection_and_segments: CollectionAndSegments,
 
     // Fetch logs
     fetch_log: FetchLogOperator,
@@ -147,7 +147,7 @@ impl GetOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        segments: CollectionSegments,
+        collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
         filter: FilterOperator,
         limit: LimitOperator,
@@ -157,7 +157,7 @@ impl GetOrchestrator {
             blockfile_provider,
             dispatcher,
             queue,
-            collection_segments: segments,
+            collection_and_segments,
             fetch_log,
             fetched_logs: None,
             filter,
@@ -229,8 +229,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
             FilterInput {
                 logs: output,
                 blockfile_provider: self.blockfile_provider.clone(),
-                metadata_segment: self.collection_segments.metadata_segment.clone(),
-                record_segment: self.collection_segments.record_segment.clone(),
+                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
         );
@@ -265,7 +265,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
                     .expect("FetchLogOperator should have finished already")
                     .clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.collection_segments.record_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: output.log_offset_ids,
                 compact_offset_ids: output.compact_offset_ids,
             },
@@ -301,7 +301,7 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
                 .expect("FetchLogOperator should have finished already")
                 .clone(),
             blockfile_provider: self.blockfile_provider.clone(),
-            record_segment: self.collection_segments.record_segment.clone(),
+            record_segment: self.collection_and_segments.record_segment.clone(),
             offset_ids: output.offset_ids.iter().collect(),
         };
 
