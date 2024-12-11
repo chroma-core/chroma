@@ -28,6 +28,8 @@ from chromadb.api.types import (
     GetResult,
     QueryResult,
     Embeddings,
+    EmbeddingsType,
+    EmbeddingType,
     convert_list_embeddings_to_np,
 )
 from chromadb.auth import UserIdentity
@@ -945,10 +947,13 @@ class FastAPI(Server):
         )
 
         if get_result["embeddings"] is not None:
-            get_result["embeddings"] = [
-                cast(Embedding, embedding).tolist()
-                for embedding in get_result["embeddings"]
-            ]
+            get_result["embeddings"] = cast(
+                EmbeddingType,
+                [
+                    cast(Embedding, embedding).tolist()
+                    for embedding in get_result["embeddings"]
+                ],
+            )
 
         return get_result
 
@@ -1071,6 +1076,7 @@ class FastAPI(Server):
                 where=query.where,
                 where_document=query.where_document,
                 include=query.include,
+                max_distance=query.max_distance,
                 tenant=tenant,
                 database=database_name,
             )
@@ -1086,10 +1092,13 @@ class FastAPI(Server):
         )
 
         if nnresult["embeddings"] is not None:
-            nnresult["embeddings"] = [
-                [cast(Embedding, embedding).tolist() for embedding in result]
-                for result in nnresult["embeddings"]
-            ]
+            nnresult["embeddings"] = cast(
+                EmbeddingsType,
+                [
+                    [cast(Embedding, embedding).tolist() for embedding in result]
+                    for result in nnresult["embeddings"]
+                ],
+            )
 
         return nnresult
 
@@ -1780,10 +1789,13 @@ class FastAPI(Server):
         )
 
         if get_result["embeddings"] is not None:
-            get_result["embeddings"] = [
-                cast(Embedding, embedding).tolist()
-                for embedding in get_result["embeddings"]
-            ]
+            get_result["embeddings"] = cast(
+                EmbeddingType,
+                [
+                    cast(Embedding, embedding).tolist()
+                    for embedding in get_result["embeddings"]
+                ],
+            )
 
         return get_result
 
@@ -1903,10 +1915,13 @@ class FastAPI(Server):
         )
 
         if nnresult["embeddings"] is not None:
-            nnresult["embeddings"] = [
-                [cast(Embedding, embedding).tolist() for embedding in result]
-                for result in nnresult["embeddings"]
-            ]
+            nnresult["embeddings"] = cast(
+                EmbeddingsType,
+                [
+                    [cast(Embedding, embedding).tolist() for embedding in result]
+                    for result in nnresult["embeddings"]
+                ],
+            )
 
         return nnresult
 

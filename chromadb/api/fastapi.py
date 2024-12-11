@@ -326,6 +326,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -344,6 +345,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 "offset": offset,
                 "where_document": where_document,
                 "include": include,
+                "max_distance": max_distance,
             },
         )
 
@@ -512,6 +514,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
@@ -527,6 +530,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 "where": where,
                 "where_document": where_document,
                 "include": include,
+                "max_distance": max_distance,
             },
         )
 

@@ -18,7 +18,6 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
-    IncludeEnum,
 )
 
 import logging
@@ -183,6 +182,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             IncludeEnum.documents,
             IncludeEnum.distances,
         ],
+        max_distance: Optional[float] = None,
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -195,6 +195,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
+            max_distance: A float to filter results by distance ≤ this value. Applies to the collection's distance metric. If `None`, no filtering is applied.
 
         Returns:
             QueryResult: A QueryResult object containing the results.
@@ -216,6 +217,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             where=where,
             where_document=where_document,
             include=include,
+            max_distance=max_distance,
         )
 
         query_results = self._client._query(
@@ -225,6 +227,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             where=query_request["where"],
             where_document=query_request["where_document"],
             include=query_request["include"],
+            max_distance=query_request["max_distance"],
             tenant=self.tenant,
             database=self.database,
         )
