@@ -5474,6 +5474,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysdb"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "chroma-storage",
+ "serde",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
