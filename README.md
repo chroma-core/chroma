@@ -22,9 +22,9 @@
   </a>
 </p>
 
-
 ```bash
 pip install chromadb # python client
+pip install chromadb[opentelemetry] # install with opentelemetry dependencies
 # for javascript, npm install chromadb!
 # for client-server mode, chroma run --path /chroma_db_path
 ```
@@ -56,6 +56,7 @@ results = collection.query(
 ```
 
 ## Features
+
 - __Simple__: Fully-typed, fully-tested, fully-documented == happiness
 - __Integrations__: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040) and more soon
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
@@ -65,6 +66,7 @@ results = collection.query(
 ## Use case: ChatGPT for ______
 
 For example, the `"Chat your data"` use case:
+
 1. Add documents to your database. You can pass in your own embeddings, embedding function, or let Chroma embed them for you.
 2. Query relevant documents with natural language.
 3. Compose documents into the context window of an LLM like `GPT3` for additional summarization or analysis.
@@ -79,17 +81,18 @@ What are embeddings?
 - __Technical__: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer.
 - __A small example__: If you search your photos for "famous bridge in San Francisco". By embedding this query and comparing it to the embeddings of your photos and their metadata - it should return photos of the Golden Gate Bridge.
 
-Embeddings databases (also known as **vector databases**) store embeddings and allow you to search by nearest neighbors rather than by substrings like a traditional database. By default, Chroma uses [Sentence Transformers](https://docs.trychroma.com/guides/embeddings#default:-all-minilm-l6-v2) to embed for you but you can also use OpenAI embeddings, Cohere (multilingual) embeddings, or your own.
+Embeddings databases (also known as __vector databases__) store embeddings and allow you to search by nearest neighbors rather than by substrings like a traditional database. By default, Chroma uses [Sentence Transformers](https://docs.trychroma.com/guides/embeddings#default:-all-minilm-l6-v2) to embed for you but you can also use OpenAI embeddings, Cohere (multilingual) embeddings, or your own.
 
 ## Get involved
 
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project.
+
 - [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x) - `#contributing` channel
 - [Review the 🛣️ Roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues) - [`Good first issue tag`](https://github.com/chroma-core/chroma/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 - [Read our contributing guide](https://docs.trychroma.com/contributing)
 
-**Release Cadence**
+__Release Cadence__
 We currently release new tagged versions of the `pypi` and `npm` packages on Mondays. Hotfixes go out at any time during the week.
 
 ## License
