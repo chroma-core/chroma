@@ -31,6 +31,7 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py",
+                   "chromadb/test/property/test_sysdb.py",
                    "chromadb/test/property/test_restart_persist.py"]
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
@@ -61,11 +62,12 @@ jobs:
                    "chromadb/test/test_cli.py",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_collections.py",
-                  "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
+                   "chromadb/test/property/test_persist.py",
+                   "chromadb/test/property/test_sysdb.py"]
         include:
           - platform: depot-ubuntu-22.04
             env-file: compose-env.linux
@@ -99,6 +101,7 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                   "chromadb/test/property/test_sysdb.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",
                    "chromadb/test/test_logservice.py",
