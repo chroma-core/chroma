@@ -425,6 +425,41 @@ impl S3Storage {
         .await
     }
 
+    // TODO: real error type
+    // TODO: real output type, rn its (List results, continuation token)
+    // TODO: verify this pattern can work for other object stores
+    async fn list(
+        &self,
+        prefix: &str,
+        continuation_token: Option<impl Into<String>>,
+    ) -> Result<(Vec<String>, Option<String>), ()> {
+        // Lists all files at a given prefix
+
+        let req = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .set_prefix(Some(prefix.to_string()));
+
+        let req = match continuation_token {
+            Some(ct) => req.continuation_token(ct),
+            None => req,
+        };
+
+        // TODO: don't unwrap
+        let res = req.send().await.unwrap();
+        let continuation_token = res.next_continuation_token().map(|s| s.to_string());
+        let mut contents = res.contents.unwrap_or_default();
+
+        let mut out = Vec::with_capacity(contents.len());
+        for obj in contents.drain(..) {
+            // TODO: why is this Option!!??!?!
+            out.push(obj.key.unwrap());
+        }
+
+        Ok((out, continuation_token))
+    }
+
     async fn put_object(
         &self,
         key: &str,
