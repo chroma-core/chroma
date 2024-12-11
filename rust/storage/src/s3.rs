@@ -901,4 +901,5 @@ mod tests {
     }
 
     // TODO: both of these are trivially testable, add test_k8s_integration tests
+    // TODO: list is trivially testable add a test for it
 }
