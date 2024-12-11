@@ -18,7 +18,7 @@ from chromadb.config import System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentType
 from chromadb.test.conftest import NOT_CLUSTER_ONLY
-from chromadb.test.db.test_system import sysdb
+from chromadb.test.db.test_system import sqlite, grpc_with_real_server
 from chromadb.types import Segment, SegmentScope
 
 
@@ -153,5 +153,6 @@ class SysDBStateMachine(RuleBasedStateMachine):
                 self.sysdb.delete_collection(id=coll.id)
 
 
-def test_sysdb(caplog: pytest.LogCaptureFixture, sysdb: SysDB, system: System) -> None:
+def test_sysdb(caplog: pytest.LogCaptureFixture, system: System) -> None:
+    sysdb = next(sqlite()) if NOT_CLUSTER_ONLY else next(grpc_with_real_server())
     run_state_machine_as_test(lambda: SysDBStateMachine(sysdb=sysdb))  # type: ignore[no-untyped-call]
