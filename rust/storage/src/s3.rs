@@ -864,4 +864,6 @@ mod tests {
         assert!(!default.if_not_exists);
         assert_eq!(default.if_match, None);
     }
+
+    // TODO: both of these are trivially testable, add test_k8s_integration tests
 }
