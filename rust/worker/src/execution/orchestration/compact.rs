@@ -213,6 +213,8 @@ impl CompactOrchestrator {
         let operator = FetchLogOperator {
             log_client: self.log.clone(),
             batch_size: 100,
+            // Here we do not need to be inclusive since the compaction job
+            // offset is the one after the last compaction offset
             start_log_offset_id: self.compaction_job.offset as u32,
             maximum_fetch_count: Some(self.max_compaction_size as u32),
             collection_uuid: self.collection_id,

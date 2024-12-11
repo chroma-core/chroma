@@ -178,6 +178,8 @@ impl CountQueryOrchestrator {
         let operator = FetchLogOperator {
             log_client: self.log.clone(),
             batch_size: 100,
+            // The collection log position is inclusive, and we want to start from the next log.
+            // Note that we query using the incoming log position this is critical for correctness.
             start_log_offset_id: self.log_position as u32 + 1,
             maximum_fetch_count: None,
             collection_uuid: collection.collection_id,
