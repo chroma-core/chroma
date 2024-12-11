@@ -894,13 +894,13 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.ALL)
     def _scan(self, collection_id: UUID) -> Scan:
-        collection_segments = self._sysdb.get_collection_with_segments(collection_id)
+        collection_and_segments = self._sysdb.get_collection_with_segments(collection_id)
         # For now collection should have exactly one segment per scope:
         # - Local scopes: vector, metadata
         # - Distributed scopes: vector, metadata, record 
-        scope_to_segment = {segment["scope"]: segment for segment in collection_segments["segments"]}
+        scope_to_segment = {segment["scope"]: segment for segment in collection_and_segments["segments"]}
         return Scan(
-            collection=collection_segments["collection"],
+            collection=collection_and_segments["collection"],
             knn=scope_to_segment[t.SegmentScope.VECTOR],
             metadata=scope_to_segment[t.SegmentScope.METADATA],
             # Local chroma do not have record segment, and this is not used by the local executor

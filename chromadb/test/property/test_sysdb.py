@@ -117,12 +117,12 @@ class SysDBStateMachine(RuleBasedStateMachine):
             coll.name in self.created_collections
             and coll.id == self.created_collections[coll.name].id
         ):
-            fetched_collection_segments = self.sysdb.get_collection_with_segments(
+            fetched_collection_and_segments = self.sysdb.get_collection_with_segments(
                 collection_id=coll.id
             )
-            assert fetched_collection_segments["collection"].name == coll.name
+            assert fetched_collection_and_segments["collection"].name == coll.name
             scopes = []
-            for segment in fetched_collection_segments["segments"]:
+            for segment in fetched_collection_and_segments["segments"]:
                 assert segment["collection"] == coll.id
                 scopes.append(segment["scope"])
             if NOT_CLUSTER_ONLY:
