@@ -65,7 +65,6 @@ where
 #[derive(Debug)]
 pub(super) struct TaskResult<Output, Error> {
     result: Result<Output, TaskError<Error>>,
-    #[allow(dead_code)]
     task_id: Uuid,
 }
 

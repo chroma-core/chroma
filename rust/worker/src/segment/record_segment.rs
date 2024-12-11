@@ -774,20 +774,6 @@ impl RecordSegmentReader<'_> {
         self.curr_max_offset_id.clone()
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn get_user_id_for_offset_id(
-        &self,
-        offset_id: u32,
-    ) -> Result<&str, Box<dyn ChromaError>> {
-        match self.id_to_user_id.get("", offset_id).await {
-            Ok(Some(user_id)) => Ok(user_id),
-            Ok(None) => Err(Box::new(
-                RecordSegmentReaderCreationError::UserRecordNotFound(offset_id.to_string()),
-            )),
-            Err(e) => Err(e),
-        }
-    }
-
     pub(crate) async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
@@ -938,14 +924,6 @@ impl RecordSegmentReader<'_> {
         let prefixes = vec![""; keys.len()];
         self.user_id_to_id
             .load_blocks_for_keys(&prefixes, &keys)
-            .await
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn prefetch_id_to_user_id(&self, keys: &[u32]) {
-        let prefixes = vec![""; keys.len()];
-        self.id_to_user_id
-            .load_blocks_for_keys(&prefixes, keys)
             .await
     }
 }
