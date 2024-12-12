@@ -1,20 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = [
-   "rust/benchmark",
-   "rust/blockstore",
-   "rust/cache",
-   "rust/chroma",
-   "rust/config",
-   "rust/distance",
-   "rust/error",
-   "rust/index",
-   "rust/load",
-   "rust/storage",
-   "rust/types",
-   "rust/worker",
-]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/index", "rust/load", "rust/storage", "rust/types", "rust/worker"]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -26,10 +13,7 @@ figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "24.3.25"
 futures = "0.3"
 num_cpus = "1.16.0"
-opentelemetry = { version = "0.27.0", default-features = false, features = [
-   "trace",
-   "metrics",
-] }
+opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = "0.27"
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
@@ -47,12 +31,7 @@ tracing = "0.1"
 tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1.11.0", features = [
-   "v4",
-   "fast-rng",
-   "macro-diagnostics",
-   "serde",
-] }
+uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
