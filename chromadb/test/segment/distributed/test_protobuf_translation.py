@@ -1,69 +1,126 @@
 import uuid
-
-from chromadb.config import Settings, System
-from chromadb.segment.impl.metadata.grpc_segment import GrpcMetadataSegment
+from chromadb.proto import convert
+from chromadb.segment import SegmentType
 from chromadb.types import (
+    Collection,
+    CollectionConfigurationInternal,
     Segment,
     SegmentScope,
     Where,
     WhereDocument,
-    MetadataEmbeddingRecord,
 )
 import chromadb.proto.chroma_pb2 as pb
+import chromadb.proto.query_executor_pb2 as query_pb
 
-
-# Note: trying to start() this segment will cause it to error since it doesn't
-# have a remote server to talk to. This is only suitable for testing the
-# python <-> proto translation logic.
-def unstarted_grpc_metadata_segment() -> GrpcMetadataSegment:
-    settings = Settings(
-        allow_reset=True,
+def test_collection_to_proto() -> None:
+    collection = Collection(
+        id=uuid.uuid4(),
+        name="test_collection",
+        configuration=CollectionConfigurationInternal(),
+        metadata={"hnsw_m": 128},
+        dimension=512,
+        tenant="test_tenant",
+        database="test_database",
+        version=1,
+        log_position=42,
     )
-    system = System(settings)
+
+    assert convert.to_proto_collection(collection) == pb.Collection(
+        id=collection.id.hex,
+        name="test_collection",
+        configuration_json_str=CollectionConfigurationInternal().to_json_str(),
+        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        dimension=512,
+        tenant="test_tenant",
+        database="test_database",
+        version=1,
+        log_position=42,
+    )
+
+def test_collection_from_proto() -> None:
+    proto = pb.Collection(
+        id=uuid.uuid4().hex,
+        name="test_collection",
+        configuration_json_str=CollectionConfigurationInternal().to_json_str(),
+        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        dimension=512,
+        tenant="test_tenant",
+        database="test_database",
+        version=1,
+        log_position=42,
+    )
+    assert convert.from_proto_collection(proto) == Collection(
+        id=uuid.UUID(proto.id),
+        name="test_collection",
+        configuration=CollectionConfigurationInternal(),
+        metadata={"hnsw_m": 128},
+        dimension=512,
+        tenant="test_tenant",
+        database="test_database",
+        version=1,
+        log_position=42,
+    )
+
+def test_segment_to_proto() -> None:
     segment = Segment(
         id=uuid.uuid4(),
-        type="test",
-        scope=SegmentScope.METADATA,
+        type=SegmentType.HNSW_DISTRIBUTED.value,
+        scope=SegmentScope.VECTOR,
         collection=uuid.uuid4(),
-        metadata={
-            "grpc_url": "test",
-        },
-        file_paths={},
+        metadata={"hnsw_m": 128},
+        file_paths={"name": ["path_0", "path_1"]},
     )
-    grpc_metadata_segment = GrpcMetadataSegment(
-        system=system,
-        segment=segment,
+    assert convert.to_proto_segment(segment) == pb.Segment(
+        id=segment["id"].hex,
+        type=SegmentType.HNSW_DISTRIBUTED.value,
+        scope=pb.SegmentScope.VECTOR,
+        collection=segment["collection"].hex,
+        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        file_paths={"name": pb.FilePaths(paths=["path_0", "path_1"])},
     )
-    return grpc_metadata_segment
 
+def test_segment_from_proto() -> None:
+    proto = pb.Segment(
+        id=uuid.uuid4().hex,
+        type=SegmentType.HNSW_DISTRIBUTED.value,
+        scope=pb.SegmentScope.VECTOR,
+        collection=uuid.uuid4().hex,
+        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        file_paths={"name": pb.FilePaths(paths=["path_0", "path_1"])},
+    )
+    assert convert.from_proto_segment(proto) == Segment(
+        id=uuid.UUID(proto.id),
+        type=SegmentType.HNSW_DISTRIBUTED.value,
+        scope=SegmentScope.VECTOR,
+        collection=uuid.UUID(proto.collection),
+        metadata={"hnsw_m": 128},
+        file_paths={"name": ["path_0", "path_1"]},
+    )
 
 def test_where_document_to_proto_not_contains() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where_document: WhereDocument = {"$not_contains": "test"}
-    proto = md_segment._where_document_to_proto(where_document)
+    proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("direct")
     assert proto.direct.document == "test"
     assert proto.direct.operator == pb.WhereDocumentOperator.NOT_CONTAINS
 
 
 def test_where_document_to_proto_contains_to_proto() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where_document: WhereDocument = {"$contains": "test"}
-    proto = md_segment._where_document_to_proto(where_document)
+    proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("direct")
     assert proto.direct.document == "test"
     assert proto.direct.operator == pb.WhereDocumentOperator.CONTAINS
 
 
 def test_where_document_to_proto_and() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where_document: WhereDocument = {
         "$and": [
             {"$contains": "test"},
             {"$not_contains": "test"},
         ]
     }
-    proto = md_segment._where_document_to_proto(where_document)
+    proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("children")
     children_pb = proto.children
     assert children_pb.operator == pb.BooleanOperator.AND
@@ -79,14 +136,13 @@ def test_where_document_to_proto_and() -> None:
 
 
 def test_where_document_to_proto_or() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where_document: WhereDocument = {
         "$or": [
             {"$contains": "test"},
             {"$not_contains": "test"},
         ]
     }
-    proto = md_segment._where_document_to_proto(where_document)
+    proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("children")
     children_pb = proto.children
     assert children_pb.operator == pb.BooleanOperator.OR
@@ -102,7 +158,6 @@ def test_where_document_to_proto_or() -> None:
 
 
 def test_where_document_to_proto_nested_boolean_operators() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where_document: WhereDocument = {
         "$and": [
             {
@@ -119,7 +174,7 @@ def test_where_document_to_proto_nested_boolean_operators() -> None:
             },
         ]
     }
-    proto = md_segment._where_document_to_proto(where_document)
+    proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("children")
     children_pb = proto.children
     assert children_pb.operator == pb.BooleanOperator.AND
@@ -142,11 +197,10 @@ def test_where_document_to_proto_nested_boolean_operators() -> None:
 
 
 def test_where_to_proto_string_value() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "test": "value",
     }
-    proto: pb.Where = md_segment._where_to_proto(where)
+    proto = convert.to_proto_where(where)
     assert proto.HasField("direct_comparison")
     d = proto.direct_comparison
     assert d.key == "test"
@@ -155,11 +209,10 @@ def test_where_to_proto_string_value() -> None:
 
 
 def test_where_to_proto_int_value() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "test": 1,
     }
-    proto = md_segment._where_to_proto(where)
+    proto = convert.to_proto_where(where)
     assert proto.HasField("direct_comparison")
     d = proto.direct_comparison
     assert d.key == "test"
@@ -168,11 +221,10 @@ def test_where_to_proto_int_value() -> None:
 
 
 def test_where_to_proto_double_value() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "test": 1.0,
     }
-    proto = md_segment._where_to_proto(where)
+    proto = convert.to_proto_where(where)
     assert proto.HasField("direct_comparison")
     d = proto.direct_comparison
     assert d.key == "test"
@@ -181,14 +233,13 @@ def test_where_to_proto_double_value() -> None:
 
 
 def test_where_to_proto_and() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "$and": [
             {"test": 1},
             {"test": "value"},
         ]
     }
-    proto = md_segment._where_to_proto(where)
+    proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
     assert children_pb.operator == pb.BooleanOperator.AND
@@ -206,14 +257,13 @@ def test_where_to_proto_and() -> None:
 
 
 def test_where_to_proto_or() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "$or": [
             {"test": 1},
             {"test": "value"},
         ]
     }
-    proto = md_segment._where_to_proto(where)
+    proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
     assert children_pb.operator == pb.BooleanOperator.OR
@@ -231,7 +281,6 @@ def test_where_to_proto_or() -> None:
 
 
 def test_where_to_proto_nested_boolean_operators() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "$and": [
             {
@@ -248,7 +297,7 @@ def test_where_to_proto_nested_boolean_operators() -> None:
             },
         ]
     }
-    proto = md_segment._where_to_proto(where)
+    proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
     assert children_pb.operator == pb.BooleanOperator.AND
@@ -273,14 +322,13 @@ def test_where_to_proto_nested_boolean_operators() -> None:
 
 
 def test_where_to_proto_float_operator() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
     where: Where = {
         "$and": [
             {"test1": 1.0},
             {"test2": 2.0},
         ]
     }
-    proto = md_segment._where_to_proto(where)
+    proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
     assert children_pb.operator == pb.BooleanOperator.AND
@@ -300,89 +348,29 @@ def test_where_to_proto_float_operator() -> None:
     assert child_1.direct_comparison.single_double_operand.value == 2.0
 
 
-def test_metadata_embedding_record_string_from_proto() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
-    val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
-        string_value="test_value",
-    )
-    update: pb.UpdateMetadata = pb.UpdateMetadata(
-        metadata={"test_key": val},
-    )
-    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
-        id="test_id",
-        metadata=update,
-    )
-
-    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
-    assert mdr["id"] == "test_id"
-    assert mdr["metadata"]
-    assert mdr["metadata"]["test_key"] == "test_value"
-
-
-def test_metadata_embedding_record_int_from_proto() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
-    val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
-        int_value=1,
-    )
-    update: pb.UpdateMetadata = pb.UpdateMetadata(
-        metadata={"test_key": val},
-    )
-    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
-        id="test_id",
-        metadata=update,
-    )
-
-    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
-    assert mdr["id"] == "test_id"
-    assert mdr["metadata"]
-    assert mdr["metadata"]["test_key"] == 1
-
-
-def test_metadata_embedding_record_double_from_proto() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
-    val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+def test_projection_record_from_proto() -> None:
+    float_val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
         float_value=1.0,
     )
-    update: pb.UpdateMetadata = pb.UpdateMetadata(
-        metadata={"test_key": val},
+    int_val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        int_value=2,
     )
-    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
+    str_val: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
+        string_value="three",
+    )
+    update: pb.UpdateMetadata = pb.UpdateMetadata(
+        metadata={"float_key": float_val, "int_key": int_val, "str_key": str_val},
+    )
+    record: query_pb.ProjectionRecord = query_pb.ProjectionRecord(
         id="test_id",
+        document="document",
         metadata=update,
     )
 
-    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
-    assert mdr["id"] == "test_id"
-    assert mdr["metadata"]
-    assert mdr["metadata"]["test_key"] == 1.0
+    projection_record = convert.from_proto_projection_record(record)
 
-
-def test_metadata_embedding_record_heterogeneous_from_proto() -> None:
-    md_segment = unstarted_grpc_metadata_segment()
-    val1: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
-        string_value="test_value",
-    )
-    val2: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
-        int_value=1,
-    )
-    val3: pb.UpdateMetadataValue = pb.UpdateMetadataValue(
-        float_value=1.0,
-    )
-    update: pb.UpdateMetadata = pb.UpdateMetadata(
-        metadata={
-            "test_key1": val1,
-            "test_key2": val2,
-            "test_key3": val3,
-        },
-    )
-    record: pb.MetadataEmbeddingRecord = pb.MetadataEmbeddingRecord(
-        id="test_id",
-        metadata=update,
-    )
-
-    mdr: MetadataEmbeddingRecord = md_segment._from_proto(record)
-    assert mdr["id"] == "test_id"
-    assert mdr["metadata"]
-    assert mdr["metadata"]["test_key1"] == "test_value"
-    assert mdr["metadata"]["test_key2"] == 1
-    assert mdr["metadata"]["test_key3"] == 1.0
+    assert projection_record["id"] == "test_id"
+    assert projection_record["metadata"]
+    assert projection_record["metadata"]["float_key"] == 1.0
+    assert projection_record["metadata"]["int_key"] == 2
+    assert projection_record["metadata"]["str_key"] == "three"
