@@ -9,7 +9,7 @@ use chroma_types::{
         self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
         KnnBatchResult, KnnPlan,
     },
-    CollectionUuid, Segment,
+    CollectionUuid, Segment, SegmentUuid,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -24,7 +24,12 @@ use crate::{
             fetch_log::FetchLogOperator, fetch_segment::FetchSegmentOperator,
             knn_projection::KnnProjectionOperator,
         },
-        orchestration::{get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::{KnnError, KnnFilterOrchestrator}, CountQueryOrchestrator},
+        orchestration::{
+            get::GetOrchestrator,
+            knn::KnnOrchestrator,
+            knn_filter::{KnnError, KnnFilterOrchestrator},
+            CountQueryOrchestrator,
+        },
     },
     log::log::Log,
     sysdb::sysdb::SysDb,
@@ -142,19 +147,12 @@ impl WorkerServer {
         let collection_uuid = CollectionUuid::from_str(&collection.id)
             .map_err(|_| Status::invalid_argument("Invalid Collection UUID"))?;
 
-        let metadata_segment = scan
-            .metadata
-            .ok_or(Status::invalid_argument("Invalid metadata segment"))?;
-        let record_segment = scan
-            .record
-            .ok_or(Status::invalid_argument("Invalid record segment"))?;
-        let vector_segment = scan
-            .knn
-            .ok_or(Status::invalid_argument("Invalid vector segment"))?;
-
-        let metadata_uuid = Segment::try_from(metadata_segment)?.id;
-        let record_uuid = Segment::try_from(record_segment)?.id;
-        let vector_uuid = Segment::try_from(vector_segment)?.id;
+        let metadata_uuid =
+            SegmentUuid::from_str(&scan.metadata.map(|seg| seg.id).unwrap_or(scan.metadata_id))?;
+        let record_uuid =
+            SegmentUuid::from_str(&scan.record.map(|seg| seg.id).unwrap_or(scan.record_id))?;
+        let vector_uuid =
+            SegmentUuid::from_str(&scan.knn.map(|seg| seg.id).unwrap_or(scan.knn_id))?;
 
         Ok((
             FetchLogOperator {
@@ -488,6 +486,12 @@ mod tests {
                 log_position: 0,
                 version: 0,
             }),
+            // Deprecated
+            knn_id: "".to_string(),
+            // Deprecated
+            metadata_id: "".to_string(),
+            // Deprecated
+            record_id: "".to_string(),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
                 r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
