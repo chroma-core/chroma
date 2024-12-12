@@ -148,6 +148,28 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	return res, nil
 }
 
+func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckCollectionsRequest) (*coordinatorpb.CheckCollectionsResponse, error) {
+	res := &coordinatorpb.CheckCollectionsResponse{}
+	res.Deleted = make([]bool, len(req.CollectionIds))
+
+	for i, collectionID := range req.CollectionIds {
+		parsedId, err := types.ToUniqueID(&collectionID)
+		if err != nil {
+			log.Error("CheckCollection failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+		deleted, err := s.coordinator.CheckCollection(ctx, parsedId)
+
+		if err != nil {
+			log.Error("CheckCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+
+		res.Deleted[i] = deleted
+	}
+	return res, nil
+}
+
 func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.DeleteCollectionRequest) (*coordinatorpb.DeleteCollectionResponse, error) {
 	collectionID := req.GetId()
 	res := &coordinatorpb.DeleteCollectionResponse{}

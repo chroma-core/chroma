@@ -182,14 +182,19 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 		return nil
 	}
 	collectionsToGC := make([]string, 0)
-	for _, collection := range collectionToCompact {
-		exist, err := r.sysDb.CheckCollection(ctx, collection)
+	// TODO(Sanket): Make batch size configurable.
+	batchSize := 1000
+	for i := 0; i < len(collectionToCompact); i += batchSize {
+		end := min(len(collectionToCompact), i+batchSize)
+		exists, err := r.sysDb.CheckCollections(ctx, collectionToCompact[i:end])
 		if err != nil {
-			trace_log.Error("Error in checking collection in sysdb", zap.Error(err), zap.String("collectionId", collection))
+			trace_log.Error("Error in checking collection in sysdb", zap.Error(err))
 			continue
 		}
-		if !exist {
-			collectionsToGC = append(collectionsToGC, collection)
+		for offset, exist := range exists {
+			if !exist {
+				collectionsToGC = append(collectionsToGC, collectionToCompact[i+offset])
+			}
 		}
 	}
 	if len(collectionsToGC) > 0 {

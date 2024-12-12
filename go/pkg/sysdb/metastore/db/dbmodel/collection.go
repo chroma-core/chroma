@@ -40,6 +40,5 @@ type ICollectionDb interface {
 	Update(in *Collection) error
 	DeleteAll() error
 	UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error)
-	CheckCollectionIsSoftDeleted(collectionName string, tenantID string, databaseName string) (bool, string, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 }
