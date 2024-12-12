@@ -455,12 +455,6 @@ mod tests {
                 log_position: 0,
                 version: 0,
             }),
-            // Deprecated
-            knn_id: "".to_string(),
-            // Deprecated
-            metadata_id: "".to_string(),
-            // Deprecated
-            record_id: "".to_string(),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
                 r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
