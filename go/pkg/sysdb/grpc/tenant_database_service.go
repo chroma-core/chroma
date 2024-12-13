@@ -97,6 +97,7 @@ func (s *Server) SetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 		log.Error("error SetTenantLastCompactionTime", zap.String("request", req.String()), zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
+	log.Info("SetLastCompactionTimeForTenant success", zap.String("request", req.String()))
 	return &emptypb.Empty{}, nil
 }
 
