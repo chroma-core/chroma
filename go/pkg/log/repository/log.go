@@ -142,6 +142,7 @@ func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Con
 	if err != nil {
 		trace_log.Error("Error in updating record_compaction_offset_position in the collection table", zap.Error(err), zap.String("collectionId", collectionId))
 	}
+	trace_log.Info("Updated record_compaction_offset_position in the collection table", zap.Int64("offsetPosition", offsetPosition), zap.String("collectionId", collectionId))
 	return
 }
 

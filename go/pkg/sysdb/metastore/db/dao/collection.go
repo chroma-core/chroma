@@ -210,6 +210,7 @@ func (s *collectionDb) Update(in *dbmodel.Collection) error {
 }
 
 func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
+	log.Info("update log position and version", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
 	// https://patrick.engineering/posts/postgres-internals/
