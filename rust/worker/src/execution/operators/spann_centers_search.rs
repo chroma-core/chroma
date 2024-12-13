@@ -28,7 +28,7 @@ pub(crate) struct SpannCentersSearchOutput {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum SpannCentersSearchError {
+pub enum SpannCentersSearchError {
     #[error("Error creating spann segment reader")]
     SpannSegmentReaderCreationError,
     #[error("Error querying RNG")]

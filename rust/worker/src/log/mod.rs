@@ -1,6 +1,6 @@
 pub(crate) mod config;
 #[allow(clippy::module_inception)]
-pub(crate) mod log;
+pub mod log;
 #[allow(dead_code)]
 pub mod test;
 

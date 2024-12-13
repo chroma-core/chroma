@@ -27,7 +27,7 @@ pub struct HnswIndexParamsFromSegment {
 }
 
 #[derive(Clone)]
-pub(crate) struct DistributedHNSWSegmentWriter {
+pub struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
     pub(crate) id: SegmentUuid,
@@ -86,7 +86,7 @@ impl DistributedHNSWSegmentWriter {
         }
     }
 
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
@@ -96,7 +96,6 @@ impl DistributedHNSWSegmentWriter {
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
-            println!("Loading HNSW index from files");
             // Check if its in the providers cache, if not load the index from the files
             let index_id = match &segment.file_path.get(HNSW_INDEX) {
                 None => {
@@ -272,9 +271,9 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 }
 
 #[derive(Clone)]
-pub(crate) struct DistributedHNSWSegmentReader {
+pub struct DistributedHNSWSegmentReader {
     index: HnswIndexRef,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for DistributedHNSWSegmentReader {
@@ -300,7 +299,6 @@ impl DistributedHNSWSegmentReader {
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
-            println!("Loading HNSW index from files");
             // Check if its in the providers cache, if not load the index from the files
             let index_id = match &segment.file_path.get(HNSW_INDEX) {
                 None => {

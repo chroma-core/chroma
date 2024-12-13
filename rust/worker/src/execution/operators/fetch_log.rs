@@ -32,7 +32,7 @@ use crate::{
 /// It should be run at the start of an orchestrator to get the latest data of a collection
 #[derive(Clone, Debug)]
 pub struct FetchLogOperator {
-    pub(crate) log_client: Box<Log>,
+    pub log_client: Box<Log>,
     pub batch_size: u32,
     pub start_log_offset_id: u32,
     pub maximum_fetch_count: Option<u32>,
