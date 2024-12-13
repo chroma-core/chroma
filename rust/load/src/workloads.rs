@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Distribution, DocumentQuery, GetQuery, KeySelector, MetadataQuery, QueryQuery, Skew, Workload,
+    Distribution, GetQuery, KeySelector, QueryQuery, Skew, TinyStoriesMixin, WhereMixin, Workload,
 };
 
 /// Return a map of all pre-configured workloads.
@@ -22,7 +22,9 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                 skew: Skew::Zipf { theta: 0.999 },
                 limit: Distribution::Constant(10),
                 metadata: None,
-                document: Some(DocumentQuery::Raw(serde_json::json!({"$contains": "the"}))),
+                document: Some(WhereMixin::Constant(
+                    serde_json::json!({"$contains": "the"}),
+                )),
             }),
         ),
         (
@@ -30,7 +32,9 @@ pub fn all_workloads() -> HashMap<String, Workload> {
             Workload::Get(GetQuery {
                 skew: Skew::Zipf { theta: 0.999 },
                 limit: Distribution::Constant(10),
-                metadata: Some(MetadataQuery::Raw(serde_json::json!({"i1": 1000}))),
+                metadata: Some(WhereMixin::TinyStories(TinyStoriesMixin::Numeric {
+                    ratio_selected: 0.01,
+                })),
                 document: None,
             }),
         ),
@@ -52,7 +56,9 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                         skew: Skew::Zipf { theta: 0.999 },
                         limit: Distribution::Constant(10),
                         metadata: None,
-                        document: Some(DocumentQuery::Raw(serde_json::json!({"$contains": "the"}))),
+                        document: Some(WhereMixin::Constant(
+                            serde_json::json!({"$contains": "the"}),
+                        )),
                     }),
                 ),
                 (
@@ -60,7 +66,9 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                     Workload::Query(QueryQuery {
                         skew: Skew::Zipf { theta: 0.999 },
                         limit: Distribution::Constant(10),
-                        metadata: Some(MetadataQuery::Raw(serde_json::json!({"i1": 1000}))),
+                        metadata: Some(WhereMixin::TinyStories(TinyStoriesMixin::Numeric {
+                            ratio_selected: 0.01,
+                        })),
                         document: None,
                     }),
                 ),
@@ -75,7 +83,9 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                         skew: Skew::Zipf { theta: 0.999 },
                         limit: Distribution::Constant(10),
                         metadata: None,
-                        document: Some(DocumentQuery::Raw(serde_json::json!({"$contains": "the"}))),
+                        document: Some(WhereMixin::Constant(
+                            serde_json::json!({"$contains": "the"}),
+                        )),
                     }),
                 ),
                 (
@@ -83,7 +93,9 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                     Workload::Get(GetQuery {
                         skew: Skew::Zipf { theta: 0.999 },
                         limit: Distribution::Constant(10),
-                        metadata: Some(MetadataQuery::Raw(serde_json::json!({"i1": 1000}))),
+                        metadata: Some(WhereMixin::TinyStories(TinyStoriesMixin::Numeric {
+                            ratio_selected: 0.01,
+                        })),
                         document: None,
                     }),
                 ),
