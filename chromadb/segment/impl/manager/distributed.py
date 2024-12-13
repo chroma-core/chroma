@@ -76,8 +76,7 @@ class DistributedSegmentManager(SegmentManager):
         return [vector_segment, record_segment, metadata_segment]
 
     @override
-    def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
-        segments = self._sysdb.get_segments(collection=collection_id)
+    def delete_segments(self, segments: Sequence[Segment]) -> Sequence[UUID]:
         return [s["id"] for s in segments]
 
     @trace_method(
