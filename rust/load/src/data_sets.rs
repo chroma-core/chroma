@@ -41,10 +41,10 @@ impl DataSet for NopDataSet {
     async fn query(
         &self,
         _: &ChromaClient,
-        _: QueryQuery,
+        qq: QueryQuery,
         _: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::info!("nop query");
+        tracing::info!("nop query {qq:?}", qq = qq);
         Ok(())
     }
 
@@ -113,8 +113,8 @@ impl DataSet for TinyStoriesDataSet {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let collection = client.get_collection(&self.name()).await?;
         let limit = gq.limit.sample(guac);
-        let where_metadata = gq.metadata.map(|m| m.into_where_metadata(guac));
-        let where_document = gq.document.map(|m| m.into_where_document(guac));
+        let where_metadata = gq.metadata.map(|m| m.to_json(guac));
+        let where_document = gq.document.map(|m| m.to_json(guac));
         let results = collection
             .get(GetOptions {
                 ids: vec![],

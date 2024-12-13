@@ -264,43 +264,87 @@ impl PartialEq for Skew {
     }
 }
 
-/////////////////////////////////////////// MetadataQuery //////////////////////////////////////////
+///////////////////////////////////////// TinyStoriesMixin /////////////////////////////////////////
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum TinyStoriesMixin {
+    #[serde(rename = "numeric")]
+    Numeric { ratio_selected: f64 },
+}
+
+impl TinyStoriesMixin {
+    pub fn to_json(&self, guac: &mut Guacamole) -> serde_json::Value {
+        match self {
+            Self::Numeric { ratio_selected } => {
+                let field: &'static str = match uniform(0u8, 5u8)(guac) {
+                    0 => "i1",
+                    1 => "i2",
+                    2 => "i3",
+                    3 => "f1",
+                    4 => "f2",
+                    5 => "f3",
+                    _ => unreachable!(),
+                };
+                let mut center = uniform(0, 1_000_000)(guac);
+                let window = (1e6 * ratio_selected) as usize;
+                if window / 2 > center {
+                    center = window / 2
+                }
+                let min = center - window / 2;
+                let max = center + window / 2;
+                serde_json::json!({"$and": [{field: {"$gte": min}}, {field: {"$lt": max}}]})
+            }
+        }
+    }
+}
+
+//////////////////////////////////////////// WhereMixin ////////////////////////////////////////////
 
 /// A metadata query specifies a metadata filter in Chroma.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum MetadataQuery {
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum WhereMixin {
     /// A raw metadata query simply copies the provided filter spec.
-    #[serde(rename = "raw")]
-    Raw(serde_json::Value),
+    #[serde(rename = "query")]
+    Constant(serde_json::Value),
+    /// The tiny stories workload.  The way these collections were setup, there are three fields
+    /// each of integer, float, and string.  The integer fields are named i1, i2, and i3.  The
+    /// float fields are named f1, f2, and f3.  The string fields are named s1, s2, and s3.
+    ///
+    /// This mixin selects one of these 6 numeric fields at random and picks a metadata range query
+    /// to perform on it that will return data according to the mixin.
+    #[serde(rename = "tiny-stories")]
+    TinyStories(TinyStoriesMixin),
+    /// A constant operator with different comparison.
+    /// A mix of metadata queries selects one of the queries at random.
+    #[serde(rename = "select")]
+    Select(Vec<(f64, WhereMixin)>),
 }
 
-impl MetadataQuery {
+impl WhereMixin {
     /// Convert the metadata query into a JSON value suitable for use in a Chroma query.
-    pub fn into_where_metadata(self, _: &mut Guacamole) -> serde_json::Value {
+    pub fn to_json(&self, guac: &mut Guacamole) -> serde_json::Value {
         match self {
-            MetadataQuery::Raw(json) => json,
+            Self::Constant(query) => query.clone(),
+            Self::TinyStories(mixin) => mixin.to_json(guac),
+            Self::Select(select) => {
+                let scale: f64 = any(guac);
+                let mut total = scale * select.iter().map(|(p, _)| *p).sum::<f64>();
+                for (p, mixin) in select {
+                    if *p < 0.0 {
+                        return serde_json::Value::Null;
+                    }
+                    if *p >= total {
+                        return mixin.to_json(guac);
+                    }
+                    total -= *p;
+                }
+                serde_json::Value::Null
+            }
         }
     }
 }
 
-/////////////////////////////////////////// DocumentQuery //////////////////////////////////////////
-
-/// A document query specifies a document filter in Chroma.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub enum DocumentQuery {
-    // A raw document query simply copies the provided filter spec.
-    #[serde(rename = "raw")]
-    Raw(serde_json::Value),
-}
-
-impl DocumentQuery {
-    /// Convert the document query into a JSON value suitable for use in a Chroma query.
-    pub fn into_where_document(self, _: &mut Guacamole) -> serde_json::Value {
-        match self {
-            DocumentQuery::Raw(json) => json,
-        }
-    }
-}
+impl Eq for WhereMixin {}
 
 ///////////////////////////////////////////// GetQuery /////////////////////////////////////////////
 
@@ -318,9 +362,9 @@ pub struct GetQuery {
     pub skew: Skew,
     pub limit: Distribution,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<MetadataQuery>,
+    pub metadata: Option<WhereMixin>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub document: Option<DocumentQuery>,
+    pub document: Option<WhereMixin>,
 }
 
 //////////////////////////////////////////// QueryQuery ////////////////////////////////////////////
@@ -339,9 +383,9 @@ pub struct QueryQuery {
     pub skew: Skew,
     pub limit: Distribution,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<MetadataQuery>,
+    pub metadata: Option<WhereMixin>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub document: Option<DocumentQuery>,
+    pub document: Option<WhereMixin>,
 }
 
 //////////////////////////////////////////// KeySelector ///////////////////////////////////////////
@@ -1505,13 +1549,11 @@ mod tests {
     #[test]
     fn workload_save_restore() {
         const TEST_PATH: &str = "workload_save_restore.test.json";
-        println!("FINDME {}:{}", file!(), line!());
         std::fs::remove_file(TEST_PATH).ok();
         // First verse.
         let mut load = LoadService::default();
         load.set_persistent_path_and_load(Some(TEST_PATH.to_string()))
             .unwrap();
-        println!("FINDME {}:{}", file!(), line!());
         load.start(
             "foo".to_string(),
             "nop".to_string(),
@@ -1520,7 +1562,6 @@ mod tests {
             Throughput::Constant(1.0),
         )
         .unwrap();
-        println!("FINDME {}:{}", file!(), line!());
         let expected = {
             // SAFETY(rescrv):  Mutex poisoning.
             let harness = load.harness.lock().unwrap();
@@ -1528,7 +1569,6 @@ mod tests {
             harness.running[0].clone()
         };
         drop(load);
-        println!("FINDME {}:{}", file!(), line!());
         println!("expected: {:?}", expected);
         // Second verse.
         let mut load = LoadService::default();
@@ -1537,7 +1577,6 @@ mod tests {
             let harness = load.harness.lock().unwrap();
             assert!(harness.running.is_empty());
         }
-        println!("FINDME {}:{}", file!(), line!());
         load.set_persistent_path_and_load(Some(TEST_PATH.to_string()))
             .unwrap();
         {

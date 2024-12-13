@@ -316,8 +316,8 @@ impl DataSet for SyntheticDataSet {
         let collection = client.get_or_create_collection(&self.name(), None).await?;
         let limit = gq.limit.sample(guac);
         let mut ids = self.sample_ids(gq.skew, guac, limit);
-        let where_metadata = gq.metadata.map(|m| m.into_where_metadata(guac));
-        let where_document = gq.document.map(|m| m.into_where_document(guac));
+        let where_metadata = gq.metadata.map(|m| m.to_json(guac));
+        let where_document = gq.document.map(|m| m.to_json(guac));
         let results = collection
             .get(GetOptions {
                 ids: ids.clone(),
@@ -346,8 +346,8 @@ impl DataSet for SyntheticDataSet {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let collection = client.get_or_create_collection(&self.name(), None).await?;
         let cluster = self.cluster_by_skew(vq.skew, guac);
-        let where_metadata = vq.metadata.map(|m| m.into_where_metadata(guac));
-        let where_document = vq.document.map(|m| m.into_where_document(guac));
+        let where_metadata = vq.metadata.map(|m| m.to_json(guac));
+        let where_document = vq.document.map(|m| m.to_json(guac));
         let results = collection
             .query(
                 QueryOptions {
