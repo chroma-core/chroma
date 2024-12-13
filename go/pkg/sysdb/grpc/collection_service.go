@@ -247,7 +247,6 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	log.Info("UpdateCollection succeeded", zap.String("collection_id", collectionID))
 	return res, nil
 }
 
