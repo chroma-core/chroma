@@ -43,13 +43,11 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - resolve-branch
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
           fetch-depth: 0
 
       - name: Checkout branch
@@ -97,7 +95,7 @@ jobs:
       - name: Create Pull Request
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
           script: |
             const baseBranch = "${{ needs.resolve-branch.outputs.branch_name }}"
             const headBranch = process.env.BRANCH_NAME
