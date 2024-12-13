@@ -5,6 +5,9 @@ on:
       - main
       - '**'
 
+concurrency:
+  cancel-in-progress: true
+
 jobs:
   # GitHub only provides a way to do path filtering at the workflow level rather than the job level.
   # This allows us to selectively run jobs based on changed paths.

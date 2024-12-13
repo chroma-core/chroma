@@ -3,6 +3,9 @@ name: Rust tests
 on:
   workflow_call:
 
+concurrency:
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:

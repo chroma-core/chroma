@@ -13,6 +13,9 @@ on:
         required: true
         type: string
 
+concurrency:
+  cancel-in-progress: true
+
 jobs:
   test:
     timeout-minutes: 90
