@@ -3,6 +3,14 @@ description: "This action starts Tilt services"
 runs:
   using: "composite"
   steps:
+    - name: Cache image layers
+      uses: actions/cache@v4
+      with:
+        path: /home/runner/.docker
+        key: ${{ runner.os }}-docker-${{ hashFiles('**/Dockerfile', 'Tiltfile') }}
+        restore-keys: |
+          ${{ runner.os }}-docker-
+
     - name: Install Tilt
       shell: bash
       run: |
