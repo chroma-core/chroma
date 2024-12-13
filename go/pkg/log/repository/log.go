@@ -131,8 +131,6 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	}
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
-	} else {
-		trace_log.Info("Got collections to compact from record_log table", zap.Int("collectionCount", len(collectionToCompact)))
 	}
 	return
 }
@@ -144,7 +142,6 @@ func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Con
 	if err != nil {
 		trace_log.Error("Error in updating record_compaction_offset_position in the collection table", zap.Error(err), zap.String("collectionId", collectionId))
 	}
-	trace_log.Info("Updated record_compaction_offset_position in the collection table", zap.Int64("offsetPosition", offsetPosition), zap.String("collectionId", collectionId))
 	return
 }
 
@@ -195,7 +192,6 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 		}
 	}
 	if len(collectionsToGC) > 0 {
-		trace_log.Info("Collections to be garbage collected", zap.Strings("collections", collectionsToGC))
 		var tx pgx.Tx
 		tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 		if err != nil {
