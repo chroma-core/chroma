@@ -70,6 +70,11 @@ class SysDBStub(object):
                 request_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.SerializeToString,
                 response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.FromString,
                 )
+        self.CheckCollections = channel.unary_unary(
+                '/chroma.SysDB/CheckCollections',
+                request_serializer=chromadb_dot_proto_dot_coordinator__pb2.CheckCollectionsRequest.SerializeToString,
+                response_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CheckCollectionsResponse.FromString,
+                )
         self.UpdateCollection = channel.unary_unary(
                 '/chroma.SysDB/UpdateCollection',
                 request_serializer=chromadb_dot_proto_dot_coordinator__pb2.UpdateCollectionRequest.SerializeToString,
@@ -166,6 +171,12 @@ class SysDBServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CheckCollections(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def UpdateCollection(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -253,6 +264,11 @@ def add_SysDBServicer_to_server(servicer, server):
                     servicer.GetCollections,
                     request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.FromString,
                     response_serializer=chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.SerializeToString,
+            ),
+            'CheckCollections': grpc.unary_unary_rpc_method_handler(
+                    servicer.CheckCollections,
+                    request_deserializer=chromadb_dot_proto_dot_coordinator__pb2.CheckCollectionsRequest.FromString,
+                    response_serializer=chromadb_dot_proto_dot_coordinator__pb2.CheckCollectionsResponse.SerializeToString,
             ),
             'UpdateCollection': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdateCollection,
@@ -473,6 +489,23 @@ class SysDB(object):
         return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/GetCollections',
             chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsRequest.SerializeToString,
             chromadb_dot_proto_dot_coordinator__pb2.GetCollectionsResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def CheckCollections(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/chroma.SysDB/CheckCollections',
+            chromadb_dot_proto_dot_coordinator__pb2.CheckCollectionsRequest.SerializeToString,
+            chromadb_dot_proto_dot_coordinator__pb2.CheckCollectionsResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

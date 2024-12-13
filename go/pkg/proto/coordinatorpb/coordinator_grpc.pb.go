@@ -31,6 +31,7 @@ const (
 	SysDB_CreateCollection_FullMethodName               = "/chroma.SysDB/CreateCollection"
 	SysDB_DeleteCollection_FullMethodName               = "/chroma.SysDB/DeleteCollection"
 	SysDB_GetCollections_FullMethodName                 = "/chroma.SysDB/GetCollections"
+	SysDB_CheckCollections_FullMethodName               = "/chroma.SysDB/CheckCollections"
 	SysDB_UpdateCollection_FullMethodName               = "/chroma.SysDB/UpdateCollection"
 	SysDB_ResetState_FullMethodName                     = "/chroma.SysDB/ResetState"
 	SysDB_GetLastCompactionTimeForTenant_FullMethodName = "/chroma.SysDB/GetLastCompactionTimeForTenant"
@@ -53,6 +54,7 @@ type SysDBClient interface {
 	CreateCollection(ctx context.Context, in *CreateCollectionRequest, opts ...grpc.CallOption) (*CreateCollectionResponse, error)
 	DeleteCollection(ctx context.Context, in *DeleteCollectionRequest, opts ...grpc.CallOption) (*DeleteCollectionResponse, error)
 	GetCollections(ctx context.Context, in *GetCollectionsRequest, opts ...grpc.CallOption) (*GetCollectionsResponse, error)
+	CheckCollections(ctx context.Context, in *CheckCollectionsRequest, opts ...grpc.CallOption) (*CheckCollectionsResponse, error)
 	UpdateCollection(ctx context.Context, in *UpdateCollectionRequest, opts ...grpc.CallOption) (*UpdateCollectionResponse, error)
 	ResetState(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ResetStateResponse, error)
 	GetLastCompactionTimeForTenant(ctx context.Context, in *GetLastCompactionTimeForTenantRequest, opts ...grpc.CallOption) (*GetLastCompactionTimeForTenantResponse, error)
@@ -178,6 +180,16 @@ func (c *sysDBClient) GetCollections(ctx context.Context, in *GetCollectionsRequ
 	return out, nil
 }
 
+func (c *sysDBClient) CheckCollections(ctx context.Context, in *CheckCollectionsRequest, opts ...grpc.CallOption) (*CheckCollectionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckCollectionsResponse)
+	err := c.cc.Invoke(ctx, SysDB_CheckCollections_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sysDBClient) UpdateCollection(ctx context.Context, in *UpdateCollectionRequest, opts ...grpc.CallOption) (*UpdateCollectionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateCollectionResponse)
@@ -243,6 +255,7 @@ type SysDBServer interface {
 	CreateCollection(context.Context, *CreateCollectionRequest) (*CreateCollectionResponse, error)
 	DeleteCollection(context.Context, *DeleteCollectionRequest) (*DeleteCollectionResponse, error)
 	GetCollections(context.Context, *GetCollectionsRequest) (*GetCollectionsResponse, error)
+	CheckCollections(context.Context, *CheckCollectionsRequest) (*CheckCollectionsResponse, error)
 	UpdateCollection(context.Context, *UpdateCollectionRequest) (*UpdateCollectionResponse, error)
 	ResetState(context.Context, *emptypb.Empty) (*ResetStateResponse, error)
 	GetLastCompactionTimeForTenant(context.Context, *GetLastCompactionTimeForTenantRequest) (*GetLastCompactionTimeForTenantResponse, error)
@@ -290,6 +303,9 @@ func (UnimplementedSysDBServer) DeleteCollection(context.Context, *DeleteCollect
 }
 func (UnimplementedSysDBServer) GetCollections(context.Context, *GetCollectionsRequest) (*GetCollectionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCollections not implemented")
+}
+func (UnimplementedSysDBServer) CheckCollections(context.Context, *CheckCollectionsRequest) (*CheckCollectionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckCollections not implemented")
 }
 func (UnimplementedSysDBServer) UpdateCollection(context.Context, *UpdateCollectionRequest) (*UpdateCollectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateCollection not implemented")
@@ -525,6 +541,24 @@ func _SysDB_GetCollections_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SysDB_CheckCollections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckCollectionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SysDBServer).CheckCollections(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SysDB_CheckCollections_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SysDBServer).CheckCollections(ctx, req.(*CheckCollectionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SysDB_UpdateCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateCollectionRequest)
 	if err := dec(in); err != nil {
@@ -665,6 +699,10 @@ var SysDB_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCollections",
 			Handler:    _SysDB_GetCollections_Handler,
+		},
+		{
+			MethodName: "CheckCollections",
+			Handler:    _SysDB_CheckCollections_Handler,
 		},
 		{
 			MethodName: "UpdateCollection",

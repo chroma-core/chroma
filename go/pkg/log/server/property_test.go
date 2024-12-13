@@ -280,10 +280,11 @@ func (suite *LogServerTestSuite) modelPurgeLogs(ctx context.Context, t *rapid.T)
 
 func (suite *LogServerTestSuite) modelGarbageCollection(ctx context.Context, t *rapid.T) {
 	for id := range suite.model.CollectionData {
-		exist, err := suite.sysDb.CheckCollection(ctx, id.String())
+		exists, err := suite.sysDb.CheckCollections(ctx, []string{id.String()})
 		if err != nil {
 			t.Fatal(err)
 		}
+		exist := exists[0]
 		if !exist {
 			// Collection does not exist, so we can delete it
 			delete(suite.model.CollectionData, id)
@@ -503,8 +504,9 @@ func (suite *LogServerTestSuite) TestRecordLogDb_PushLogs() {
 				err := suite.lr.GarbageCollection(ctx)
 				suite.NoError(err)
 				for id := range suite.model.CollectionData {
-					exist, err := suite.sysDb.CheckCollection(ctx, id.String())
+					exists, err := suite.sysDb.CheckCollections(ctx, []string{id.String()})
 					suite.NoError(err)
+					exist := exists[0]
 					if !exist {
 						t.Fatalf("collection id %s does not exist in sysdb", id)
 					}

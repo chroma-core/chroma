@@ -181,6 +181,18 @@ class GetCollectionsResponse(_message.Message):
     collections: _containers.RepeatedCompositeFieldContainer[_chroma_pb2.Collection]
     def __init__(self, collections: _Optional[_Iterable[_Union[_chroma_pb2.Collection, _Mapping]]] = ...) -> None: ...
 
+class CheckCollectionsRequest(_message.Message):
+    __slots__ = ["collection_ids"]
+    COLLECTION_IDS_FIELD_NUMBER: _ClassVar[int]
+    collection_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, collection_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class CheckCollectionsResponse(_message.Message):
+    __slots__ = ["deleted"]
+    DELETED_FIELD_NUMBER: _ClassVar[int]
+    deleted: _containers.RepeatedScalarFieldContainer[bool]
+    def __init__(self, deleted: _Optional[_Iterable[bool]] = ...) -> None: ...
+
 class UpdateCollectionRequest(_message.Message):
     __slots__ = ["id", "name", "dimension", "metadata", "reset_metadata"]
     ID_FIELD_NUMBER: _ClassVar[int]

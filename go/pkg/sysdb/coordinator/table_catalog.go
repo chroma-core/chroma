@@ -298,6 +298,31 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 	return result, created, nil
 }
 
+// Returns true if collection is deleted (either soft-deleted or hard-deleted)
+// and false otherwise.
+func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.CheckCollection")
+		defer span.End()
+	}
+
+	collectionInfo, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(collectionID), nil)
+	if err != nil {
+		return false, err
+	}
+	// Collection is hard deleted.
+	if collectionInfo == nil {
+		return true, nil
+	}
+	// Collection is soft deleted.
+	if collectionInfo.IsDeleted {
+		return true, nil
+	}
+	// Collection is not deleted.
+	return false, nil
+}
+
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
