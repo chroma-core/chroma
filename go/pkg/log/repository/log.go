@@ -149,7 +149,6 @@ func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Con
 }
 
 func (r *LogRepository) PurgeRecords(ctx context.Context) (err error) {
-	trace_log.Info("Purging records from record_log table")
 	err = r.queries.PurgeRecords(ctx)
 	return
 }
@@ -175,8 +174,6 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact", zap.Error(err))
 		return err
-	} else {
-		trace_log.Info("GC Got collections to compact", zap.Int("collectionCount", len(collectionToCompact)))
 	}
 	if collectionToCompact == nil {
 		return nil
@@ -213,13 +210,11 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 				err = tx.Commit(ctx)
 			}
 		}()
-		trace_log.Info("Starting garbage collection", zap.Strings("collections", collectionsToGC))
 		err = queriesWithTx.DeleteRecords(ctx, collectionsToGC)
 		if err != nil {
 			trace_log.Error("Error in garbage collection", zap.Error(err))
 			return err
 		}
-		trace_log.Info("Delete collections", zap.Strings("collections", collectionsToGC))
 		err = queriesWithTx.DeleteCollection(ctx, collectionsToGC)
 		if err != nil {
 			trace_log.Error("Error in deleting collection", zap.Error(err))

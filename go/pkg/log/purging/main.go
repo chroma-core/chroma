@@ -27,14 +27,12 @@ func PerformPurgingLoop(ctx context.Context, lg *repository.LogRepository) {
 				log.Error("failed to purge records", zap.Error(err))
 				continue
 			}
-			log.Info("purged records")
 		case <-gcTicker.C:
 			// TODO: Add a RPC to manually trigger garbage collection
 			if err := lg.GarbageCollection(ctx); err != nil {
 				log.Error("failed to garbage collect", zap.Error(err))
 				continue
 			}
-			log.Info("garbage collected")
 		}
 	}
 }
