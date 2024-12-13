@@ -131,8 +131,6 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	}
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
-	} else {
-		trace_log.Info("Got collections to compact from record_log table", zap.Int("collectionCount", len(collectionToCompact)))
 	}
 	return
 }
@@ -195,7 +193,6 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 		}
 	}
 	if len(collectionsToGC) > 0 {
-		trace_log.Info("Collections to be garbage collected", zap.Strings("collections", collectionsToGC))
 		var tx pgx.Tx
 		tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 		if err != nil {
