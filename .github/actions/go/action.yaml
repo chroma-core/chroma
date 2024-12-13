@@ -14,9 +14,9 @@ runs:
       run: |
         sudo apt-get update
         sudo apt-get install -y wget unzip
-        wget https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
-        sudo unzip protoc-21.12-linux-x86_64.zip -d /usr/local/
-        sudo rm protoc-21.12-linux-x86_64.zip
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
+        sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+        sudo rm protoc-28.2-linux-x86_64.zip
       shell: bash
 
     - name: Add Go bin to PATH
@@ -31,7 +31,7 @@ runs:
 
     - name: Install protoc-gen-go-grpc
       run: |
-        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2.0
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
       shell: bash
 
     - name: Add Go bin to PATH
