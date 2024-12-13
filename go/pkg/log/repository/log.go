@@ -183,7 +183,7 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 	}
 	collectionsToGC := make([]string, 0)
 	// TODO(Sanket): Make batch size configurable.
-	batchSize := 1000
+	batchSize := 5000
 	for i := 0; i < len(collectionToCompact); i += batchSize {
 		end := min(len(collectionToCompact), i+batchSize)
 		exists, err := r.sysDb.CheckCollections(ctx, collectionToCompact[i:end])
