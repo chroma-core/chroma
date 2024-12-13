@@ -5,8 +5,8 @@ on:
   push:
     branches:
       # main is not included here because it is handled by the release-chromadb.yaml workflow
-      - rc/**
-      - release/**
+      - rc/**-**-**
+      - release/**-**-**
 
 jobs:
   deploy:
