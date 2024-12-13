@@ -35,11 +35,11 @@ RUN --mount=type=cache,target="/root/.cache/go-build" make proto
 RUN --mount=type=cache,target="/root/.cache/go-build" make build
 
 FROM debian:bookworm-slim AS logservice
-COPY --from=builder /build-dir/bin/logservice .
+COPY --from=builder /build-dir/go/bin/logservice .
 ENV PATH=$PATH:./
 CMD ["./logservice"]
 
 FROM debian:bookworm-slim AS sysdb
-COPY --from=builder /build-dir/bin/coordinator .
+COPY --from=builder /build-dir/go/bin/coordinator .
 ENV PATH=$PATH:./
 CMD /bin/bash
