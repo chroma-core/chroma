@@ -13,10 +13,6 @@ on:
         required: true
         type: string
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   test:
     timeout-minutes: 90
@@ -39,6 +35,10 @@ jobs:
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
             parallelized: true
+
+        concurrency:
+          group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+          cancel-in-progress: true
 
     runs-on: ${{ matrix.platform }}
     steps:
