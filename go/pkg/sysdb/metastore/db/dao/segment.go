@@ -182,7 +182,6 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 		metadata = append(metadata, segmentMetadata)
 		currentSegment.SegmentMetadata = metadata
 	}
-	log.Info("get segments success", zap.Any("segments", segments))
 	return segments, nil
 }
 
@@ -212,7 +211,6 @@ func (s *segmentDb) Update(in *dbmodel.UpdateSegment) error {
 }
 
 func (s *segmentDb) RegisterFilePaths(flushSegmentCompactions []*model.FlushSegmentCompaction) error {
-	log.Info("register file paths", zap.Any("flushSegmentCompactions", flushSegmentCompactions))
 	for _, flushSegmentCompaction := range flushSegmentCompactions {
 		filePaths, err := json.Marshal(flushSegmentCompaction.FilePaths)
 		if err != nil {

@@ -229,7 +229,6 @@ impl GrpcLog {
         match response {
             Ok(response) => {
                 let collections = response.into_inner().all_collection_info;
-                println!("Log got collections with new data: {:?}", collections);
                 let mut result = Vec::new();
                 for collection in collections {
                     let collection_uuid = match Uuid::parse_str(&collection.collection_id) {

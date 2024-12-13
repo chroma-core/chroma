@@ -52,7 +52,6 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 		Name:   database.Name,
 		Tenant: database.Tenant,
 	}
-	log.Info("GetDatabase success", zap.String("request", req.String()))
 	return res, nil
 }
 
@@ -89,7 +88,6 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 	res.Tenant = &coordinatorpb.Tenant{
 		Name: tenant.Name,
 	}
-	log.Info("GetTenant success", zap.String("request", req.String()))
 	return res, nil
 }
 
@@ -117,6 +115,5 @@ func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 			LastCompactionTime: tenant.LastCompactionTime,
 		})
 	}
-	log.Info("GetLastCompactionTimeForTenant success", zap.String("request", req.String()))
 	return res, nil
 }
