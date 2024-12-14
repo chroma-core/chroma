@@ -126,20 +126,20 @@ mod tests {
     fn setup_in_memory_log() -> (CollectionUuid, Box<Log>) {
         let collection_id = CollectionUuid::new();
         let mut in_memory_log = InMemoryLog::new();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
-        generator.generate_vec(0..10).into_iter().for_each(|log| {
-            in_memory_log.add_log(
-                collection_id,
-                InternalLogRecord {
+        upsert_generator
+            .generate_vec(0..10)
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
                     collection_id,
-                    log_offset: log.log_offset,
-                    log_ts: log.log_offset,
-                    record: log,
-                },
-            )
-        });
+                    InternalLogRecord {
+                        collection_id,
+                        log_offset: log.log_offset,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
         (collection_id, Box::new(Log::InMemory(in_memory_log)))
     }
 

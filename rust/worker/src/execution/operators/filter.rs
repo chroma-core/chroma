@@ -515,12 +515,11 @@ mod tests {
     /// - Compacted: Delete [1..=10] deletion, add [11..=50]
     async fn setup_filter_input() -> FilterInput {
         let mut test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: add_delete_generator,
-        };
-        test_segment.populate_with_generator(60, &generator).await;
+        test_segment
+            .populate_with_generator(60, add_delete_generator)
+            .await;
         FilterInput {
-            logs: generator.generate_chunk(61..=120),
+            logs: add_delete_generator.generate_chunk(61..=120),
             blockfile_provider: test_segment.blockfile_provider,
             metadata_segment: test_segment.metadata_segment,
             record_segment: test_segment.record_segment,

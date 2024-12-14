@@ -143,11 +143,8 @@ mod tests {
         log_offset_ids: SignedRoaringBitmap,
     ) -> KnnLogInput {
         let test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
         KnnLogInput {
-            logs: generator.generate_chunk(1..=100),
+            logs: upsert_generator.generate_chunk(1..=100),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             distance_function: metric,

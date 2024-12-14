@@ -3,8 +3,8 @@ use std::sync::atomic::AtomicU32;
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
 use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
 use chroma_types::{
-    test_segment, Chunk, Collection, CollectionAndSegments, CollectionUuid, LogRecord,
-    OperationRecord, Segment, SegmentScope,
+    test_segment, Chunk, Collection, CollectionAndSegments, CollectionUuid, LogRecord, Segment,
+    SegmentScope,
 };
 
 use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
@@ -119,9 +119,9 @@ impl TestSegment {
             .expect("Should be able to flush vector.");
     }
 
-    pub async fn populate_with_generator<G>(&mut self, size: usize, generator: &LogGenerator<G>)
+    pub async fn populate_with_generator<G>(&mut self, size: usize, generator: G)
     where
-        G: Fn(usize) -> OperationRecord,
+        G: LogGenerator,
     {
         let ids: Vec<_> = (1..=size).collect();
         for chunk in ids.chunks(100) {

@@ -304,12 +304,11 @@ mod tests {
         compact_offset_ids: SignedRoaringBitmap,
     ) -> LimitInput {
         let mut test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
-        test_segment.populate_with_generator(100, &generator).await;
+        test_segment
+            .populate_with_generator(100, upsert_generator)
+            .await;
         LimitInput {
-            logs: generator.generate_chunk(31..=60),
+            logs: upsert_generator.generate_chunk(31..=60),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             log_offset_ids,

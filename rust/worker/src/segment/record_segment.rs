@@ -948,17 +948,18 @@ mod tests {
     // The same record segment writer should be able to run concurrently on different threads without conflict
     #[test]
     fn test_max_offset_id_shuttle() {
+        let test_segment = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Runtime creation should not fail")
+            .block_on(async { TestSegment::default() });
         shuttle::check_random(
-            || {
+            move || {
                 let log_partition_size = 100;
                 let stack_size = 1 << 22;
                 let thread_count = 4;
-                let log_generator = LogGenerator {
-                    generator: upsert_generator,
-                };
                 let max_log_offset = thread_count * log_partition_size;
-                let logs = log_generator.generate_vec(1..=max_log_offset);
-                let test_segment = TestSegment::default();
+                let logs = upsert_generator.generate_vec(1..=max_log_offset);
 
                 let batches = logs
                     .chunks(log_partition_size)
