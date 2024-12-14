@@ -174,10 +174,10 @@ Count the number of collections.
 
 **Examples**:
 
-    ```python
-    client.count_collections()
-    # 1
-    ```
+```python
+client.count_collections()
+# 1
+```
 
 ## delete\_collection
 
@@ -199,9 +199,9 @@ Delete a collection with the given name.
 
 **Examples**:
 
-    ```python
-    client.delete_collection("my_collection")
-    ```
+```python
+client.delete_collection("my_collection")
+```
 
 ## reset
 
@@ -317,13 +317,13 @@ Create a new collection with the given name and metadata.
 
 **Examples**:
 
-    ```python
-    client.create_collection("my_collection")
-    # collection(name="my_collection", metadata={})
+```python
+client.create_collection("my_collection")
+# collection(name="my_collection", metadata={})
 
-    client.create_collection("my_collection", metadata={"foo": "bar"})
-    # collection(name="my_collection", metadata={"foo": "bar"})
-    ```
+client.create_collection("my_collection", metadata={"foo": "bar"})
+# collection(name="my_collection", metadata={"foo": "bar"})
+```
 
 ## get\_collection
 
@@ -358,10 +358,10 @@ Get a collection with the given name.
 
 **Examples**:
 
-    ```python
-    client.get_collection("my_collection")
-    # collection(name="my_collection", metadata={})
-    ```
+```python
+client.get_collection("my_collection")
+# collection(name="my_collection", metadata={})
+```
 
 ## get\_or\_create\_collection
 
@@ -394,10 +394,10 @@ Get or create a collection with the given name and metadata.
 
 **Examples**:
 
-    ```python
-    client.get_or_create_collection("my_collection")
-    # collection(name="my_collection", metadata={})
-    ```
+```python
+client.get_or_create_collection("my_collection")
+# collection(name="my_collection", metadata={})
+```
 
 ## set\_tenant
 
