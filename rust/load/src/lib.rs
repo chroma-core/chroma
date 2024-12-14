@@ -478,7 +478,7 @@ impl Workload {
                 if let Some(workload) = workloads.get(name) {
                     *self = workload.clone();
                 } else {
-                    return Err(Error::InvalidRequest(format!("workload not found: {name}")));
+                    return Err(Error::NotFound(format!("workload not found: {name}")));
                 }
             }
             Workload::Get(_) => {}
@@ -1412,7 +1412,6 @@ pub async fn entrypoint() {
                     "http_request",
                     method = ?request.method(),
                     matched_path,
-                    some_other_field = tracing::field::Empty,
                 )
             }),
         )

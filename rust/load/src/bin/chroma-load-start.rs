@@ -116,10 +116,13 @@ async fn main() {
                 );
             } else {
                 eprintln!(
-                    "Failed to start workload on {}: {}",
+                    "Categorically failed to start workload on {}: {}",
                     args.host,
                     resp.status()
                 );
+                if let Ok(text) = resp.text().await {
+                    eprintln!("{}", text.trim());
+                }
             }
         }
         Err(e) => eprintln!("Failed to start workload on {}: {}", args.host, e),
