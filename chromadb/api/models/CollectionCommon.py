@@ -65,6 +65,7 @@ from chromadb.api.types import (
 # which are essentially API views. And the actual data models which are
 # stored / retrieved / transmitted.
 from chromadb.types import Collection as CollectionModel, Where, WhereDocument
+from chromadb.errors import InvalidArgumentError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -242,7 +243,7 @@ class CollectionCommon(Generic[ClientT]):
         validate_include(include=include, dissalowed=[IncludeEnum.distances])
 
         if IncludeEnum.data in include and self._data_loader is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "You must set a data loader on the collection if loading from URIs."
             )
 
@@ -423,7 +424,7 @@ class CollectionCommon(Generic[ClientT]):
         where_document: Optional[WhereDocument],
     ) -> DeleteRequest:
         if ids is None and where is None and where_document is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "At least one of ids, where, or where_document must be provided"
             )
 
@@ -493,7 +494,7 @@ class CollectionCommon(Generic[ClientT]):
         if metadata is not None:
             validate_metadata(metadata)
             if "hnsw:space" in metadata:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "Changing the distance function of a collection once it is created is not supported currently."
                 )
 
@@ -516,7 +517,7 @@ class CollectionCommon(Generic[ClientT]):
                 # uris require special handling
                 if field == "uris":
                     if self._data_loader is None:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             "You must set a data loader on the collection if loading from URIs."
                         )
                     return self._embed(
@@ -524,7 +525,7 @@ class CollectionCommon(Generic[ClientT]):
                     )
                 else:
                     return self._embed(input=record_set[field])  # type: ignore[literal-required]
-        raise ValueError(
+        raise InvalidArgumentError(
             "Record does not contain any non-None fields that can be embedded."
             f"Embeddable Fields: {embeddable_fields}"
             f"Record Fields: {record_set}"
@@ -532,7 +533,7 @@ class CollectionCommon(Generic[ClientT]):
 
     def _embed(self, input: Any) -> Embeddings:
         if self._embedding_function is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "You must provide an embedding function to compute embeddings."
                 "https://docs.trychroma.com/guides/embeddings"
             )

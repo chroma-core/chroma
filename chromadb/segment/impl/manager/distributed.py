@@ -12,6 +12,10 @@ from chromadb.segment import (
     SegmentManager,
     SegmentType,
 )
+from chromadb.config import System, get_class
+from chromadb.db.system import SysDB
+from chromadb.errors import InvalidArgumentError
+from overrides import override
 from chromadb.segment.distributed import SegmentDirectory
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
@@ -86,7 +90,14 @@ class DistributedSegmentManager(SegmentManager):
         "DistributedSegmentManager.get_segment",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def get_segment(self, collection_id: UUID, scope: SegmentScope) -> Segment:
+    def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
+        if type == MetadataReader:
+            scope = SegmentScope.METADATA
+        elif type == VectorReader:
+            scope = SegmentScope.VECTOR
+        else:
+            raise InvalidArgumentError(f"Invalid segment type: {type}")
+
         if scope not in self._segment_cache[collection_id]:
             # For now, there is exactly one segment per scope for a given collection
             segment = self._sysdb.get_segments(collection=collection_id, scope=scope)[0]

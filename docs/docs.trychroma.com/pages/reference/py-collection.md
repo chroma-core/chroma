@@ -46,9 +46,9 @@ Add embeddings to the data store.
 
 **Raises**:
 
-- `ValueError` - If you don't provide either embeddings or documents
-- `ValueError` - If the length of ids, embeddings, metadatas, or documents don't match
-- `ValueError` - If you don't provide an embedding function and don't provide embeddings
+- `InvalidArgumentError` - If you don't provide either embeddings or documents
+- `InvalidArgumentError` - If the length of ids, embeddings, metadatas, or documents don't match
+- `InvalidArgumentError` - If you don't provide an embedding function and don't provide embeddings
 - `DuplicateIDError` - If you provide an id that already exists
 
 # get
@@ -128,8 +128,8 @@ Get the n_results nearest neighbor embeddings for provided query_embeddings or q
 
 **Raises**:
 
-- `ValueError` - If you don't provide either query_embeddings or query_texts
-- `ValueError` - If you provide both query_embeddings and query_texts
+- `InvalidArgumentError` - If you don't provide either query_embeddings or query_texts
+- `InvalidArgumentError` - If you provide both query_embeddings and query_texts
 
 # modify
 

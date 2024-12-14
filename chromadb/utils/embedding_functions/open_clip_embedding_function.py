@@ -13,6 +13,8 @@ from chromadb.api.types import (
     is_document,
     is_image,
 )
+from chromadb.errors import InvalidArgumentError
+
 
 logger = logging.getLogger(__name__)
 
@@ -27,20 +29,20 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Union[Documents, Images]]):
         try:
             import open_clip
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The open_clip python package is not installed. Please install it with `pip install open-clip-torch`. https://github.com/mlfoundations/open_clip"
             )
         try:
             self._torch = importlib.import_module("torch")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The torch python package is not installed. Please install it with `pip install torch`"
             )
 
         try:
             self._PILImage = importlib.import_module("PIL.Image")
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 

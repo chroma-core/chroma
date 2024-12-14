@@ -2,6 +2,7 @@ import importlib
 import inspect
 import logging
 from abc import ABC
+from chromadb.errors import InvalidArgumentError
 from enum import Enum
 from graphlib import TopologicalSorter
 from typing import Optional, List, Any, Dict, Set, Iterable, Union
@@ -282,14 +283,14 @@ class Settings(BaseSettings):  # type: ignore
         set"""
         val = self[key]
         if val is None:
-            raise ValueError(f"Missing required config value '{key}'")
+            raise InvalidArgumentError(f"Missing required config value '{key}'")
         return val
 
     def __getitem__(self, key: str) -> Any:
         val = getattr(self, key)
         # Error on legacy config values
         if isinstance(val, str) and val in _legacy_config_values:
-            raise ValueError(LEGACY_ERROR)
+            raise InvalidArgumentError(LEGACY_ERROR)
         return val
 
     class Config:
@@ -356,7 +357,7 @@ class System(Component):
         # Validate settings don't contain any legacy config values
         for key in _legacy_config_keys:
             if settings[key] is not None:
-                raise ValueError(LEGACY_ERROR)
+                raise InvalidArgumentError(LEGACY_ERROR)
 
         if (
             settings["chroma_segment_cache_policy"] is not None
@@ -414,7 +415,7 @@ class System(Component):
         if inspect.isabstract(type):
             type_fqn = get_fqn(type)
             if type_fqn not in _abstract_type_keys:
-                raise ValueError(f"Cannot instantiate abstract type: {type}")
+                raise InvalidArgumentError(f"Cannot instantiate abstract type: {type}")
             key = _abstract_type_keys[type_fqn]
             fqn = self.settings.require(key)
             type = get_class(fqn, type)
@@ -453,7 +454,7 @@ class System(Component):
     def reset_state(self) -> None:
         """Reset the state of this system and all constituents in reverse dependency order"""
         if not self.settings.allow_reset:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Resetting is not allowed by this configuration (to enable it, set `allow_reset` to `True` in your Settings() or include `ALLOW_RESET=TRUE` in your environment variables)"
             )
         for component in reversed(list(self.components())):

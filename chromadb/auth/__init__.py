@@ -10,6 +10,7 @@ from typing import (
     Tuple,
     TypeVar,
 )
+from chromadb.errors import InvalidArgumentError
 from dataclasses import dataclass
 
 from pydantic import SecretStr
@@ -109,12 +110,12 @@ class ServerAuthenticationProvider(Component):
         if self._system.settings.chroma_server_authn_credentials:
             _creds = str(self._system.settings["chroma_server_authn_credentials"])
         if not _creds_file and not _creds:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "No credentials file or credentials found in "
                 "[chroma_server_authn_credentials]."
             )
         if _creds_file and _creds:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Both credentials file and credentials found."
                 "Please provide only one."
             )
@@ -123,7 +124,7 @@ class ServerAuthenticationProvider(Component):
         elif _creds_file:
             with open(_creds_file, "r") as f:
                 return f.readlines()
-        raise ValueError("Should never happen")
+        raise InvalidArgumentError("Should never happen")
 
     def singleton_tenant_database_if_applicable(
         self, user: Optional[UserIdentity]
@@ -219,11 +220,11 @@ class ServerAuthorizationProvider(Component):
         if self._system.settings.chroma_server_authz_config:
             _config = str(self._system.settings["chroma_server_authz_config"])
         if not _config_file and not _config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "No authz configuration file or authz configuration found."
             )
         if _config_file and _config:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Both authz configuration file and authz configuration found."
                 "Please provide only one."
             )
@@ -232,4 +233,4 @@ class ServerAuthorizationProvider(Component):
         elif _config_file:
             with open(_config_file, "r") as f:
                 return f.readlines()
-        raise ValueError("Should never happen")
+        raise InvalidArgumentError("Should never happen")

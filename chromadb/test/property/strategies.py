@@ -18,6 +18,7 @@ from chromadb.api.types import (
     Embeddings,
     Metadata,
 )
+from chromadb.errors import InvalidArgumentError
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
 
 # Set the random seed for reproducibility
@@ -300,7 +301,7 @@ def collections(
     use_persistent_hnsw_params = draw(with_persistent_hnsw_params)
 
     if use_persistent_hnsw_params and not with_hnsw_params:
-        raise ValueError(
+        raise InvalidArgumentError(
             "with_persistent_hnsw_params requires with_hnsw_params to be true"
         )
 

@@ -3,6 +3,7 @@ from chromadb.db.impl.sqlite_pool import Connection, LockPool, PerThreadPool, Po
 from chromadb.db.migrations import MigratableDB, Migration
 from chromadb.config import System, Settings
 import chromadb.db.base as base
+from chromadb.errors import InvalidArgumentError
 from chromadb.db.mixins.embeddings_queue import SqlEmbeddingsQueue
 from chromadb.db.mixins.sysdb import SqlSysDB
 from chromadb.telemetry.opentelemetry import (
@@ -147,7 +148,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def reset_state(self) -> None:
         if not self._settings.require("allow_reset"):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
         with self.tx() as cur:
