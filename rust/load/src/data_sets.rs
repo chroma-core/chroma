@@ -6,10 +6,11 @@ use guacamole::combinators::*;
 use guacamole::Guacamole;
 use tracing::Instrument;
 
-use crate::{DataSet, Error, GetQuery, QueryQuery};
+use crate::{bit_difference, DataSet, Error, GetQuery, QueryQuery, UpsertQuery};
 
 //////////////////////////////////////////////// Nop ///////////////////////////////////////////////
 
+/// A data set that does nothing.
 #[derive(Debug)]
 pub struct NopDataSet;
 
@@ -46,12 +47,23 @@ impl DataSet for NopDataSet {
         tracing::info!("nop query");
         Ok(())
     }
+
+    async fn upsert(
+        &self,
+        _: &ChromaClient,
+        _: UpsertQuery,
+        _: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        tracing::info!("nop upsert");
+        Ok(())
+    }
 }
 
 /////////////////////////////////////////// Tiny Stories ///////////////////////////////////////////
 
+/// A data set of tiny stories.
 #[derive(Clone, Debug)]
-struct TinyStoriesDataSet {
+pub struct TinyStoriesDataSet {
     name: &'static str,
     model: &'static str,
     size: usize,
@@ -85,9 +97,11 @@ impl DataSet for TinyStoriesDataSet {
 
     fn json(&self) -> serde_json::Value {
         serde_json::json!({
-            "name": self.name,
-            "model": self.model,
-            "size": self.size,
+            "tiny_stories": {
+                "name": self.name,
+                "model": self.model,
+                "size": self.size,
+            }
         })
     }
 
@@ -154,6 +168,15 @@ impl DataSet for TinyStoriesDataSet {
             .await;
         let _results = results?;
         Ok(())
+    }
+
+    async fn upsert(
+        &self,
+        _: &ChromaClient,
+        _: UpsertQuery,
+        _: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Err(Error::InvalidRequest("Upsert not supported".into()).into())
     }
 }
 
@@ -244,10 +267,56 @@ const TINY_STORIES_DATA_SETS: &[TinyStoriesDataSet] = &[
 
 /////////////////////////////////////////// All Data Sets //////////////////////////////////////////
 
+/// Get all data sets.
 pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
     let mut data_sets = vec![Arc::new(NopDataSet) as _];
     for data_set in TINY_STORIES_DATA_SETS {
         data_sets.push(Arc::new(data_set.clone()) as _);
     }
+    for num_clusters in [10_000, 100_000] {
+        for (seed_idx, seed_clusters) in [
+            0xab1cd5b6a5173d40usize,
+            0x415c2b5b6451416dusize,
+            0x7bfbf398fb74d56usize,
+            0xed11fe8e8655591eusize,
+            0xcb86c32c95df5657usize,
+            0xa869711d201b98a4usize,
+            0xe2a276bde1c91d1ausize,
+            0x866a7f8100ccf78usize,
+            0xa23e0b862d45e227usize,
+            0x59f651f54a5ffe1usize,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for max_adjacent in [1, 10, 100] {
+                let adjacent_theta = 0.99;
+                let eo = bit_difference::EmbeddingOptions {
+                    num_clusters,
+                    seed_clusters,
+                    clustering: bit_difference::ClusterOptions {
+                        max_adjacent,
+                        adjacent_theta,
+                    },
+                };
+                let collection = format!(
+                    "bit-difference-scale-{:e}-seed-{}-adj-{}",
+                    num_clusters, seed_idx, max_adjacent
+                );
+                let data_set = Arc::new(bit_difference::SyntheticDataSet::new(collection, eo));
+                data_sets.push(data_set as _);
+            }
+        }
+    }
     data_sets
+}
+
+/// Get a data set from a particular JSON value.
+pub fn from_json(json: &serde_json::Value) -> Option<Arc<dyn DataSet>> {
+    // NOTE(rescrv):  I don't like that we use json attributes to identify data sets, but it's the
+    // only robust way I can think of that's not encoding everything to strings or reworking the
+    // data set type to be an enum.
+    all_data_sets()
+        .into_iter()
+        .find(|data_set| data_set.json() == *json)
 }

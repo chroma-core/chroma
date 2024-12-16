@@ -1,9 +1,8 @@
+use crate::{HnswIndexConfigError, PersistentIndex};
+
 use super::config::HnswProviderConfig;
-use super::{
-    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
-    IndexConfigFromSegmentError, IndexUuid,
-};
-use crate::PersistentIndex;
+use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
+
 use async_trait::async_trait;
 use chroma_cache::{Cache, Weighted};
 use chroma_config::Configurable;
@@ -494,7 +493,7 @@ impl HnswIndexProvider {
                 .await;
             match res {
                 Ok(_) => {
-                    println!("Flushed hnsw index file: {}", file);
+                    tracing::info!("Flushed hnsw index file: {}", file);
                 }
                 Err(e) => {
                     return Err(Box::new(HnswIndexProviderFlushError::StoragePutError(e)));
@@ -547,12 +546,8 @@ impl HnswIndexProvider {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderOpenError {
-    #[error("Index configuration error")]
-    IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
     FileError(#[from] HnswIndexProviderFileError),
-    #[error("Hnsw config error")]
-    HnswConfigError(#[from] HnswIndexFromSegmentError),
     #[error("Index load error")]
     IndexLoadError(#[from] Box<dyn ChromaError>),
     #[error("Path: {0} could not be converted to string")]
@@ -562,9 +557,7 @@ pub enum HnswIndexProviderOpenError {
 impl ChromaError for HnswIndexProviderOpenError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswIndexProviderOpenError::IndexConfigError(e) => e.code(),
             HnswIndexProviderOpenError::FileError(_) => ErrorCodes::Internal,
-            HnswIndexProviderOpenError::HnswConfigError(e) => e.code(),
             HnswIndexProviderOpenError::IndexLoadError(e) => e.code(),
             HnswIndexProviderOpenError::PathToStringError(_) => ErrorCodes::InvalidArgument,
         }
@@ -573,12 +566,8 @@ impl ChromaError for HnswIndexProviderOpenError {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderForkError {
-    #[error("Index configuration error")]
-    IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
     FileError(#[from] HnswIndexProviderFileError),
-    #[error("Hnsw config error")]
-    HnswConfigError(#[from] HnswIndexFromSegmentError),
     #[error("Index load error")]
     IndexLoadError(#[from] Box<dyn ChromaError>),
     #[error("Path: {0} could not be converted to string")]
@@ -588,9 +577,7 @@ pub enum HnswIndexProviderForkError {
 impl ChromaError for HnswIndexProviderForkError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswIndexProviderForkError::IndexConfigError(e) => e.code(),
             HnswIndexProviderForkError::FileError(_) => ErrorCodes::Internal,
-            HnswIndexProviderForkError::HnswConfigError(e) => e.code(),
             HnswIndexProviderForkError::IndexLoadError(e) => e.code(),
             HnswIndexProviderForkError::PathToStringError(_) => ErrorCodes::InvalidArgument,
         }
@@ -599,12 +586,10 @@ impl ChromaError for HnswIndexProviderForkError {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderCreateError {
-    #[error("Index configuration error")]
-    IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
     FileError(#[from] HnswIndexProviderFileError),
     #[error("Hnsw config error")]
-    HnswConfigError(#[from] HnswIndexFromSegmentError),
+    HnswConfigError(#[from] HnswIndexConfigError),
     #[error("Index init error")]
     IndexInitError(#[from] Box<dyn ChromaError>),
 }
@@ -612,7 +597,6 @@ pub enum HnswIndexProviderCreateError {
 impl ChromaError for HnswIndexProviderCreateError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswIndexProviderCreateError::IndexConfigError(e) => e.code(),
             HnswIndexProviderCreateError::FileError(_) => ErrorCodes::Internal,
             HnswIndexProviderCreateError::HnswConfigError(e) => e.code(),
             HnswIndexProviderCreateError::IndexInitError(e) => e.code(),

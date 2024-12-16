@@ -15,6 +15,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/utils"
 	libs "github.com/chroma-core/chroma/go/shared/libs"
 	"github.com/chroma-core/chroma/go/shared/otel"
+	sharedOtel "github.com/chroma-core/chroma/go/shared/otel"
 	"github.com/pingcap/log"
 	"github.com/rs/zerolog"
 	"go.uber.org/automaxprocs/maxprocs"
@@ -52,7 +53,7 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to listen", zap.Error(err))
 	}
-	s := grpc.NewServer(grpc.UnaryInterceptor(otel.ServerGrpcInterceptor))
+	s := grpc.NewServer(grpc.UnaryInterceptor(sharedOtel.ServerGrpcInterceptor))
 	logservicepb.RegisterLogServiceServer(s, server)
 	log.Info("log service started", zap.String("address", listener.Addr().String()))
 	go leader.AcquireLeaderLock(ctx, func(ctx context.Context) {

@@ -1,6 +1,6 @@
 use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
-use chroma_types::DataRecord;
+use chroma_types::{DataRecord, SpannPostingList};
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
 use std::{
@@ -585,6 +585,16 @@ impl Writeable for &DataRecord<'_> {
     }
 }
 
+impl Writeable for &SpannPostingList<'_> {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {
+        todo!()
+    }
+
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {
+        todo!()
+    }
+}
+
 impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
     fn read_from_storage(
         prefix: &str,
@@ -667,6 +677,39 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
                 key,
             })
             .is_some()
+    }
+}
+
+impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_data> {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        todo!()
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        todo!()
+    }
+
+    fn get_at_index(
+        _: &'referred_data Storage,
+        _: usize,
+    ) -> Option<(&'referred_data CompositeKey, Self)> {
+        todo!()
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        todo!()
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        todo!()
     }
 }
 

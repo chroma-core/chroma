@@ -27,10 +27,16 @@ func (s *collectionDb) DeleteAll() error {
 
 func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
-	err := s.db.Table("collections").
+	query := s.db.Table("collections").
 		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.name, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("collections.id = ? AND databases.name = ?", collectionID, databaseName).Find(&collections).Error
+		Where("collections.id = ?", collectionID)
+
+	if databaseName != nil && *databaseName != "" {
+		query = query.Where("databases.name = ?", databaseName)
+	}
+
+	err := query.Find(&collections).Error
 	if err != nil {
 		return nil, err
 	}

@@ -167,13 +167,13 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
         {
             return self.final_document.map(|doc| doc.to_string());
         }
-        return match self.final_document {
+        match self.final_document {
             Some(doc) => Some(doc.to_string()),
             None => match self.data_record.as_ref() {
                 Some(data_record) => data_record.document.map(|doc| doc.to_string()),
                 None => None,
             },
-        };
+        }
     }
 
     pub(crate) fn merged_document_ref(&self) -> Option<&str> {
@@ -185,7 +185,7 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
                 None => None,
             };
         }
-        return match self.final_document {
+        match self.final_document {
             Some(doc) => Some(doc),
             None => match self.data_record.as_ref() {
                 Some(data_record) => match data_record.document {
@@ -194,7 +194,7 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
                 },
                 None => None,
             },
-        };
+        }
     }
 
     // Performs a deep copy of the user id so only use it if really
@@ -326,13 +326,13 @@ impl<'referred_data> MaterializedLogRecord<'referred_data> {
                 None => panic!("Expected source of embedding"),
             };
         }
-        return match self.final_embedding {
+        match self.final_embedding {
             Some(embed) => embed,
             None => match self.data_record.as_ref() {
                 Some(data_record) => data_record.embedding,
                 None => panic!("Expected at least one source of embedding"),
             },
-        };
+        }
     }
 }
 

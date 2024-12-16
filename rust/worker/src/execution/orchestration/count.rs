@@ -3,9 +3,8 @@ use crate::execution::operator::{wrap, TaskResult};
 use crate::execution::operators::count_records::{
     CountRecordsError, CountRecordsInput, CountRecordsOperator, CountRecordsOutput,
 };
-use crate::execution::operators::pull_log::{PullLogsInput, PullLogsOperator, PullLogsOutput};
+use crate::execution::operators::fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput};
 use crate::execution::orchestration::common::terminate_with_error;
-use crate::log::log::PullLogsError;
 use crate::sysdb::sysdb::{GetCollectionsError, GetSegmentsError};
 use crate::system::{Component, ComponentContext, ComponentHandle, Handler};
 use crate::{log::log::Log, sysdb::sysdb::SysDb, system::System};
@@ -13,7 +12,6 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Collection, CollectionUuid, Segment, SegmentType, SegmentUuid};
-use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::Span;
 use uuid::Uuid;
@@ -56,6 +54,8 @@ enum CountQueryOrchestratorError {
     GetCollectionError(#[from] GetCollectionsError),
     #[error("Collection version mismatch")]
     CollectionVersionMismatch,
+    #[error("Task dispatch failed")]
+    DispatchFailure,
 }
 
 impl ChromaError for CountQueryOrchestratorError {
@@ -70,6 +70,7 @@ impl ChromaError for CountQueryOrchestratorError {
             CountQueryOrchestratorError::CollectionNotFound(_) => ErrorCodes::NotFound,
             CountQueryOrchestratorError::GetCollectionError(e) => e.code(),
             CountQueryOrchestratorError::CollectionVersionMismatch => ErrorCodes::VersionMismatch,
+            CountQueryOrchestratorError::DispatchFailure => ErrorCodes::Internal,
         }
     }
 }
@@ -162,50 +163,40 @@ impl CountQueryOrchestrator {
 
         self.record_segment = Some(record_segment);
         self.collection = Some(collection);
-        self.pull_logs(ctx).await;
+        self.fetch_log(ctx).await;
     }
 
     // shared
-    async fn pull_logs(&mut self, ctx: &ComponentContext<Self>) {
+    async fn fetch_log(&mut self, ctx: &ComponentContext<Self>) {
         println!("Count query orchestrator pulling logs");
-
-        let operator = PullLogsOperator::new(self.log.clone());
-        let end_timestamp = SystemTime::now().duration_since(UNIX_EPOCH);
-        let end_timestamp = match end_timestamp {
-            Ok(end_timestamp) => end_timestamp.as_nanos() as i64,
-            Err(e) => {
-                tracing::error!("Error getting system time: {:?}", e);
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(CountQueryOrchestratorError::SystemTimeError(e)),
-                    ctx,
-                );
-                return;
-            }
-        };
 
         let collection = self
             .collection
             .as_ref()
             .expect("Invariant violation. Collection is not set before pull logs state.");
-        let input = PullLogsInput::new(
-            collection.collection_id,
-            // The collection log position is inclusive, and we want to start from the next log.
-            // Note that we query using the incoming log position this is critical for correctness
-            // TODO: We should make all the log service code use u64 instead of i64
-            (self.log_position as i64) + 1,
-            100,
-            None,
-            Some(end_timestamp),
-        );
 
-        let task = wrap(operator, input, ctx.receiver());
+        let operator = FetchLogOperator {
+            log_client: self.log.clone(),
+            batch_size: 100,
+            // The collection log position is inclusive, and we want to start from the next log.
+            // Note that we query using the incoming log position this is critical for correctness.
+            start_log_offset_id: self.log_position as u32 + 1,
+            maximum_fetch_count: None,
+            collection_uuid: collection.collection_id,
+        };
+
+        let task = wrap(Box::new(operator), (), ctx.receiver());
         match self.dispatcher.send(task, Some(Span::current())).await {
             Ok(_) => (),
             Err(e) => {
                 // Log an error - this implies the dispatcher was dropped somehow
                 // and is likely fatal
                 println!("Error sending Count Query task: {:?}", e);
+                terminate_with_error(
+                    self.result_channel.take(),
+                    Box::new(CountQueryOrchestratorError::DispatchFailure),
+                    ctx,
+                );
             }
         }
     }
@@ -335,12 +326,12 @@ impl Component for CountQueryOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrator {
+impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountQueryOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<PullLogsOutput, PullLogsError>,
+        message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
         let message = message.into_inner();
@@ -353,7 +344,7 @@ impl Handler<TaskResult<PullLogsOutput, PullLogsError>> for CountQueryOrchestrat
                         .expect("Expect segment")
                         .clone(),
                     self.blockfile_provider.clone(),
-                    logs.logs(),
+                    logs,
                 );
                 let msg = wrap(operator, input, ctx.receiver());
                 match self.dispatcher.send(msg, None).await {

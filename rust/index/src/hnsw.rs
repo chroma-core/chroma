@@ -1,6 +1,5 @@
 use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::MetadataValueConversionError;
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
 use std::path::Path;
@@ -37,14 +36,12 @@ pub struct HnswIndexConfig {
 }
 
 #[derive(Error, Debug)]
-pub enum HnswIndexFromSegmentError {
+pub enum HnswIndexConfigError {
     #[error("Missing config `{0}`")]
     MissingConfig(String),
-    #[error("Invalid metadata value")]
-    MetadataValueError(#[from] MetadataValueConversionError),
 }
 
-impl ChromaError for HnswIndexFromSegmentError {
+impl ChromaError for HnswIndexConfigError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::InvalidArgument
     }
@@ -56,11 +53,11 @@ impl HnswIndexConfig {
         ef_construction: usize,
         ef_search: usize,
         persist_path: &Path,
-    ) -> Result<Self, Box<HnswIndexFromSegmentError>> {
+    ) -> Result<Self, Box<HnswIndexConfigError>> {
         let persist_path = match persist_path.to_str() {
             Some(persist_path) => persist_path,
             None => {
-                return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                return Err(Box::new(HnswIndexConfigError::MissingConfig(
                     "persist_path".to_string(),
                 )))
             }
@@ -233,6 +230,28 @@ impl Index<HnswIndexConfig> for HnswIndex {
             Ok(Some(data))
         }
     }
+
+    fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
+        let mut sizes = vec![0usize; 2];
+        unsafe { get_all_ids_sizes(self.ffi_ptr, sizes.as_mut_ptr()) };
+        read_and_return_hnsw_error(self.ffi_ptr)?;
+        Ok(sizes)
+    }
+
+    fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>> {
+        let sizes = self.get_all_ids_sizes()?;
+        let mut non_deleted_ids = vec![0usize; sizes[0]];
+        let mut deleted_ids = vec![0usize; sizes[1]];
+        unsafe {
+            get_all_ids(
+                self.ffi_ptr,
+                non_deleted_ids.as_mut_ptr(),
+                deleted_ids.as_mut_ptr(),
+            );
+        }
+        read_and_return_hnsw_error(self.ffi_ptr)?;
+        Ok((non_deleted_ids, deleted_ids))
+    }
 }
 
 impl PersistentIndex<HnswIndexConfig> for HnswIndex {
@@ -362,6 +381,8 @@ extern "C" {
     fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
     fn mark_deleted(index: *const IndexPtrFFI, id: usize);
     fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
+    fn get_all_ids_sizes(index: *const IndexPtrFFI, sizes: *mut usize);
+    fn get_all_ids(index: *const IndexPtrFFI, non_deleted_ids: *mut usize, deleted_ids: *mut usize);
     fn knn_query(
         index: *const IndexPtrFFI,
         query_vector: *const f32,

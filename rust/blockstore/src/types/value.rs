@@ -49,19 +49,25 @@ impl Value for &RoaringBitmap {
     }
 }
 
-impl<'a> Value for DataRecord<'a> {
+impl Value for DataRecord<'_> {
     fn get_size(&self) -> usize {
         DataRecord::get_size(self)
     }
 }
 
-impl<'a> Value for &DataRecord<'a> {
+impl Value for &DataRecord<'_> {
     fn get_size(&self) -> usize {
         DataRecord::get_size(self)
     }
 }
 
-impl<'a> Value for &SpannPostingList<'a> {
+impl Value for SpannPostingList<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}
+
+impl Value for &SpannPostingList<'_> {
     fn get_size(&self) -> usize {
         self.compute_size()
     }

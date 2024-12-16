@@ -1050,7 +1050,7 @@ impl MetadataSegmentReader<'_> {
     fn process_where_clause<'me>(
         &'me self,
         where_clause: &'me Where,
-    ) -> BoxFuture<Result<Vec<usize>, MetadataIndexError>> {
+    ) -> BoxFuture<'me, Result<Vec<usize>, MetadataIndexError>> {
         async move {
             let provider = MetadataProvider::from_metadata_segment_reader(self);
             let result = where_clause
