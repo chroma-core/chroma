@@ -15,8 +15,8 @@ from anyio import (
     to_thread,
     CapacityLimiter,
 )
-from fastapi import FastAPI as _FastAPI, Response, Request, Body
-from fastapi.responses import JSONResponse, ORJSONResponse
+from fastapi import FastAPI as _FastAPI, Response, Request
+from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
@@ -108,18 +108,18 @@ async def catch_exceptions_middleware(
     except ChromaError as e:
         return fastapi_json_response(e)
     except ValueError as e:
-        return JSONResponse(
+        return ORJSONResponse(
             content={"error": "InvalidArgumentError", "message": str(e)},
             status_code=400,
         )
     except TypeError as e:
-        return JSONResponse(
+        return ORJSONResponse(
             content={"error": "InvalidArgumentError", "message": str(e)},
             status_code=400,
         )
     except Exception as e:
         logger.exception(e)
-        return JSONResponse(content={"error": repr(e)}, status_code=500)
+        return ORJSONResponse(content={"error": repr(e)}, status_code=500)
 
 
 async def check_http_version_middleware(
@@ -140,6 +140,18 @@ def validate_model(model: Type[D], data: Any) -> D:  # type: ignore
         return model.model_validate(data)  # pydantic 2.x
     except AttributeError:
         return model.parse_obj(data)  # pydantic 1.x
+
+
+def get_openapi_extras_for_model(request_model: Type[D]) -> Dict[str, Any]:
+    openapi_extra = {
+        "requestBody": {
+            "content": {
+                "application/json": {"schema": request_model.model_json_schema()}
+            },
+            "required": True,
+        }
+    }
+    return openapi_extra
 
 
 class ChromaAPIRouter(fastapi.APIRouter):  # type: ignore
@@ -241,6 +253,7 @@ class FastAPI(Server):
             self.create_database,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(CreateDatabase),
         )
 
         self.router.add_api_route(
@@ -255,6 +268,7 @@ class FastAPI(Server):
             self.create_tenant,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(CreateTenant),
         )
 
         self.router.add_api_route(
@@ -281,6 +295,7 @@ class FastAPI(Server):
             self.create_collection,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(CreateCollection),
         )
 
         self.router.add_api_route(
@@ -289,30 +304,35 @@ class FastAPI(Server):
             methods=["POST"],
             status_code=status.HTTP_201_CREATED,
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(AddEmbedding),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/update",
             self.update,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(UpdateEmbedding),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/upsert",
             self.upsert,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(AddEmbedding),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/get",
             self.get,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(GetEmbedding),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
             self.delete,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(DeleteEmbedding),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/count",
@@ -325,6 +345,7 @@ class FastAPI(Server):
             self.get_nearest_neighbors,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(request_model=QueryEmbedding),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_name}",
@@ -337,6 +358,7 @@ class FastAPI(Server):
             self.update_collection,
             methods=["PUT"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(UpdateCollection),
         )
         self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_name}",
@@ -353,8 +375,8 @@ class FastAPI(Server):
 
     async def rate_limit_exception_handler(
         self, request: Request, exc: RateLimitError
-    ) -> JSONResponse:
-        return JSONResponse(
+    ) -> ORJSONResponse:
+        return ORJSONResponse(
             status_code=429,
             content={"message": "Rate limit exceeded."},
         )
@@ -364,8 +386,8 @@ class FastAPI(Server):
 
     async def quota_exception_handler(
         self, request: Request, exc: QuotaError
-    ) -> JSONResponse:
-        return JSONResponse(
+    ) -> ORJSONResponse:
+        return ORJSONResponse(
             status_code=400,
             content={"message": exc.message()},
         )
@@ -452,7 +474,6 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str,
-        body: CreateDatabase = Body(...),
     ) -> None:
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
@@ -506,7 +527,8 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     async def create_tenant(
-        self, request: Request, body: CreateTenant = Body(...)
+        self,
+        request: Request,
     ) -> None:
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
@@ -625,7 +647,6 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
         database_name: str,
-        body: CreateCollection = Body(...),
     ) -> CollectionModel:
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
@@ -708,7 +729,6 @@ class FastAPI(Server):
         database_name: str,
         collection_id: str,
         request: Request,
-        body: UpdateCollection = Body(...),
     ) -> None:
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
@@ -771,7 +791,6 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
         collection_id: str,
-        body: AddEmbedding = Body(...),
     ) -> bool:
         try:
 
@@ -821,7 +840,6 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
         collection_id: str,
-        body: UpdateEmbedding = Body(...),
     ) -> None:
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
@@ -863,7 +881,6 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
         collection_id: str,
-        body: AddEmbedding = Body(...),
     ) -> None:
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
@@ -908,7 +925,6 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
         request: Request,
-        body: GetEmbedding = Body(...),
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
@@ -959,7 +975,6 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
         request: Request,
-        body: DeleteEmbedding = Body(...),
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
@@ -1044,7 +1059,6 @@ class FastAPI(Server):
         database_name: str,
         collection_id: str,
         request: Request,
-        body: QueryEmbedding = Body(...),
     ) -> QueryResult:
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
@@ -1124,6 +1138,7 @@ class FastAPI(Server):
             self.create_database_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(CreateDatabase),
         )
 
         self.router.add_api_route(
@@ -1138,6 +1153,7 @@ class FastAPI(Server):
             self.create_tenant_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(CreateTenant),
         )
 
         self.router.add_api_route(
@@ -1164,6 +1180,7 @@ class FastAPI(Server):
             self.create_collection_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(CreateCollection),
         )
 
         self.router.add_api_route(
@@ -1172,30 +1189,35 @@ class FastAPI(Server):
             methods=["POST"],
             status_code=status.HTTP_201_CREATED,
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(AddEmbedding),
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/update",
             self.update_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(UpdateEmbedding),
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/upsert",
             self.upsert_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(AddEmbedding),
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/get",
             self.get_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(GetEmbedding),
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/delete",
             self.delete_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(DeleteEmbedding),
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_id}/count",
@@ -1208,6 +1230,7 @@ class FastAPI(Server):
             self.get_nearest_neighbors_v1,
             methods=["POST"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(QueryEmbedding),
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}",
@@ -1220,6 +1243,7 @@ class FastAPI(Server):
             self.update_collection_v1,
             methods=["PUT"],
             response_model=None,
+            openapi_extra=get_openapi_extras_for_model(UpdateCollection),
         )
         self.router.add_api_route(
             "/api/v1/collections/{collection_name}",
@@ -1300,7 +1324,6 @@ class FastAPI(Server):
         self,
         request: Request,
         tenant: str = DEFAULT_TENANT,
-        body: CreateDatabase = Body(...),
     ) -> None:
         def process_create_database(
             tenant: str, headers: Headers, raw_body: bytes
@@ -1366,7 +1389,8 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.create_tenant_v1", OpenTelemetryGranularity.OPERATION)
     async def create_tenant_v1(
-        self, request: Request, body: CreateTenant = Body(...)
+        self,
+        request: Request,
     ) -> None:
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
@@ -1491,7 +1515,6 @@ class FastAPI(Server):
         request: Request,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        body: CreateCollection = Body(...),
     ) -> CollectionModel:
         def process_create_collection(
             request: Request, tenant: str, database: str, raw_body: bytes
@@ -1577,7 +1600,10 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.update_collection_v1", OpenTelemetryGranularity.OPERATION)
     async def update_collection_v1(
-        self, collection_id: str, request: Request, body: UpdateCollection = Body(...)
+        self,
+        collection_id: str,
+        request: Request,
+        # body: UpdateCollection = Body(...)
     ) -> None:
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
@@ -1637,7 +1663,9 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.add_v1", OpenTelemetryGranularity.OPERATION)
     async def add_v1(
-        self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
+        self,
+        request: Request,
+        collection_id: str,
     ) -> bool:
         try:
 
@@ -1678,7 +1706,9 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.update_v1", OpenTelemetryGranularity.OPERATION)
     async def update_v1(
-        self, request: Request, collection_id: str, body: UpdateEmbedding = Body(...)
+        self,
+        request: Request,
+        collection_id: str,
     ) -> None:
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
@@ -1711,7 +1741,9 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.upsert_v1", OpenTelemetryGranularity.OPERATION)
     async def upsert_v1(
-        self, request: Request, collection_id: str, body: AddEmbedding = Body(...)
+        self,
+        request: Request,
+        collection_id: str,
     ) -> None:
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
@@ -1747,7 +1779,9 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.get_v1", OpenTelemetryGranularity.OPERATION)
     async def get_v1(
-        self, collection_id: str, request: Request, body: GetEmbedding = Body(...)
+        self,
+        collection_id: str,
+        request: Request,
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
@@ -1789,7 +1823,10 @@ class FastAPI(Server):
 
     @trace_method("FastAPI.delete_v1", OpenTelemetryGranularity.OPERATION)
     async def delete_v1(
-        self, collection_id: str, request: Request, body: DeleteEmbedding = Body(...)
+        self,
+        collection_id: str,
+        request: Request,
+        # body: DeleteEmbedding = Body(...)
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
@@ -1865,7 +1902,6 @@ class FastAPI(Server):
         self,
         collection_id: str,
         request: Request,
-        body: QueryEmbedding = Body(...),
     ) -> QueryResult:
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
