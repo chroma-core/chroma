@@ -1,6 +1,6 @@
 import React from "react";
-import { AppSection } from "@/markdoc/content/sidebar-config";
 import Link from "next/link";
+import { AppSection } from "@/lib/content";
 
 const MenuItem: React.FC<{ section: AppSection; active: boolean }> = ({
   section,

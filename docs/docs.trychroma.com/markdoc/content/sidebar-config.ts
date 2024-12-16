@@ -6,7 +6,7 @@ import {
   SquareTerminalIcon,
   WrenchIcon,
 } from "lucide-react";
-import { AppSection, getAllPages } from "@/lib/content";
+import { AppSection } from "@/lib/content";
 
 const sidebarConfig: AppSection[] = [
   {

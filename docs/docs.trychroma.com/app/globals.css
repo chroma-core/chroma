@@ -18,26 +18,3 @@ body {
     --radius: 0.5rem;
   }
 }
-
-.DocSearch-Button {
-  @apply flex items-center text-sm bg-transparent hover:ring-0 p-0 hover:bg-transparent hover:bg-gradient-to-b
-  hover:from-gray-100 hover:to-gray-100 hover:rounded hover:h-[29px] focus-visible:ring-0 focus:ring-0
-}
-
-.DocSearch-Button-Container {
-  @apply flex items-center justify-center border-x-[0.9px] border-y-[1px] shadow outline-none h-[29px] rounded py-[0.2rem]
-  text-[#27201C] bg-gradient-to-b from-[#FFFFFF] to-[#f9f9f9] border-[#171716]/40  dark:text-[#fff] dark:bg-gradient-to-b dark:from-[#171716]
-  dark:to-[#171716] border-[0.8px] dark:border-[#fff]/40 dark:hover:from-[#171716]/90 dark:hover:to-[#171716]/90
-}
-
-.DocSearch-Search-Icon {
-  @apply h-3 w-3 ml-2 dark:invert
-}
-
-.DocSearch-Button-Placeholder {
-  @apply text-xs mr-8 after:content-['...']
-}
-
-.DocSearch-Button-Keys {
-  @apply hidden
-}

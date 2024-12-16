@@ -16,8 +16,7 @@ import TabbedCodeBlock from "@/components/markdoc/tabbed-code-block";
 import CenteredContent from "@/components/markdoc/centered-content";
 import Latex from "@/components/markdoc/latex";
 import Banner from "@/components/markdoc/banner";
-import MarkdocImage from "@/components/markdoc/markdoc-image";
-import Heading from "@/components/markdoc/heading";
+import Heading from "@/components/markdoc/markdoc-heading";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -55,13 +54,6 @@ const markdocConfig: MarkDocConfig = {
     },
     td: {
       render: "TableCell",
-    },
-    image: {
-      render: "MarkdocImage",
-      attributes: {
-        src: { type: String },
-        alt: { type: String },
-      },
     },
     heading: {
       render: "Heading",
@@ -135,7 +127,6 @@ const markdocConfig: MarkDocConfig = {
     CenteredContent,
     Banner,
     Latex,
-    MarkdocImage,
     Heading,
   },
 };

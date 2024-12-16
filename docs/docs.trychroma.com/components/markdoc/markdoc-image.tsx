@@ -6,8 +6,12 @@ const MarkdocImage: React.FC<{ src: string; alt: string; title?: string }> = ({
   src,
   alt,
 }) => {
-  const { width, height } = imageSize(`public/${src}`);
-  return <Image src={src} alt={alt} width={width} height={height} priority />;
+  try {
+    const { width, height } = imageSize(`public/${src}`);
+    return <Image src={src} alt={alt} width={width} height={height} priority />;
+  } catch (e) {
+    return <div />;
+  }
 };
 
 export default MarkdocImage;

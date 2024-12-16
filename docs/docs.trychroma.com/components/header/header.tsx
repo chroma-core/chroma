@@ -14,9 +14,9 @@ const Header: React.FC = () => {
         <Link href="/">
           <Logo />
         </Link>
+        <SearchBox />
       </div>
       <div className="flex items-center justify-between gap-2">
-        <SearchBox />
         <DiscordLink />
         <GithubLink />
         <XLink />
