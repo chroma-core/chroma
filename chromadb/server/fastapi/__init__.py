@@ -16,8 +16,8 @@ from anyio import (
     CapacityLimiter,
 )
 from fastapi import FastAPI as _FastAPI, Response, Request
-from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import ORJSONResponse
 from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 
