@@ -14,6 +14,8 @@ struct Args {
     #[arg(long)]
     expires: String,
     #[arg(long)]
+    delay: Option<String>,
+    #[arg(long)]
     data_set: String,
     #[arg(long)]
     workload: String,
@@ -84,11 +86,20 @@ async fn main() {
     let args = Args::parse();
     let client = reqwest::Client::new();
     let throughput = args.throughput();
+    let mut workload = Workload::ByName(args.workload);
+    if let Some(delay) = args.delay {
+        let delay = humanize_expires(&delay).expect("delay must be humanizable");
+        let delay = delay.parse().expect("delay must be a date time");
+        workload = Workload::Delay {
+            after: delay,
+            wrap: Box::new(workload),
+        };
+    }
     let req = StartRequest {
         name: args.name,
         expires: humanize_expires(&args.expires).unwrap_or(args.expires),
         data_set: args.data_set,
-        workload: Workload::ByName(args.workload),
+        workload,
         throughput,
     };
     match client
