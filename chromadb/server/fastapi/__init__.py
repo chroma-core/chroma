@@ -1603,7 +1603,6 @@ class FastAPI(Server):
         self,
         collection_id: str,
         request: Request,
-        # body: UpdateCollection = Body(...)
     ) -> None:
         def process_update_collection(
             request: Request, collection_id: str, raw_body: bytes
@@ -1826,7 +1825,6 @@ class FastAPI(Server):
         self,
         collection_id: str,
         request: Request,
-        # body: DeleteEmbedding = Body(...)
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
