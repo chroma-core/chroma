@@ -118,7 +118,7 @@ In your client environment, set the `CHROMA_CLIENT_AUTH_CREDENTIALS` variable to
 export CHROMA_CLIENT_AUTH_CREDENTIALS="admin:admin"
 ```
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -170,7 +170,7 @@ chromaClient.heartbeat()
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 ### Static API Token Authentication
 
@@ -222,7 +222,7 @@ docker run --env-file ./.chroma_env -v <path_to_authz.yaml>:/chroma/<authz.yaml>
 
 #### Client Set-Up
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -281,7 +281,7 @@ chromaClient.heartbeat()
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 ## Observability with Docker
 

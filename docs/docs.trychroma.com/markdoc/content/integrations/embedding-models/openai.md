@@ -17,7 +17,7 @@ The following OpenAI Embedding Models are supported:
 Visit OpenAI Embeddings [documentation](https://platform.openai.com/docs/guides/embeddings) for more information.
 {% /Banner %}
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -75,4 +75,4 @@ collection = await client.getCollection({
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}

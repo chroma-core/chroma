@@ -181,8 +181,8 @@ const sidebarConfig: AppSection[] = [
     ],
   },
   {
-    id: "learn",
-    name: "Learn",
+    id: "guides-and-examples",
+    name: "Guides & Examples",
     icon: GraduationCap,
     comingSoon: true,
   },

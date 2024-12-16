@@ -102,21 +102,25 @@ await client.deleteCollection(collection); // Delete a collection and all associ
 
 Collections have a few useful convenience methods.
 
+* `peek()` - returns a list of the first 10 items in the collection.
+* `count()` - returns the number of items in the collection.
+* `modify()` - rename the collection
+
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-collection.peek() # returns a list of the first 10 items in the collection
-collection.count() # returns the number of items in the collection
-collection.modify(name="new_name") # Rename the collection
+collection.peek() 
+collection.count() 
+collection.modify(name="new_name")
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-await collection.peek(); // returns a list of the first 10 items in the collection
-await collection.count(); // returns the number of items in the collection
-await collection.modify({ name: "new_name" }) // Rename the collection
+await collection.peek();
+await collection.count();
+await collection.modify({ name: "new_name" })
 ```
 {% /Tab %}
 

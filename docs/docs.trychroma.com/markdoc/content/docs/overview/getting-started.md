@@ -13,7 +13,7 @@ Chroma is an AI-native open-source vector database. It comes with everything you
 
 ### 1. Install
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -47,7 +47,7 @@ pnpm install chromadb chromadb-default-embed
 
 {% /TabbedUseCaseCodeBlock %}
 
-Install chroma via `pip` to easily run the backend server. ([Docker](../../production/containers/docker) also available)
+Install chroma via `pip` to easily run the backend server. Here are [instructions](https://pip.pypa.io/en/stable/installation/) for installing and running `pip`. Alternatively, you can also run Chroma in a [Docker](../../production/containers/docker) container.
 
 ```terminal
 pip install chromadb
@@ -55,11 +55,11 @@ pip install chromadb
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 ### 2. Create a Chroma Client
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 ```python
@@ -110,7 +110,7 @@ const client = new ChromaClient();
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 ### 3. Create a collection
 
@@ -136,7 +136,7 @@ const collection = await client.createCollection({
 
 ### 4. Add some text documents to the collection
 
-Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model.
+Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
 
 {% TabbedCodeBlock %}
 
@@ -307,6 +307,8 @@ console.log(results);
 {% /TabbedCodeBlock %}
 
 ## Next steps
+
+In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](../run-chroma/persistent-client) or run Chroma in [client-server mode](../run-chroma/client-server) if you need data persistence.
 
 - Learn how to [Deploy Chroma](../../production/deployment) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help

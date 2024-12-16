@@ -66,7 +66,7 @@ chroma run --path <DB path>
 
 #### Client Set-Up
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -108,7 +108,7 @@ chromaClient.heartbeat()
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 We recommend setting the environment variable `CHROMA_CLIENT_AUTH_CREDENTIALS` instead of specifying the credentials in code.
 
@@ -156,7 +156,7 @@ export CHROMA_SERVER_AUTHZ_PROVIDER="chromadb.auth.simple_rbac_authz.SimpleRBACA
 
 #### Client Set-Up
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -204,6 +204,6 @@ chromaClient.heartbeat()
 ```
 
 {% /Tab %}
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 We recommend setting the environment variable `CHROMA_CLIENT_AUTH_CREDENTIALS` instead of specifying the token in code. Similarly, you can read the value of `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER` in the client construction.

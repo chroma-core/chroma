@@ -13,13 +13,6 @@ import AppContext from "@/context/app-context";
 import CodeBlock from "@/components/markdoc/code-block";
 import { Playfair_Display } from "next/font/google";
 
-export const playfairDisplay = Playfair_Display({
-  subsets: ["latin"],
-  display: "swap",
-  weight: "500",
-  variable: "--font-playfair-display",
-});
-
 export interface TabProps {
   label: string;
   children: React.ReactElement<{ content: string; showHeader: boolean }>;
@@ -49,7 +42,7 @@ const Tab: React.FC<TabProps> = ({ children }) => {
   return <div>{children}</div>;
 };
 
-export const MarkdocTabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
+export const Tabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
   children,
 }) => {
   const { language } = useContext(AppContext);
@@ -67,8 +60,7 @@ export const MarkdocTabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
               value={tab.props.label}
               className={cn(
                 tabLabelStyle,
-                playfairDisplay.className,
-                "text-sm tracking-normal dark:data-[state=active]:bg-transparent data-[state=active]:border-b data-[state=active]:text-gray-900 dark:data-[state=active]:text-gray-200 data-[state=active]:border-gray-900 dark:data-[state=active]:border-gray-200",
+                "text-sm font-mono tracking-normal dark:data-[state=active]:bg-transparent data-[state=active]:border-b data-[state=active]:text-gray-900 dark:data-[state=active]:text-gray-200 data-[state=active]:border-gray-900 dark:data-[state=active]:border-gray-200",
               )}
             >
               {capitalize(tab.props.label)}

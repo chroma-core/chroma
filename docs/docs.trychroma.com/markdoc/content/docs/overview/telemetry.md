@@ -12,7 +12,7 @@ If you prefer to opt out of telemetry, you can do this in two ways.
 
 #### In Client Code
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -33,7 +33,7 @@ Disable telemetry on you Chroma server (see next section).
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 #### In Chroma's Backend Using Environment Variables
 

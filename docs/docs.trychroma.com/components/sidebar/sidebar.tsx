@@ -52,7 +52,7 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
       className={`h-full xl:ml-[calc((100vw-1256px)/2)] ${!mobile && "hidden md:block"}`}
     >
       <div className="flex flex-col h-full w-64 p-5 border-r-[1px] flex-shrink-0 dark:border-gray-700">
-        <div className="flex flex-col gap-1 pb-10">
+        <div className="flex flex-col gap-y-1.5 pb-10">
           {sidebarConfig.map((section) => (
             <MenuItem
               key={section.id}

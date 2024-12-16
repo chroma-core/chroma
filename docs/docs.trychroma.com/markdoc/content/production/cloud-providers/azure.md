@@ -189,7 +189,7 @@ Add the `CHROMA_CLIENT_AUTH_CREDENTIALS` environment variable to your local envi
 export CHROMA_CLIENT_AUTH_CREDENTIALS="test-token"
 ```
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -242,7 +242,7 @@ chromaClient.heartbeat()
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 ## Observability with Azure
 

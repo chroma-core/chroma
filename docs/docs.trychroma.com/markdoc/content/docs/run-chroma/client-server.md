@@ -8,7 +8,7 @@ To start the Chroma server, run the following command:
 chroma run --path /db_path
 ```
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -56,4 +56,4 @@ const client = new ChromaClient();
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}

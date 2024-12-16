@@ -17,7 +17,9 @@ const PageIndex: React.FC<{
   return (
     <div className="select-none cursor-pointer">
       {name && (
-        <p className={`${playfairDisplay.className} mb-2 tracking-wide`}>
+        <p
+          className={`${playfairDisplay.className} mb-2 tracking-wide cursor-default`}
+        >
           {name}
         </p>
       )}

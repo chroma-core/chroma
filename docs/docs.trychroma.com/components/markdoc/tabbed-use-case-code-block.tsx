@@ -2,7 +2,7 @@ import React, { ReactElement } from "react";
 import { tabLabelStyle } from "@/components/markdoc/code-block-header";
 import { capitalize, cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TabProps } from "@/components/markdoc/markdoc-tabs";
+import { TabProps } from "@/components/markdoc/tabs";
 import CodeBlock from "@/components/markdoc/code-block";
 import CopyButton from "@/components/markdoc/copy-button";
 

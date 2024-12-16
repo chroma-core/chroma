@@ -10,7 +10,7 @@ You can quickly experiment locally with Chroma in client/server mode by using ou
 chroma run --path /db_path
 ```
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -57,4 +57,4 @@ const client = new ChromaClient();
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}

@@ -1,7 +1,21 @@
 # The Python HTTP-Only Client
 
-If you are running Chroma in client-server mode, you may not need the full Chroma library. Instead, you can use the lightweight client-only library.
+If you are running Chroma in client-server mode, where you run a Chroma server and client on separate machines, you may not need the full Chroma package where you run your client. Instead, you can use the lightweight client-only library.
 In this case, you can install the `chromadb-client` package. This package is a lightweight HTTP client for the server with a minimal dependency footprint.
+
+On your server, install chroma with
+
+```terminal
+pip install chromadb
+```
+
+And run a Chroma server:
+
+```terminal
+chroma run --path [path/to/persist/data]
+```
+
+Then, on your client side, install the HTTP-only client: 
 
 ```terminal
 pip install chromadb-client

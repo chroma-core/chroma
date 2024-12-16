@@ -9,7 +9,7 @@ Chroma provides a convenient wrapper around Google's Generative AI embedding API
 
 You can get an API key by signing up for an account at [Google MakerSuite](https://makersuite.google.com/).
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -64,4 +64,4 @@ For more info - please visit the [official Google JS docs](https://ai.google.dev
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}

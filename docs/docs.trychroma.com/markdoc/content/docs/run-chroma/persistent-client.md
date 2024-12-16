@@ -1,6 +1,6 @@
 # Persistent Client
 
-{% MarkdocTabs %}
+{% Tabs %}
 
 {% Tab label="python" %}
 
@@ -14,7 +14,7 @@ import chromadb
 client = chromadb.PersistentClient(path="/path/to/save/to")
 ```
 
-The `path` is where Chroma will store its database files on disk, and load them on start.
+The `path` is where Chroma will store its database files on disk, and load them on start. If you don't provide a path, the default is `.chroma`
 
 {% /Tab %}
 
@@ -34,7 +34,7 @@ And run the server using our CLI:
 chroma run --path ./getting-started 
 ```
 
-The `path` is where Chroma will store its database files on disk, and load them on start.
+The `path` is where Chroma will store its database files on disk, and load them on start. The default is `.chroma`.
 
 Alternatively, you can also use our official Docker image:
 
@@ -55,23 +55,26 @@ See [Running Chroma in client-server mode](../client-server-mode) for more.
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 The client object has a few useful convenience methods.
+
+* `hearthbeat()` - returns a nanosecond heartbeat. Useful for making sure the client remains connected.
+* `reset()` - empties and completely resets the database. ⚠️ This is destructive and not reversible.
 
 {% TabbedCodeBlock %}
 
 {% Tab label="python" %}
 ```python
-client.heartbeat() # returns a nanosecond heartbeat. Useful for making sure the client remains connected.
-client.reset() # Empties and completely resets the database. ⚠️ This is destructive and not reversible.
+client.heartbeat()
+client.reset()
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-await client.heartbeat(); // returns a nanosecond heartbeat. Useful for making sure the client remains connected.
-await client.reset(); // Empties and completely resets the database. ⚠️ This is destructive and not reversible.
+await client.heartbeat();
+await client.reset();
 ```
 {% /Tab %}
 

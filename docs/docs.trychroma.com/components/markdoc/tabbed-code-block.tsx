@@ -4,7 +4,7 @@ import { TabsContent, TabsList } from "@/components/ui/tabs";
 import { tabLabelStyle } from "@/components/markdoc/code-block-header";
 import { capitalize, cn } from "@/lib/utils";
 import CodeBlock from "@/components/markdoc/code-block";
-import { TabProps, TabsTrigger } from "@/components/markdoc/markdoc-tabs";
+import { TabProps, TabsTrigger } from "@/components/markdoc/tabs";
 import CodeTabs from "@/components/markdoc/code-tab";
 
 const TabbedCodeBlock: React.FC<{

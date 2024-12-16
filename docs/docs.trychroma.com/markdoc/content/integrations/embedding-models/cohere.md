@@ -7,7 +7,7 @@ name: 'Cohere'
 
 Chroma also provides a convenient wrapper around Cohere's embedding API. This embedding function runs remotely on Cohere’s servers, and requires an API key. You can get an API key by signing up for an account at [Cohere](https://dashboard.cohere.ai/welcome/register).
 
-{% MarkdocTabs %}
+{% Tabs %}
 {% Tab label="python" %}
 
 This embedding function relies on the `cohere` python package, which you can install with `pip install cohere`.
@@ -37,7 +37,7 @@ const collectionGet = await client.getCollection({name:"name", embeddingFunction
 
 {% /Tab %}
 
-{% /MarkdocTabs %}
+{% /Tabs %}
 
 You can pass in an optional `model_name` argument, which lets you choose which Cohere embeddings model to use. By default, Chroma uses `large` model. You can see the available models under `Get embeddings` section [here](https://docs.cohere.ai/reference/embed).
 
