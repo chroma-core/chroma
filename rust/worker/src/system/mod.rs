@@ -9,5 +9,5 @@ mod wrapped_message;
 // Re-export types
 pub(crate) use receiver::*;
 pub use system::*;
-pub(crate) use types::*;
+pub use types::*;
 pub(crate) use wrapped_message::*;

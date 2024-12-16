@@ -1,7 +1,20 @@
 use chroma_benchmark::datasets::sift::Sift1MData;
-use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
+use chroma_types::{
+    Chunk, CollectionUuid, DirectWhereComparison, LogRecord, MetadataSetValue, Operation,
+    OperationRecord, SetOperator, Where, WhereComparison,
+};
 use indicatif::ProgressIterator;
-use worker::{log::test::modulo_metadata, segment::test::TestSegment};
+use worker::{
+    execution::operators::{
+        fetch_log::FetchLogOperator, filter::FilterOperator, limit::LimitOperator,
+        projection::ProjectionOperator,
+    },
+    log::{
+        log::{InMemoryLog, Log},
+        test::modulo_metadata,
+    },
+    segment::test::TestSegment,
+};
 
 const DATA_CHUNK_SIZE: usize = 10000;
 
@@ -41,4 +54,73 @@ pub async fn sift1m_segments() -> TestSegment {
             .await;
     }
     segments
+}
+
+pub fn empty_fetch_log(collection_uuid: CollectionUuid) -> FetchLogOperator {
+    FetchLogOperator {
+        log_client: Log::InMemory(InMemoryLog::default()).into(),
+        batch_size: 100,
+        start_log_offset_id: 0,
+        maximum_fetch_count: Some(0),
+        collection_uuid,
+    }
+}
+
+pub fn trivial_filter() -> FilterOperator {
+    FilterOperator {
+        query_ids: None,
+        where_clause: None,
+    }
+}
+
+pub fn always_true_where_for_modulo_metadata() -> FilterOperator {
+    FilterOperator {
+        query_ids: None,
+        where_clause: Some(Where::conjunction(vec![
+            Where::DirectWhereComparison(DirectWhereComparison {
+                key: "is_even".to_string(),
+                comparison: WhereComparison::Set(
+                    SetOperator::In,
+                    MetadataSetValue::Bool(vec![false, true]),
+                ),
+            }),
+            Where::DirectWhereComparison(DirectWhereComparison {
+                key: "modulo_3".to_string(),
+                comparison: WhereComparison::Set(
+                    SetOperator::In,
+                    MetadataSetValue::Int(vec![0, 1, 2]),
+                ),
+            }),
+        ])),
+    }
+}
+
+pub fn trivial_limit() -> LimitOperator {
+    LimitOperator {
+        skip: 0,
+        fetch: Some(100),
+    }
+}
+
+pub fn offset_limit() -> LimitOperator {
+    LimitOperator {
+        skip: 100,
+        fetch: Some(100),
+    }
+}
+
+pub fn trivial_projection() -> ProjectionOperator {
+    ProjectionOperator {
+        document: false,
+        embedding: false,
+        metadata: false,
+    }
+}
+
+pub fn all_projection() -> ProjectionOperator {
+    ProjectionOperator {
+        document: true,
+        embedding: true,
+        metadata: true,
+    }
 }

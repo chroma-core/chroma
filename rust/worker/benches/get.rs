@@ -3,20 +3,88 @@ mod load;
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_config::Configurable;
 use criterion::{criterion_group, criterion_main, Criterion};
-use load::sift1m_segments;
+use load::{
+    all_projection, always_true_where_for_modulo_metadata, empty_fetch_log, offset_limit,
+    sift1m_segments, trivial_filter, trivial_limit, trivial_projection,
+};
 use worker::{
     config::RootConfig,
-    execution::{
-        dispatcher::Dispatcher,
-        operators::{
-            fetch_log::FetchLogOperator, filter::FilterOperator, limit::LimitOperator,
-            projection::ProjectionOperator,
-        },
-        orchestration::get::GetOrchestrator,
-    },
-    log::log::{InMemoryLog, Log},
-    system::System,
+    execution::{dispatcher::Dispatcher, orchestration::get::GetOrchestrator},
+    segment::test::TestSegment,
+    system::{ComponentHandle, System},
 };
+
+fn trivial_get(
+    test_segments: TestSegment,
+    dispatcher_handle: ComponentHandle<Dispatcher>,
+) -> GetOrchestrator {
+    let blockfile_provider = test_segments.blockfile_provider.clone();
+    let collection_uuid = test_segments.collection.collection_id;
+    GetOrchestrator::new(
+        blockfile_provider,
+        dispatcher_handle,
+        100,
+        test_segments.into(),
+        empty_fetch_log(collection_uuid),
+        trivial_filter(),
+        trivial_limit(),
+        trivial_projection(),
+    )
+}
+
+fn get_filter(
+    test_segments: TestSegment,
+    dispatcher_handle: ComponentHandle<Dispatcher>,
+) -> GetOrchestrator {
+    let blockfile_provider = test_segments.blockfile_provider.clone();
+    let collection_uuid = test_segments.collection.collection_id;
+    GetOrchestrator::new(
+        blockfile_provider,
+        dispatcher_handle,
+        100,
+        test_segments.into(),
+        empty_fetch_log(collection_uuid),
+        always_true_where_for_modulo_metadata(),
+        trivial_limit(),
+        trivial_projection(),
+    )
+}
+
+fn get_filter_limit(
+    test_segments: TestSegment,
+    dispatcher_handle: ComponentHandle<Dispatcher>,
+) -> GetOrchestrator {
+    let blockfile_provider = test_segments.blockfile_provider.clone();
+    let collection_uuid = test_segments.collection.collection_id;
+    GetOrchestrator::new(
+        blockfile_provider,
+        dispatcher_handle,
+        100,
+        test_segments.into(),
+        empty_fetch_log(collection_uuid),
+        always_true_where_for_modulo_metadata(),
+        offset_limit(),
+        trivial_projection(),
+    )
+}
+
+fn get_filter_limit_projection(
+    test_segments: TestSegment,
+    dispatcher_handle: ComponentHandle<Dispatcher>,
+) -> GetOrchestrator {
+    let blockfile_provider = test_segments.blockfile_provider.clone();
+    let collection_uuid = test_segments.collection.collection_id;
+    GetOrchestrator::new(
+        blockfile_provider,
+        dispatcher_handle,
+        100,
+        test_segments.into(),
+        empty_fetch_log(collection_uuid),
+        always_true_where_for_modulo_metadata(),
+        offset_limit(),
+        all_projection(),
+    )
+}
 
 fn bench_get(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
@@ -31,62 +99,78 @@ fn bench_get(criterion: &mut Criterion) {
         .expect("Should be able to initialize dispatcher");
     let dispatcher_handle = runtime.block_on(async { system.start_component(dispatcher) });
 
-    let filter = FilterOperator {
-        query_ids: None,
-        where_clause: None,
-    };
-    let limit = LimitOperator {
-        skip: 0,
-        fetch: Some(100),
-    };
-    let projection = ProjectionOperator {
-        document: true,
-        embedding: true,
-        metadata: true,
-    };
-
-    let test_name = format!("get-sift1m-{:?}-{:?}-{:?}", filter, limit, projection);
-
-    let setup = || {
+    let trivial_get_setup = || {
         (
             system.clone(),
-            GetOrchestrator::new(
-                test_segments.blockfile_provider.clone(),
-                dispatcher_handle.clone(),
-                100,
-                test_segments.clone().into(),
-                FetchLogOperator {
-                    log_client: Log::InMemory(InMemoryLog::default()).into(),
-                    batch_size: 100,
-                    start_log_offset_id: 0,
-                    maximum_fetch_count: Some(0),
-                    collection_uuid: test_segments.collection.collection_id,
-                },
-                FilterOperator {
-                    query_ids: None,
-                    where_clause: None,
-                },
-                LimitOperator {
-                    skip: 0,
-                    fetch: Some(100),
-                },
-                ProjectionOperator {
-                    document: true,
-                    embedding: true,
-                    metadata: true,
-                },
-            ),
+            trivial_get(test_segments.clone(), dispatcher_handle.clone()),
+            (0..100).map(|id| id.to_string()).collect(),
+        )
+    };
+    let get_filter_setup = || {
+        (
+            system.clone(),
+            get_filter(test_segments.clone(), dispatcher_handle.clone()),
+            (0..100).map(|id| id.to_string()).collect(),
+        )
+    };
+    let get_filter_limit_setup = || {
+        (
+            system.clone(),
+            get_filter_limit(test_segments.clone(), dispatcher_handle.clone()),
+            (100..200).map(|id| id.to_string()).collect(),
+        )
+    };
+    let get_filter_limit_projection_setup = || {
+        (
+            system.clone(),
+            get_filter_limit_projection(test_segments.clone(), dispatcher_handle.clone()),
+            (100..200).map(|id| id.to_string()).collect(),
         )
     };
 
-    let routine = |(system, orchestrator): (System, GetOrchestrator)| async move {
-        orchestrator
+    let routine = |(system, orchestrator, expected): (System, GetOrchestrator, Vec<String>)| async move {
+        let output = orchestrator
             .run(system)
             .await
             .expect("Orchestrator should not fail");
+        assert_eq!(
+            output
+                .records
+                .into_iter()
+                .map(|record| record.id)
+                .collect::<Vec<_>>(),
+            expected
+        );
     };
 
-    bench_run(&test_name, criterion, &runtime, setup, routine);
+    bench_run(
+        "test-trivial-get",
+        criterion,
+        &runtime,
+        trivial_get_setup,
+        routine,
+    );
+    bench_run(
+        "test-get-filter",
+        criterion,
+        &runtime,
+        get_filter_setup,
+        routine,
+    );
+    bench_run(
+        "test-get-filter-limit",
+        criterion,
+        &runtime,
+        get_filter_limit_setup,
+        routine,
+    );
+    bench_run(
+        "test-get-filter-limit-projection",
+        criterion,
+        &runtime,
+        get_filter_limit_projection_setup,
+        routine,
+    );
 }
 criterion_group!(benches, bench_get);
 criterion_main!(benches);
