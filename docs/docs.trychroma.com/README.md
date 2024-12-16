@@ -28,7 +28,7 @@ It also incldues [Shadcn](https://ui.shadcn.com/) with [Tailwind](https://tailwi
 - Dark/Light Mode
 - Responsive
 - Global and Local state management with localstorage persistence
-- Tabs
+- MarkdocTabs
 - Code styling with Prism
 - Toasts
 
