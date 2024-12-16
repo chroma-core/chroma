@@ -1,4 +1,4 @@
-//! Stop a single workload on the chroma-load server.
+//! Stop all workloads on the chroma-load server.
 //!
 //! If you are looking to stop traffic for a SEV, see chroma-load-inhibit.
 
