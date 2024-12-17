@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -166,6 +167,52 @@ func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckC
 
 		res.Deleted[i] = deleted
 	}
+	return res, nil
+}
+
+func (s *Server) GetCollectionWithSegments(ctx context.Context, req *coordinatorpb.GetCollectionWithSegmentsRequest) (*coordinatorpb.GetCollectionWithSegmentsResponse, error) {
+	collectionID := req.Id
+
+	res := &coordinatorpb.GetCollectionWithSegmentsResponse{}
+
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	if err != nil {
+		log.Error("GetCollectionWithSegments failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	collection, segments, err := s.coordinator.GetCollectionWithSegments(ctx, parsedCollectionID)
+	if err != nil {
+		log.Error("GetCollectionWithSegments failed. ", zap.Error(err), zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res.Collection = convertCollectionToProto(collection)
+	segmentpbList := make([]*coordinatorpb.Segment, 0, len(segments))
+	scopeToSegmentMap := map[coordinatorpb.SegmentScope]*coordinatorpb.Segment{}
+	for _, segment := range segments {
+		segmentpb := convertSegmentToProto(segment)
+		scopeToSegmentMap[segmentpb.GetScope()] = segmentpb
+		segmentpbList = append(segmentpbList, segmentpb)
+	}
+
+	if len(segmentpbList) != 3 {
+		log.Error("GetCollectionWithSegments failed. Unexpected number of collection segments", zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(fmt.Sprintf("Unexpected number of segments for collection %s: %d", collectionID, len(segmentpbList)))
+	}
+
+	scopes := []coordinatorpb.SegmentScope{coordinatorpb.SegmentScope_METADATA, coordinatorpb.SegmentScope_RECORD, coordinatorpb.SegmentScope_VECTOR}
+
+	for _, scope := range scopes {
+		if _, exists := scopeToSegmentMap[scope]; !exists {
+			log.Error("GetCollectionWithSegments failed. Collection segment scope not found", zap.String("collection_id", collectionID), zap.String("missing_scope", scope.String()))
+			return res, grpcutils.BuildInternalGrpcError(fmt.Sprintf("Missing segment scope for collection %s: %s", collectionID, scope.String()))
+		}
+	}
+
+	res.Segments = segmentpbList
+
+	log.Info("GetCollectionWithSegments succeeded", zap.String("request", req.String()), zap.String("response", res.String()))
 	return res, nil
 }
 
