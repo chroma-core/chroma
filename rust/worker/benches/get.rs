@@ -5,8 +5,9 @@ use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_config::Configurable;
 use criterion::{criterion_group, criterion_main, Criterion};
 use load::{
-    all_projection, always_true_filter_for_modulo_metadata, empty_fetch_log, offset_limit,
-    sift1m_segments, trivial_filter, trivial_limit, trivial_projection,
+    all_projection, always_false_filter_for_modulo_metadata,
+    always_true_filter_for_modulo_metadata, empty_fetch_log, offset_limit, sift1m_segments,
+    trivial_filter, trivial_limit, trivial_projection,
 };
 use worker::{
     config::RootConfig,
@@ -33,7 +34,25 @@ fn trivial_get(
     )
 }
 
-fn get_filter(
+fn get_false_filter(
+    test_segments: TestSegment,
+    dispatcher_handle: ComponentHandle<Dispatcher>,
+) -> GetOrchestrator {
+    let blockfile_provider = test_segments.blockfile_provider.clone();
+    let collection_uuid = test_segments.collection.collection_id;
+    GetOrchestrator::new(
+        blockfile_provider,
+        dispatcher_handle,
+        1000,
+        test_segments.into(),
+        empty_fetch_log(collection_uuid),
+        always_false_filter_for_modulo_metadata(),
+        trivial_limit(),
+        trivial_projection(),
+    )
+}
+
+fn get_true_filter(
     test_segments: TestSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
@@ -51,7 +70,7 @@ fn get_filter(
     )
 }
 
-fn get_filter_limit(
+fn get_true_filter_limit(
     test_segments: TestSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
@@ -69,7 +88,7 @@ fn get_filter_limit(
     )
 }
 
-fn get_filter_limit_projection(
+fn get_true_filter_limit_projection(
     test_segments: TestSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
@@ -123,24 +142,31 @@ fn bench_get(criterion: &mut Criterion) {
             (0..100).map(|id| id.to_string()).collect(),
         )
     };
-    let get_filter_setup = || {
+    let get_false_filter_setup = || {
         (
             system.clone(),
-            get_filter(test_segments.clone(), dispatcher_handle.clone()),
+            get_false_filter(test_segments.clone(), dispatcher_handle.clone()),
+            Vec::new(),
+        )
+    };
+    let get_true_filter_setup = || {
+        (
+            system.clone(),
+            get_true_filter(test_segments.clone(), dispatcher_handle.clone()),
             (0..100).map(|id| id.to_string()).collect(),
         )
     };
-    let get_filter_limit_setup = || {
+    let get_true_filter_limit_setup = || {
         (
             system.clone(),
-            get_filter_limit(test_segments.clone(), dispatcher_handle.clone()),
+            get_true_filter_limit(test_segments.clone(), dispatcher_handle.clone()),
             (100..200).map(|id| id.to_string()).collect(),
         )
     };
-    let get_filter_limit_projection_setup = || {
+    let get_true_filter_limit_projection_setup = || {
         (
             system.clone(),
-            get_filter_limit_projection(test_segments.clone(), dispatcher_handle.clone()),
+            get_true_filter_limit_projection(test_segments.clone(), dispatcher_handle.clone()),
             (100..200).map(|id| id.to_string()).collect(),
         )
     };
@@ -153,24 +179,31 @@ fn bench_get(criterion: &mut Criterion) {
         bench_routine,
     );
     bench_run(
-        "test-get-filter",
+        "test-get-false-filter",
         criterion,
         &runtime,
-        get_filter_setup,
+        get_false_filter_setup,
         bench_routine,
     );
     bench_run(
-        "test-get-filter-limit",
+        "test-get-true-filter",
         criterion,
         &runtime,
-        get_filter_limit_setup,
+        get_true_filter_setup,
         bench_routine,
     );
     bench_run(
-        "test-get-filter-limit-projection",
+        "test-get-true-filter-limit",
         criterion,
         &runtime,
-        get_filter_limit_projection_setup,
+        get_true_filter_limit_setup,
+        bench_routine,
+    );
+    bench_run(
+        "test-get-true-filter-limit-projection",
+        criterion,
+        &runtime,
+        get_true_filter_limit_projection_setup,
         bench_routine,
     );
 }

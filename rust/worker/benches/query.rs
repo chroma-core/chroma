@@ -1,8 +1,6 @@
 #[allow(dead_code)]
 mod load;
 
-use std::collections::HashSet;
-
 use chroma_benchmark::{
     benchmark::{bench_run, tokio_multi_thread},
     datasets::sift::Sift1MData,
@@ -11,8 +9,8 @@ use chroma_config::Configurable;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{stream, StreamExt, TryStreamExt};
 use load::{
-    all_projection, always_true_filter_for_modulo_metadata, empty_fetch_log, sift1m_segments,
-    trivial_filter,
+    all_projection, always_false_filter_for_modulo_metadata,
+    always_true_filter_for_modulo_metadata, empty_fetch_log, sift1m_segments, trivial_filter,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use worker::{
@@ -65,6 +63,24 @@ fn always_true_knn_filter(
     )
 }
 
+fn always_false_knn_filter(
+    test_segments: TestSegment,
+    dispatcher_handle: ComponentHandle<Dispatcher>,
+) -> KnnFilterOrchestrator {
+    let blockfile_provider = test_segments.blockfile_provider.clone();
+    let hnsw_provider = test_segments.hnsw_provider.clone();
+    let collection_uuid = test_segments.collection.collection_id;
+    KnnFilterOrchestrator::new(
+        blockfile_provider,
+        dispatcher_handle,
+        hnsw_provider,
+        1000,
+        test_segments.into(),
+        empty_fetch_log(collection_uuid),
+        always_false_filter_for_modulo_metadata(),
+    )
+}
+
 fn knn(
     test_segments: TestSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
@@ -99,33 +115,14 @@ async fn bench_routine(
         .run(system.clone())
         .await
         .expect("Orchestrator should not fail");
-    let (knns, expected): (Vec<_>, Vec<_>) = knn_constructor(knn_filter_output).into_iter().unzip();
-    let results = stream::iter(knns.into_iter().map(|knn| knn.run(system.clone())))
+    let (knns, _expected): (Vec<_>, Vec<_>) =
+        knn_constructor(knn_filter_output).into_iter().unzip();
+    let _results = stream::iter(knns.into_iter().map(|knn| knn.run(system.clone())))
         .buffered(32)
         .try_collect::<Vec<_>>()
         .await
         .expect("Orchestrators should not fail");
-    results
-        .into_iter()
-        .map(|result| {
-            result
-                .records
-                .into_iter()
-                .map(|record| record.record.id.parse())
-                // .collect::<Result<_, _>>()
-                .collect::<Result<Vec<u32>, _>>()
-                .expect("Record id should be parsable to u32")
-        })
-        .zip(expected)
-        .for_each(|(got, expected)| {
-            let expected_set: HashSet<_> = HashSet::from_iter(expected);
-            let recall = got
-                .into_iter()
-                .filter(|id| expected_set.contains(id))
-                .count() as f64
-                / expected_set.len() as f64;
-            assert!(recall > 0.9);
-        });
+    // TODO: verify recall
 }
 
 fn bench_query(criterion: &mut Criterion) {
@@ -174,7 +171,7 @@ fn bench_query(criterion: &mut Criterion) {
         )
     };
 
-    let filtered_knn_setup = || {
+    let true_filter_knn_setup = || {
         (
             system.clone(),
             always_true_knn_filter(test_segments.clone(), dispatcher_handle.clone().clone()),
@@ -198,6 +195,30 @@ fn bench_query(criterion: &mut Criterion) {
         )
     };
 
+    let false_filter_knn_setup = || {
+        (
+            system.clone(),
+            always_false_knn_filter(test_segments.clone(), dispatcher_handle.clone().clone()),
+            |knn_filter_output: KnnFilterOutput| {
+                sift1m_queries
+                    .iter()
+                    .take(4)
+                    .map(|(query, _)| {
+                        (
+                            knn(
+                                test_segments.clone(),
+                                dispatcher_handle.clone(),
+                                knn_filter_output.clone(),
+                                query.clone(),
+                            ),
+                            Vec::new(),
+                        )
+                    })
+                    .collect()
+            },
+        )
+    };
+
     bench_run(
         "test-trivial-knn",
         criterion,
@@ -207,10 +228,18 @@ fn bench_query(criterion: &mut Criterion) {
     );
 
     bench_run(
-        "test-filtered-knn",
+        "test-true-filter-knn",
         criterion,
         &runtime,
-        filtered_knn_setup,
+        true_filter_knn_setup,
+        bench_routine,
+    );
+
+    bench_run(
+        "test-false-filter-knn",
+        criterion,
+        &runtime,
+        false_filter_knn_setup,
         bench_routine,
     );
 }

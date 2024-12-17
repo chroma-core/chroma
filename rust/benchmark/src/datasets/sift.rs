@@ -20,7 +20,7 @@ pub struct Sift1MData {
 impl Sift1MData {
     pub async fn init() -> Result<Self> {
         let base = get_or_populate_cached_dataset_file(
-            "gist",
+            "sift1m",
             "base.fvecs",
             None,
             |mut writer| async move {
@@ -45,7 +45,7 @@ impl Sift1MData {
             },
         ).await?;
         let query = get_or_populate_cached_dataset_file(
-            "gist",
+            "sift1m",
             "query.fvecs",
             None,
             |mut writer| async move {
@@ -70,8 +70,8 @@ impl Sift1MData {
             },
         ).await?;
         let ground = get_or_populate_cached_dataset_file(
-            "gist",
-            "groundtruth.fvecs",
+            "sift1m",
+            "groundtruth.ivecs",
             None,
             |mut writer| async move {
                 let client = reqwest::Client::new();
@@ -134,43 +134,64 @@ impl Sift1MData {
             return Ok(Vec::new());
         }
 
-        let start = SeekFrom::Start(
-            (size_of::<u32>() + lower_bound * Self::dimension() * size_of::<f32>()) as u64,
-        );
+        let vector_size = size_of::<u32>() + Self::dimension() * size_of::<f32>();
+
+        let start = SeekFrom::Start((lower_bound * vector_size) as u64);
         self.base.seek(start).await?;
         let batch_size = upper_bound - lower_bound;
-        let mut base_bytes = vec![0; batch_size * Self::dimension() * size_of::<f32>()];
+        let mut base_bytes = vec![0; batch_size * vector_size];
         self.base.read_exact(&mut base_bytes).await?;
-        let embedding_f32s: Vec<_> = base_bytes
-            .chunks(size_of::<f32>())
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-            .collect();
-        Ok(embedding_f32s
-            .chunks(Self::dimension())
-            .map(|embedding| embedding.to_vec())
-            .collect())
+        read_raw_vec(&base_bytes, |bytes| {
+            Ok(f32::from_le_bytes(bytes.try_into()?))
+        })
     }
 
     pub async fn query(&mut self) -> Result<Vec<(Vec<f32>, Vec<u32>)>> {
         let mut query_bytes = Vec::new();
         self.query.read_to_end(&mut query_bytes).await?;
-        let (_, embeddings_bytes) = query_bytes.split_at(size_of::<u32>());
-        let embedding_f32s: Vec<_> = embeddings_bytes
-            .chunks(size_of::<f32>())
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-            .collect();
+        let queries = read_raw_vec(&query_bytes, |bytes| {
+            Ok(f32::from_le_bytes(bytes.try_into()?))
+        })?;
 
         let mut ground_bytes = Vec::new();
         self.ground.read_to_end(&mut ground_bytes).await?;
-        let (_, embeddings_bytes) = query_bytes.split_at(size_of::<u32>());
-        let ground_u32s: Vec<_> = embeddings_bytes
-            .chunks(size_of::<u32>())
-            .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
-            .collect();
-        Ok(embedding_f32s
-            .chunks(Self::dimension())
-            .zip(ground_u32s.chunks(Self::k()))
-            .map(|(embedding, ground)| (embedding.to_vec(), ground.to_vec()))
-            .collect())
+        let grounds = read_raw_vec(&ground_bytes, |bytes| {
+            Ok(u32::from_le_bytes(bytes.try_into()?))
+        })?;
+        if queries.len() != grounds.len() {
+            return Err(anyhow!(
+                "Queries and grounds count mismatch: {} != {}",
+                queries.len(),
+                grounds.len()
+            ));
+        }
+        Ok(queries.into_iter().zip(grounds).collect())
     }
+}
+
+fn read_raw_vec<T>(
+    raw_bytes: &[u8],
+    convert_from_bytes: impl Fn(&[u8]) -> Result<T>,
+) -> Result<Vec<Vec<T>>> {
+    let mut result = Vec::new();
+    let mut bytes = raw_bytes;
+    while !bytes.is_empty() {
+        let (dimension_bytes, rem_bytes) = bytes.split_at(size_of::<u32>());
+        let dimension = u32::from_le_bytes(dimension_bytes.try_into()?);
+        let (embedding_bytes, rem_bytes) = rem_bytes.split_at(dimension as usize * size_of::<T>());
+        let embedding = embedding_bytes
+            .chunks(size_of::<T>())
+            .map(&convert_from_bytes)
+            .collect::<Result<Vec<T>>>()?;
+        if embedding.len() != dimension as usize {
+            return Err(anyhow!(
+                "Embedding dimension mismatch: {} != {}",
+                embedding.len(),
+                dimension
+            ));
+        }
+        result.push(embedding);
+        bytes = rem_bytes;
+    }
+    Ok(result)
 }

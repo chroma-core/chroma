@@ -73,6 +73,28 @@ pub fn trivial_filter() -> FilterOperator {
     }
 }
 
+pub fn always_false_filter_for_modulo_metadata() -> FilterOperator {
+    FilterOperator {
+        query_ids: None,
+        where_clause: Some(Where::disjunction(vec![
+            Where::DirectWhereComparison(DirectWhereComparison {
+                key: "is_even".to_string(),
+                comparison: WhereComparison::Set(
+                    SetOperator::NotIn,
+                    MetadataSetValue::Bool(vec![false, true]),
+                ),
+            }),
+            Where::DirectWhereComparison(DirectWhereComparison {
+                key: "modulo_3".to_string(),
+                comparison: WhereComparison::Set(
+                    SetOperator::NotIn,
+                    MetadataSetValue::Int(vec![0, 1, 2]),
+                ),
+            }),
+        ])),
+    }
+}
+
 pub fn always_true_filter_for_modulo_metadata() -> FilterOperator {
     FilterOperator {
         query_ids: None,
