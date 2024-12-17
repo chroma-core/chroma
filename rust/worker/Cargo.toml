@@ -85,5 +85,9 @@ name = "limit"
 harness = false
 
 [[bench]]
+name = "query"
+harness = false
+
+[[bench]]
 name = "spann"
 harness = false

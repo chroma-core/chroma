@@ -1,10 +1,11 @@
+#[allow(dead_code)]
 mod load;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_config::Configurable;
 use criterion::{criterion_group, criterion_main, Criterion};
 use load::{
-    all_projection, always_true_where_for_modulo_metadata, empty_fetch_log, offset_limit,
+    all_projection, always_true_filter_for_modulo_metadata, empty_fetch_log, offset_limit,
     sift1m_segments, trivial_filter, trivial_limit, trivial_projection,
 };
 use worker::{
@@ -23,7 +24,7 @@ fn trivial_get(
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
-        100,
+        1000,
         test_segments.into(),
         empty_fetch_log(collection_uuid),
         trivial_filter(),
@@ -41,10 +42,10 @@ fn get_filter(
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
-        100,
+        1000,
         test_segments.into(),
         empty_fetch_log(collection_uuid),
-        always_true_where_for_modulo_metadata(),
+        always_true_filter_for_modulo_metadata(),
         trivial_limit(),
         trivial_projection(),
     )
@@ -59,10 +60,10 @@ fn get_filter_limit(
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
-        100,
+        1000,
         test_segments.into(),
         empty_fetch_log(collection_uuid),
-        always_true_where_for_modulo_metadata(),
+        always_true_filter_for_modulo_metadata(),
         offset_limit(),
         trivial_projection(),
     )
@@ -77,13 +78,29 @@ fn get_filter_limit_projection(
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
-        100,
+        1000,
         test_segments.into(),
         empty_fetch_log(collection_uuid),
-        always_true_where_for_modulo_metadata(),
+        always_true_filter_for_modulo_metadata(),
         offset_limit(),
         all_projection(),
     )
+}
+
+async fn bench_routine(input: (System, GetOrchestrator, Vec<String>)) {
+    let (system, orchestrator, expected_ids) = input;
+    let output = orchestrator
+        .run(system)
+        .await
+        .expect("Orchestrator should not fail");
+    assert_eq!(
+        output
+            .records
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        expected_ids
+    );
 }
 
 fn bench_get(criterion: &mut Criterion) {
@@ -128,48 +145,33 @@ fn bench_get(criterion: &mut Criterion) {
         )
     };
 
-    let routine = |(system, orchestrator, expected): (System, GetOrchestrator, Vec<String>)| async move {
-        let output = orchestrator
-            .run(system)
-            .await
-            .expect("Orchestrator should not fail");
-        assert_eq!(
-            output
-                .records
-                .into_iter()
-                .map(|record| record.id)
-                .collect::<Vec<_>>(),
-            expected
-        );
-    };
-
     bench_run(
         "test-trivial-get",
         criterion,
         &runtime,
         trivial_get_setup,
-        routine,
+        bench_routine,
     );
     bench_run(
         "test-get-filter",
         criterion,
         &runtime,
         get_filter_setup,
-        routine,
+        bench_routine,
     );
     bench_run(
         "test-get-filter-limit",
         criterion,
         &runtime,
         get_filter_limit_setup,
-        routine,
+        bench_routine,
     );
     bench_run(
         "test-get-filter-limit-projection",
         criterion,
         &runtime,
         get_filter_limit_projection_setup,
-        routine,
+        bench_routine,
     );
 }
 criterion_group!(benches, bench_get);

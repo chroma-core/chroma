@@ -73,7 +73,7 @@ pub fn trivial_filter() -> FilterOperator {
     }
 }
 
-pub fn always_true_where_for_modulo_metadata() -> FilterOperator {
+pub fn always_true_filter_for_modulo_metadata() -> FilterOperator {
     FilterOperator {
         query_ids: None,
         where_clause: Some(Where::conjunction(vec![

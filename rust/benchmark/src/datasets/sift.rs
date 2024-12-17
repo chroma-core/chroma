@@ -151,7 +151,7 @@ impl Sift1MData {
             .collect())
     }
 
-    pub async fn query(&mut self) -> Result<Vec<(Vec<f32>, Vec<usize>)>> {
+    pub async fn query(&mut self) -> Result<Vec<(Vec<f32>, Vec<u32>)>> {
         let mut query_bytes = Vec::new();
         self.query.read_to_end(&mut query_bytes).await?;
         let (_, embeddings_bytes) = query_bytes.split_at(size_of::<u32>());
@@ -165,7 +165,7 @@ impl Sift1MData {
         let (_, embeddings_bytes) = query_bytes.split_at(size_of::<u32>());
         let ground_u32s: Vec<_> = embeddings_bytes
             .chunks(size_of::<u32>())
-            .map(|c| u32::from_le_bytes(c.try_into().unwrap()) as usize)
+            .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
             .collect();
         Ok(embedding_f32s
             .chunks(Self::dimension())
