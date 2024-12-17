@@ -15,7 +15,20 @@ runs:
         cache: "pip"
         cache-dependency-path: "requirements*.txt"
     - name: Install test dependencies
-      run: python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+      run: |
+        python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+        python -m pip install grpcio==1.58.0 grpcio-tools==1.58.0
+      shell: bash
+    - name: Install protobuf compiler (protoc)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget unzip
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
+        sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+        sudo rm protoc-28.2-linux-x86_64.zip
+      shell: bash
+    - name: Generate Proto Files
+      run: make -C idl proto_python
       shell: bash
     - name: Upgrade SQLite
       run: python bin/windows_upgrade_sqlite.py
