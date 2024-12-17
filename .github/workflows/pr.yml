@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@v4
       - uses: ./.github/actions/python
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Setup Rust
         uses: ./.github/actions/rust
       - name: Run pre-commit
