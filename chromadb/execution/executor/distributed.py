@@ -57,11 +57,6 @@ class DistributedExecutor(Executor):
         try:
             count_result = executor.Count(convert.to_proto_count_plan(plan))
         except grpc.RpcError as rpc_error:
-            if (
-                rpc_error.code() == grpc.StatusCode.INTERNAL
-                and "version mismatch" in rpc_error.details()
-            ):
-                raise VersionMismatchError()
             raise rpc_error
         return convert.from_proto_count_result(count_result)
 
@@ -71,11 +66,6 @@ class DistributedExecutor(Executor):
         try:
             get_result = executor.Get(convert.to_proto_get_plan(plan))
         except grpc.RpcError as rpc_error:
-            if (
-                rpc_error.code() == grpc.StatusCode.INTERNAL
-                and "version mismatch" in rpc_error.details()
-            ):
-                raise VersionMismatchError()
             raise rpc_error
         records = convert.from_proto_get_result(get_result)
 
@@ -118,11 +108,6 @@ class DistributedExecutor(Executor):
         try:
             knn_result = executor.KNN(convert.to_proto_knn_plan(plan))
         except grpc.RpcError as rpc_error:
-            if (
-                rpc_error.code() == grpc.StatusCode.INTERNAL
-                and "version mismatch" in rpc_error.details()
-            ):
-                raise VersionMismatchError()
             raise rpc_error
         results = convert.from_proto_knn_batch_result(knn_result)
 
