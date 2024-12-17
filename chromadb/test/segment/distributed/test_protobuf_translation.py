@@ -28,6 +28,7 @@ def unstarted_grpc_metadata_segment() -> GrpcMetadataSegment:
         metadata={
             "grpc_url": "test",
         },
+        file_paths={},
     )
     grpc_metadata_segment = GrpcMetadataSegment(
         system=system,
