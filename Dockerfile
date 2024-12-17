@@ -1,16 +1,25 @@
 FROM python:3.11-slim-bookworm AS builder
 ARG REBUILD_HNSWLIB
+ARG PROTOBUF_VERSION=28.2
 RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     build-essential \
     gcc \
     g++ \
     cmake \
     autoconf \
-    protobuf-compiler \
     python3-dev \
+    unzip \
+    curl \
     make && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir /install
+
+# Install specific Protobuf compiler (v28.2)
+RUN curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protoc-${PROTOBUF_VERSION}-linux-x86_64.zip && \
+    unzip protoc-${PROTOBUF_VERSION}-linux-x86_64.zip -d /usr/local/ && \
+    rm protoc-${PROTOBUF_VERSION}-linux-x86_64.zip && \
+    chmod +x /usr/local/bin/protoc && \
+    protoc --version  # Verify installed version
 
 WORKDIR /install
 
@@ -19,8 +28,8 @@ COPY ./requirements.txt requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade --prefix="/install" -r requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip if [ "$REBUILD_HNSWLIB" = "true" ]; then pip install --no-binary :all: --force-reinstall --prefix="/install" chroma-hnswlib; fi
 
-# Install gRPC tools for Python
-RUN pip install grpcio grpcio-tools
+# Install gRPC tools for Python with fixed version
+RUN pip install grpcio==1.58.0 grpcio-tools==1.58.0
 
 # Copy source files to build Protobufs
 COPY ./ /chroma
