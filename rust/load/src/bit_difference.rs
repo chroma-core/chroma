@@ -32,7 +32,7 @@ use guacamole::{FromGuacamole, Guacamole, Zipf};
 use siphasher::sip::SipHasher24;
 use tracing::Instrument;
 
-use crate::words::WORDS;
+use crate::words::MANY_WORDS;
 use crate::{DataSet, GetQuery, KeySelector, QueryQuery, Skew, UpsertQuery};
 
 const EMBEDDING_BYTES: usize = 128;
@@ -101,7 +101,7 @@ impl Document {
     pub fn embedding(&self) -> Vec<f32> {
         let mut result = vec![];
         let words = self.content.split_whitespace().collect::<Vec<_>>();
-        for word in WORDS.iter() {
+        for word in MANY_WORDS.iter() {
             if words.contains(word) {
                 result.push(1.0);
             } else {
@@ -114,7 +114,7 @@ impl Document {
 
 impl From<[u8; EMBEDDING_BYTES]> for Document {
     fn from(embedding: [u8; EMBEDDING_BYTES]) -> Document {
-        let document = WORDS
+        let document = MANY_WORDS
             .iter()
             .enumerate()
             .filter_map(|(idx, word)| {
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn constants() {
-        assert_eq!(EMBEDDING_SIZE, WORDS.len());
+        assert_eq!(EMBEDDING_SIZE, MANY_WORDS.len());
     }
 
     mod synthethic {
