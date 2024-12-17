@@ -189,7 +189,7 @@ describe("add collections", () => {
     try {
       await collection.add({ ids, embeddings, metadatas });
     } catch (e: any) {
-      expect(e.message).toMatch("got empty embedding at pos");
+      expect(e.message).toMatch("with no values at pos");
     }
   });
 
