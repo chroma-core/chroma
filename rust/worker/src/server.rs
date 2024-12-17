@@ -9,7 +9,7 @@ use chroma_types::{
         self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
         KnnBatchResult, KnnPlan,
     },
-    CollectionUuid, Segment, SegmentUuid,
+    CollectionUuid, SegmentUuid,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -191,12 +191,7 @@ impl WorkerServer {
 
         let count_orchestrator = CountQueryOrchestrator::new(
             self.clone_system()?,
-            &Segment::try_from(
-                scan.metadata
-                    .ok_or(Status::invalid_argument("Invalid metadata segment"))?,
-            )?
-            .id
-            .0,
+            &SegmentUuid::from_str(&scan.metadata.map(|seg| seg.id).unwrap_or(scan.metadata_id))?.0,
             &CollectionUuid::from_str(&collection.id)
                 .map_err(|e| Status::invalid_argument(e.to_string()))?,
             self.log.clone(),
