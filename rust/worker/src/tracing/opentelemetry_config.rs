@@ -129,7 +129,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // global filter layer. Don't filter anything at above trace at the global layer for chroma.
     // And enable errors for every other library.
     let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,".to_string()
+        "info,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -149,7 +149,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
                 "worker",
             ]
             .into_iter()
-            .map(|s| s.to_string() + "=trace")
+            .map(|s| s.to_string() + "=debug")
             .collect::<Vec<String>>()
             .join(",")
     }));
