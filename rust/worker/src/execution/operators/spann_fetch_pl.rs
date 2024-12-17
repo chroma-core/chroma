@@ -22,7 +22,7 @@ pub(crate) struct SpannFetchPlOutput {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum SpannFetchPlError {
+pub enum SpannFetchPlError {
     #[error("Error creating spann segment reader")]
     SpannSegmentReaderCreationError,
     #[error("Error querying reader")]

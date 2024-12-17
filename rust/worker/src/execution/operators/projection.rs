@@ -184,12 +184,11 @@ mod tests {
     /// - Compacted: Upsert [1..=100]
     async fn setup_projection_input(offset_ids: Vec<u32>) -> ProjectionInput {
         let mut test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
-        test_segment.populate_with_generator(100, &generator).await;
+        test_segment
+            .populate_with_generator(100, upsert_generator)
+            .await;
         ProjectionInput {
-            logs: generator.generate_chunk(81..=120),
+            logs: upsert_generator.generate_chunk(81..=120),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             offset_ids,

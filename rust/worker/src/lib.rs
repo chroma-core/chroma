@@ -1,10 +1,8 @@
 mod assignment;
 mod compactor;
-mod config;
 mod memberlist;
 mod server;
 mod sysdb;
-mod system;
 mod tracing;
 mod utils;
 
@@ -15,9 +13,11 @@ use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
 // Required for benchmark
+pub mod config;
 pub mod execution;
 pub mod log;
 pub mod segment;
+pub mod system;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 

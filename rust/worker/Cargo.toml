@@ -61,13 +61,14 @@ chroma-distance = { workspace = true }
 random-port = "0.1.1"
 serial_test = "3.2.0"
 
+criterion = { workspace = true }
+indicatif = { workspace = true }
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+shuttle = { workspace = true }
 rand = { workspace = true }
 rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
-shuttle = { workspace = true }
-proptest = { workspace = true }
-proptest-state-machine = { workspace = true }
-criterion = { workspace = true }
 
 chroma-benchmark = { workspace = true }
 
@@ -76,7 +77,15 @@ name = "filter"
 harness = false
 
 [[bench]]
+name = "get"
+harness = false
+
+[[bench]]
 name = "limit"
+harness = false
+
+[[bench]]
+name = "query"
 harness = false
 
 [[bench]]

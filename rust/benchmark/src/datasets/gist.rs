@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::Ok;
+use anyhow::Result;
 use tokio::io::{AsyncReadExt, BufReader};
 
 use super::{
@@ -20,7 +20,7 @@ impl RecordDataset for GistDataset {
     const DISPLAY_NAME: &'static str = "Gist";
     const NAME: &'static str = "gist";
 
-    async fn init() -> anyhow::Result<Self> {
+    async fn init() -> Result<Self> {
         // TODO(Sanket): Download file if it doesn't exist.
         // move file from downloads to cached path.
         let current_path = "/Users/sanketkedia/Downloads/siftsmall/siftsmall_base.fvecs";

@@ -51,7 +51,7 @@ use tracing::{trace_span, Instrument, Span};
   coarser work-stealing, and other optimizations.
 */
 #[derive(Debug)]
-pub(crate) struct Dispatcher {
+pub struct Dispatcher {
     task_queue: Vec<TaskMessage>,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,

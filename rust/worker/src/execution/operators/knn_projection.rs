@@ -145,12 +145,11 @@ mod tests {
         record_distances: Vec<RecordDistance>,
     ) -> KnnProjectionInput {
         let mut test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
-        test_segment.populate_with_generator(100, &generator).await;
+        test_segment
+            .populate_with_generator(100, upsert_generator)
+            .await;
         KnnProjectionInput {
-            logs: generator.generate_chunk(81..=120),
+            logs: upsert_generator.generate_chunk(81..=120),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             record_distances,
