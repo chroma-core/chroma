@@ -11,9 +11,10 @@ use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{
     Chunk, DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid,
 };
-use std::cmp::Ordering;
+use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
+use std::ops::RangeBounds;
 use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
@@ -831,50 +832,19 @@ impl RecordSegmentReader<'_> {
     /// embedding id
     #[allow(dead_code)]
     pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
-        let mut data = Vec::new();
-        let max_size = self.user_id_to_id.count().await?;
-        for i in 0..max_size {
-            let res = self.user_id_to_id.get_at_index(i).await;
-            match res {
-                Ok((_, _, offset_id)) => {
-                    if let Some(data_record) = self.id_to_data.get("", offset_id).await? {
-                        data.push(data_record);
-                    } else {
-                        return Err(
-                            Box::new(RecordSegmentReaderCreationError::DataRecordNotFound(
-                                offset_id,
-                            )) as _,
-                        );
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "[GetAllData] Error getting data record for index {:?}: {:?}",
-                        i,
-                        e
-                    );
-                    return Err(e);
-                }
-            }
-        }
-        Ok(data)
+        self.id_to_data
+            .get_range(.., ..)
+            .await
+            .map(|vec| vec.into_iter().map(|(_, data)| data).collect())
     }
 
-    pub(crate) async fn get_offset_id_at_index(
-        &self,
-        index: usize,
-    ) -> Result<u32, Box<dyn ChromaError>> {
-        match self.id_to_user_id.get_at_index(index).await {
-            Ok((_, oid, _)) => Ok(oid),
-            Err(e) => {
-                tracing::error!(
-                    "[GetAllData] Error getting offset id for index {}: {}",
-                    index,
-                    e
-                );
-                Err(e)
-            }
-        }
+    pub(crate) fn get_offset_stream<'me>(
+        &'me self,
+        offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
+    ) -> impl Stream<Item = Result<u32, Box<dyn ChromaError>>> + 'me {
+        self.id_to_user_id
+            .get_range_stream(.., offset_range)
+            .map(|res| res.map(|(offset_id, _)| offset_id))
     }
 
     // Find the rank of the given offset id in the record segment
@@ -883,27 +853,7 @@ impl RecordSegmentReader<'_> {
         &self,
         target_oid: u32,
     ) -> Result<usize, Box<dyn ChromaError>> {
-        let mut size = self.count().await?;
-        if size == 0 {
-            return Ok(0);
-        }
-        let mut base = 0;
-        while size > 1 {
-            let half = size / 2;
-            let mid = base + half;
-
-            let cmp = self.get_offset_id_at_index(mid).await?.cmp(&target_oid);
-            base = if cmp == Ordering::Greater { base } else { mid };
-            size -= half;
-        }
-
-        Ok(
-            match self.get_offset_id_at_index(base).await?.cmp(&target_oid) {
-                Ordering::Equal => base,
-                Ordering::Less => base + 1,
-                Ordering::Greater => base,
-            },
-        )
+        self.id_to_user_id.rank("", target_oid).await
     }
 
     pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {

@@ -146,6 +146,10 @@ impl<
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.storage.id
     }
+
+    pub(crate) fn rank(&'storage self, prefix: &'storage str, key: K) -> usize {
+        V::rank(prefix, key.into(), &self.storage)
+    }
 }
 
 #[cfg(test)]
@@ -883,6 +887,29 @@ mod tests {
             assert_eq!(prefix, "prefix");
             assert_eq!(key, expected_key.as_str());
             assert_eq!(value, expected_value.as_str());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rank() {
+        let storage_manager = StorageManager::new();
+        let writer = MemoryBlockfileWriter::new(storage_manager.clone());
+        let id = writer.id;
+
+        let n = 2000;
+        for i in 0..n {
+            let key = format!("key{:04}", i);
+            let value = format!("value{:04}", i);
+            let _ = writer.set("prefix", key.as_str(), value.to_string());
+        }
+        let _ = writer.commit();
+
+        let reader: MemoryBlockfileReader<&str, &str> =
+            MemoryBlockfileReader::open(id, storage_manager.clone());
+        for i in 0..n {
+            let rank_key = format!("key{:04}", i);
+            let rank = MemoryBlockfileReader::<&str, &str>::rank(&reader, "prefix", &rank_key);
+            assert_eq!(rank, i);
         }
     }
 }

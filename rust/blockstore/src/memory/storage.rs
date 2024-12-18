@@ -37,6 +37,8 @@ pub trait Readable<'referred_data>: Sized {
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize;
 }
 
 impl Writeable for String {
@@ -125,6 +127,18 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .string_value_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -216,6 +230,18 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data [u32] {
             })
             .is_some()
     }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .uint32_array_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
+    }
 }
 
 impl Writeable for RoaringBitmap {
@@ -301,6 +327,18 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             })
             .is_some()
     }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .roaring_bitmap_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
+    }
 }
 
 impl Writeable for f32 {
@@ -377,6 +415,18 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             })
             .is_some()
     }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .f32_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
+    }
 }
 
 impl Writeable for u32 {
@@ -452,6 +502,18 @@ impl<'referred_data> Readable<'referred_data> for u32 {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .u32_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -532,6 +594,18 @@ impl<'referred_data> Readable<'referred_data> for bool {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .bool_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -678,6 +752,18 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
             })
             .is_some()
     }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .data_record_id_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
+    }
 }
 
 impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_data> {
@@ -709,6 +795,10 @@ impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_dat
     }
 
     fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        todo!()
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
         todo!()
     }
 }
