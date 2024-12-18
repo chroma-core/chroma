@@ -22,9 +22,7 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                 skew: Skew::Zipf { theta: 0.999 },
                 limit: Distribution::Constant(10),
                 metadata: None,
-                document: Some(WhereMixin::Constant(
-                    serde_json::json!({"$contains": "the"}),
-                )),
+                document: Some(WhereMixin::FullTextSearch(Skew::Zipf { theta: 0.99 })),
             }),
         ),
         (
@@ -56,9 +54,7 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                         skew: Skew::Zipf { theta: 0.999 },
                         limit: Distribution::Constant(10),
                         metadata: None,
-                        document: Some(WhereMixin::Constant(
-                            serde_json::json!({"$contains": "the"}),
-                        )),
+                        document: Some(WhereMixin::FullTextSearch(Skew::Zipf { theta: 0.99 })),
                     }),
                 ),
                 (
@@ -83,9 +79,7 @@ pub fn all_workloads() -> HashMap<String, Workload> {
                         skew: Skew::Zipf { theta: 0.999 },
                         limit: Distribution::Constant(10),
                         metadata: None,
-                        document: Some(WhereMixin::Constant(
-                            serde_json::json!({"$contains": "the"}),
-                        )),
+                        document: Some(WhereMixin::FullTextSearch(Skew::Zipf { theta: 0.99 })),
                     }),
                 ),
                 (

@@ -306,6 +306,9 @@ pub enum WhereMixin {
     /// A raw metadata query simply copies the provided filter spec.
     #[serde(rename = "query")]
     Constant(serde_json::Value),
+    /// Search for a word from the provided set of words with skew.
+    #[serde(rename = "fts")]
+    FullTextSearch(Skew),
     /// The tiny stories workload.  The way these collections were setup, there are three fields
     /// each of integer, float, and string.  The integer fields are named i1, i2, and i3.  The
     /// float fields are named f1, f2, and f3.  The string fields are named s1, s2, and s3.
@@ -325,6 +328,17 @@ impl WhereMixin {
     pub fn to_json(&self, guac: &mut Guacamole) -> serde_json::Value {
         match self {
             Self::Constant(query) => query.clone(),
+            Self::FullTextSearch(skew) => {
+                const WORDS: &[&str] = words::FEW_WORDS;
+                let word = match skew {
+                    Skew::Uniform => WORDS[uniform(0, WORDS.len() as u64)(guac) as usize],
+                    Skew::Zipf { theta } => {
+                        let z = Zipf::from_alpha(WORDS.len() as u64, *theta);
+                        WORDS[z.next(guac) as usize]
+                    }
+                };
+                serde_json::json!({"$contains": word.to_string()})
+            }
             Self::TinyStories(mixin) => mixin.to_json(guac),
             Self::Select(select) => {
                 let scale: f64 = any(guac);
