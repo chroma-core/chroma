@@ -833,7 +833,7 @@ impl RecordSegmentReader<'_> {
     #[allow(dead_code)]
     pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
         self.id_to_data
-            .get_range(.., ..)
+            .get_range(""..="", ..)
             .await
             .map(|vec| vec.into_iter().map(|(_, data)| data).collect())
     }
@@ -843,7 +843,7 @@ impl RecordSegmentReader<'_> {
         offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
     ) -> impl Stream<Item = Result<u32, Box<dyn ChromaError>>> + 'me {
         self.id_to_user_id
-            .get_range_stream(.., offset_range)
+            .get_range_stream(""..="", offset_range)
             .map(|res| res.map(|(offset_id, _)| offset_id))
     }
 
