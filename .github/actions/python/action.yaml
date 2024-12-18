@@ -8,16 +8,37 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Set up Python 3.9 for protos
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.9"
+        cache: "pip"
+        cache-dependency-path: "requirements*.txt"
+    - name: Install proto dependencies
+      run: |
+        python -m pip install grpcio==1.58.0 grpcio-tools==1.58.0
+      shell: bash
+    - name: Generate Proto Files
+      if: runner.os != 'Windows'
+      run: make -C idl proto_python
+      shell: bash
+    - name: Generate Proto Files (Windows)
+      if: runner.os == 'Windows'
+      run: cd idl && make proto_python
+      shell: cmd
+    - name: Uninstall proto dependencies
+      run: |
+        python -m pip uninstall -y grpcio grpcio-tools
+      shell: bash
     - name: Set up Python ${{ inputs.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
         cache: "pip"
         cache-dependency-path: "requirements*.txt"
-    - name: Install test dependencies
+    - name: Install dependencies
       run: |
         python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
-        python -m pip install grpcio==1.58.0 grpcio-tools==1.58.0
       shell: bash
     - name: Install protobuf compiler (protoc) - Linux
       if: runner.os != 'Windows'
@@ -36,14 +57,6 @@ runs:
         echo "C:\protoc\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         Remove-Item protoc.zip
       shell: pwsh
-    - name: Generate Proto Files
-      if: runner.os != 'Windows'
-      run: make -C idl proto_python
-      shell: bash
-    - name: Generate Proto Files (Windows)
-      if: runner.os == 'Windows'
-      run: cd idl && make proto_python
-      shell: cmd
     - name: Upgrade SQLite
       run: python bin/windows_upgrade_sqlite.py
       shell: bash
