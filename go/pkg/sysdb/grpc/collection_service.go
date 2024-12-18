@@ -211,8 +211,6 @@ func (s *Server) GetCollectionWithSegments(ctx context.Context, req *coordinator
 	}
 
 	res.Segments = segmentpbList
-
-	log.Info("GetCollectionWithSegments succeeded", zap.String("request", req.String()), zap.String("response", res.String()))
 	return res, nil
 }
 
