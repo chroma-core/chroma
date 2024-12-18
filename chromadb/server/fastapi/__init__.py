@@ -1586,17 +1586,19 @@ class FastAPI(Server):
         if maybe_database:
             database = maybe_database
 
-        api_collection_model = cast(
-            CollectionModel,
-            await to_thread.run_sync(
-                self._api.get_collection,
-                collection_name,
-                tenant,
-                database,
-                limiter=self._capacity_limiter,
-            ),
-        )
-        return api_collection_model
+        async def inner():
+            api_collection_model = cast(
+                CollectionModel,
+                await to_thread.run_sync(
+                    self._api.get_collection,
+                    collection_name,
+                    tenant,
+                    database,
+                    limiter=self._capacity_limiter,
+                ),
+            )
+            return api_collection_model
+        return await inner()
 
     @trace_method("FastAPI.update_collection_v1", OpenTelemetryGranularity.OPERATION)
     async def update_collection_v1(
