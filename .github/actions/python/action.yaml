@@ -30,10 +30,10 @@ runs:
       run: |
         python -m pip uninstall -y grpcio grpcio-tools
       shell: bash
-    - name: Set up Python ${{ inputs.python-version }}
+    - name: Set up Python 3.12 to test this in pre-merge
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ inputs.python-version }}
+        python-version: "3.12"
         cache: "pip"
         cache-dependency-path: "requirements*.txt"
     - name: Install dependencies
