@@ -145,30 +145,35 @@ impl<'me> SeekScanner<'me> {
         let starting_offset = self.seek_starting_offset(skip).await?;
         let mut log_index = self.log_offset_ids.rank(starting_offset)
             - self.log_offset_ids.contains(starting_offset) as u64;
-        let mut record_stream = self.record_segment.get_offset_stream(starting_offset..);
+        let mut log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
+        let mut record_offset_stream = self.record_segment.get_offset_stream(starting_offset..);
+        let mut record_offset_id = record_offset_stream.next().await.transpose()?;
         let mut merged_result = Vec::new();
 
         while fetch > 0 {
-            let log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
-            let record_offset_id = record_stream.next().await.transpose()?;
             match (log_offset_id, record_offset_id) {
                 (_, Some(oid)) if self.mask.contains(oid) => {
+                    record_offset_id = record_offset_stream.next().await.transpose()?;
                     continue;
                 }
                 (Some(log_oid), Some(record_oid)) => {
                     if log_oid < record_oid {
                         merged_result.push(log_oid);
                         log_index += 1;
+                        log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
                     } else {
                         merged_result.push(record_oid);
+                        record_offset_id = record_offset_stream.next().await.transpose()?;
                     }
                 }
                 (None, Some(oid)) => {
                     merged_result.push(oid);
+                    record_offset_id = record_offset_stream.next().await.transpose()?;
                 }
                 (Some(oid), None) => {
                     merged_result.push(oid);
                     log_index += 1;
+                    log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
                 }
                 _ => break,
             };
