@@ -1,4 +1,4 @@
-# cleanup old pages
+# cleanup old pages-old
 rm pages/reference/js-client.md
 rm pages/reference/js-collection.md
 
