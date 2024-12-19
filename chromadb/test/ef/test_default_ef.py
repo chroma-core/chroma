@@ -41,6 +41,9 @@ def test_unavailable_provider_multiple(providers: List[str]) -> None:
         ),
         min_size=1,
         unique_by=unique_by,
+        suppress_health_check=[
+            hypothesis.HealthCheck.filter_too_much
+        ],
     )
 )
 def test_available_provider(providers: List[str]) -> None:
