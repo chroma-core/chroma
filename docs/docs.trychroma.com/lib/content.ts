@@ -1,4 +1,4 @@
-import { LucideIcon } from "lucide-react";
+import { ForwardRefExoticComponent, RefAttributes } from "react";
 
 export interface AppPage {
   id: string;
@@ -11,7 +11,9 @@ export interface AppSection {
   id: string;
   name: string;
   default?: string;
-  icon?: LucideIcon;
+  icon?: ForwardRefExoticComponent<
+    { className?: string } & RefAttributes<SVGSVGElement>
+  >;
   pages?: AppPage[];
   generatePages?: boolean;
   subsections?: AppSection[];
