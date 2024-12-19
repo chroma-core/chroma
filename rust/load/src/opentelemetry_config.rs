@@ -132,32 +132,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
             .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
     // global filter layer. Don't filter anything at above trace at the global layer for chroma.
     // And enable errors for every other library.
-    let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "info,".to_string()
-            + &vec![
-                "chroma",
-                "chroma-blockstore",
-                "chroma-config",
-                "chroma-cache",
-                "chroma-distance",
-                "chroma-error",
-                "chroma-index",
-                "chroma-load",
-                "chroma-storage",
-                "chroma-test",
-                "chroma-types",
-                "compaction_service",
-                "distance_metrics",
-                "full_text",
-                "metadata_filtering",
-                "query_service",
-                "worker",
-            ]
-            .into_iter()
-            .map(|s| s.to_string() + "=trace")
-            .collect::<Vec<String>>()
-            .join(",")
-    }));
+    let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or("error".to_string()));
 
     // Create subscriber.
     let subscriber = tracing_subscriber::registry()
