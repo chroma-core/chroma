@@ -97,7 +97,7 @@ class LocalSegmentManager(SegmentManager):
                 // PersistentLocalHnswSegment.get_file_handle_count()
             )
             self._vector_instances_file_handle_cache = LRUCache(
-                segment_limit, callback=lambda _, v: v.close_persistent_index()
+                segment_limit, callback=lambda _, v: v.stop()
             )
 
     @trace_method(
@@ -156,6 +156,7 @@ class LocalSegmentManager(SegmentManager):
     def delete_segments(self, segments: Sequence[Segment]) -> Sequence[UUID]:
         for segment in segments:
             collection_id = segment["collection"]
+            self._vector_instances_file_handle_cache.evict(collection_id)
             if segment["id"] in self._instances:
                 if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
                     instance = self.get_segment(collection_id, VectorReader)
