@@ -158,6 +158,7 @@ class LocalSegmentManager(SegmentManager):
         for segment in segments:
             if segment["id"] in self._instances:
                 if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                    self._vector_instances_file_handle_cache.evict(collection_id)
                     instance = self.get_segment(collection_id, VectorReader)
                     instance.delete()
                 elif segment["type"] == SegmentType.SQLITE.value:
