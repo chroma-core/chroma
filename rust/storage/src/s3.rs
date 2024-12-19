@@ -339,6 +339,10 @@ impl S3Storage {
         }
     }
 
+    pub(super) fn is_oneshot_upload(&self, total_size_bytes: usize) -> bool {
+        total_size_bytes < self.upload_part_size_bytes
+    }
+
     pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
@@ -382,7 +386,7 @@ impl S3Storage {
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
     ) -> Result<(), S3PutError> {
-        if total_size_bytes < self.upload_part_size_bytes {
+        if self.is_oneshot_upload(total_size_bytes) {
             return self
                 .oneshot_upload(key, total_size_bytes, create_bytestream_fn)
                 .await;
@@ -392,7 +396,7 @@ impl S3Storage {
             .await
     }
 
-    async fn oneshot_upload(
+    pub(super) async fn oneshot_upload(
         &self,
         key: &str,
         total_size_bytes: usize,
@@ -412,14 +416,11 @@ impl S3Storage {
         Ok(())
     }
 
-    async fn multipart_upload(
+    pub(super) async fn prepare_multipart_upload(
         &self,
         key: &str,
         total_size_bytes: usize,
-        create_bytestream_fn: impl Fn(
-            Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
-    ) -> Result<(), S3PutError> {
+    ) -> Result<(usize, usize, String), S3PutError> {
         let mut part_count = (total_size_bytes / self.upload_part_size_bytes) + 1;
         let mut size_of_last_part = total_size_bytes % self.upload_part_size_bytes;
         if size_of_last_part == 0 {
@@ -445,39 +446,55 @@ impl S3Storage {
             }
         };
 
-        let mut upload_parts = Vec::new();
-        for part_index in 0..part_count {
-            let this_part = if part_count - 1 == part_index {
-                size_of_last_part
-            } else {
-                self.upload_part_size_bytes
-            };
-            let part_number = part_index as i32 + 1; // Part numbers start at 1
-            let offset = part_index * self.upload_part_size_bytes;
-            let length = this_part;
+        Ok((part_count, size_of_last_part, upload_id))
+    }
 
-            let stream = create_bytestream_fn(offset..(offset + length)).await?;
+    pub(super) async fn upload_part(
+        &self,
+        key: &str,
+        upload_id: &str,
+        part_count: usize,
+        part_index: usize,
+        size_of_last_part: usize,
+        create_bytestream_fn: &impl Fn(
+            Range<usize>,
+        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+    ) -> Result<CompletedPart, S3PutError> {
+        let this_part = if part_count - 1 == part_index {
+            size_of_last_part
+        } else {
+            self.upload_part_size_bytes
+        };
+        let part_number = part_index as i32 + 1; // Part numbers start at 1
+        let offset = part_index * self.upload_part_size_bytes;
+        let length = this_part;
 
-            let upload_part_res = self
-                .client
-                .upload_part()
-                .key(key)
-                .bucket(&self.bucket)
-                .upload_id(&upload_id)
-                .body(stream)
-                .part_number(part_number)
-                .send()
-                .await
-                .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+        let stream = create_bytestream_fn(offset..(offset + length)).await?;
 
-            upload_parts.push(
-                CompletedPart::builder()
-                    .e_tag(upload_part_res.e_tag.unwrap_or_default())
-                    .part_number(part_number)
-                    .build(),
-            );
-        }
+        let upload_part_res = self
+            .client
+            .upload_part()
+            .key(key)
+            .bucket(&self.bucket)
+            .upload_id(upload_id)
+            .body(stream)
+            .part_number(part_number)
+            .send()
+            .await
+            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
 
+        Ok(CompletedPart::builder()
+            .e_tag(upload_part_res.e_tag.unwrap_or_default())
+            .part_number(part_number)
+            .build())
+    }
+
+    pub(super) async fn finish_multipart_upload(
+        &self,
+        key: &str,
+        upload_id: &str,
+        upload_parts: Vec<CompletedPart>,
+    ) -> Result<(), S3PutError> {
         self.client
             .complete_multipart_upload()
             .bucket(&self.bucket)
@@ -487,12 +504,43 @@ impl S3Storage {
                     .set_parts(Some(upload_parts))
                     .build(),
             )
-            .upload_id(&upload_id)
+            .upload_id(upload_id)
             .send()
             .await
             .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
 
         Ok(())
+    }
+
+    async fn multipart_upload(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        create_bytestream_fn: impl Fn(
+            Range<usize>,
+        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+    ) -> Result<(), S3PutError> {
+        let (part_count, size_of_last_part, upload_id) =
+            self.prepare_multipart_upload(key, total_size_bytes).await?;
+
+        let mut upload_parts = Vec::new();
+        for part_index in 0..part_count {
+            let completed_part = self
+                .upload_part(
+                    key,
+                    &upload_id,
+                    part_count,
+                    part_index,
+                    size_of_last_part,
+                    &create_bytestream_fn,
+                )
+                .await?;
+
+            upload_parts.push(completed_part);
+        }
+
+        self.finish_multipart_upload(key, &upload_id, upload_parts)
+            .await
     }
 }
 
