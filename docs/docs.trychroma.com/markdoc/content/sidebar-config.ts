@@ -7,6 +7,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 import { AppSection } from "@/lib/content";
+import CloudIcon from "@/components/sidebar/cloud-icon";
 
 const sidebarConfig: AppSection[] = [
   {
@@ -84,6 +85,12 @@ const sidebarConfig: AppSection[] = [
         ],
       },
     ],
+  },
+  {
+    id: "cloud",
+    name: "Chroma Cloud",
+    icon: CloudIcon,
+    override: "https://airtable.com/appG6DhLoDUnTawwh/shrOAiDUtS2ILy5vZ",
   },
   {
     id: "production",

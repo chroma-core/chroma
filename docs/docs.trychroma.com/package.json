@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@docsearch/react": "^3.8.0",
+    "@heroicons/react": "^2.2.0",
     "@markdoc/markdoc": "latest",
     "@markdoc/next.js": "^0.3.7",
     "@matejmazur/react-katex": "^3.1.3",

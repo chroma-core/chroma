@@ -13,8 +13,11 @@ const MenuItem: React.FC<{ section: AppSection; active: boolean }> = ({
       href={
         section.comingSoon
           ? ""
-          : `/${section.id}/${section.default || (section.pages ? section.pages[0].id : "")}`
+          : section.override ||
+            `/${section.id}/${section.default || (section.pages ? section.pages[0].id : "")}`
       }
+      target={section.override ? "_blank" : undefined}
+      rel={section.override ? "noopener noreferrer" : undefined}
     >
       <div
         className={`flex items-center gap-2 text-gray-700/80 cursor-pointer ${!section.comingSoon && "hover:text-gray-800"} dark:text-gray-400/80 dark:hover:text-gray-300`}

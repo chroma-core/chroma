@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { Playfair_Display } from "next/font/google";
 import PageLink from "@/components/sidebar/page-link";
 
@@ -25,13 +25,14 @@ const PageIndex: React.FC<{
       )}
       <div className="flex flex-col">
         {pages.map((page) => (
-          <PageLink
-            key={page.id}
-            id={page.id}
-            name={page.name}
-            path={`${path}/${page.id}`}
-            sectionPage={name !== undefined}
-          />
+          <Suspense key={page.id}>
+            <PageLink
+              id={page.id}
+              name={page.name}
+              path={`${path}/${page.id}`}
+              sectionPage={name !== undefined}
+            />
+          </Suspense>
         ))}
       </div>
     </div>
