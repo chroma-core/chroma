@@ -311,6 +311,8 @@ impl SparseIndexReader {
     }
 
     /// Get the number of keys in the sparse index
+    /// Used in unit test
+    #[allow(dead_code)]
     pub(super) fn len(&self) -> usize {
         self.data.forward.len()
     }
