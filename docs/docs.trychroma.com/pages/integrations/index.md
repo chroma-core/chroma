@@ -46,3 +46,9 @@ We welcome pull requests to add new Integrations to the community.
 | [🎈 Streamlit](/integrations/streamlit) | ✅     | ➖ |
 | [💙 Haystack](/integrations/haystack) | ✅     | ➖ |
 | [🔭 OpenLIT](/integrations/openlit) | ✅     | 🔜 |
+
+### 📦 Libraries
+
+|                       | Java |
+|-----------------------|------|
+| [Testcontainers](/integrations/testcontainers) | ✅   |
