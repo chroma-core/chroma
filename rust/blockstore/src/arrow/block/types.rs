@@ -277,7 +277,7 @@ impl Block {
     /// Finds the partition point of the prefix and key.
     /// Returns the index of the first element that matches the target prefix and key. If no element matches, returns the index at which the target prefix and key could be inserted to maintain sorted order.
     #[inline]
-    fn binary_search_prefix_key<'me, K: ArrowReadableKey<'me>>(
+    pub(crate) fn binary_search_prefix_key<'me, K: ArrowReadableKey<'me>>(
         &'me self,
         prefix: &str,
         key: &K,
