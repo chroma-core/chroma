@@ -44,19 +44,15 @@ impl ArrowBlockfileFlusher {
         // Flush all blocks in parallel using futures unordered
         // NOTE(hammadb) we do not use try_join_all here because we want to flush all blocks
         // in parallel and try_join_all / join_all switches to using futures_ordered if the
-        // number of futures is high. However, our NAC controls the number of futures that can be
-        // created at once, so that behavior is redudant and suboptimal for us.
-        // As of 10/28 the NAC does not impact the write path, only the read path.
-        // As a workaround we used buffered futures to reduce concurrency
-        // once the NAC supports write path admission control we can switch back
-        // to unbuffered futures.
+        // number of futures is high.
 
         let mut futures = Vec::new();
         for block in &self.blocks {
             futures.push(self.block_manager.flush(block));
         }
+        let num_futures = futures.len();
         futures::stream::iter(futures)
-            .buffer_unordered(30)
+            .buffer_unordered(num_futures)
             .try_collect::<Vec<_>>()
             .await?;
 
