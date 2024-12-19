@@ -2,6 +2,7 @@ import shutil
 import os
 from typing import List, Hashable
 
+import hypothesis
 import hypothesis.strategies as st
 import onnxruntime
 import pytest
