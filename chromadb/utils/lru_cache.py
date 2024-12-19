@@ -1,6 +1,6 @@
+import threading
 from collections import OrderedDict
 from typing import Any, Callable, Generic, Optional, TypeVar
-
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -14,19 +14,29 @@ class LRUCache(Generic[K, V]):
         self.capacity = capacity
         self.cache: OrderedDict[K, V] = OrderedDict()
         self.callback = callback
+        self.lock = threading.Lock()
 
     def get(self, key: K) -> Optional[V]:
-        if key not in self.cache:
-            return None
-        value = self.cache.pop(key)
-        self.cache[key] = value
-        return value
+        with self.lock:
+            if key not in self.cache:
+                return None
+            value = self.cache.pop(key)
+            self.cache[key] = value
+            return value
 
     def set(self, key: K, value: V) -> None:
-        if key in self.cache:
-            self.cache.pop(key)
-        elif len(self.cache) == self.capacity:
-            evicted_key, evicted_value = self.cache.popitem(last=False)
-            if self.callback:
-                self.callback(evicted_key, evicted_value)
-        self.cache[key] = value
+        with self.lock:
+            if key in self.cache:
+                self.cache.pop(key)
+            elif len(self.cache) == self.capacity:
+                evicted_key, evicted_value = self.cache.popitem(last=False)
+                if self.callback:
+                    self.callback(evicted_key, evicted_value)
+            self.cache[key] = value
+
+    def evict(self, key: K) -> None:
+        with self.lock:
+            if key in self.cache:
+                value = self.cache.pop(key)
+                if self.callback:
+                    self.callback(key, value)

@@ -97,7 +97,7 @@ class LocalSegmentManager(SegmentManager):
                 // PersistentLocalHnswSegment.get_file_handle_count()
             )
             self._vector_instances_file_handle_cache = LRUCache(
-                segment_limit, callback=lambda _, v: v.close_persistent_index()
+                segment_limit, callback=lambda _, v: v.stop()
             )
 
     @trace_method(
