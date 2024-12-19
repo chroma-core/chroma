@@ -29,11 +29,6 @@ pub trait Readable<'referred_data>: Sized {
         PrefixRange: std::ops::RangeBounds<&'prefix str>,
         KeyRange: std::ops::RangeBounds<KeyWrapper>;
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)>;
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
@@ -102,17 +97,6 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             })
             .map(|(k, v)| (k, v.as_str()))
             .collect()
-    }
-
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage
-            .string_value_storage
-            .iter()
-            .nth(index)
-            .map(|(k, v)| (k, v.as_str()))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
@@ -206,17 +190,6 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data [u32] {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage
-            .uint32_array_storage
-            .iter()
-            .nth(index)
-            .map(|(k, v)| (k, v.as_slice()))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.uint32_array_storage.iter().len())
     }
@@ -303,17 +276,6 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage
-            .roaring_bitmap_storage
-            .iter()
-            .nth(index)
-            .map(|(k, v)| (k, v.clone()))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.roaring_bitmap_storage.iter().len())
     }
@@ -395,13 +357,6 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage.f32_storage.iter().nth(index).map(|(k, v)| (k, *v))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.f32_storage.iter().len())
     }
@@ -481,13 +436,6 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             })
             .map(|(k, v)| (k, *v))
             .collect()
-    }
-
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage.u32_storage.iter().nth(index).map(|(k, v)| (k, *v))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
@@ -573,13 +521,6 @@ impl<'referred_data> Readable<'referred_data> for bool {
             })
             .map(|(k, v)| (k, *v))
             .collect()
-    }
-
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage.bool_storage.iter().nth(index).map(|(k, v)| (k, *v))
     }
 
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
@@ -721,24 +662,6 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        let (k, v) = storage.data_record_id_storage.iter().nth(index).unwrap();
-        let embedding = storage.data_record_embedding_storage.get(k).unwrap();
-        let id = v;
-        Some((
-            k,
-            DataRecord {
-                id,
-                embedding,
-                metadata: None,
-                document: None,
-            },
-        ))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.data_record_id_storage.iter().len())
     }
@@ -780,13 +703,6 @@ impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_dat
         PrefixRange: std::ops::RangeBounds<&'prefix str>,
         KeyRange: std::ops::RangeBounds<KeyWrapper>,
     {
-        todo!()
-    }
-
-    fn get_at_index(
-        _: &'referred_data Storage,
-        _: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
         todo!()
     }
 
