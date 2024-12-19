@@ -265,7 +265,7 @@ chromaClient.heartbeat()
 
 ## Observability with GCP
 
-Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only export OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
 
 Tracing is configured with four environment variables:
 
