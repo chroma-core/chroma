@@ -3,6 +3,7 @@ use std::{
     ops::{BitAnd, BitOr, Bound},
 };
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
@@ -13,7 +14,6 @@ use chroma_types::{
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
 use crate::{

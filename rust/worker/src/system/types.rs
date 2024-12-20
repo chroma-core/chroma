@@ -43,7 +43,7 @@ pub trait Component: Send + Sized + Debug + 'static {
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
     }
-    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
+    async fn start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -346,7 +346,7 @@ mod tests {
             self.queue_size
         }
 
-        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }

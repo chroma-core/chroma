@@ -53,7 +53,7 @@ where
         mut channel: tokio::sync::mpsc::Receiver<WrappedMessage<C>>,
     ) {
         self.handler
-            .on_start(&ComponentContext {
+            .start(&ComponentContext {
                 system: self.inner.system.clone(),
                 sender: self.inner.sender.clone(),
                 cancellation_token: self.inner.cancellation_token.clone(),

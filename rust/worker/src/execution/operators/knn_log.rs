@@ -1,11 +1,11 @@
 use std::collections::BinaryHeap;
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_types::{MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use thiserror::Error;
-use tonic::async_trait;
 
 use crate::{
     execution::operator::Operator,

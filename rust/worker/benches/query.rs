@@ -21,6 +21,7 @@ use worker::{
         orchestration::{
             knn::KnnOrchestrator,
             knn_filter::{KnnFilterOrchestrator, KnnFilterOutput},
+            orchestrator::Orchestrator,
         },
     },
     segment::test::TestSegment,

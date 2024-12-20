@@ -1,8 +1,8 @@
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_types::Segment;
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::trace;
 
 use crate::execution::{operator::Operator, operators::projection::ProjectionInput};

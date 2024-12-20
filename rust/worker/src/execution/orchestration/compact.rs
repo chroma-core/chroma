@@ -1,6 +1,9 @@
 use super::super::operator::wrap;
+use super::orchestrator::Orchestrator;
 use crate::compactor::CompactionJob;
 use crate::execution::dispatcher::Dispatcher;
+use crate::execution::operator::TaskError;
+use crate::execution::operator::TaskMessage;
 use crate::execution::operator::TaskResult;
 use crate::execution::operators::fetch_log::FetchLogError;
 use crate::execution::operators::fetch_log::FetchLogOperator;
@@ -20,7 +23,6 @@ use crate::execution::operators::write_segments::WriteSegmentsInput;
 use crate::execution::operators::write_segments::WriteSegmentsOperator;
 use crate::execution::operators::write_segments::WriteSegmentsOperatorError;
 use crate::execution::operators::write_segments::WriteSegmentsOutput;
-use crate::execution::orchestration::common::terminate_with_error;
 use crate::log::log::Log;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
@@ -29,11 +31,10 @@ use crate::segment::record_segment::RecordSegmentWriter;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::Component;
+use crate::system::ChannelError;
+use crate::system::ComponentContext;
 use crate::system::ComponentHandle;
 use crate::system::Handler;
-use crate::system::ReceiverForMessage;
-use crate::system::System;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
@@ -46,7 +47,8 @@ use std::sync::atomic;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::Span;
+use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::oneshot::Sender;
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -67,11 +69,17 @@ understand. We can always add more abstraction later if we need it.
 #[derive(Debug)]
 enum ExecutionState {
     Pending,
-    PullLogs,
     Partition,
     Write,
     Flush,
     Register,
+}
+
+#[derive(Clone, Debug)]
+struct CompactWriters {
+    metadata: MetadataSegmentWriter<'static>,
+    record: RecordSegmentWriter,
+    vector: Box<DistributedHNSWSegmentWriter>,
 }
 
 #[derive(Debug)]
@@ -80,7 +88,6 @@ pub struct CompactOrchestrator {
     compaction_job: CompactionJob,
     state: ExecutionState,
     // Component Execution
-    system: System,
     collection_id: CollectionUuid,
     // Dependencies
     log: Box<Log>,
@@ -93,16 +100,11 @@ pub struct CompactOrchestrator {
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
     // Shared writers
-    writers: Option<(
-        RecordSegmentWriter,
-        Box<DistributedHNSWSegmentWriter>,
-        MetadataSegmentWriter<'static>,
-    )>,
+    writers: Option<CompactWriters>,
     // number of write segments tasks
     num_write_tasks: i32,
     // Result Channel
-    result_channel:
-        Option<tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>>,
+    result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     // Next offset id
     next_offset_id: Arc<AtomicU32>,
     max_compaction_size: usize,
@@ -140,11 +142,35 @@ impl ChromaError for GetSegmentWritersError {
 }
 
 #[derive(Error, Debug)]
-enum CompactionError {
-    #[error("Task dispatch failed")]
-    DispatchFailure,
-    #[error("Result channel dropped")]
-    ResultChannelDropped,
+pub enum CompactionError {
+    #[error("Panic running task: {0}")]
+    Panic(String),
+    #[error("FetchLog error: {0}")]
+    FetchLog(#[from] FetchLogError),
+    #[error("Partition error: {0}")]
+    Partition(#[from] PartitionError),
+    #[error("WriteSegments error: {0}")]
+    WriteSegments(#[from] WriteSegmentsOperatorError),
+    #[error("Regester error: {0}")]
+    Register(#[from] RegisterError),
+    #[error("Error sending message through channel: {0}")]
+    Channel(#[from] ChannelError),
+    #[error("Error receiving final result: {0}")]
+    Result(#[from] RecvError),
+    #[error("{0}")]
+    Generic(#[from] Box<dyn ChromaError>),
+}
+
+impl<E> From<TaskError<E>> for CompactionError
+where
+    E: Into<CompactionError>,
+{
+    fn from(value: TaskError<E>) -> Self {
+        match value {
+            TaskError::Panic(e) => CompactionError::Panic(e.unwrap_or_default()),
+            TaskError::TaskFailed(e) => e.into(),
+        }
+    }
 }
 
 impl ChromaError for CompactionError {
@@ -167,16 +193,13 @@ impl CompactOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         compaction_job: CompactionJob,
-        system: System,
         collection_id: CollectionUuid,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
         dispatcher: ComponentHandle<Dispatcher>,
-        result_channel: Option<
-            tokio::sync::oneshot::Sender<Result<CompactionResponse, Box<dyn ChromaError>>>,
-        >,
+        result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
         record_segment: Option<Segment>,
         next_offset_id: Arc<AtomicU32>,
         max_compaction_size: usize,
@@ -186,7 +209,6 @@ impl CompactOrchestrator {
             id: Uuid::new_v4(),
             compaction_job,
             state: ExecutionState::Pending,
-            system,
             collection_id,
             log,
             sysdb,
@@ -204,76 +226,38 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn fetch_log(
-        &mut self,
-        self_address: Box<dyn ReceiverForMessage<TaskResult<FetchLogOutput, FetchLogError>>>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
-    ) {
-        self.state = ExecutionState::PullLogs;
-        let operator = FetchLogOperator {
-            log_client: self.log.clone(),
-            batch_size: 100,
-            // Here we do not need to be inclusive since the compaction job
-            // offset is the one after the last compaction offset
-            start_log_offset_id: self.compaction_job.offset as u32,
-            maximum_fetch_count: Some(self.max_compaction_size as u32),
-            collection_uuid: self.collection_id,
-        };
-        let task = wrap(Box::new(operator), (), self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                tracing::error!("Error dispatching pull logs for compaction {:?}", e);
-                terminate_with_error(
-                    self.result_channel.take(),
-                    Box::new(CompactionError::DispatchFailure),
-                    ctx,
-                );
-            }
-        }
-    }
-
     async fn partition(
         &mut self,
         records: Chunk<LogRecord>,
-        self_address: Box<dyn ReceiverForMessage<TaskResult<PartitionOutput, PartitionError>>>,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
         println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
-        let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                tracing::error!("Error dispatching partition for compaction {:?}", e);
-                panic!(
-                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
-                    e
-                )
-            }
-        }
+        let task = wrap(operator, input, ctx.receiver());
+        self.send(task, ctx).await;
     }
 
     async fn write(
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
-        self_address: Box<
-            dyn ReceiverForMessage<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
-        >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::Write;
 
-        if let Err(e) = self.init_segment_writers().await {
-            tracing::error!("Error creating writers for compaction {:?}", e);
-            terminate_with_error(self.result_channel.take(), e, ctx);
+        let init_res = self.init_segment_writers().await;
+        if self.ok_or_terminate(init_res, ctx).is_none() {
             return;
         }
         let (record_segment_writer, hnsw_segment_writer, metadata_segment_writer) =
             match self.writers.clone() {
-                Some((rec, hnsw, mt)) => (Some(rec), Some(hnsw), Some(mt)),
+                Some(writers) => (
+                    Some(writers.record),
+                    Some(writers.vector),
+                    Some(writers.metadata),
+                ),
                 None => (None, None, None),
             };
 
@@ -292,16 +276,8 @@ impl CompactOrchestrator {
                     .clone(),
                 self.next_offset_id.clone(),
             );
-            let task = wrap(operator, input, self_address.clone());
-            match self.dispatcher.send(task, Some(Span::current())).await {
-                Ok(_) => (),
-                Err(e) => {
-                    tracing::error!("Error dispatching writers for compaction {:?}", e);
-                    panic!(
-                        "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
-                        e)
-                }
-            }
+            let task = wrap(operator, input, ctx.receiver());
+            self.send(task, ctx).await;
         }
     }
 
@@ -310,7 +286,7 @@ impl CompactOrchestrator {
         record_segment_writer: RecordSegmentWriter,
         hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
         metadata_segment_writer: MetadataSegmentWriter<'static>,
-        self_address: Box<dyn ReceiverForMessage<TaskResult<FlushS3Output, Box<dyn ChromaError>>>>,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::Flush;
 
@@ -321,24 +297,15 @@ impl CompactOrchestrator {
             metadata_segment_writer,
         );
 
-        let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                tracing::error!("Error dispatching flush to S3 for compaction {:?}", e);
-                panic!(
-                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
-                    e
-                );
-            }
-        }
+        let task = wrap(operator, input, ctx.receiver());
+        self.send(task, ctx).await;
     }
 
     async fn register(
         &mut self,
         log_position: i64,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
-        self_address: Box<dyn ReceiverForMessage<TaskResult<RegisterOutput, RegisterError>>>,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::Register;
         let operator = RegisterOperator::new();
@@ -352,17 +319,8 @@ impl CompactOrchestrator {
             self.log.clone(),
         );
 
-        let task = wrap(operator, input, self_address);
-        match self.dispatcher.send(task, Some(Span::current())).await {
-            Ok(_) => (),
-            Err(e) => {
-                tracing::error!("Error dispatching register for compaction {:?}", e);
-                panic!(
-                    "Invariant violation. Somehow the dispatcher receiver is dropped. Error: {:?}",
-                    e
-                );
-            }
-        }
+        let task = wrap(operator, input, ctx.receiver());
+        self.send(task, ctx).await;
     }
 
     async fn init_segment_writers(&mut self) -> Result<(), Box<dyn ChromaError>> {
@@ -490,42 +448,52 @@ impl CompactOrchestrator {
                     return Err(Box::new(GetSegmentWritersError::HnswSegmentWriterError));
                 }
             };
-            self.writers = Some((
-                record_segment_writer,
-                hnsw_segment_writer,
-                mt_segment_writer,
-            ))
+            self.writers = Some(CompactWriters {
+                metadata: mt_segment_writer,
+                record: record_segment_writer,
+                vector: hnsw_segment_writer,
+            })
         }
 
         Ok(())
-    }
-
-    pub(crate) async fn run(mut self) -> Result<CompactionResponse, Box<dyn ChromaError>> {
-        println!("Running compaction job: {:?}", self.compaction_job);
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.result_channel = Some(tx);
-        let mut handle = self.system.clone().start_component(self);
-        let result = rx.await;
-        handle.stop();
-        result
-            .map_err(|_| Box::new(CompactionError::ResultChannelDropped) as Box<dyn ChromaError>)?
     }
 }
 
 // ============== Component Implementation ==============
 
 #[async_trait]
-impl Component for CompactOrchestrator {
-    fn get_name() -> &'static str {
-        "Compaction orchestrator"
+impl Orchestrator for CompactOrchestrator {
+    type Output = CompactionResponse;
+    type Error = CompactionError;
+
+    fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
+        self.dispatcher.clone()
     }
 
-    fn queue_size(&self) -> usize {
-        1000 // TODO: make configurable
+    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+        vec![wrap(
+            Box::new(FetchLogOperator {
+                log_client: self.log.clone(),
+                batch_size: 100,
+                // Here we do not need to be inclusive since the compaction job
+                // offset is the one after the last compaction offset
+                start_log_offset_id: self.compaction_job.offset as u32,
+                maximum_fetch_count: Some(self.max_compaction_size as u32),
+                collection_uuid: self.collection_id,
+            }),
+            (),
+            ctx.receiver(),
+        )]
     }
 
-    async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
-        self.fetch_log(ctx.receiver(), ctx).await;
+    fn set_result_channel(&mut self, sender: Sender<Result<CompactionResponse, CompactionError>>) {
+        self.result_channel = Some(sender)
+    }
+
+    fn take_result_channel(&mut self) -> Sender<Result<CompactionResponse, CompactionError>> {
+        self.result_channel
+            .take()
+            .expect("The result channel should be set before take")
     }
 }
 
@@ -539,13 +507,9 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        let message = message.into_inner();
-        let records = match message {
-            Ok(result) => result,
-            Err(e) => {
-                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
-                return;
-            }
+        let records = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(recs) => recs,
+            None => todo!(),
         };
         tracing::info!("Pulled Records: {:?}", records.len());
         let final_record_pulled = records.get(records.len() - 1);
@@ -553,7 +517,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             Some(record) => {
                 self.pulled_log_offset = Some(record.log_offset);
                 tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
-                self.partition(records, ctx.receiver()).await;
+                self.partition(records, ctx).await;
             }
             None => {
                 tracing::error!(
@@ -574,16 +538,11 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
         message: TaskResult<PartitionOutput, PartitionError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        let message = message.into_inner();
-        let records = match message {
-            Ok(result) => result.records,
-            Err(e) => {
-                tracing::error!("Error partitioning records: {:?}", e);
-                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
-                return;
-            }
+        let records = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(recs) => recs.records,
+            None => todo!(),
         };
-        self.write(records, ctx.receiver(), ctx).await;
+        self.write(records, ctx).await;
     }
 }
 
@@ -596,33 +555,22 @@ impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for Co
         message: TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        let message = message.into_inner();
-        let output = match message {
-            Ok(output) => {
-                self.num_write_tasks -= 1;
-                output
-            }
-            Err(e) => {
-                tracing::error!("Error writing segments: {:?}", e);
-                terminate_with_error(self.result_channel.take(), Box::new(e), ctx);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
+        self.num_write_tasks -= 1;
         if self.num_write_tasks == 0 {
             if let (Some(rec), Some(hnsw), Some(mt)) = (
                 output.record_segment_writer,
                 output.hnsw_segment_writer,
                 output.metadata_segment_writer,
             ) {
-                self.flush_s3(rec, hnsw, mt, ctx.receiver()).await;
+                self.flush_s3(rec, hnsw, mt, ctx).await;
             } else {
                 // There is nothing to flush, proceed to register
-                self.register(
-                    self.pulled_log_offset.unwrap(),
-                    Arc::new([]),
-                    ctx.receiver(),
-                )
-                .await;
+                self.register(self.pulled_log_offset.unwrap(), Arc::new([]), ctx)
+                    .await;
             }
         }
     }
@@ -637,22 +585,16 @@ impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchest
         message: TaskResult<FlushS3Output, Box<dyn ChromaError>>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        let message = message.into_inner();
-        match message {
-            Ok(msg) => {
-                // Unwrap should be safe here as we are guaranteed to have a value by construction
-                self.register(
-                    self.pulled_log_offset.unwrap(),
-                    msg.segment_flush_info,
-                    ctx.receiver(),
-                )
-                .await;
-            }
-            Err(e) => {
-                tracing::error!("Error flushing to S3: {:?}", e);
-                terminate_with_error(self.result_channel.take(), e.boxed(), ctx);
-            }
-        }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
+        self.register(
+            self.pulled_log_offset.unwrap(),
+            output.segment_flush_info,
+            ctx,
+        )
+        .await;
     }
 }
 
@@ -665,26 +607,16 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
         message: TaskResult<RegisterOutput, RegisterError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        let message = message.into_inner();
-        // Return execution state to the compaction manager
-        let result_channel = self
-            .result_channel
-            .take()
-            .expect("Invariant violation. Result channel is not set.");
-
-        match message {
-            Ok(_) => {
-                let response = CompactionResponse {
+        self.terminate_with_result(
+            message
+                .into_inner()
+                .map_err(|e| e.into())
+                .map(|_| CompactionResponse {
                     id: self.id,
                     compaction_job: self.compaction_job.clone(),
                     message: "Compaction Complete".to_string(),
-                };
-                let _ = result_channel.send(Ok(response));
-            }
-            Err(e) => {
-                tracing::error!("Error registering compaction: {:?}", e);
-                terminate_with_error(Some(result_channel), Box::new(e), ctx);
-            }
-        }
+                }),
+            ctx,
+        );
     }
 }

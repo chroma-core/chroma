@@ -204,7 +204,7 @@ mod tests {
             self.queue_size
         }
 
-        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
             ctx.scheduler
                 .schedule(ScheduleMessage {}, duration, ctx, || None);
