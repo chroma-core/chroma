@@ -5,6 +5,7 @@
 go/bin/
 go/**/testdata/
 go/coordinator/bin/
+go/pkg/proto/
 
 clients/js/package-lock.json
 
