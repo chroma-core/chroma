@@ -4,6 +4,7 @@ const generateId = (content: React.ReactNode): string => {
   if (typeof content === "string") {
     return content
       .toLowerCase()
+      .replaceAll("_", "-")
       .replace(/[^a-z0-9\s-]/g, "")
       .replace(/\s+/g, "-")
       .trim();
