@@ -131,4 +131,15 @@ impl<
             }
         }
     }
+
+    pub async fn rank(
+        &'referred_data self,
+        prefix: &'referred_data str,
+        key: K,
+    ) -> Result<usize, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.rank(prefix, key)),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.rank(prefix, key).await,
+        }
+    }
 }

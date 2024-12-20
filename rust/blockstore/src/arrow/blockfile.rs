@@ -657,6 +657,56 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         self.root.id
     }
 
+    /// Returns the number of elements strictly less than the given prefix-key pair in the blockfile
+    /// In other words, the rank is the position where the given prefix-key pair can be inserted while maintaining the order of the blockfile
+    pub(crate) async fn rank(
+        &'me self,
+        prefix: &'me str,
+        key: K,
+    ) -> Result<usize, Box<dyn ChromaError>> {
+        let mut rank = 0;
+
+        // This should be sorted by offset id ranges
+        let block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_range(..=prefix, ..=key.clone());
+
+        // The block that may contain the prefix-key pair
+        if let Some(last_id) = block_ids.last() {
+            if self.root.version >= Version::V1_1 {
+                rank += self
+                    .root
+                    .sparse_index
+                    .data
+                    .forward
+                    .values()
+                    .take(block_ids.len() - 1)
+                    .map(|meta| meta.count)
+                    .sum::<u32>() as usize;
+            } else {
+                self.load_blocks(&block_ids).await;
+                for block_id in block_ids.iter().take(block_ids.len() - 1) {
+                    let block =
+                        self.get_block(*block_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                            .ok_or(Box::new(ArrowBlockfileError::BlockNotFound)
+                                as Box<dyn ChromaError>)?;
+                    rank += block.len();
+                }
+            }
+            let last_block = self
+                .get_block(*last_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
+            rank += last_block.binary_search_prefix_key(prefix, &key);
+        }
+
+        Ok(rank)
+    }
+
     /// Check if the blockfile is valid.
     /// Validates that the sparse index is valid and that no block exceeds the max block size.
     pub async fn is_valid(&self) -> bool {
@@ -1547,6 +1597,45 @@ mod tests {
             assert_eq!(res.0, "key");
             assert_eq!(res.1, expected_key);
             assert_eq!(res.2, expected_value);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rank() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let id_1 = writer.id();
+
+        let n = 1200;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = vec![i];
+            writer.set("key", key.as_str(), value).await.unwrap();
+        }
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        flusher.flush::<&str, Vec<u32>>().await.unwrap();
+
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(&id_1)
+            .await
+            .unwrap();
+
+        for i in 0..n {
+            let rank_key = format!("{:04}", i);
+            let rank = reader.rank("key", &rank_key).await.unwrap();
+            assert_eq!(rank, i as usize);
         }
     }
 
