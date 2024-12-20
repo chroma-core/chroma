@@ -11,7 +11,6 @@ use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
-use crate::BlockfileError;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
@@ -457,63 +456,6 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 Ok(None)
             }
             Err(e) => Err(Box::new(e)),
-        }
-    }
-
-    pub(crate) async fn get_at_index(
-        &'me self,
-        index: usize,
-    ) -> Result<(&'me str, K, V), Box<dyn ChromaError>> {
-        let mut block_offset = 0;
-        let mut block = None;
-        let sparse_index_len = self.root.sparse_index.len();
-        for i in 0..sparse_index_len {
-            // This unwrap is safe because we are iterating over the sparse index
-            // within its len. The sparse index reader is immutable and cannot be modified
-            let uuid = self
-                .root
-                .sparse_index
-                .data
-                .forward
-                .iter()
-                .nth(i)
-                .unwrap()
-                .1
-                .id;
-            block = match self.get_block(uuid).await {
-                Ok(Some(block)) => Some(block),
-                Ok(None) => {
-                    tracing::error!("Block with id {:?} not found", uuid);
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
-            match block {
-                Some(b) => {
-                    if block_offset + b.len() > index {
-                        break;
-                    }
-                    block_offset += b.len();
-                }
-                None => {
-                    tracing::error!("Block id {:?} not found", uuid);
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            }
-        }
-        let block = block.unwrap();
-        let res = block.get_at_index::<'me, K, V>(index - block_offset);
-        match res {
-            Some((prefix, key, value)) => Ok((prefix, key, value)),
-            _ => {
-                tracing::error!(
-                    "Value not found at index {:?} for block",
-                    index - block_offset,
-                );
-                Err(Box::new(BlockfileError::NotFoundError))
-            }
         }
     }
 
@@ -1555,48 +1497,6 @@ mod tests {
                 let value = reader.get("key", &key).await.unwrap().unwrap();
                 assert_eq!(value, format!("{:04}", i));
             }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_get_at_index() {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = new_cache_for_test();
-        let sparse_index_cache = new_cache_for_test();
-        let blockfile_provider = ArrowBlockfileProvider::new(
-            storage,
-            TEST_MAX_BLOCK_SIZE_BYTES,
-            block_cache,
-            sparse_index_cache,
-        );
-        let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
-            .await
-            .unwrap();
-        let id_1 = writer.id();
-
-        let n = 1200;
-        for i in 0..n {
-            let key = format!("{:04}", i);
-            let value = vec![i];
-            writer.set("key", key.as_str(), value).await.unwrap();
-        }
-        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
-        flusher.flush::<&str, Vec<u32>>().await.unwrap();
-
-        let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_1)
-            .await
-            .unwrap();
-
-        for i in 0..n {
-            let expected_key = format!("{:04}", i);
-            let expected_value = vec![i];
-            let res = reader.get_at_index(i as usize).await.unwrap();
-            assert_eq!(res.0, "key");
-            assert_eq!(res.1, expected_key);
-            assert_eq!(res.2, expected_value);
         }
     }
 
