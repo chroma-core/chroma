@@ -22,6 +22,7 @@ from chromadb.utils.embedding_functions import (
 persist_dir = tempfile.mkdtemp()
 
 
+
 @pytest.fixture
 def local_persist_api():
     client = chromadb.Client(
@@ -749,6 +750,7 @@ operator_records = {
 def test_where_lt(client):
     client.reset()
     collection = client.create_collection("test_where_lt")
+
     collection.add(**operator_records)
     items = collection.get(where={"int_value": {"$lt": 2}})
     assert len(items["metadatas"]) == 1
@@ -796,9 +798,11 @@ def test_where_ne_eq_number(client):
     assert len(items["metadatas"]) == 1
 
 
+
 def test_where_valid_operators(client):
     client.reset()
     collection = client.create_collection("test_where_valid_operators")
+
     collection.add(**operator_records)
     with pytest.raises(ValueError):
         collection.get(where={"int_value": {"$invalid": 2}})
@@ -1004,6 +1008,7 @@ logical_operator_records = {
 def test_where_logical_operators(client):
     client.reset()
     collection = client.create_collection("test_logical_operators")
+
     collection.add(**logical_operator_records)
 
     items = collection.get(
@@ -1095,7 +1100,95 @@ def test_where_document_logical_operators(client):
     )
     assert len(items["metadatas"]) == 1
 
+def test_where_like_string(client):
+    client.reset()
+    collection = client.create_collection("test_where_like")
+    collection.add(**operator_records)
+    #Exact match.
+    items = collection.get(where={"string_value": {"$like": "one"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "two"}})
+    assert len(items["metadatas"]) == 1
+    #partial matches
+    items = collection.get(where={"string_value": {"$like": "%"}})
+    assert len(items["metadatas"]) == 2
+    items = collection.get(where={"string_value": {"$like": "%wo%"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "%o%"}})
+    assert len(items["metadatas"]) == 2
+    items = collection.get(where={"string_value": {"$like": "on_"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "t_o"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "%o"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "o%"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"float_value": {"$like": "%o%"}})
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$nlike": "%o%"}})
+    assert len(items["metadatas"]) == 0
 
+    items = collection.get(where={"string_value": {"$like": r"o\%"}}) 
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$like": r"o\__"}}) 
+    assert len(items["metadatas"]) == 0
+
+def test_where_like_string_case_sensitive(client):
+    client.reset()
+    collection = client.create_collection("test_where_like")
+    
+    collection.add(**operator_records)
+    #Exact match.
+    items = collection.get(where={"string_value": {"$like": "one"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "two"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "One"}})
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$like": "Two"}})
+    assert len(items["metadatas"]) == 0
+    #partial matches
+
+    items = collection.get(where={"string_value": {"$like": "%o"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$like": "O%"}})
+    assert len(items["metadatas"]) == 0
+
+
+def test_where_nlike_string(client):
+    client.reset()
+    collection = client.create_collection("test_where_like")
+    collection.add(**operator_records)
+    items = collection.get(where={"string_value": {"$nlike": "%wo%"}})
+    assert len(items["metadatas"]) == 1
+    items = collection.get(where={"string_value": {"$nlike": "%o%"}})
+    assert len(items["metadatas"]) == 0
+    items = collection.get(where={"string_value": {"$nlike": "%h%"}})
+    assert len(items["metadatas"]) == 2
+    items = collection.get(where={"float_value": {"$nlike": "%wo%"}})
+    assert len(items["metadatas"]) == 0
+
+
+def test_where_valid_operators_like(client):
+    client.reset()
+    collection = client.create_collection("test_where_valid_like_operators")
+    collection.add(**operator_records)
+
+    with pytest.raises(ValueError,match=r".* operand value to be an string for operator \$like.*"):
+        collection.get(where={"b": {"$like": 4}})  # invalid
+    with pytest.raises(ValueError,match=r".* operand value to be an string for operator \$like.*"):
+        collection.get(
+            where={
+                "$or": [
+                    {"a": {"$like": "first"}},  # valid
+                    {"b": {"$like": 4}},  # invalid
+                    {"$like": "second"},  # valid
+                ]
+            }
+        )
+
+    
 # endregion
 
 records = {
@@ -1624,3 +1717,5 @@ def test_ssl_self_signed_without_ssl_verify(client_ssl):
     )
     client_ssl.clear_system_cache()
     assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
+
+

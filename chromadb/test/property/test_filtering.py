@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, cast
 from hypothesis import given, settings, HealthCheck
+from hypothesis import Verbosity
 import pytest
 from chromadb.api import ClientAPI
 from chromadb.test.property import invariants
@@ -60,6 +61,21 @@ def _filter_where_clause(clause: Where, metadata: Optional[Metadata]) -> bool:
     elif op == "$nin":
         return key not in metadata or metadata[key] not in val  # type: ignore[operator]
 
+    elif op == "$like":
+        assert isinstance(val, str)
+        if "%" in val or "_" in val:
+            val1 = val.replace("%", "(.*)").replace("_", ".")
+            doc = str(metadata_key)
+            return re.search(val1, doc) is not None
+        return val in str(metadata_key)
+    elif op == "$nlike":
+        assert isinstance(val, str)
+        if "%" in val or "_" in val:
+            val1 = val.replace("%", "(.*)").replace("_", ".")
+            doc = str(metadata_key)
+            return re.search(val1, doc) is None
+        return val not in str(metadata_key)
+      
     # The following conditions only make sense for numeric values
     assert (
         key not in metadata
@@ -158,12 +174,14 @@ def _filter_embedding_set(
 
 
 collection_st = st.shared(
-    strategies.collections(add_filterable_data=True, with_hnsw_params=True),
+    strategies.collections(add_filterable_data=True, with_hnsw_params=True,uses_metadata_like=True),
     key="coll",
 )
+
 recordset_st = st.shared(
     strategies.recordsets(collection_st, max_size=1000), key="recordset"
 )
+
 
 
 @settings(
@@ -196,6 +214,7 @@ def test_filterable_metadata_get(
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
+
 
     initial_version = coll.get_model()["version"]
 
@@ -408,6 +427,7 @@ def test_boolean_metadata(client: ClientAPI) -> None:
 
 
 def test_get_empty(client: ClientAPI) -> None:
+
     """Tests that calling get() with empty filters returns nothing"""
 
     reset(client)
