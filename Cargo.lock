@@ -1364,8 +1364,8 @@ dependencies = [
 
 [[package]]
 name = "chromadb"
-version = "1.0.2"
-source = "git+https://github.com/rescrv/chromadb-rs?rev=e364e35c34c660d4e8e862436ea600ddc2f46a1e#e364e35c34c660d4e8e862436ea600ddc2f46a1e"
+version = "1.1.0"
+source = "git+https://github.com/rescrv/chromadb-rs?rev=e9a8fb2e8b8edf7acfb1accf10166720a6bbbd33#e9a8fb2e8b8edf7acfb1accf10166720a6bbbd33"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6792,6 +6792,7 @@ dependencies = [
  "figment",
  "flatbuffers",
  "futures",
+ "indicatif",
  "k8s-openapi",
  "kube",
  "murmur3",

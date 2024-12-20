@@ -1,9 +1,9 @@
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::trace;
 
 use crate::{
@@ -32,7 +32,7 @@ use crate::{
 /// It should be run at the start of an orchestrator to get the latest data of a collection
 #[derive(Clone, Debug)]
 pub struct FetchLogOperator {
-    pub(crate) log_client: Box<Log>,
+    pub log_client: Box<Log>,
     pub batch_size: u32,
     pub start_log_offset_id: u32,
     pub maximum_fetch_count: Option<u32>,
@@ -126,20 +126,20 @@ mod tests {
     fn setup_in_memory_log() -> (CollectionUuid, Box<Log>) {
         let collection_id = CollectionUuid::new();
         let mut in_memory_log = InMemoryLog::new();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
-        generator.generate_vec(0..10).into_iter().for_each(|log| {
-            in_memory_log.add_log(
-                collection_id,
-                InternalLogRecord {
+        upsert_generator
+            .generate_vec(0..10)
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
                     collection_id,
-                    log_offset: log.log_offset,
-                    log_ts: log.log_offset,
-                    record: log,
-                },
-            )
-        });
+                    InternalLogRecord {
+                        collection_id,
+                        log_offset: log.log_offset,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
         (collection_id, Box::new(Log::InMemory(in_memory_log)))
     }
 

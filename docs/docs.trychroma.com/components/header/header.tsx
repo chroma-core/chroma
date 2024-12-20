@@ -8,6 +8,7 @@ import Link from "next/link";
 import SearchBox from "@/components/header/search-box";
 import SearchDocs from "@/components/header/search-docs";
 
+
 const Header: React.FC = () => {
   return (
     <div className="flex items-center justify-between flex-shrink-0 p-3 px-5 h-14 border-b-[1px] dark:border-gray-700 xl:w-[1256px] xl:mx-auto">

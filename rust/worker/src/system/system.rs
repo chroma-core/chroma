@@ -14,7 +14,7 @@ use tokio::{pin, select};
 use tracing::{trace_span, Instrument, Span};
 
 #[derive(Clone, Debug)]
-pub(crate) struct System {
+pub struct System {
     inner: Arc<Inner>,
 }
 
@@ -32,7 +32,7 @@ impl System {
         }
     }
 
-    pub(crate) fn start_component<C>(&self, component: C) -> ComponentHandle<C>
+    pub fn start_component<C>(&self, component: C) -> ComponentHandle<C>
     where
         C: Component + Send + 'static,
     {
@@ -93,6 +93,12 @@ impl System {
 
     pub(crate) async fn join(&self) {
         self.inner.scheduler.join().await;
+    }
+}
+
+impl Default for System {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

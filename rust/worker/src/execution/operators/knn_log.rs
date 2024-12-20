@@ -1,11 +1,11 @@
 use std::collections::BinaryHeap;
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_types::{MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use thiserror::Error;
-use tonic::async_trait;
 
 use crate::{
     execution::operator::Operator,
@@ -143,11 +143,8 @@ mod tests {
         log_offset_ids: SignedRoaringBitmap,
     ) -> KnnLogInput {
         let test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
         KnnLogInput {
-            logs: generator.generate_chunk(1..=100),
+            logs: upsert_generator.generate_chunk(1..=100),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             distance_function: metric,

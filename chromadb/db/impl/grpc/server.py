@@ -28,6 +28,8 @@ from chromadb.proto.coordinator_pb2 import (
     DeleteSegmentResponse,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse,
     GetDatabaseRequest,
     GetDatabaseResponse,
     GetSegmentsRequest,
@@ -46,7 +48,7 @@ from chromadb.proto.coordinator_pb2_grpc import (
 )
 import grpc
 from google.protobuf.empty_pb2 import Empty
-from chromadb.types import Collection, Metadata, Segment
+from chromadb.types import Collection, Metadata, Segment, SegmentScope
 
 
 class GrpcMockSysDB(SysDBServicer, Component):
@@ -368,6 +370,30 @@ class GrpcMockSysDB(SysDBServicer, Component):
             collections=[
                 to_proto_collection(collection) for collection in found_collections
             ]
+        )
+
+    @overrides(check_signature=False)
+    def GetCollectionWithSegments(
+        self, request: GetCollectionWithSegmentsRequest, context: grpc.ServicerContext
+    ) -> GetCollectionWithSegmentsResponse:
+        allCollections = {}
+        for tenant, databases in self._tenants_to_databases_to_collections.items():
+            for database, collections in databases.items():
+                allCollections.update(collections)
+                print(
+                    f"Tenant: {tenant}, Database: {database}, Collections: {collections}"
+                )
+        collection = allCollections.get(request.id, None)
+        if collection is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Collection with id {request.id} not found")
+        collection_unique_key = f"{collection.tenant}:{collection.database}:{request.id}"
+        segments = [self._segments[id] for id in self._collection_to_segments[collection_unique_key]]
+        if {segment["scope"] for segment in segments} != {SegmentScope.METADATA, SegmentScope.RECORD, SegmentScope.VECTOR}:
+            context.abort(grpc.StatusCode.INTERNAL, f"Incomplete segments for collection {collection}: {segments}")
+            
+        return GetCollectionWithSegmentsResponse(
+            collection=to_proto_collection(collection),
+            segments=[to_proto_segment(segment) for segment in segments]
         )
 
     @overrides(check_signature=False)

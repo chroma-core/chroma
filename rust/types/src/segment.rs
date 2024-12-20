@@ -6,6 +6,7 @@ use crate::chroma_proto;
 use chroma_error::{ChromaError, ErrorCodes};
 use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
+use tonic::Status;
 use uuid::Uuid;
 
 /// SegmentUuid is a wrapper around Uuid to provide a type for the segment id.
@@ -103,6 +104,12 @@ impl ChromaError for SegmentConversionError {
             SegmentConversionError::SegmentScopeConversionError(e) => e.code(),
             SegmentConversionError::MetadataValueConversionError(e) => e.code(),
         }
+    }
+}
+
+impl From<SegmentConversionError> for Status {
+    fn from(value: SegmentConversionError) -> Self {
+        Status::invalid_argument(value.to_string())
     }
 }
 

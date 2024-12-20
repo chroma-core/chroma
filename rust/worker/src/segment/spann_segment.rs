@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -11,7 +12,6 @@ use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWri
 use chroma_types::SegmentUuid;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use thiserror::Error;
-use tonic::async_trait;
 use uuid::Uuid;
 
 use super::{

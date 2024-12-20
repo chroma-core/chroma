@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use chromadb::v2::collection::{GetOptions, QueryOptions};
-use chromadb::v2::ChromaClient;
+use chromadb::collection::{GetOptions, QueryOptions};
+use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::Guacamole;
 use tracing::Instrument;

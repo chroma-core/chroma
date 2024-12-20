@@ -7,7 +7,6 @@ const generateId = (content: React.ReactNode): string => {
       .replaceAll("_", "-")
       .replace(/[^a-z0-9\s-]/g, "")
       .replace(/\s+/g, "-")
-
       .trim();
   }
   return "";

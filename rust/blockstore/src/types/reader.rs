@@ -106,16 +106,6 @@ impl<
         }
     }
 
-    pub async fn get_at_index(
-        &'referred_data self,
-        index: usize,
-    ) -> Result<(&'referred_data str, K, V), Box<dyn ChromaError>> {
-        match self {
-            BlockfileReader::MemoryBlockfileReader(reader) => reader.get_at_index(index),
-            BlockfileReader::ArrowBlockfileReader(reader) => reader.get_at_index(index).await,
-        }
-    }
-
     pub fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader.id(),
@@ -129,6 +119,17 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(prefixes, keys).await
             }
+        }
+    }
+
+    pub async fn rank(
+        &'referred_data self,
+        prefix: &'referred_data str,
+        key: K,
+    ) -> Result<usize, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.rank(prefix, key)),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.rank(prefix, key).await,
         }
     }
 }

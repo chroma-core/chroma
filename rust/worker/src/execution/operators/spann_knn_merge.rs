@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use tonic::async_trait;
+use async_trait::async_trait;
 
 use crate::execution::operator::Operator;
 

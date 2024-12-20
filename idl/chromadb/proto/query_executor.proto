@@ -6,9 +6,11 @@ import "chromadb/proto/chroma.proto";
 
 message ScanOperator {
     Collection collection = 1;
-    string knn_id = 2;
-    string metadata_id = 3;
-    string record_id = 4;
+    // Reserve for deprecated fields
+    reserved 2, 3, 4;
+    Segment knn = 5;
+    Segment metadata = 6;
+    Segment record = 7;
 }
 
 message FilterOperator {

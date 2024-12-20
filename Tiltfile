@@ -145,4 +145,4 @@ k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"]
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
 
 # Local S3
-k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards='9000:9000')
+k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])

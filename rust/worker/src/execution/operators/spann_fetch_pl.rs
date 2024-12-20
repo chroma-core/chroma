@@ -1,7 +1,7 @@
+use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::SpannPosting;
 use thiserror::Error;
-use tonic::async_trait;
 
 use crate::{
     execution::operator::{Operator, OperatorType},
@@ -22,7 +22,7 @@ pub(crate) struct SpannFetchPlOutput {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum SpannFetchPlError {
+pub enum SpannFetchPlError {
     #[error("Error creating spann segment reader")]
     SpannSegmentReaderCreationError,
     #[error("Error querying reader")]

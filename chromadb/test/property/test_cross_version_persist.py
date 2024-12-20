@@ -150,13 +150,7 @@ def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
 
-    # Version <3.9 requires bounding tokenizers<=0.20.3
-    (major, minor, patch) = sys.version_info[:3]
-    if major == 3 and minor < 9:
-        install_version(version, {"tokenizers": "<=0.20.3"})
-    else:
-        install_version(version, {})
-
+    install_version(version, {})
     yield configuration
     # Cleanup the installed version
     path = get_path_to_version_install(version)

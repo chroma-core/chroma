@@ -1,20 +1,18 @@
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::Segment;
+use chroma_types::{CollectionAndSegments, Segment};
 use thiserror::Error;
-use tokio::sync::oneshot::{self, error::RecvError, Sender};
-use tonic::async_trait;
-use tracing::Span;
+use tokio::sync::oneshot::{error::RecvError, Sender};
 
 use crate::{
     execution::{
         dispatcher::Dispatcher,
-        operator::{wrap, TaskError, TaskResult},
+        operator::{wrap, TaskError, TaskMessage, TaskResult},
         operators::{
             fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-            fetch_segment::{FetchSegmentError, FetchSegmentOperator, FetchSegmentOutput},
             filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
             knn_hnsw::KnnHnswError,
             knn_log::KnnLogError,
@@ -23,7 +21,6 @@ use crate::{
             spann_centers_search::SpannCentersSearchError,
             spann_fetch_pl::SpannFetchPlError,
         },
-        orchestration::common::terminate_with_error,
     },
     segment::{
         distributed_hnsw_segment::{
@@ -31,19 +28,17 @@ use crate::{
         },
         utils::distance_function_from_segment,
     },
-    system::{ChannelError, Component, ComponentContext, ComponentHandle, Handler, System},
+    system::{ChannelError, ComponentContext, ComponentHandle, Handler},
 };
+
+use super::orchestrator::Orchestrator;
 
 #[derive(Error, Debug)]
 pub enum KnnError {
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
-    #[error("Empty collection")]
-    EmptyCollection,
     #[error("Error running Fetch Log Operator: {0}")]
     FetchLog(#[from] FetchLogError),
-    #[error("Error running Fetch Segment Operator: {0}")]
-    FetchSegment(#[from] FetchSegmentError),
     #[error("Error running Filter Operator: {0}")]
     Filter(#[from] FilterError),
     #[error("Error creating hnsw segment reader: {0}")]
@@ -74,9 +69,7 @@ impl ChromaError for KnnError {
     fn code(&self) -> ErrorCodes {
         match self {
             KnnError::Channel(e) => e.code(),
-            KnnError::EmptyCollection => ErrorCodes::Internal,
             KnnError::FetchLog(e) => e.code(),
-            KnnError::FetchSegment(e) => e.code(),
             KnnError::Filter(e) => e.code(),
             KnnError::HnswReader(e) => e.code(),
             KnnError::KnnLog(e) => e.code(),
@@ -118,6 +111,38 @@ pub struct KnnFilterOutput {
 
 type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 
+/// The `KnnFilterOrchestrator` chains a sequence of operators in sequence to evaluate
+/// the first half of a `<collection>.query(...)` query from the user
+///
+/// # Pipeline
+/// ```text
+///       ┌────────────┐           
+///       │            │           
+///       │  on_start  │           
+///       │            │           
+///       └──────┬─────┘           
+///              │                 
+///              ▼                 
+///    ┌────────────────────┐      
+///    │                    │      
+///    │  FetchLogOperator  │      
+///    │                    │      
+///    └─────────┬──────────┘      
+///              │                 
+///              ▼                 
+///    ┌───────────────────┐       
+///    │                   │       
+///    │   FilterOperator  │       
+///    │                   │       
+///    └─────────┬─────────┘       
+///              │                 
+///              ▼                 
+///     ┌──────────────────┐       
+///     │                  │       
+///     │  result_channel  │       
+///     │                  │       
+///     └──────────────────┘       
+/// ```
 #[derive(Debug)]
 pub struct KnnFilterOrchestrator {
     // Orchestrator parameters
@@ -126,13 +151,14 @@ pub struct KnnFilterOrchestrator {
     hnsw_provider: HnswIndexProvider,
     queue: usize,
 
-    // Fetch logs and segments
-    fetch_log: FetchLogOperator,
-    fetch_segment: FetchSegmentOperator,
+    // Collection segments
+    collection_and_segments: CollectionAndSegments,
 
-    // Fetch output
-    fetch_log_output: Option<FetchLogOutput>,
-    fetch_segment_output: Option<FetchSegmentOutput>,
+    // Fetch logs
+    fetch_log: FetchLogOperator,
+
+    // Fetched logs
+    fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
     filter: FilterOperator,
@@ -147,8 +173,8 @@ impl KnnFilterOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         hnsw_provider: HnswIndexProvider,
         queue: usize,
+        collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
-        fetch_segment: FetchSegmentOperator,
         filter: FilterOperator,
     ) -> Self {
         Self {
@@ -156,77 +182,40 @@ impl KnnFilterOrchestrator {
             dispatcher,
             hnsw_provider,
             queue,
+            collection_and_segments,
             fetch_log,
-            fetch_segment,
-            fetch_log_output: None,
-            fetch_segment_output: None,
+            fetched_logs: None,
             filter,
             result_channel: None,
-        }
-    }
-
-    pub async fn run(mut self, system: System) -> KnnFilterResult {
-        let (tx, rx) = oneshot::channel();
-        self.result_channel = Some(tx);
-        let mut handle = system.start_component(self);
-        let result = rx.await;
-        handle.stop();
-        result?
-    }
-
-    fn terminate_with_error<E>(&mut self, ctx: &ComponentContext<Self>, err: E)
-    where
-        E: Into<KnnError>,
-    {
-        let knn_err = err.into();
-        tracing::error!("Error running orchestrator: {}", &knn_err);
-        terminate_with_error(self.result_channel.take(), knn_err, ctx);
-    }
-
-    async fn try_start_filter_operator(&mut self, ctx: &ComponentContext<Self>) {
-        if let (Some(logs), Some(segments)) = (
-            self.fetch_log_output.as_ref(),
-            self.fetch_segment_output.as_ref(),
-        ) {
-            let task = wrap(
-                Box::new(self.filter.clone()),
-                FilterInput {
-                    logs: logs.clone(),
-                    blockfile_provider: self.blockfile_provider.clone(),
-                    metadata_segment: segments.metadata_segment.clone(),
-                    record_segment: segments.record_segment.clone(),
-                },
-                ctx.receiver(),
-            );
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
         }
     }
 }
 
 #[async_trait]
-impl Component for KnnFilterOrchestrator {
-    fn get_name() -> &'static str {
-        "Knn Filter Orchestrator"
+impl Orchestrator for KnnFilterOrchestrator {
+    type Output = KnnFilterOutput;
+    type Error = KnnError;
+
+    fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
+        self.dispatcher.clone()
+    }
+
+    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+        vec![wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver())]
     }
 
     fn queue_size(&self) -> usize {
         self.queue
     }
 
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        let log_task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
-        let segment_task = wrap(Box::new(self.fetch_segment.clone()), (), ctx.receiver());
-        if let Err(err) = self.dispatcher.send(log_task, Some(Span::current())).await {
-            self.terminate_with_error(ctx, err);
-        } else if let Err(err) = self
-            .dispatcher
-            .send(segment_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-        }
+    fn set_result_channel(&mut self, sender: Sender<KnnFilterResult>) {
+        self.result_channel = Some(sender)
+    }
+
+    fn take_result_channel(&mut self) -> Sender<KnnFilterResult> {
+        self.result_channel
+            .take()
+            .expect("The result channel should be set before take")
     }
 }
 
@@ -239,44 +228,24 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
-        };
-        self.fetch_log_output = Some(output);
-        self.try_start_filter_operator(ctx).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<FetchSegmentOutput, FetchSegmentError>> for KnnFilterOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<FetchSegmentOutput, FetchSegmentError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
 
-        // If dimension is not set and segment is uninitialized,  we assume
-        // this is a query on empty collection, so we return early here
-        if output.collection.dimension.is_none() && output.vector_segment.file_path.is_empty() {
-            self.terminate_with_error(ctx, KnnError::EmptyCollection);
-            return;
-        }
+        self.fetched_logs = Some(output.clone());
 
-        self.fetch_segment_output = Some(output);
-        self.try_start_filter_operator(ctx).await;
+        let task = wrap(
+            Box::new(self.filter.clone()),
+            FilterInput {
+                logs: output,
+                blockfile_provider: self.blockfile_provider.clone(),
+                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+        );
+        self.send(task, ctx).await;
     }
 }
 
@@ -289,33 +258,30 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
         message: TaskResult<FilterOutput, FilterError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
-        let segments = self
-            .fetch_segment_output
-            .take()
-            .expect("FetchSegmentOperator should have finished already");
-        let collection_dimension = match segments.collection.dimension {
-            Some(dimension) => dimension as u32,
-            None => {
-                self.terminate_with_error(ctx, KnnError::NoCollectionDimension);
-                return;
-            }
+        let collection_dimension = match self.ok_or_terminate(
+            self.collection_and_segments
+                .collection
+                .dimension
+                .ok_or(KnnError::NoCollectionDimension),
+            ctx,
+        ) {
+            Some(dim) => dim as u32,
+            None => return,
         };
-        let distance_function = match distance_function_from_segment(&segments.vector_segment) {
-            Ok(distance_function) => distance_function,
-            Err(_) => {
-                self.terminate_with_error(ctx, KnnError::InvalidDistanceFunction);
-                return;
-            }
+        let distance_function = match self.ok_or_terminate(
+            distance_function_from_segment(&self.collection_and_segments.vector_segment)
+                .map_err(|_| KnnError::InvalidDistanceFunction),
+            ctx,
+        ) {
+            Some(distance_function) => distance_function,
+            None => return,
         };
         let hnsw_reader = match DistributedHNSWSegmentReader::from_segment(
-            &segments.vector_segment,
+            &self.collection_and_segments.vector_segment,
             collection_dimension as usize,
             self.hnsw_provider.clone(),
         )
@@ -327,29 +293,23 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             }
 
             Err(err) => {
-                self.terminate_with_error(ctx, *err);
+                self.terminate_with_result(Err((*err).into()), ctx);
                 return;
             }
         };
-        if let Some(chan) = self.result_channel.take() {
-            if chan
-                .send(Ok(KnnFilterOutput {
-                    logs: self
-                        .fetch_log_output
-                        .take()
-                        .expect("FetchLogOperator should have finished already"),
-                    distance_function,
-                    filter_output: output,
-                    hnsw_reader,
-                    record_segment: segments.record_segment,
-                    vector_segment: segments.vector_segment,
-                    dimension: collection_dimension as usize,
-                }))
-                .is_err()
-            {
-                tracing::error!("Error sending final result");
-            };
-        }
+        let output = KnnFilterOutput {
+            logs: self
+                .fetched_logs
+                .take()
+                .expect("FetchLogOperator should have finished already"),
+            distance_function,
+            filter_output: output,
+            hnsw_reader,
+            record_segment: self.collection_and_segments.record_segment.clone(),
+            vector_segment: self.collection_and_segments.vector_segment.clone(),
+            dimension: collection_dimension as usize,
+        };
+        self.terminate_with_result(Ok(output), ctx);
     }
 }
 

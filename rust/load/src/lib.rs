@@ -24,8 +24,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chromadb::v2::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
-use chromadb::v2::ChromaClient;
+use chromadb::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
+use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{Guacamole, Zipf};
 use opentelemetry::global;
@@ -113,29 +113,33 @@ pub struct Metrics {
 
 /// Instantiate a new Chroma client.  This will use the CHROMA_HOST environment variable (or
 /// http://localhost:8000 when unset) as the argument to [client_for_url].
-pub fn client() -> ChromaClient {
+pub async fn client() -> ChromaClient {
     let url = std::env::var("CHROMA_HOST").unwrap_or_else(|_| "http://localhost:8000".into());
-    client_for_url(url)
+    client_for_url(url).await
 }
 
 /// Create a new Chroma client for the given URL.  This will use the CHROMA_TOKEN environment
 /// variable if set, or no authentication if unset.
-pub fn client_for_url(url: String) -> ChromaClient {
+pub async fn client_for_url(url: String) -> ChromaClient {
     if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
         ChromaClient::new(ChromaClientOptions {
-            url,
+            url: Some(url),
             auth: ChromaAuthMethod::TokenAuth {
                 token: auth,
                 header: ChromaTokenHeader::XChromaToken,
             },
-            database: Some("hf-tiny-stories".to_string()),
+            database: "hf-tiny-stories".to_string(),
         })
+        .await
+        .unwrap()
     } else {
         ChromaClient::new(ChromaClientOptions {
-            url,
+            url: Some(url),
             auth: ChromaAuthMethod::None,
-            database: Some("hf-tiny-stories".to_string()),
+            database: "hf-tiny-stories".to_string(),
         })
+        .await
+        .unwrap()
     }
 }
 
@@ -306,6 +310,9 @@ pub enum WhereMixin {
     /// A raw metadata query simply copies the provided filter spec.
     #[serde(rename = "query")]
     Constant(serde_json::Value),
+    /// Search for a word from the provided set of words with skew.
+    #[serde(rename = "fts")]
+    FullTextSearch(Skew),
     /// The tiny stories workload.  The way these collections were setup, there are three fields
     /// each of integer, float, and string.  The integer fields are named i1, i2, and i3.  The
     /// float fields are named f1, f2, and f3.  The string fields are named s1, s2, and s3.
@@ -325,6 +332,17 @@ impl WhereMixin {
     pub fn to_json(&self, guac: &mut Guacamole) -> serde_json::Value {
         match self {
             Self::Constant(query) => query.clone(),
+            Self::FullTextSearch(skew) => {
+                const WORDS: &[&str] = words::FEW_WORDS;
+                let word = match skew {
+                    Skew::Uniform => WORDS[uniform(0, WORDS.len() as u64)(guac) as usize],
+                    Skew::Zipf { theta } => {
+                        let z = Zipf::from_alpha(WORDS.len() as u64, *theta);
+                        WORDS[z.next(guac) as usize]
+                    }
+                };
+                serde_json::json!({"$contains": word.to_string()})
+            }
             Self::TinyStories(mixin) => mixin.to_json(guac),
             Self::Select(select) => {
                 let scale: f64 = any(guac);
@@ -478,7 +496,7 @@ impl Workload {
                 if let Some(workload) = workloads.get(name) {
                     *self = workload.clone();
                 } else {
-                    return Err(Error::InvalidRequest(format!("workload not found: {name}")));
+                    return Err(Error::NotFound(format!("workload not found: {name}")));
                 }
             }
             Workload::Get(_) => {}
@@ -1093,7 +1111,7 @@ impl LoadService {
         inhibit: Arc<AtomicBool>,
         spec: RunningWorkload,
     ) {
-        let client = Arc::new(client());
+        let client = Arc::new(client().await);
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
         let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
@@ -1412,7 +1430,6 @@ pub async fn entrypoint() {
                     "http_request",
                     method = ?request.method(),
                     matched_path,
-                    some_other_field = tracing::field::Empty,
                 )
             }),
         )

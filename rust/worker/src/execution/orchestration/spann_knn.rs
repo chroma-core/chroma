@@ -1,14 +1,13 @@
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use tokio::sync::oneshot::{self, Sender};
-use tonic::async_trait;
-use tracing::Span;
+use tokio::sync::oneshot::Sender;
 
 use crate::{
     execution::{
         dispatcher::Dispatcher,
-        operator::{wrap, TaskResult},
+        operator::{wrap, TaskMessage, TaskResult},
         operators::{
             knn::{KnnOperator, RecordDistance},
             knn_log::{KnnLogError, KnnLogInput, KnnLogOutput},
@@ -31,13 +30,15 @@ use crate::{
                 SpannKnnMergeError, SpannKnnMergeInput, SpannKnnMergeOperator, SpannKnnMergeOutput,
             },
         },
-        orchestration::common::terminate_with_error,
     },
     segment::spann_segment::SpannSegmentReaderContext,
-    system::{Component, ComponentContext, ComponentHandle, Handler, System},
+    system::{ComponentContext, ComponentHandle, Handler},
 };
 
-use super::knn_filter::{KnnError, KnnFilterOutput, KnnResult};
+use super::{
+    knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult},
+    orchestrator::Orchestrator,
+};
 
 // TODO(Sanket): Make these configurable.
 const RNG_FACTOR: f32 = 1.0;
@@ -127,24 +128,6 @@ impl SpannKnnOrchestrator {
         }
     }
 
-    pub async fn run(mut self, system: System) -> KnnResult {
-        let (tx, rx) = oneshot::channel();
-        self.result_channel = Some(tx);
-        let mut handle = system.start_component(self);
-        let result = rx.await;
-        handle.stop();
-        result?
-    }
-
-    fn terminate_with_error<E>(&mut self, ctx: &ComponentContext<Self>, err: E)
-    where
-        E: Into<KnnError>,
-    {
-        let knn_err = err.into();
-        tracing::error!("Error running orchestrator: {}", &knn_err);
-        terminate_with_error(self.result_channel.take(), knn_err, ctx);
-    }
-
     async fn try_start_knn_merge_operator(&mut self, ctx: &ComponentContext<Self>) {
         if self.heads_searched && self.num_outstanding_bf_pl == 0 {
             // This is safe because self.records is only used once and that is during merge.
@@ -155,24 +138,23 @@ impl SpannKnnOrchestrator {
                 SpannKnnMergeInput { records },
                 ctx.receiver(),
             );
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
+            self.send(task, ctx).await;
         }
     }
 }
 
 #[async_trait]
-impl Component for SpannKnnOrchestrator {
-    fn get_name() -> &'static str {
-        "Spann Knn Orchestrator"
+impl Orchestrator for SpannKnnOrchestrator {
+    type Output = KnnOutput;
+    type Error = KnnError;
+
+    fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
+        self.dispatcher.clone()
     }
 
-    fn queue_size(&self) -> usize {
-        self.queue
-    }
+    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+        let mut tasks = Vec::new();
 
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         let knn_log_task = wrap(
             Box::new(self.log_knn.clone()),
             KnnLogInput {
@@ -184,16 +166,8 @@ impl Component for SpannKnnOrchestrator {
             },
             ctx.receiver(),
         );
-        if let Err(err) = self
-            .dispatcher
-            .send(knn_log_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-            return;
-        }
+        tasks.push(knn_log_task);
 
-        // Invoke Head search operator.
         let reader_context = SpannSegmentReaderContext {
             segment: self.knn_filter_output.vector_segment.clone(),
             blockfile_provider: self.blockfile_provider.clone(),
@@ -212,14 +186,23 @@ impl Component for SpannKnnOrchestrator {
             },
             ctx.receiver(),
         );
+        tasks.push(head_search_task);
 
-        if let Err(err) = self
-            .dispatcher
-            .send(head_search_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-        }
+        tasks
+    }
+
+    fn queue_size(&self) -> usize {
+        self.queue
+    }
+
+    fn set_result_channel(&mut self, sender: Sender<KnnResult>) {
+        self.result_channel = Some(sender)
+    }
+
+    fn take_result_channel(&mut self) -> Sender<KnnResult> {
+        self.result_channel
+            .take()
+            .expect("The result channel should be set before take")
     }
 }
 
@@ -232,12 +215,9 @@ impl Handler<TaskResult<KnnLogOutput, KnnLogError>> for SpannKnnOrchestrator {
         message: TaskResult<KnnLogOutput, KnnLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
         self.records.push(output.record_distances);
         self.try_start_knn_merge_operator(ctx).await;
@@ -255,12 +235,9 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         message: TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
         // Set state that is used for tracking when we are ready for merging.
         self.heads_searched = true;
@@ -283,13 +260,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
                 ctx.receiver(),
             );
 
-            if let Err(err) = self
-                .dispatcher
-                .send(fetch_pl_task, Some(Span::current()))
-                .await
-            {
-                self.terminate_with_error(ctx, err);
-            }
+            self.send(fetch_pl_task, ctx).await;
         }
     }
 }
@@ -303,12 +274,9 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
         message: TaskResult<SpannFetchPlOutput, SpannFetchPlError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
         // Spawn brute force posting list task.
         let bf_pl_task = wrap(
@@ -327,13 +295,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
             ctx.receiver(),
         );
 
-        if let Err(err) = self
-            .dispatcher
-            .send(bf_pl_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-        }
+        self.send(bf_pl_task, ctx).await;
     }
 }
 
@@ -346,12 +308,9 @@ impl Handler<TaskResult<SpannBfPlOutput, SpannBfPlError>> for SpannKnnOrchestrat
         message: TaskResult<SpannBfPlOutput, SpannBfPlError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
         // Update state tracking for merging.
         self.num_outstanding_bf_pl -= 1;
@@ -389,13 +348,7 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
             },
             ctx.receiver(),
         );
-        if let Err(err) = self
-            .dispatcher
-            .send(prefetch_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-        }
+        self.send(prefetch_task, ctx).await;
 
         let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
@@ -407,13 +360,7 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
             },
             ctx.receiver(),
         );
-        if let Err(err) = self
-            .dispatcher
-            .send(projection_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-        }
+        self.send(projection_task, ctx).await;
     }
 }
 
@@ -439,17 +386,6 @@ impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for SpannKnnOr
         message: TaskResult<KnnProjectionOutput, KnnProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
-        };
-        if let Some(chan) = self.result_channel.take() {
-            if chan.send(Ok(output)).is_err() {
-                tracing::error!("Error sending final result");
-            };
-        }
+        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
     }
 }

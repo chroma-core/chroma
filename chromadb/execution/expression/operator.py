@@ -1,14 +1,16 @@
 from dataclasses import dataclass
 from typing import Optional
-from uuid import UUID
 
 from chromadb.api.types import Embeddings, IDs, Include, IncludeEnum
-from chromadb.types import Collection, RequestVersionContext, Where, WhereDocument
+from chromadb.types import Collection, RequestVersionContext, Segment, Where, WhereDocument
 
 
 @dataclass
 class Scan:
     collection: Collection
+    knn: Segment
+    metadata: Segment
+    record: Segment
 
     @property
     def version(self) -> RequestVersionContext:
@@ -16,14 +18,6 @@ class Scan:
             collection_version=self.collection.version,
             log_position=self.collection.log_position,
         )
-
-
-@dataclass
-class SegmentScan(Scan):
-    knn_id: UUID
-    metadata_id: UUID
-    record_id: UUID
-
 
 @dataclass
 class Filter:
