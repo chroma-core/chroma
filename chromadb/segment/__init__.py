@@ -104,13 +104,15 @@ class SegmentManager(Component):
     segments as required"""
 
     @abstractmethod
-    def prepare_segments_for_new_collection(self, collection: Collection) -> Sequence[Segment]:
+    def prepare_segments_for_new_collection(
+        self, collection: Collection
+    ) -> Sequence[Segment]:
         """Return the segments required for a new collection. Returns only segment data,
         does not persist to the SysDB"""
         pass
 
     @abstractmethod
-    def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
+    def delete_segments(self, segments: Sequence[Segment]) -> Sequence[UUID]:
         """Delete any local state for all the segments associated with a collection, and
         returns a sequence of their IDs. Does not update the SysDB."""
         pass

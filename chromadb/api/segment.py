@@ -227,7 +227,7 @@ class SegmentAPI(ServerAPI):
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
-            segments=[], # Passing empty till backend changes are deployed.
+            segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -384,10 +384,11 @@ class SegmentAPI(ServerAPI):
         )
 
         if existing:
+            segments = self._sysdb.get_segments(collection=existing[0].id)
             self._sysdb.delete_collection(
                 existing[0].id, tenant=tenant, database=database
             )
-            self._manager.delete_segments(existing[0].id)
+            self._manager.delete_segments(segments)
         else:
             raise ValueError(f"Collection {name} does not exist.")
 

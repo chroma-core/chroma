@@ -1,7 +1,11 @@
 import gc
 import math
+import os.path
 from uuid import UUID
+from contextlib import contextmanager
 
+from chromadb.api.segment import SegmentAPI
+from chromadb.db.system import SysDB
 from chromadb.ingest.impl.utils import create_topic_name
 
 from chromadb.config import System
@@ -9,12 +13,14 @@ from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
 from time import sleep
 import psutil
+
+from chromadb.segment import SegmentType
 from chromadb.test.property.strategies import NormalizedRecordSet, RecordSet
 from typing import Callable, Optional, Tuple, Union, List, TypeVar, cast, Any, Dict
 from typing_extensions import Literal
 import numpy as np
 import numpy.typing as npt
-from chromadb.api import types
+from chromadb.api import types, ClientAPI
 from chromadb.api.models.Collection import Collection
 from hypothesis import note
 from hypothesis.errors import InvalidArgument
@@ -457,3 +463,53 @@ def log_size_for_collections_match_expected(
 
     else:
         assert _total_embedding_queue_log_size(sqlite) == 0
+
+
+@contextmanager
+def collection_deleted(client: ClientAPI, collection_name: str):
+    # Invariant checks before deletion
+    assert collection_name in [c.name for c in client.list_collections()]
+    collection = client.get_collection(collection_name)
+    segments = []
+    if isinstance(client._server, SegmentAPI):  # type: ignore
+        sysdb: SysDB = client._server._sysdb  # type: ignore
+        segments = sysdb.get_segments(collection=collection.id)
+        segment_types = {}
+        should_have_hnsw = False
+        for segment in segments:
+            segment_types[segment["type"]] = True
+            if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                sync_threshold = (
+                    collection.metadata["hnsw:sync_threshold"]
+                    if collection.metadata is not None
+                    and "hnsw:sync_threshold" in collection.metadata
+                    else 1000
+                )
+                if (
+                    collection.count() > sync_threshold
+                ):  # we only check if vector segment dir exists if we've synced at least once
+                    should_have_hnsw = True
+                    assert os.path.exists(
+                        os.path.join(
+                            client.get_settings().persist_directory, str(segment["id"])
+                        )
+                    )
+        if should_have_hnsw:
+            assert segment_types[SegmentType.HNSW_LOCAL_PERSISTED.value]
+        assert segment_types[SegmentType.SQLITE.value]
+
+    yield
+
+    # Invariant checks after deletion
+    assert collection_name not in [c.name for c in client.list_collections()]
+    if len(segments) > 0:
+        sysdb: SysDB = client._server._sysdb  # type: ignore
+        segments_after = sysdb.get_segments(collection=collection.id)
+        assert len(segments_after) == 0
+        for segment in segments:
+            if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                assert not os.path.exists(
+                    os.path.join(
+                        client.get_settings().persist_directory, str(segment["id"])
+                    )
+                )

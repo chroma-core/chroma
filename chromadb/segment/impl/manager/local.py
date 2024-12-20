@@ -137,7 +137,9 @@ class LocalSegmentManager(SegmentManager):
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
     @override
-    def prepare_segments_for_new_collection(self, collection: Collection) -> Sequence[Segment]:
+    def prepare_segments_for_new_collection(
+        self, collection: Collection
+    ) -> Sequence[Segment]:
         vector_segment = _segment(
             self._vector_segment_type, SegmentScope.VECTOR, collection
         )
@@ -151,9 +153,9 @@ class LocalSegmentManager(SegmentManager):
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
     @override
-    def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
-        segments = self._sysdb.get_segments(collection=collection_id)
+    def delete_segments(self, segments: Sequence[Segment]) -> Sequence[UUID]:
         for segment in segments:
+            collection_id = segment["collection"]
             if segment["id"] in self._instances:
                 if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
                     instance = self.get_segment(collection_id, VectorReader)
