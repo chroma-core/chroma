@@ -32,4 +32,6 @@ For MacOS users, you can download the version of `protoc` from the [release page
 
 ALSO, ensure you have copied the `/include` directory of the release to `../include` relative to wherever you installed the binary.
 
-Once those are installed, you can run `make build` to build the project and most importantly, the generated protobuf files which your IDE will complain about until they are generated.
+Then, to install the plugins, run the `go install` commands from the `Dockerfile`. The exact commands are not here because we would be duplicating where versions live if we did. The `Dockerfile` is the source of truth for the versions.
+
+Once those are all installed, you can run `make build` to build the project and most importantly, the generated protobuf files which your IDE will complain about until they are generated.
