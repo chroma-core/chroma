@@ -57,7 +57,13 @@ const SearchDocs: React.FC = () => {
   }, [query]);
 
   return (
-    <Dialog>
+    <Dialog
+      onOpenChange={(open) => {
+        if (!open) {
+          setQuery("");
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <UIButton className="lex items-center gap-2 p-[0.35rem] px-3 text-xs">
           <MagnifyingGlassIcon className="w-4 h-4" />
@@ -132,10 +138,16 @@ const SearchDocs: React.FC = () => {
           )}
         </div>
         <div className="flex justify-end py-2 px-4 border-t border-black">
-          <div className="flex items-center gap-2">
-            <ChromaIcon className="h-7 w-7" />
-            <p className="text-xs font-semibold">Powered by Chroma Cloud</p>
-          </div>
+          <Link
+            href="https://airtable.com/appG6DhLoDUnTawwh/shrOAiDUtS2ILy5vZ"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <div className="flex items-center gap-2">
+              <ChromaIcon className="h-7 w-7" />
+              <p className="text-xs font-semibold">Powered by Chroma Cloud</p>
+            </div>
+          </Link>
         </div>
       </DialogContent>
     </Dialog>
