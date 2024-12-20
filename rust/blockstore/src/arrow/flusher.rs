@@ -50,6 +50,12 @@ impl ArrowBlockfileFlusher {
             futures.push(self.block_manager.flush(block));
         }
         let num_futures = futures.len();
+        // buffer_unordered hangs with 0 futures.
+        if num_futures == 0 {
+            self.root_manager.flush::<K>(&self.root).await?;
+            return Ok(());
+        }
+        tracing::debug!("Flushing {} blocks", num_futures);
         futures::stream::iter(futures)
             .buffer_unordered(num_futures)
             .try_collect::<Vec<_>>()
