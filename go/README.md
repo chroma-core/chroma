@@ -28,7 +28,7 @@ The biggest challenge to getting the project to build correctly is ensuring you 
 - `protoc-gen-go`
 - `protoc-gen-go-grpc`
 
-For MacOS users, you can download the version of `protoc` from the [release page](https://github.com/protocolbuffers/protobuf/releases). Ensure that you copy the `protoc` binary to `/usr/local/bin` or add it to your `GOPATH/bin`.
+You can start by downloading the version of `protoc` from the [release page](https://github.com/protocolbuffers/protobuf/releases). Ensure that you copy the `protoc` binary to `/usr/local/bin` or add it to your `GOPATH/bin`.
 
 ALSO, ensure you have copied the `/include` directory of the release to `../include` relative to wherever you installed the binary.
 
