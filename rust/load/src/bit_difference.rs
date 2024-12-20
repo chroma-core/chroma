@@ -25,8 +25,8 @@
 //! Internally, guacamole provides primitives that make it easy to manage the set of seeds to get a
 //! variety of data sets out of the synthetic data.
 
-use chromadb::v2::collection::{CollectionEntries, GetOptions, QueryOptions};
-use chromadb::v2::ChromaClient;
+use chromadb::collection::{CollectionEntries, GetOptions, QueryOptions};
+use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{FromGuacamole, Guacamole, Zipf};
 use siphasher::sip::SipHasher24;
