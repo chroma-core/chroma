@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
+use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
 use crate::{

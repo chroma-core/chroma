@@ -2,12 +2,12 @@ use crate::{
     execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
 };
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
 use thiserror::Error;
-use tonic::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct CountRecordsOperator {}

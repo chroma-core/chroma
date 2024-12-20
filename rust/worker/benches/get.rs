@@ -11,7 +11,10 @@ use load::{
 };
 use worker::{
     config::RootConfig,
-    execution::{dispatcher::Dispatcher, orchestration::get::GetOrchestrator},
+    execution::{
+        dispatcher::Dispatcher,
+        orchestration::{get::GetOrchestrator, orchestrator::Orchestrator},
+    },
     segment::test::TestSegment,
     system::{ComponentHandle, System},
 };

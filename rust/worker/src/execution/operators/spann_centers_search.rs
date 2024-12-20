@@ -1,8 +1,8 @@
+use async_trait::async_trait;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::utils::rng_query;
 use thiserror::Error;
-use tonic::async_trait;
 
 use crate::{
     execution::operator::Operator,

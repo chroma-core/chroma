@@ -1,12 +1,11 @@
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
-use tokio::sync::oneshot::{self, Sender};
-use tonic::async_trait;
-use tracing::Span;
+use tokio::sync::oneshot::Sender;
 
 use crate::{
     execution::{
         dispatcher::Dispatcher,
-        operator::{wrap, TaskResult},
+        operator::{wrap, TaskMessage, TaskResult},
         operators::{
             knn::{KnnOperator, RecordDistance},
             knn_hnsw::{KnnHnswError, KnnHnswInput, KnnHnswOutput},
@@ -20,12 +19,14 @@ use crate::{
                 PrefetchRecordOutput,
             },
         },
-        orchestration::common::terminate_with_error,
     },
-    system::{Component, ComponentContext, ComponentHandle, Handler, System},
+    system::{ComponentContext, ComponentHandle, Handler},
 };
 
-use super::knn_filter::{KnnError, KnnFilterOutput, KnnResult};
+use super::{
+    knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult},
+    orchestrator::Orchestrator,
+};
 
 /// The `KnnOrchestrator` finds the nearest neighbor of a target embedding given the search domain.
 /// When used together with `KnnFilterOrchestrator`, they evaluate a `<collection>.query(...)` query
@@ -146,6 +147,11 @@ impl KnnOrchestrator {
         knn_projection: KnnProjectionOperator,
     ) -> Self {
         let fetch = knn.fetch;
+        let knn_segment_distances = if knn_filter_output.hnsw_reader.is_none() {
+            Some(Vec::new())
+        } else {
+            None
+        };
         Self {
             blockfile_provider,
             dispatcher,
@@ -153,29 +159,11 @@ impl KnnOrchestrator {
             knn_filter_output,
             knn,
             knn_log_distances: None,
-            knn_segment_distances: None,
+            knn_segment_distances,
             merge: KnnMergeOperator { fetch },
             knn_projection,
             result_channel: None,
         }
-    }
-
-    pub async fn run(mut self, system: System) -> KnnResult {
-        let (tx, rx) = oneshot::channel();
-        self.result_channel = Some(tx);
-        let mut handle = system.start_component(self);
-        let result = rx.await;
-        handle.stop();
-        result?
-    }
-
-    fn terminate_with_error<E>(&mut self, ctx: &ComponentContext<Self>, err: E)
-    where
-        E: Into<KnnError>,
-    {
-        let knn_err = err.into();
-        tracing::error!("Error running orchestrator: {}", &knn_err);
-        terminate_with_error(self.result_channel.take(), knn_err, ctx);
     }
 
     async fn try_start_knn_merge_operator(&mut self, ctx: &ComponentContext<Self>) {
@@ -191,24 +179,23 @@ impl KnnOrchestrator {
                 },
                 ctx.receiver(),
             );
-            if let Err(err) = self.dispatcher.send(task, Some(Span::current())).await {
-                self.terminate_with_error(ctx, err);
-            }
+            self.send(task, ctx).await;
         }
     }
 }
 
 #[async_trait]
-impl Component for KnnOrchestrator {
-    fn get_name() -> &'static str {
-        "Knn Orchestrator"
+impl Orchestrator for KnnOrchestrator {
+    type Output = KnnOutput;
+    type Error = KnnError;
+
+    fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
+        self.dispatcher.clone()
     }
 
-    fn queue_size(&self) -> usize {
-        self.queue
-    }
+    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+        let mut tasks = Vec::new();
 
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         let knn_log_task = wrap(
             Box::new(self.knn.clone()),
             KnnLogInput {
@@ -220,14 +207,7 @@ impl Component for KnnOrchestrator {
             },
             ctx.receiver(),
         );
-        if let Err(err) = self
-            .dispatcher
-            .send(knn_log_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-            return;
-        }
+        tasks.push(knn_log_task);
 
         if let Some(hnsw_reader) = self.knn_filter_output.hnsw_reader.as_ref().cloned() {
             let knn_segment_task = wrap(
@@ -243,17 +223,24 @@ impl Component for KnnOrchestrator {
                 },
                 ctx.receiver(),
             );
-
-            if let Err(err) = self
-                .dispatcher
-                .send(knn_segment_task, Some(Span::current()))
-                .await
-            {
-                self.terminate_with_error(ctx, err);
-            }
-        } else {
-            self.knn_segment_distances = Some(Vec::new())
+            tasks.push(knn_segment_task);
         }
+
+        tasks
+    }
+
+    fn queue_size(&self) -> usize {
+        self.queue
+    }
+
+    fn set_result_channel(&mut self, sender: Sender<KnnResult>) {
+        self.result_channel = Some(sender)
+    }
+
+    fn take_result_channel(&mut self) -> Sender<KnnResult> {
+        self.result_channel
+            .take()
+            .expect("The result channel should be set before take")
     }
 }
 
@@ -266,12 +253,9 @@ impl Handler<TaskResult<KnnLogOutput, KnnLogError>> for KnnOrchestrator {
         message: TaskResult<KnnLogOutput, KnnLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
         self.knn_log_distances = Some(output.record_distances);
         self.try_start_knn_merge_operator(ctx).await;
@@ -287,12 +271,9 @@ impl Handler<TaskResult<KnnHnswOutput, KnnHnswError>> for KnnOrchestrator {
         message: TaskResult<KnnHnswOutput, KnnHnswError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
         self.knn_segment_distances = Some(output.record_distances);
         self.try_start_knn_merge_operator(ctx).await;
@@ -327,13 +308,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             },
             ctx.receiver(),
         );
-        if let Err(err) = self
-            .dispatcher
-            .send(prefetch_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-        }
+        self.send(prefetch_task, ctx).await;
 
         let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
@@ -345,13 +320,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             },
             ctx.receiver(),
         );
-        if let Err(err) = self
-            .dispatcher
-            .send(projection_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_error(ctx, err);
-        }
+        self.send(projection_task, ctx).await;
     }
 }
 
@@ -377,17 +346,6 @@ impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for KnnOrchest
         message: TaskResult<KnnProjectionOutput, KnnProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match message.into_inner() {
-            Ok(output) => output,
-            Err(err) => {
-                self.terminate_with_error(ctx, err);
-                return;
-            }
-        };
-        if let Some(chan) = self.result_channel.take() {
-            if chan.send(Ok(output)).is_err() {
-                tracing::error!("Error sending final result");
-            };
-        }
+        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
     }
 }

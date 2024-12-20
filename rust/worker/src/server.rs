@@ -1,5 +1,6 @@
 use std::iter::once;
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
@@ -23,7 +24,7 @@ use crate::{
         operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
         orchestration::{
             get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
-            CountQueryOrchestrator,
+            orchestrator::Orchestrator, CountOrchestrator,
         },
     },
     log::log::Log,
@@ -41,13 +42,13 @@ pub struct WorkerServer {
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
     log: Box<Log>,
-    sysdb: Box<SysDb>,
+    _sysdb: Box<SysDb>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl Configurable<QueryServiceConfig> for WorkerServer {
     async fn try_from_config(config: &QueryServiceConfig) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = &config.sysdb;
@@ -85,7 +86,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
-            sysdb,
+            _sysdb: sysdb,
             log,
             hnsw_index_provider,
             blockfile_provider,
@@ -153,22 +154,19 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let collection_and_segments = CollectionAndSegments::try_from(scan)?;
-        let collection = &collection_and_segments.collection;
+        let collection_and_segments = scan.try_into()?;
+        let fetch_log = self.fetch_log(&collection_and_segments);
 
-        let count_orchestrator = CountQueryOrchestrator::new(
-            self.clone_system()?,
-            &collection_and_segments.metadata_segment.id.0,
-            &collection.collection_id,
-            self.log.clone(),
-            self.sysdb.clone(),
-            self.clone_dispatcher()?,
+        let count_orchestrator = CountOrchestrator::new(
             self.blockfile_provider.clone(),
-            collection.version as u32,
-            collection.log_position as u64,
+            self.clone_dispatcher()?,
+            // TODO: Make this configurable
+            1000,
+            collection_and_segments,
+            fetch_log,
         );
 
-        match count_orchestrator.run().await {
+        match count_orchestrator.run(self.clone_system()?).await {
             Ok(count) => Ok(Response::new(CountResult {
                 count: count as u32,
             })),
@@ -321,7 +319,7 @@ impl WorkerServer {
     }
 }
 
-#[tonic::async_trait]
+#[async_trait]
 impl QueryExecutor for WorkerServer {
     async fn count(&self, count: Request<CountPlan>) -> Result<Response<CountResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
@@ -364,7 +362,7 @@ impl QueryExecutor for WorkerServer {
 }
 
 #[cfg(debug_assertions)]
-#[tonic::async_trait]
+#[async_trait]
 impl chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
         &self,
@@ -420,7 +418,7 @@ mod tests {
         let mut server = WorkerServer {
             dispatcher: None,
             system: None,
-            sysdb: Box::new(SysDb::Test(sysdb)),
+            _sysdb: Box::new(SysDb::Test(sysdb)),
             log: Box::new(Log::InMemory(log)),
             hnsw_index_provider: test_hnsw_index_provider(),
             blockfile_provider: segments.blockfile_provider,
@@ -500,14 +498,6 @@ mod tests {
     async fn validate_count_plan() {
         let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
         let mut scan_operator = scan();
-        let request = chroma_proto::CountPlan {
-            scan: Some(scan_operator.clone()),
-        };
-
-        // segment or collection not found
-        let response = executor.count(request).await;
-        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
-
         scan_operator.metadata = Some(chroma_proto::Segment {
             id: "invalid-metadata-segment-id".to_string(),
             r#type: "urn:chroma:segment/metadata/blockfile".to_string(),

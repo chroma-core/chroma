@@ -4,6 +4,7 @@ use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
 use crate::config::CompactionServiceConfig;
 use crate::execution::dispatcher::Dispatcher;
+use crate::execution::orchestration::orchestrator::Orchestrator;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
@@ -115,7 +116,6 @@ impl CompactionManager {
             Some(ref system) => {
                 let orchestrator = CompactOrchestrator::new(
                     compaction_job.clone(),
-                    system.clone(),
                     compaction_job.collection_id,
                     self.log.clone(),
                     self.sysdb.clone(),
@@ -129,14 +129,14 @@ impl CompactionManager {
                     self.max_partition_size,
                 );
 
-                match orchestrator.run().await {
+                match orchestrator.run(system.clone()).await {
                     Ok(result) => {
                         tracing::info!("Compaction Job completed: {:?}", result);
                         return Ok(result);
                     }
                     Err(e) => {
                         tracing::error!("Compaction Job failed: {:?}", e);
-                        return Err(e);
+                        return Err(Box::new(e));
                     }
                 }
             }
@@ -280,7 +280,7 @@ impl Component for CompactionManager {
         self.compaction_manager_queue_size
     }
 
-    async fn on_start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
+    async fn start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
         ctx.scheduler
             .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {

@@ -1,9 +1,9 @@
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::trace;
 
 use crate::{
