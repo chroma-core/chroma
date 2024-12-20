@@ -828,8 +828,7 @@ impl RecordSegmentReader<'_> {
         self.id_to_data.contains("", offset_id).await
     }
 
-    /// Returns all data in the record segment, sorted by
-    /// embedding id
+    /// Returns all data in the record segment, sorted by their offset ids
     #[allow(dead_code)]
     pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
         self.id_to_data
@@ -838,6 +837,7 @@ impl RecordSegmentReader<'_> {
             .map(|vec| vec.into_iter().map(|(_, data)| data).collect())
     }
 
+    /// Get a stream of offset ids from the smallest to the largest in the given range
     pub(crate) fn get_offset_stream<'me>(
         &'me self,
         offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
@@ -847,8 +847,9 @@ impl RecordSegmentReader<'_> {
             .map(|res| res.map(|(offset_id, _)| offset_id))
     }
 
-    // Find the rank of the given offset id in the record segment
-    // The implemention is based on std binary search
+    /// Find the rank of the given offset id in the record segment
+    /// The rank of an offset id is the number of offset ids strictly smaller than it
+    /// In other words, it is the position where the given offset id can be inserted without breaking the order
     pub(crate) async fn get_offset_id_rank(
         &self,
         target_oid: u32,

@@ -657,6 +657,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         self.root.id
     }
 
+    /// Returns the number of elements strictly less than the given prefix-key pair in the blockfile
+    /// In other words, the rank is the position where the given prefix-key pair can be inserted while maintaining the order of the blockfile
     pub(crate) async fn rank(
         &'me self,
         prefix: &'me str,
