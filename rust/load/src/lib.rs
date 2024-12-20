@@ -24,8 +24,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chromadb::v2::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
-use chromadb::v2::ChromaClient;
+use chromadb::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
+use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{Guacamole, Zipf};
 use opentelemetry::global;
@@ -113,29 +113,33 @@ pub struct Metrics {
 
 /// Instantiate a new Chroma client.  This will use the CHROMA_HOST environment variable (or
 /// http://localhost:8000 when unset) as the argument to [client_for_url].
-pub fn client() -> ChromaClient {
+pub async fn client() -> ChromaClient {
     let url = std::env::var("CHROMA_HOST").unwrap_or_else(|_| "http://localhost:8000".into());
-    client_for_url(url)
+    client_for_url(url).await
 }
 
 /// Create a new Chroma client for the given URL.  This will use the CHROMA_TOKEN environment
 /// variable if set, or no authentication if unset.
-pub fn client_for_url(url: String) -> ChromaClient {
+pub async fn client_for_url(url: String) -> ChromaClient {
     if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
         ChromaClient::new(ChromaClientOptions {
-            url,
+            url: Some(url),
             auth: ChromaAuthMethod::TokenAuth {
                 token: auth,
                 header: ChromaTokenHeader::XChromaToken,
             },
-            database: Some("hf-tiny-stories".to_string()),
+            database: "hf-tiny-stories".to_string(),
         })
+        .await
+        .unwrap()
     } else {
         ChromaClient::new(ChromaClientOptions {
-            url,
+            url: Some(url),
             auth: ChromaAuthMethod::None,
-            database: Some("hf-tiny-stories".to_string()),
+            database: "hf-tiny-stories".to_string(),
         })
+        .await
+        .unwrap()
     }
 }
 
@@ -1107,7 +1111,7 @@ impl LoadService {
         inhibit: Arc<AtomicBool>,
         spec: RunningWorkload,
     ) {
-        let client = Arc::new(client());
+        let client = Arc::new(client().await);
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
         let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
