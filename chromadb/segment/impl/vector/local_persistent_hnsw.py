@@ -219,6 +219,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                         DEFAULT_CAPACITY,
                     )
                 ),
+                allow_replace_deleted=True,
             )
         else:
             index.init_index(
@@ -227,6 +228,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 M=self._params.M,
                 is_persistent_index=True,
                 persistence_location=self._get_storage_folder(),
+                allow_replace_deleted=True,
             )
 
         index.set_ef(self._params.search_ef)
