@@ -45,7 +45,6 @@ impl ArrowBlockfileFlusher {
         // NOTE(hammadb) we do not use try_join_all here because we want to flush all blocks
         // in parallel and try_join_all / join_all switches to using futures_ordered if the
         // number of futures is high.
-
         let mut futures = Vec::new();
         for block in &self.blocks {
             futures.push(self.block_manager.flush(block));
