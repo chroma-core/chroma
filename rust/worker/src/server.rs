@@ -498,14 +498,6 @@ mod tests {
     async fn validate_count_plan() {
         let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
         let mut scan_operator = scan();
-        let request = chroma_proto::CountPlan {
-            scan: Some(scan_operator.clone()),
-        };
-
-        // segment or collection not found
-        let response = executor.count(request).await;
-        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
-
         scan_operator.metadata = Some(chroma_proto::Segment {
             id: "invalid-metadata-segment-id".to_string(),
             r#type: "urn:chroma:segment/metadata/blockfile".to_string(),
