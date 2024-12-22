@@ -15,6 +15,7 @@ def test_get_builtins_holds() -> None:
     expected_builtins = {
         "AmazonBedrockEmbeddingFunction",
         "CohereEmbeddingFunction",
+        "VoyageAIEmbeddingFunction",
         "GoogleGenerativeAiEmbeddingFunction",
         "GooglePalmEmbeddingFunction",
         "GoogleVertexEmbeddingFunction",
