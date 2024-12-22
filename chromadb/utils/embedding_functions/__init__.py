@@ -11,8 +11,71 @@ from chromadb.utils.embedding_functions.chroma_langchain_embedding_function impo
     create_langchain_embedding,
 )
 
+from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+    ONNXMiniLM_L6_V2,
+)  # noqa: F401
+from chromadb.utils.embedding_functions.amazon_bedrock_embedding_function import (  # noqa: F401
+    AmazonBedrockEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.cohere_embedding_function import (  # noqa: F401
+    CohereEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.google_embedding_function import (  # noqa: F401
+    GoogleGenerativeAiEmbeddingFunction,
+    GooglePalmEmbeddingFunction,
+    GoogleVertexEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.huggingface_embedding_function import (  # noqa: F401
+    HuggingFaceEmbeddingFunction,
+    HuggingFaceEmbeddingServer,
+)
+from chromadb.utils.embedding_functions.instructor_embedding_function import (  # noqa: F401
+    InstructorEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.jina_embedding_function import (  # noqa: F401
+    JinaEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.ollama_embedding_function import (  # noqa: F401
+    OllamaEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.openai_embedding_function import (  # noqa: F401
+    OpenAIEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.open_clip_embedding_function import (  # noqa: F401
+    OpenCLIPEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.roboflow_embedding_function import (  # noqa: F401
+    RoboflowEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.sentence_transformer_embedding_function import (  # noqa: F401
+    SentenceTransformerEmbeddingFunction,
+)
+from chromadb.utils.embedding_functions.text2vec_embedding_function import (  # noqa: F401
+    Text2VecEmbeddingFunction,
+)
+
 _all_classes: Set[str] = set()
-_all_classes.add("ChromaLangchainEmbeddingFunction")
+_all_classes.update(
+    {
+        "ChromaLangchainEmbeddingFunction",
+        "ONNXMiniLM_L6_V2",
+        "AmazonBedrockEmbeddingFunction",
+        "CohereEmbeddingFunction",
+        "GoogleGenerativeAiEmbeddingFunction",
+        "GooglePalmEmbeddingFunction",
+        "GoogleVertexEmbeddingFunction",
+        "HuggingFaceEmbeddingFunction",
+        "HuggingFaceEmbeddingServer",
+        "InstructorEmbeddingFunction",
+        "JinaEmbeddingFunction",
+        "OllamaEmbeddingFunction",
+        "OpenAIEmbeddingFunction",
+        "OpenCLIPEmbeddingFunction",
+        "RoboflowEmbeddingFunction",
+        "SentenceTransformerEmbeddingFunction",
+        "Text2VecEmbeddingFunction",
+    }
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
