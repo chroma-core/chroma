@@ -4,9 +4,10 @@ runs:
   using: "composite"
   steps:
     - name: Cache image layers
+      id: cache
       uses: actions/cache@v4
       with:
-        path: /home/runner/.cache/docker
+        path: ./registry-cache
         key: ${{ runner.os }}-docker-${{ hashFiles('**/Dockerfile') }}
         restore-keys: |
           ${{ runner.os }}-docker-
@@ -26,9 +27,19 @@ runs:
     - name: Set up kind
       shell: bash
       run: ctlptl create cluster kind --registry=ctlptl-registry
+    - name: Load cached image layers
+      if: ${{ steps.cache.outputs.cache-hit == 'true' }}
+      shell: bash
+      run: |
+        docker cp ./registry-cache "ctlptl-registry:/var/lib/registry"
     - name: Start Tilt
       shell: bash
       run: tilt ci
+    - name: Export images to cache (if no cache hit)
+      if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: |
+        docker cp "ctlptl-registry:/var/lib/registry" ./registry-cache
     - name: Forward ports
       shell: bash
       run: |
