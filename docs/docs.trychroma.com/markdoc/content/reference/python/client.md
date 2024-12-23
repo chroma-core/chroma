@@ -159,7 +159,7 @@ Used to check if the server is alive.
 
 - `int` - The current time in nanoseconds since epoch
 
-## count\_collections
+## count_collections
 
 ```python
 def count_collections() -> int
@@ -179,7 +179,7 @@ client.count_collections()
 # 1
 ```
 
-## delete\_collection
+## delete_collection
 
 ```python
 def delete_collection(name: str) -> None
@@ -215,7 +215,7 @@ Resets the database. This will delete all collections and entries.
 
 - `bool` - True if the database was reset successfully.
 
-## get\_version
+## get_version
 
 ```python
 def get_version() -> str
@@ -227,7 +227,7 @@ Get the version of Chroma.
 
 - `str` - The version of Chroma
 
-## get\_settings
+## get_settings
 
 ```python
 def get_settings() -> Settings
@@ -239,7 +239,7 @@ Get the settings used to initialize.
 
 - `Settings` - The settings used to initialize.
 
-## get\_max\_batch\_size
+## get_max_batch_size
 
 ```python
 def get_max_batch_size() -> int
@@ -255,7 +255,7 @@ Return the maximum number of records that can be created or mutated in a single 
 class ClientAPI(BaseAPI, ABC)
 ```
 
-## list\_collections
+## list_collections
 
 ```python
 def list_collections(limit: Optional[int] = None,
@@ -366,7 +366,7 @@ Get a collection with the given name.
   # collection(name="my_collection", metadata={})
   ```
 
-## get\_or\_create\_collection
+## get_or_create_collection
 
 ```python
 def get_or_create_collection(
