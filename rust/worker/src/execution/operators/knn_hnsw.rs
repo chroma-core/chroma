@@ -1,8 +1,8 @@
+use async_trait::async_trait;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SignedRoaringBitmap;
 use thiserror::Error;
-use tonic::async_trait;
 
 use crate::{
     execution::operator::Operator, segment::distributed_hnsw_segment::DistributedHNSWSegmentReader,

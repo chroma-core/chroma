@@ -51,15 +51,6 @@ where
     }
 }
 
-impl<Err> TaskError<Err>
-where
-    Err: Debug + ChromaError + 'static,
-{
-    pub(super) fn boxed(self) -> Box<dyn ChromaError> {
-        Box::new(self)
-    }
-}
-
 /// A task result is a wrapper around the result of a task.
 /// It contains the task id for tracking purposes.
 #[derive(Debug)]
@@ -73,6 +64,7 @@ impl<Output, Error> TaskResult<Output, Error> {
         self.result
     }
 
+    #[allow(dead_code)]
     pub(super) fn id(&self) -> Uuid {
         self.task_id
     }
@@ -93,14 +85,15 @@ where
 }
 
 /// A message type used by the dispatcher to send tasks to worker threads.
-pub(crate) type TaskMessage = Box<dyn TaskWrapper>;
+pub type TaskMessage = Box<dyn TaskWrapper>;
 
 /// A task wrapper is a trait that can be used to run a task. We use it to
 /// erase the I, O types from the Task struct so that tasks.
 #[async_trait]
-pub(crate) trait TaskWrapper: Send + Debug {
+pub trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
     async fn run(&self);
+    #[allow(dead_code)]
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
 }
@@ -262,7 +255,7 @@ mod tests {
             1000
         }
 
-        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn start(&mut self, ctx: &ComponentContext<Self>) {
             let task = wrap(Box::new(MockOperator {}), (), ctx.receiver());
             self.dispatcher.send(task, None).await.unwrap();
         }

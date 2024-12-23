@@ -1308,11 +1308,13 @@ dependencies = [
  "figment",
  "guacamole",
  "opentelemetry",
+ "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "reqwest 0.12.9",
  "serde",
  "serde_json",
+ "siphasher",
  "tokio",
  "tower-http 0.6.2",
  "tracing",
@@ -1362,8 +1364,8 @@ dependencies = [
 
 [[package]]
 name = "chromadb"
-version = "1.0.2"
-source = "git+https://github.com/rescrv/chromadb-rs?rev=e364e35c34c660d4e8e862436ea600ddc2f46a1e#e364e35c34c660d4e8e862436ea600ddc2f46a1e"
+version = "1.1.0"
+source = "git+https://github.com/rescrv/chromadb-rs?rev=3b2a9c96bf99cd0f9bd4e09ea983df335d6bbf68#3b2a9c96bf99cd0f9bd4e09ea983df335d6bbf68"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3905,6 +3907,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-http"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a8a7f5f6ba7c1b286c2fbca0454eaba116f63bbe69ed250b642d36fbb04d80"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "http 1.1.0",
+ "opentelemetry",
+ "reqwest 0.12.9",
+]
+
+[[package]]
 name = "opentelemetry-otlp"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3914,6 +3929,7 @@ dependencies = [
  "futures-core",
  "http 1.1.0",
  "opentelemetry",
+ "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost 0.13.3",
@@ -4701,6 +4717,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2 0.4.7",
@@ -5297,6 +5314,12 @@ dependencies = [
  "digest",
  "rand_core",
 ]
+
+[[package]]
+name = "siphasher"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
 
 [[package]]
 name = "sketches-ddsketch"
@@ -6769,6 +6792,7 @@ dependencies = [
  "figment",
  "flatbuffers",
  "futures",
+ "indicatif",
  "k8s-openapi",
  "kube",
  "murmur3",

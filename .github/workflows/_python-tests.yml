@@ -6,7 +6,7 @@ on:
       python_versions:
         description: 'Python versions to test (as json array)'
         required: false
-        default: '["3.8"]'
+        default: '["3.9"]'
         type: string
       property_testing_preset:
         description: 'Property testing preset'
@@ -31,6 +31,7 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py",
+                   "chromadb/test/property/test_sysdb.py",
                    "chromadb/test/property/test_restart_persist.py"]
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
@@ -61,11 +62,12 @@ jobs:
                    "chromadb/test/test_cli.py",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_collections.py",
-                  "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/property/test_cross_version_persist.py",
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py"]
+                   "chromadb/test/property/test_persist.py",
+                   "chromadb/test/property/test_sysdb.py"]
         include:
           - platform: depot-ubuntu-22.04
             env-file: compose-env.linux
@@ -89,15 +91,17 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["depot-ubuntu-22.04-16"]
+        platform: ["depot-ubuntu-22.04-4"]
         test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/api/test_collection.py",
+                   "chromadb/test/api/test_limit_offset.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                   "chromadb/test/property/test_sysdb.py",
                    "chromadb/test/ingest/test_producer_consumer.py",
                    "chromadb/test/segment/distributed/test_memberlist_provider.py",
                    "chromadb/test/test_logservice.py",

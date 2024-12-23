@@ -131,8 +131,6 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	}
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
-	} else {
-		trace_log.Info("Got collections to compact from record_log table", zap.Int("collectionCount", len(collectionToCompact)))
 	}
 	return
 }
@@ -149,7 +147,6 @@ func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Con
 }
 
 func (r *LogRepository) PurgeRecords(ctx context.Context) (err error) {
-	trace_log.Info("Purging records from record_log table")
 	err = r.queries.PurgeRecords(ctx)
 	return
 }
@@ -175,25 +172,27 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact", zap.Error(err))
 		return err
-	} else {
-		trace_log.Info("GC Got collections to compact", zap.Int("collectionCount", len(collectionToCompact)))
 	}
 	if collectionToCompact == nil {
 		return nil
 	}
 	collectionsToGC := make([]string, 0)
-	for _, collection := range collectionToCompact {
-		exist, err := r.sysDb.CheckCollection(ctx, collection)
+	// TODO(Sanket): Make batch size configurable.
+	batchSize := 5000
+	for i := 0; i < len(collectionToCompact); i += batchSize {
+		end := min(len(collectionToCompact), i+batchSize)
+		exists, err := r.sysDb.CheckCollections(ctx, collectionToCompact[i:end])
 		if err != nil {
-			trace_log.Error("Error in checking collection in sysdb", zap.Error(err), zap.String("collectionId", collection))
+			trace_log.Error("Error in checking collection in sysdb", zap.Error(err))
 			continue
 		}
-		if !exist {
-			collectionsToGC = append(collectionsToGC, collection)
+		for offset, exist := range exists {
+			if !exist {
+				collectionsToGC = append(collectionsToGC, collectionToCompact[i+offset])
+			}
 		}
 	}
 	if len(collectionsToGC) > 0 {
-		trace_log.Info("Collections to be garbage collected", zap.Strings("collections", collectionsToGC))
 		var tx pgx.Tx
 		tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 		if err != nil {
@@ -208,13 +207,11 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 				err = tx.Commit(ctx)
 			}
 		}()
-		trace_log.Info("Starting garbage collection", zap.Strings("collections", collectionsToGC))
 		err = queriesWithTx.DeleteRecords(ctx, collectionsToGC)
 		if err != nil {
 			trace_log.Error("Error in garbage collection", zap.Error(err))
 			return err
 		}
-		trace_log.Info("Delete collections", zap.Strings("collections", collectionsToGC))
 		err = queriesWithTx.DeleteCollection(ctx, collectionsToGC)
 		if err != nil {
 			trace_log.Error("Error in deleting collection", zap.Error(err))

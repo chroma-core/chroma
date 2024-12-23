@@ -115,6 +115,7 @@ def create_random_segment_definition() -> Segment:
         scope=SegmentScope.VECTOR,
         collection=uuid.UUID(int=0),
         metadata=test_hnsw_config,
+        file_paths={},
     )
 
 

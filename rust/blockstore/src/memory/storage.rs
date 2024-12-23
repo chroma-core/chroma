@@ -29,14 +29,11 @@ pub trait Readable<'referred_data>: Sized {
         PrefixRange: std::ops::RangeBounds<&'prefix str>,
         KeyRange: std::ops::RangeBounds<KeyWrapper>;
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)>;
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>>;
 
     fn contains(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> bool;
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize;
 }
 
 impl Writeable for String {
@@ -102,17 +99,6 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage
-            .string_value_storage
-            .iter()
-            .nth(index)
-            .map(|(k, v)| (k, v.as_str()))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.string_value_storage.iter().len())
     }
@@ -125,6 +111,18 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data str {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .string_value_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -192,17 +190,6 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data [u32] {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage
-            .uint32_array_storage
-            .iter()
-            .nth(index)
-            .map(|(k, v)| (k, v.as_slice()))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.uint32_array_storage.iter().len())
     }
@@ -215,6 +202,18 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data [u32] {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .uint32_array_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -277,17 +276,6 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage
-            .roaring_bitmap_storage
-            .iter()
-            .nth(index)
-            .map(|(k, v)| (k, v.clone()))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.roaring_bitmap_storage.iter().len())
     }
@@ -300,6 +288,18 @@ impl<'referred_data> Readable<'referred_data> for RoaringBitmap {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .roaring_bitmap_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -357,13 +357,6 @@ impl<'referred_data> Readable<'referred_data> for f32 {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage.f32_storage.iter().nth(index).map(|(k, v)| (k, *v))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.f32_storage.iter().len())
     }
@@ -376,6 +369,18 @@ impl<'referred_data> Readable<'referred_data> for f32 {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .f32_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -433,13 +438,6 @@ impl<'referred_data> Readable<'referred_data> for u32 {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage.u32_storage.iter().nth(index).map(|(k, v)| (k, *v))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.u32_storage.iter().len())
     }
@@ -452,6 +450,18 @@ impl<'referred_data> Readable<'referred_data> for u32 {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .u32_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -513,13 +523,6 @@ impl<'referred_data> Readable<'referred_data> for bool {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        storage.bool_storage.iter().nth(index).map(|(k, v)| (k, *v))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.bool_storage.iter().len())
     }
@@ -532,6 +535,18 @@ impl<'referred_data> Readable<'referred_data> for bool {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .bool_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
     }
 }
 
@@ -647,24 +662,6 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
             .collect()
     }
 
-    fn get_at_index(
-        storage: &'referred_data Storage,
-        index: usize,
-    ) -> Option<(&'referred_data CompositeKey, Self)> {
-        let (k, v) = storage.data_record_id_storage.iter().nth(index).unwrap();
-        let embedding = storage.data_record_embedding_storage.get(k).unwrap();
-        let id = v;
-        Some((
-            k,
-            DataRecord {
-                id,
-                embedding,
-                metadata: None,
-                document: None,
-            },
-        ))
-    }
-
     fn count(storage: &Storage) -> Result<usize, Box<dyn ChromaError>> {
         Ok(storage.data_record_id_storage.iter().len())
     }
@@ -677,6 +674,48 @@ impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
                 key,
             })
             .is_some()
+    }
+
+    fn rank(prefix: &str, key: KeyWrapper, storage: &'referred_data Storage) -> usize {
+        storage
+            .data_record_id_storage
+            .range(
+                ..CompositeKey {
+                    prefix: prefix.to_string(),
+                    key,
+                },
+            )
+            .count()
+    }
+}
+
+impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_data> {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        todo!()
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        todo!()
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        todo!()
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        todo!()
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        todo!()
     }
 }
 

@@ -16,6 +16,7 @@ var (
 
 	// Collection errors
 	ErrCollectionNotFound                    = errors.New("collection not found")
+	ErrCollectionSoftDeleted                 = errors.New("collection soft deleted")
 	ErrCollectionIDFormat                    = errors.New("collection id format error")
 	ErrCollectionNameEmpty                   = errors.New("collection name is empty")
 	ErrCollectionUniqueConstraintViolation   = errors.New("collection unique constraint violation")

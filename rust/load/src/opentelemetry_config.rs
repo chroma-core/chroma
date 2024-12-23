@@ -5,7 +5,7 @@
 
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
@@ -71,8 +71,10 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     )]);
 
     // Prepare tracer.
+    let client = reqwest::Client::new();
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
+        .with_http()
+        .with_http_client(client)
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build span exporter");
@@ -88,8 +90,10 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // global::set_tracer_provider(tracer_provider);
 
     // Prepare meter.
+    let client = reqwest::Client::new();
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-        .with_tonic()
+        .with_http()
+        .with_http_client(client)
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build metric exporter");
@@ -108,7 +112,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // Layer for adding our configured tracer.
     // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
     let exporter_layer = tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
-        .with_filter(tracing_subscriber::filter::LevelFilter::TRACE);
+        .with_filter(tracing_subscriber::filter::LevelFilter::ERROR);
     // Layer for printing spans to stdout. Only print INFO logs by default.
     let stdout_layer =
         BunyanFormattingLayer::new(service_name.clone().to_string(), std::io::stdout)
@@ -128,32 +132,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
             .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
     // global filter layer. Don't filter anything at above trace at the global layer for chroma.
     // And enable errors for every other library.
-    let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "info,".to_string()
-            + &vec![
-                "chroma",
-                "chroma-blockstore",
-                "chroma-config",
-                "chroma-cache",
-                "chroma-distance",
-                "chroma-error",
-                "chroma-index",
-                "chroma-load",
-                "chroma-storage",
-                "chroma-test",
-                "chroma-types",
-                "compaction_service",
-                "distance_metrics",
-                "full_text",
-                "metadata_filtering",
-                "query_service",
-                "worker",
-            ]
-            .into_iter()
-            .map(|s| s.to_string() + "=trace")
-            .collect::<Vec<String>>()
-            .join(",")
-    }));
+    let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or("error".to_string()));
 
     // Create subscriber.
     let subscriber = tracing_subscriber::registry()

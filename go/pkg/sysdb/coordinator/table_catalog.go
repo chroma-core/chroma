@@ -298,6 +298,31 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 	return result, created, nil
 }
 
+// Returns true if collection is deleted (either soft-deleted or hard-deleted)
+// and false otherwise.
+func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.CheckCollection")
+		defer span.End()
+	}
+
+	collectionInfo, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(collectionID), nil)
+	if err != nil {
+		return false, err
+	}
+	// Collection is hard deleted.
+	if collectionInfo == nil {
+		return true, nil
+	}
+	// Collection is soft deleted.
+	if collectionInfo.IsDeleted {
+		return true, nil
+	}
+	// Collection is not deleted.
+	return false, nil
+}
+
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
@@ -311,6 +336,43 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	}
 	collections := convertCollectionToModel(collectionAndMetadataList)
 	return collections, nil
+}
+
+func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollections")
+		defer span.End()
+	}
+
+	var collection *model.Collection
+	var segments []*model.Segment
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		collections, e := tc.GetCollections(ctx, collectionID, nil, "", "", nil, nil)
+		if e != nil {
+			return e
+		}
+		if len(collections) == 0 {
+			return common.ErrCollectionNotFound
+		}
+		if len(collections) > 1 {
+			return common.ErrCollectionUniqueConstraintViolation
+		}
+		collection = collections[0]
+
+		segments, e = tc.GetSegments(ctx, types.NilUniqueID(), nil, nil, collectionID)
+		if e != nil {
+			return e
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return collection, segments, nil
 }
 
 func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection, softDelete bool) error {
@@ -754,8 +816,20 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	}
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Check if collection exists.
+		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
+		if err != nil {
+			return err
+		}
+		if collection == nil {
+			return common.ErrCollectionNotFound
+		}
+		if collection.IsDeleted {
+			return common.ErrCollectionSoftDeleted
+		}
+
 		// register files to Segment metadata
-		err := tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+		err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
 		if err != nil {
 			return err
 		}

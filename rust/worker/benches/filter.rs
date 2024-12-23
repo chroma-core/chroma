@@ -9,7 +9,7 @@ use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operator::Operator;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
-use worker::log::test::{upsert_generator, LogGenerator};
+use worker::log::test::upsert_generator;
 use worker::segment::test::TestSegment;
 
 fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
@@ -71,14 +71,13 @@ fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
 
 fn bench_filter(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
-    let logen = LogGenerator {
-        generator: upsert_generator,
-    };
 
     for record_count in [1000, 10000, 100000] {
         let test_segment = runtime.block_on(async {
             let mut segment = TestSegment::default();
-            segment.populate_with_generator(record_count, &logen).await;
+            segment
+                .populate_with_generator(record_count, upsert_generator)
+                .await;
             segment
         });
 

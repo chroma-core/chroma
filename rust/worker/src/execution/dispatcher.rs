@@ -51,7 +51,7 @@ use tracing::{trace_span, Instrument, Span};
   coarser work-stealing, and other optimizations.
 */
 #[derive(Debug)]
-pub(crate) struct Dispatcher {
+pub struct Dispatcher {
     task_queue: Vec<TaskMessage>,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,
@@ -188,7 +188,7 @@ impl Component for Dispatcher {
         self.queue_size
     }
 
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn start(&mut self, ctx: &ComponentContext<Self>) {
         self.spawn_workers(&mut ctx.system.clone(), ctx.receiver());
     }
 }
@@ -314,7 +314,7 @@ mod tests {
             1000
         }
 
-        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
@@ -377,7 +377,7 @@ mod tests {
             1000
         }
 
-        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler

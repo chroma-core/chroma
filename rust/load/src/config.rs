@@ -37,4 +37,5 @@ pub struct LoadServiceConfig {
     pub service_name: String,
     pub otel_endpoint: String,
     pub port: u16,
+    pub persistent_state_path: Option<String>,
 }

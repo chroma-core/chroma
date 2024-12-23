@@ -3,13 +3,9 @@ import {
   test,
   beforeEach,
   describe,
-  afterAll,
-  beforeAll,
 } from "@jest/globals";
-import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
-import { StartedTestContainer } from "testcontainers";
-import { ChromaClient } from "../src/ChromaClient";
-import { startChromaContainer } from "./startChromaContainer";
+import { DefaultEmbeddingFunction } from "../src";
+import { ChromaClient } from "../src";
 
 describe("collection operations", () => {
   // connects to the unauthenticated chroma instance started in
@@ -42,23 +38,7 @@ describe("collection operations", () => {
 
     const [returnedCollection] = collections;
 
-    expect({
-      ...returnedCollection,
-      configuration_json: undefined,
-      id: undefined,
-    }).toMatchInlineSnapshot(`
-    {
-      "configuration_json": undefined,
-      "database": "default_database",
-      "dimension": null,
-      "id": undefined,
-      "log_position": 0,
-      "metadata": null,
-      "name": "test",
-      "tenant": "default_tenant",
-      "version": 0,
-    }
-  `);
+    expect(returnedCollection).toEqual("test")
 
     expect([{ name: "test2", metadata: null }]).not.toEqual(
       expect.arrayContaining(collections),
@@ -79,25 +59,7 @@ describe("collection operations", () => {
     const collections2 = await client.listCollections();
     expect(collections2).toHaveLength(1);
     const [returnedCollection2] = collections2;
-    expect({
-      ...returnedCollection2,
-      configuration_json: undefined,
-      id: undefined,
-    }).toMatchInlineSnapshot(`
-    {
-      "configuration_json": undefined,
-      "database": "default_database",
-      "dimension": null,
-      "id": undefined,
-      "log_position": 0,
-      "metadata": {
-        "test": "test",
-      },
-      "name": "test2",
-      "tenant": "default_tenant",
-      "version": 0,
-    }
-  `);
+    expect(returnedCollection2).toEqual("test2");
   });
 
   test("it should get a collection", async () => {

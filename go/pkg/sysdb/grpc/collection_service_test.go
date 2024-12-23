@@ -81,16 +81,19 @@ func testCollection(t *rapid.T) {
 	var collectionsWithErrors []*coordinatorpb.Collection
 
 	t.Repeat(map[string]func(*rapid.T){
-		"create_collection": func(t *rapid.T) {
+		"create_get_collection": func(t *rapid.T) {
 			stringValue := generateStringMetadataValue(t)
 			intValue := generateInt64MetadataValue(t)
 			floatValue := generateFloat64MetadataValue(t)
 			getOrCreate := false
 
+			collectionId := rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "collection_id")
+			collectionName := rapid.String().Draw(t, "collection_name")
+
 			createCollectionRequest := rapid.Custom[*coordinatorpb.CreateCollectionRequest](func(t *rapid.T) *coordinatorpb.CreateCollectionRequest {
 				return &coordinatorpb.CreateCollectionRequest{
-					Id:   rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "collection_id"),
-					Name: rapid.String().Draw(t, "collection_name"),
+					Id:   collectionId,
+					Name: collectionName,
 					Metadata: &coordinatorpb.UpdateMetadata{
 						Metadata: map[string]*coordinatorpb.UpdateMetadataValue{
 							"string_value": stringValue,
@@ -99,6 +102,26 @@ func testCollection(t *rapid.T) {
 						},
 					},
 					GetOrCreate: &getOrCreate,
+					Segments: []*coordinatorpb.Segment{
+						{
+							Id:         rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "metadata_segment_id"),
+							Type:       "metadata_segment_type",
+							Scope:      coordinatorpb.SegmentScope_METADATA,
+							Collection: collectionId,
+						},
+						{
+							Id:         rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "record_segment_id"),
+							Type:       "record_segment_type",
+							Scope:      coordinatorpb.SegmentScope_RECORD,
+							Collection: collectionId,
+						},
+						{
+							Id:         rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "vector_segment_id"),
+							Type:       "vector_segment_type",
+							Scope:      coordinatorpb.SegmentScope_VECTOR,
+							Collection: collectionId,
+						},
+					},
 				}
 			}).Draw(t, "create_collection_request")
 
@@ -114,28 +137,56 @@ func testCollection(t *rapid.T) {
 				}
 			}
 
-			getCollectionsRequest := coordinatorpb.GetCollectionsRequest{
-				Id: &createCollectionRequest.Id,
-			}
 			if err == nil {
+				getCollectionsRequest := coordinatorpb.GetCollectionsRequest{
+					Id: &createCollectionRequest.Id,
+				}
 				// verify the correctness
-				GetCollectionsResponse, err := s.GetCollections(ctx, &getCollectionsRequest)
+				getCollectionsResponse, err := s.GetCollections(ctx, &getCollectionsRequest)
 				if err != nil {
 					t.Fatalf("error getting collections: %v", err)
 				}
-				collectionList := GetCollectionsResponse.GetCollections()
+				collectionList := getCollectionsResponse.GetCollections()
 				if len(collectionList) != 1 {
-					t.Fatalf("More than 1 collection with the same collection id")
+					t.Fatalf("there should be exactly one matching collection given the collection id")
 				}
-				for _, collection := range collectionList {
-					if collection.Id != createCollectionRequest.Id {
-						t.Fatalf("collection id is the right value")
+				if collectionList[0].Id != createCollectionRequest.Id {
+					t.Fatalf("collection id mismatch")
+				}
+
+				getCollectionWithSegmentsRequest := coordinatorpb.GetCollectionWithSegmentsRequest{
+					Id: createCollectionRequest.Id,
+				}
+
+				getCollectionWithSegmentsResponse, err := s.GetCollectionWithSegments(ctx, &getCollectionWithSegmentsRequest)
+				if err != nil {
+					t.Fatalf("error getting collection with segments: %v", err)
+				}
+
+				if getCollectionWithSegmentsResponse.Collection.Id != res.Collection.Id {
+					t.Fatalf("collection id mismatch")
+				}
+
+				if len(getCollectionWithSegmentsResponse.Segments) != 3 {
+					t.Fatalf("unexpected number of segments in collection: %v", getCollectionWithSegmentsResponse.Segments)
+				}
+
+				scopeToSegmentMap := map[coordinatorpb.SegmentScope]*coordinatorpb.Segment{}
+				for _, segment := range getCollectionWithSegmentsResponse.Segments {
+					if segment.Collection != res.Collection.Id {
+						t.Fatalf("invalid collection id in segment")
+					}
+					scopeToSegmentMap[segment.GetScope()] = segment
+				}
+				scopes := []coordinatorpb.SegmentScope{coordinatorpb.SegmentScope_METADATA, coordinatorpb.SegmentScope_RECORD, coordinatorpb.SegmentScope_VECTOR}
+				for _, scope := range scopes {
+					if _, exists := scopeToSegmentMap[scope]; !exists {
+						t.Fatalf("collection segment scope not found: %s", scope.String())
 					}
 				}
+
 				state = append(state, res.Collection)
 			}
-		},
-		"get_collections": func(t *rapid.T) {
 		},
 	})
 }

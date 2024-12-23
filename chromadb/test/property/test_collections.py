@@ -88,8 +88,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
     def list_collections(self) -> None:
         colls = self.client.list_collections()
         assert len(colls) == len(self.model)
-        for c in colls:
-            assert c.name in self.model
+        for collection_name in colls:
+            assert collection_name in self.model
 
     # @rule for list_collections with limit and offset
     @rule(
