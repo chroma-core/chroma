@@ -251,7 +251,7 @@ impl SegmentWriter for SpannSegmentWriter {
                     let record = record
                         .hydrate(record_segment_reader.as_ref())
                         .await
-                        .unwrap();
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
                     self.add(&record)
                         .await
                         .map_err(ApplyMaterializedLogError::SpannSegmentError)?;
@@ -261,7 +261,7 @@ impl SegmentWriter for SpannSegmentWriter {
                     let record = record
                         .hydrate(record_segment_reader.as_ref())
                         .await
-                        .unwrap();
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
                     self.update(&record)
                         .await
                         .map_err(|_| ApplyMaterializedLogError::BlockfileUpdate)?;
