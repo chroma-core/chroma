@@ -103,7 +103,7 @@ jobs:
         with:
           header: helm-chart-version-info
           message: |
-            :green_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
+            :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
 
       - name: Delete comment (Helm chart was not changed)
         if:  needs.paths-filter.outputs.helm-changes == 'false'
