@@ -45,7 +45,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }}
+        run: python -m pytest --profile ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }}
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -114,7 +114,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest --profile "${{ matrix.test-globs }}"'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -175,7 +175,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Test
-        run: python -m pytest chromadb/test/stress/
+        run: python -m pytest --profile chromadb/test/stress/
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
