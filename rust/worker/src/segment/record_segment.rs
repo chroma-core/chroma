@@ -346,8 +346,8 @@ impl ChromaError for ApplyMaterializedLogError {
 impl SegmentWriter for RecordSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: Option<RecordSegmentReader<'_>>,
-        materialized: MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
         // The max new offset id introduced by materialized logs is initialized as zero
         // Since offset id should start from 1, we use this to indicate no new offset id
@@ -355,7 +355,7 @@ impl SegmentWriter for RecordSegmentWriter {
         let mut max_new_offset_id = 0;
         let mut count = 0u64;
 
-        for log_record in &materialized {
+        for log_record in materialized {
             count += 1;
 
             let log_record = log_record
@@ -947,7 +947,8 @@ mod tests {
                             ))
                             .expect("Should be able to materialize log");
                             future::block_on(
-                                record_writer.apply_materialized_log_chunk(None, materialized_logs),
+                                record_writer
+                                    .apply_materialized_log_chunk(&None, &materialized_logs),
                             )
                             .expect("Should be able to apply materialized log")
                         })

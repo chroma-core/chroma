@@ -298,7 +298,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             segment_writer
-                .apply_materialized_log_chunk(record_segment_reader, mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materializated log failed");
             let flusher = segment_writer

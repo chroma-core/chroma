@@ -862,8 +862,8 @@ pub async fn materialize_logs(
 pub trait SegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: Option<RecordSegmentReader>,
-        materialized_chunk: MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader>,
+        materialized_chunk: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError>;
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
 }
@@ -985,7 +985,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(record_segment_reader.clone(), mat_records.clone())
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -993,7 +993,7 @@ mod tests {
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
-                .apply_materialized_log_chunk(record_segment_reader, mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log failed");
             let metadata_flusher = metadata_writer
@@ -1079,11 +1079,11 @@ mod tests {
                 .await
                 .expect("Error creating segment writer");
         segment_writer
-            .apply_materialized_log_chunk(some_reader.clone(), res.clone())
+            .apply_materialized_log_chunk(&some_reader, &res)
             .await
             .expect("Error applying materialized log chunk");
         metadata_writer
-            .apply_materialized_log_chunk(some_reader, res.clone())
+            .apply_materialized_log_chunk(&some_reader, &res)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1278,7 +1278,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(record_segment_reader.clone(), mat_records.clone())
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1286,7 +1286,7 @@ mod tests {
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
-                .apply_materialized_log_chunk(record_segment_reader, mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log failed");
             let metadata_flusher = metadata_writer
@@ -1363,11 +1363,11 @@ mod tests {
                 .await
                 .expect("Error creating segment writer");
         segment_writer
-            .apply_materialized_log_chunk(some_reader.clone(), res.clone())
+            .apply_materialized_log_chunk(&some_reader, &res)
             .await
             .expect("Error applying materialized log chunk");
         metadata_writer
-            .apply_materialized_log_chunk(some_reader, res.clone())
+            .apply_materialized_log_chunk(&some_reader, &res)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1563,7 +1563,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             metadata_writer
-                .apply_materialized_log_chunk(record_segment_reader.clone(), mat_records.clone())
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log to metadata segment failed");
             metadata_writer
@@ -1571,7 +1571,7 @@ mod tests {
                 .await
                 .expect("Write to blockfiles for metadata writer failed");
             segment_writer
-                .apply_materialized_log_chunk(record_segment_reader, mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log failed");
             let metadata_flusher = metadata_writer
@@ -1668,11 +1668,11 @@ mod tests {
                 .await
                 .expect("Error creating segment writer");
         segment_writer
-            .apply_materialized_log_chunk(some_reader.clone(), res.clone())
+            .apply_materialized_log_chunk(&some_reader, &res)
             .await
             .expect("Error applying materialized log chunk");
         metadata_writer
-            .apply_materialized_log_chunk(some_reader, res.clone())
+            .apply_materialized_log_chunk(&some_reader, &res)
             .await
             .expect("Apply materialized log to metadata segment failed");
         metadata_writer
@@ -1867,7 +1867,7 @@ mod tests {
                 .await
                 .expect("Log materialization failed");
             segment_writer
-                .apply_materialized_log_chunk(record_segment_reader, mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materialized log failed");
             let flusher = segment_writer
@@ -2038,7 +2038,7 @@ mod tests {
                 .await
                 .expect("Error creating segment writer");
         segment_writer
-            .apply_materialized_log_chunk(some_reader, res)
+            .apply_materialized_log_chunk(&some_reader, &res)
             .await
             .expect("Error applying materialized log chunk");
         let flusher = segment_writer

@@ -195,10 +195,10 @@ impl DistributedHNSWSegmentWriter {
 impl SegmentWriter for DistributedHNSWSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: Option<RecordSegmentReader<'_>>,
-        materialized: MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
-        for record in &materialized {
+        for record in materialized {
             match record.get_operation() {
                 // If embedding is not found in case of adds it means that user
                 // did not supply them and thus we should return an error as

@@ -242,10 +242,10 @@ struct SpannSegmentFlusher {
 impl SegmentWriter for SpannSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: Option<RecordSegmentReader<'_>>,
-        materialized_chunk: MaterializeLogsResult,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized_chunk: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
-        for record in &materialized_chunk {
+        for record in materialized_chunk {
             match record.get_operation() {
                 MaterializedLogOperation::AddNew => {
                     let record = record
@@ -586,7 +586,7 @@ mod test {
             .await
             .expect("Error materializing logs");
         spann_writer
-            .apply_materialized_log_chunk(None, materialized_log)
+            .apply_materialized_log_chunk(&None, &materialized_log)
             .await
             .expect("Error applying materialized log");
         let flusher = spann_writer
@@ -773,7 +773,7 @@ mod test {
             .await
             .expect("Error materializing logs");
         spann_writer
-            .apply_materialized_log_chunk(None, materialized_log)
+            .apply_materialized_log_chunk(&None, &materialized_log)
             .await
             .expect("Error applying materialized log");
         let flusher = spann_writer

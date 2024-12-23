@@ -60,7 +60,7 @@ impl TestSegment {
                 .await
                 .expect("Should be able to initialize metadata writer.");
         metadata_writer
-            .apply_materialized_log_chunk(None, materialized_logs.clone())
+            .apply_materialized_log_chunk(&None, &materialized_logs)
             .await
             .expect("Should be able to apply materialized logs.");
         metadata_writer
@@ -80,7 +80,7 @@ impl TestSegment {
                 .await
                 .expect("Should be able to initiaize record writer.");
         record_writer
-            .apply_materialized_log_chunk(None, materialized_logs.clone())
+            .apply_materialized_log_chunk(&None, &materialized_logs)
             .await
             .expect("Should be able to apply materialized log.");
 
@@ -103,7 +103,7 @@ impl TestSegment {
         .expect("Should be able to initialize vector writer");
 
         vector_writer
-            .apply_materialized_log_chunk(None, materialized_logs)
+            .apply_materialized_log_chunk(&None, &materialized_logs)
             .await
             .expect("Should be able to apply materialized log.");
 
