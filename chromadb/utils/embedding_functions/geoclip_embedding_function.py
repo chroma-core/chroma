@@ -3,6 +3,19 @@ from typing import Optional, Union, cast, List
 
 import numpy as np
 
+# -------------------------------------------------------------------------
+# GeoClipEmbeddingFunction Module
+# 
+# Original GeoCLIP Reference:
+# @inproceedings{geoclip,
+#   title={GeoCLIP: Clip-Inspired Alignment between Locations and Images for Effective Worldwide Geo-localization},
+#   author={Vivanco, Vicente and Nayak, Gaurav Kumar and Shah, Mubarak},
+#   booktitle={Advances in Neural Information Processing Systems},
+#   year={2023}
+# }
+#
+# Custom Embedding Implementation by Andrew Herr (LatticeWorks)
+# -------------------------------------------------------------------------
 try:
     from geoclip import LocationEncoder
 except ImportError:
