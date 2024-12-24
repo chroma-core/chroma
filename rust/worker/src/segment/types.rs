@@ -115,13 +115,12 @@ impl ChromaError for LogMaterializerError {
 /// This struct is used internally. It is not exposed to materialized log consumers.
 ///
 /// Instead of cloning or holding references to log records/segment data, this struct contains owned values that can be resolved to the referenced data.
-/// E.x. `data_record_offset_id: Option<u32>` is used instead of `data_record: Option<&DataRecord>` to avoid holding references to the data.
+/// E.x. `final_document_at_log_index: Option<usize>` is used instead of `final_document: Option<&str>` to avoid holding references to the data.
 /// This allows `MaterializedLogRecord` (and types above it) to be trivially Send'able.
 #[derive(Debug)]
 struct MaterializedLogRecord {
-    // This is the data record read from the record segment for this id.
-    // None if the record exists only in the log.
-    data_record_offset_id: Option<u32>,
+    // False if the record exists only in the log, otherwise true.
+    offset_id_exists_in_segment: bool,
     // If present in the record segment then it is the offset id
     // in the record segment at which the record was found.
     // If not present in the segment then it is the offset id
@@ -166,7 +165,7 @@ struct MaterializedLogRecord {
 impl MaterializedLogRecord {
     fn from_segment_offset_id(offset_id: u32) -> Self {
         Self {
-            data_record_offset_id: Some(offset_id),
+            offset_id_exists_in_segment: true,
             offset_id,
             user_id_at_log_index: None,
             final_operation: MaterializedLogOperation::Initial,
@@ -213,7 +212,7 @@ impl MaterializedLogRecord {
         };
 
         Ok(Self {
-            data_record_offset_id: None,
+            offset_id_exists_in_segment: false,
             offset_id,
             user_id_at_log_index: Some(log_index),
             final_operation: MaterializedLogOperation::AddNew,
@@ -247,12 +246,16 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
         &self,
         record_segment_reader: Option<&'segment_data RecordSegmentReader<'segment_data>>,
     ) -> Result<HydratedMaterializedLogRecord<'log_data, 'segment_data>, LogMaterializerError> {
-        let segment_data_record = match self.materialized_log_record.data_record_offset_id {
-            Some(offset_id) => match record_segment_reader {
-                Some(reader) => reader.get_data_for_offset_id(offset_id).await?,
+        let segment_data_record = match self.materialized_log_record.offset_id_exists_in_segment {
+            true => match record_segment_reader {
+                Some(reader) => {
+                    reader
+                        .get_data_for_offset_id(self.materialized_log_record.offset_id)
+                        .await?
+                }
                 None => None,
             },
-            None => None,
+            false => None,
         };
 
         Ok(HydratedMaterializedLogRecord {
@@ -603,8 +606,7 @@ pub async fn materialize_logs(
                                             return Err(e);
                                         }
                                     };
-                                materialized_record.data_record_offset_id =
-                                    curr_val.data_record_offset_id;
+                                materialized_record.offset_id_exists_in_segment = true;
                                 materialized_record.final_operation =
                                     MaterializedLogOperation::OverwriteExisting;
                                 existing_id_to_materialized
@@ -741,7 +743,7 @@ pub async fn materialize_logs(
                                                     return Err(e);
                                                 }
                                             };
-                                        materialized_record.data_record_offset_id = curr_val.data_record_offset_id;
+                                        materialized_record.offset_id_exists_in_segment = true;
                                         materialized_record.final_operation =
                                             MaterializedLogOperation::OverwriteExisting;
                                         existing_id_to_materialized
