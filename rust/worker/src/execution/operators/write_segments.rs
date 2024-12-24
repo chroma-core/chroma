@@ -163,7 +163,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
         // Materialize the logs.
         let res = match materialize_logs(
             &record_segment_reader,
-            &input.chunk,
+            input.chunk.clone(),
             Some(input.next_offset_id.clone()),
         )
         .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
@@ -182,7 +182,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
                 .record_segment_writer
                 .as_ref()
                 .ok_or(WriteSegmentsOperatorError::UnintializedWriter)?
-                .apply_materialized_log_chunk(res.clone())
+                .apply_materialized_log_chunk(&record_segment_reader, &res)
                 .instrument(tracing::trace_span!(
                     "Apply materialized logs to record segment"
                 ))
@@ -198,7 +198,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
                 .metadata_segment_writer
                 .as_ref()
                 .ok_or(WriteSegmentsOperatorError::UnintializedWriter)?
-                .apply_materialized_log_chunk(res.clone())
+                .apply_materialized_log_chunk(&record_segment_reader, &res)
                 .instrument(tracing::trace_span!(
                     "Apply materialized logs to metadata segment"
                 ))
@@ -214,7 +214,7 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
                 .hnsw_segment_writer
                 .as_ref()
                 .ok_or(WriteSegmentsOperatorError::UnintializedWriter)?
-                .apply_materialized_log_chunk(res)
+                .apply_materialized_log_chunk(&record_segment_reader, &res)
                 .instrument(tracing::trace_span!(
                     "Apply materialized logs to HNSW segment"
                 ))

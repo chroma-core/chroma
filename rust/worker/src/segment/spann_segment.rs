@@ -14,11 +14,13 @@ use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType}
 use thiserror::Error;
 use uuid::Uuid;
 
+use super::record_segment::RecordSegmentReader;
 use super::{
     record_segment::ApplyMaterializedLogError,
     utils::{distance_function_from_segment, hnsw_params_from_segment},
-    MaterializedLogRecord, SegmentFlusher, SegmentWriter,
+    SegmentFlusher, SegmentWriter,
 };
+use super::{BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult};
 
 const HNSW_PATH: &str = "hnsw_path";
 const VERSION_MAP_PATH: &str = "version_map_path";
@@ -202,29 +204,32 @@ impl SpannSegmentWriter {
         })
     }
 
-    async fn add(&self, record: &MaterializedLogRecord<'_>) -> Result<(), SpannSegmentWriterError> {
+    async fn add(
+        &self,
+        record: &HydratedMaterializedLogRecord<'_, '_>,
+    ) -> Result<(), SpannSegmentWriterError> {
         self.index
-            .add(record.offset_id, record.merged_embeddings())
+            .add(record.get_offset_id(), record.merged_embeddings_ref())
             .await
             .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
 
     async fn delete(
         &self,
-        record: &MaterializedLogRecord<'_>,
+        record: &BorrowedMaterializedLogRecord<'_>,
     ) -> Result<(), SpannSegmentWriterError> {
         self.index
-            .delete(record.offset_id)
+            .delete(record.get_offset_id())
             .await
             .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
 
     async fn update(
         &self,
-        record: &MaterializedLogRecord<'_>,
+        record: &HydratedMaterializedLogRecord<'_, '_>,
     ) -> Result<(), SpannSegmentWriterError> {
         self.index
-            .update(record.offset_id, record.merged_embeddings())
+            .update(record.get_offset_id(), record.merged_embeddings_ref())
             .await
             .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
@@ -234,26 +239,35 @@ struct SpannSegmentFlusher {
     index_flusher: SpannIndexFlusher,
 }
 
-impl<'referred_data> SegmentWriter<'referred_data> for SpannSegmentWriter {
+impl SegmentWriter for SpannSegmentWriter {
     async fn apply_materialized_log_chunk(
         &self,
-        records: chroma_types::Chunk<super::MaterializedLogRecord<'referred_data>>,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized_chunk: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
-        for (record, _) in records.iter() {
-            match record.final_operation {
+        for record in materialized_chunk {
+            match record.get_operation() {
                 MaterializedLogOperation::AddNew => {
-                    self.add(record)
+                    let record = record
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
+                    self.add(&record)
                         .await
                         .map_err(ApplyMaterializedLogError::SpannSegmentError)?;
                 }
                 MaterializedLogOperation::UpdateExisting
                 | MaterializedLogOperation::OverwriteExisting => {
-                    self.update(record)
+                    let record = record
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
+                    self.update(&record)
                         .await
                         .map_err(|_| ApplyMaterializedLogError::BlockfileUpdate)?;
                 }
                 MaterializedLogOperation::DeleteExisting => {
-                    self.delete(record)
+                    self.delete(&record)
                         .await
                         .map_err(|_| ApplyMaterializedLogError::BlockfileDelete)?;
                 }
@@ -568,11 +582,11 @@ mod test {
         ];
         let chunked_log = Chunk::new(data.into());
         // Materialize the logs.
-        let materialized_log = materialize_logs(&None, &chunked_log, None)
+        let materialized_log = materialize_logs(&None, chunked_log, None)
             .await
             .expect("Error materializing logs");
         spann_writer
-            .apply_materialized_log_chunk(materialized_log)
+            .apply_materialized_log_chunk(&None, &materialized_log)
             .await
             .expect("Error applying materialized log");
         let flusher = spann_writer
@@ -755,11 +769,11 @@ mod test {
         ];
         let chunked_log = Chunk::new(data.into());
         // Materialize the logs.
-        let materialized_log = materialize_logs(&None, &chunked_log, None)
+        let materialized_log = materialize_logs(&None, chunked_log, None)
             .await
             .expect("Error materializing logs");
         spann_writer
-            .apply_materialized_log_chunk(materialized_log)
+            .apply_materialized_log_chunk(&None, &materialized_log)
             .await
             .expect("Error applying materialized log");
         let flusher = spann_writer

@@ -109,7 +109,8 @@ impl Eq for MetadataValue {}
 
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
 /// We are not planning to support `f64::NaN`s anyway, so the `PartialOrd` and `Ord` should be identical
-impl Ord for &MetadataValue {
+#[allow(clippy::derive_ord_xor_partial_ord)]
+impl Ord for MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap_or(Ordering::Equal)
     }
