@@ -61,7 +61,7 @@ variable "ssh_public_key_path" {
 }
 
 provider "azurerm" {
-  features = {}
+  features {}
 }
 
 # Resource Group
