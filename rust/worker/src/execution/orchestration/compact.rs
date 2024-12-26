@@ -55,7 +55,6 @@ use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::OnceCell;
-use tracing::Span;
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -260,10 +259,14 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        let current_max_offset_id = match self.ok_or_terminate(
+        let next_max_offset_id = match self.ok_or_terminate(
             match RecordSegmentReader::from_segment(&record_segment, &self.blockfile_provider).await
             {
-                Ok(reader) => Ok(reader.get_current_max_offset_id()),
+                Ok(reader) => {
+                    let current_max_offset_id = reader.get_current_max_offset_id();
+                    current_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(current_max_offset_id)
+                }
                 Err(err) => match *err {
                     RecordSegmentReaderCreationError::UninitializedSegment => {
                         Ok(Arc::new(AtomicU32::new(0)))
@@ -284,7 +287,7 @@ impl CompactOrchestrator {
                 partition.clone(),
                 self.blockfile_provider.clone(),
                 record_segment.clone(),
-                current_max_offset_id.clone(),
+                next_max_offset_id.clone(),
             );
             let task = wrap(operator, input, self_address.clone());
             self.send(task, ctx).await;
