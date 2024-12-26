@@ -77,14 +77,14 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
         };
 
         let some_reader = Some(record_segment_reader.clone());
-        let materialized_logs = materialize_logs(&some_reader, &input.logs, None)
+        let materialized_logs = materialize_logs(&some_reader, input.logs.clone(), None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
 
         let mut record_segment_offset_ids: HashSet<_> =
             HashSet::from_iter(input.offset_ids.iter().cloned());
-        for (log, _) in materialized_logs.iter() {
-            record_segment_offset_ids.remove(&log.offset_id);
+        for log in &materialized_logs {
+            record_segment_offset_ids.remove(&log.get_offset_id());
         }
 
         record_segment_reader
