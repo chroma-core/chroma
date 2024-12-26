@@ -1365,7 +1365,7 @@ dependencies = [
 [[package]]
 name = "chromadb"
 version = "1.1.0"
-source = "git+https://github.com/rescrv/chromadb-rs?rev=3b2a9c96bf99cd0f9bd4e09ea983df335d6bbf68#3b2a9c96bf99cd0f9bd4e09ea983df335d6bbf68"
+source = "git+https://github.com/rescrv/chromadb-rs?rev=a88e5a83e27e168362262308f62a34065b19e067#a88e5a83e27e168362262308f62a34065b19e067"
 dependencies = [
  "anyhow",
  "async-trait",

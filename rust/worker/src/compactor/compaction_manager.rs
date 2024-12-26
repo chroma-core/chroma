@@ -27,6 +27,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::time::timeout;
 use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
@@ -51,6 +52,7 @@ pub(crate) struct CompactionManager {
     min_compaction_size: usize,
     max_compaction_size: usize,
     max_partition_size: usize,
+    max_compaction_time: Duration,
 }
 
 #[derive(Error, Debug)]
@@ -81,6 +83,7 @@ impl CompactionManager {
         min_compaction_size: usize,
         max_compaction_size: usize,
         max_partition_size: usize,
+        max_compaction_time: Duration,
     ) -> Self {
         CompactionManager {
             system: None,
@@ -96,6 +99,7 @@ impl CompactionManager {
             min_compaction_size,
             max_compaction_size,
             max_partition_size,
+            max_compaction_time,
         }
     }
 
@@ -158,7 +162,9 @@ impl CompactionManager {
         for job in self.scheduler.get_jobs() {
             let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
             instrumented_span.follows_from(Span::current());
-            jobs.push(self.compact(job).instrument(instrumented_span));
+            jobs.push(
+                timeout(self.max_compaction_time, self.compact(job)).instrument(instrumented_span),
+            );
         }
         println!("Compacting {} jobs", jobs.len());
         tracing::info!("Compacting {} jobs", jobs.len());
@@ -166,13 +172,19 @@ impl CompactionManager {
         let mut num_failed_jobs = 0;
         while let Some(job) = jobs.next().await {
             match job {
-                Ok(result) => {
-                    println!("Compaction completed: {:?}", result);
-                    compacted.push(result.compaction_job.collection_id);
-                    num_completed_jobs += 1;
-                }
+                Ok(result) => match result {
+                    Ok(result) => {
+                        println!("Compaction completed: {:?}", result);
+                        compacted.push(result.compaction_job.collection_id);
+                        num_completed_jobs += 1;
+                    }
+                    Err(e) => {
+                        println!("Compaction failed: {:?}", e);
+                        num_failed_jobs += 1;
+                    }
+                },
                 Err(e) => {
-                    println!("Compaction failed: {:?}", e);
+                    println!("Compaction timed out: {:?}", e);
                     num_failed_jobs += 1;
                 }
             }
@@ -265,6 +277,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             min_compaction_size,
             max_compaction_size,
             max_partition_size,
+            Duration::from_secs(config.compactor.max_compaction_time_sec),
         ))
     }
 }
@@ -510,6 +523,7 @@ mod tests {
         let min_compaction_size = 0;
         let max_compaction_size = 1000;
         let max_partition_size = 1000;
+        let max_compaction_time = Duration::from_secs(10);
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
@@ -553,6 +567,7 @@ mod tests {
             min_compaction_size,
             max_compaction_size,
             max_partition_size,
+            max_compaction_time,
         );
 
         let system = System::new();

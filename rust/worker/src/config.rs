@@ -261,6 +261,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        max_compaction_time_sec: 60
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -407,6 +408,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        max_compaction_time_sec: 60
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -571,6 +573,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        max_compaction_time_sec: 60
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -722,6 +725,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        max_compaction_time_sec: 60
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -884,6 +888,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        max_compaction_time_sec: 60
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
