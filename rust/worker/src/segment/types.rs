@@ -226,6 +226,7 @@ impl MaterializedLogRecord {
 
 /// Obtained from a `MaterializeLogsResult`. Provides a borrowed view of a single materialized log record.
 /// You will probably need to call `.hydrate()` on this struct for most use cases, although you can view the offset ID and operation without hydrating.
+/// BorrowedMaterializedLogRecord and HydratedMaterializedLogRecord are separate types as some use cases may not need to fully hydrate the record.
 pub struct BorrowedMaterializedLogRecord<'log_data> {
     materialized_log_record: &'log_data MaterializedLogRecord,
     logs: &'log_data Chunk<LogRecord>,
