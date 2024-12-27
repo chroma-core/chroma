@@ -428,7 +428,7 @@ impl CompactOrchestrator {
 
     async fn dispatch_segment_writer_commit(
         &mut self,
-        segment_writer: ChromaSegmentWriter<'static>, // todo
+        segment_writer: ChromaSegmentWriter<'static>,
         self_address: Box<
             dyn ReceiverForMessage<
                 TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
@@ -753,8 +753,6 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
         message: TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        self.num_uncompleted_materialization_tasks -= 1;
-
         let materialized_result = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(result) => result,
             None => return,
@@ -762,7 +760,7 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
 
         if materialized_result.is_empty() {
             // We check the number of remaining materialization tasks to prevent a race condition
-            if self.num_uncompleted_materialization_tasks == 0
+            if self.num_uncompleted_materialization_tasks == 1
                 && self.num_uncompleted_tasks_by_segment.is_empty()
             {
                 // There is nothing to flush, proceed to register
@@ -776,6 +774,8 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
             )
             .await;
         }
+
+        self.num_uncompleted_materialization_tasks -= 1;
     }
 }
 
