@@ -76,8 +76,8 @@ impl<'bf, Writer: SegmentWriter> ApplyLogToSegmentWriterInput<'bf, Writer> {
 pub struct ApplyLogToSegmentWriterOutput {}
 
 #[async_trait]
-impl<'bf, Writer: SegmentWriter + Send + Sync + Clone>
-    Operator<ApplyLogToSegmentWriterInput<'bf, Writer>, ApplyLogToSegmentWriterOutput>
+impl<Writer: SegmentWriter + Send + Sync + Clone>
+    Operator<ApplyLogToSegmentWriterInput<'_, Writer>, ApplyLogToSegmentWriterOutput>
     for ApplyLogToSegmentWriterOperator
 {
     type Error = ApplyLogToSegmentWriterOperatorError;
