@@ -9,12 +9,17 @@ use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentW
 use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOperator;
 use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOperatorError;
 use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOutput;
+use crate::execution::operators::commit_segment_writer::CommitSegmentWriterInput;
+use crate::execution::operators::commit_segment_writer::CommitSegmentWriterOperator;
+use crate::execution::operators::commit_segment_writer::CommitSegmentWriterOperatorError;
+use crate::execution::operators::commit_segment_writer::CommitSegmentWriterOutput;
 use crate::execution::operators::fetch_log::FetchLogError;
 use crate::execution::operators::fetch_log::FetchLogOperator;
 use crate::execution::operators::fetch_log::FetchLogOutput;
-use crate::execution::operators::flush_s3::FlushS3Input;
-use crate::execution::operators::flush_s3::FlushS3Operator;
-use crate::execution::operators::flush_s3::FlushS3Output;
+use crate::execution::operators::flush_segment_writer::FlushSegmentWriterInput;
+use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOperator;
+use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOperatorError;
+use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOutput;
 use crate::execution::operators::materialize_logs::MaterializeLogInput;
 use crate::execution::operators::materialize_logs::MaterializeLogOperator;
 use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
@@ -32,7 +37,11 @@ use crate::segment::metadata_segment::MetadataSegmentWriter;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::record_segment::RecordSegmentWriter;
+use crate::segment::ChromaSegmentFlusher;
+use crate::segment::ChromaSegmentWriter;
 use crate::segment::MaterializeLogsResult;
+use crate::segment::SegmentFlusher;
+use crate::segment::SegmentWriter;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
@@ -47,14 +56,17 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_types::Chunk;
+use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::OnceCell;
+use tracing::Span;
 use uuid::Uuid;
 
 /**  The state of the orchestrator.
@@ -62,22 +74,24 @@ In chroma, we have a relatively fixed number of query plans that we can execute.
 than a flexible state machine abstraction, we just manually define the states that we
 expect to encounter for a given query plan. This is a bit more rigid, but it's also simpler and easier to
 understand. We can always add more abstraction later if we need it.
+
 ```plaintext
-
-                                   ┌───► Write─────-------┐
-                                   │                      │
-  Pending ─► PullLogs ─► Partition │                      ├─► Flush ─► Finished
-                                   │                      │
-                                   └───► Write ───────────┘
-
+                                   ┌────────────────────────────┐
+                                   ├─► Apply logs to segment #1 │
+                                   │                            ├──► Commit segment #1 ──► Flush segment #1
+                                   ├─► Apply logs to segment #1 │
+Pending ──► PullLogs ──► Partition │                            │                                            ──► Register ─► Finished
+                                   ├─► Apply logs to segment #2 │
+                                   │                            ├──► Commit segment #2 ──► Flush segment #2
+                                   ├─► Apply logs to segment #2 │
+                                   └────────────────────────────┘
 ```
 */
 #[derive(Debug)]
 enum ExecutionState {
     Pending,
     Partition,
-    MaterializeAndWrite,
-    Flush,
+    MaterializeApplyCommitFlush,
     Register,
 }
 
@@ -104,8 +118,10 @@ pub struct CompactOrchestrator {
     pulled_log_offset: Option<i64>,
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
-    // number of write segments tasks
-    num_write_tasks: i32,
+    // Tracks the total remaining number of MaterializeLogs tasks
+    num_uncompleted_materialization_tasks: usize,
+    // Tracks the total remaining number of tasks per segment
+    num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
     // Result Channel
     result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     max_compaction_size: usize,
@@ -113,6 +129,9 @@ pub struct CompactOrchestrator {
     // Populated during the compaction process
     cached_segments: Option<Vec<Segment>>,
     writers: OnceCell<CompactWriters>,
+    flush_results: Vec<SegmentFlushInfo>,
+    // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
+    segment_spans: HashMap<SegmentUuid, Span>,
 }
 
 #[derive(Error, Debug)]
@@ -153,6 +172,10 @@ pub enum CompactionError {
     MaterializeLogs(#[from] MaterializeLogOperatorError),
     #[error("Apply logs to segment writer error: {0}")]
     ApplyLogToSegmentWriter(#[from] ApplyLogToSegmentWriterOperatorError),
+    #[error("Commit segment writer error: {0}")]
+    CommitSegmentWriter(#[from] CommitSegmentWriterOperatorError),
+    #[error("Flush segment writer error: {0}")]
+    FlushSegmentWriter(#[from] FlushSegmentWriterOperatorError),
     #[error("Could not create record segment reader: {0}")]
     RecordSegmentReaderCreationFailed(#[from] RecordSegmentReaderCreationError),
     #[error("GetSegmentWriters error: {0}")]
@@ -165,6 +188,8 @@ pub enum CompactionError {
     Result(#[from] RecvError),
     #[error("{0}")]
     Generic(#[from] Box<dyn ChromaError>),
+    #[error("Invariant violation: {}", .0)]
+    InvariantViolation(&'static str),
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -220,12 +245,15 @@ impl CompactOrchestrator {
             hnsw_index_provider,
             pulled_log_offset: None,
             dispatcher,
-            num_write_tasks: 0,
+            num_uncompleted_materialization_tasks: 0,
+            num_uncompleted_tasks_by_segment: HashMap::new(),
             result_channel,
             max_compaction_size,
             max_partition_size,
             cached_segments: None,
             writers: OnceCell::new(),
+            flush_results: Vec::new(),
+            segment_spans: HashMap::new(),
         }
     }
 
@@ -251,7 +279,7 @@ impl CompactOrchestrator {
         >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        self.state = ExecutionState::MaterializeAndWrite;
+        self.state = ExecutionState::MaterializeApplyCommitFlush;
 
         let record_segment_result = self.get_segment(SegmentType::BlockfileRecord).await;
         let record_segment = match self.ok_or_terminate(record_segment_result, ctx) {
@@ -280,7 +308,7 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        self.num_write_tasks = partitions.len() as i32 * 3;
+        self.num_uncompleted_materialization_tasks = partitions.len();
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
@@ -294,7 +322,7 @@ impl CompactOrchestrator {
         }
     }
 
-    async fn write(
+    async fn dispatch_apply_log_to_segment_writer_tasks(
         &mut self,
         materialized_logs: MaterializeLogsResult,
         self_address: Box<
@@ -332,6 +360,14 @@ impl CompactOrchestrator {
         };
 
         {
+            self.num_uncompleted_tasks_by_segment
+                .entry(writers.metadata.get_id())
+                .and_modify(|v| {
+                    *v += 1;
+                })
+                .or_insert(1);
+
+            let span = self.get_segment_writer_span(&writers.metadata);
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input = ApplyLogToSegmentWriterInput::new(
                 writers.metadata,
@@ -339,10 +375,22 @@ impl CompactOrchestrator {
                 record_segment_reader.clone(),
             );
             let task = wrap(operator, input, self_address.clone());
-            self.send(task, ctx).await;
+            let res = self.dispatcher().send(task, Some(span)).await;
+            match self.ok_or_terminate(res, ctx) {
+                Some(_) => (),
+                None => return,
+            }
         }
 
         {
+            self.num_uncompleted_tasks_by_segment
+                .entry(writers.record.get_id())
+                .and_modify(|v| {
+                    *v += 1;
+                })
+                .or_insert(1);
+
+            let span = self.get_segment_writer_span(&writers.record);
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input = ApplyLogToSegmentWriterInput::new(
                 writers.record,
@@ -350,10 +398,22 @@ impl CompactOrchestrator {
                 record_segment_reader.clone(),
             );
             let task = wrap(operator, input, self_address.clone());
-            self.send(task, ctx).await;
+            let res = self.dispatcher().send(task, Some(span)).await;
+            match self.ok_or_terminate(res, ctx) {
+                Some(_) => (),
+                None => return,
+            }
         }
 
         {
+            self.num_uncompleted_tasks_by_segment
+                .entry(writers.vector.id)
+                .and_modify(|v| {
+                    *v += 1;
+                })
+                .or_insert(1);
+
+            let span = self.get_segment_writer_span(writers.vector.as_ref());
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input = ApplyLogToSegmentWriterInput::new(
                 *writers.vector,
@@ -361,34 +421,50 @@ impl CompactOrchestrator {
                 record_segment_reader,
             );
             let task = wrap(operator, input, self_address);
-            self.send(task, ctx).await;
+            let res = self.dispatcher().send(task, Some(span)).await;
+            self.ok_or_terminate(res, ctx);
         }
     }
 
-    async fn flush_s3(
+    async fn dispatch_segment_writer_commit(
         &mut self,
-        record_segment_writer: RecordSegmentWriter,
-        hnsw_segment_writer: Box<DistributedHNSWSegmentWriter>,
-        metadata_segment_writer: MetadataSegmentWriter<'static>,
+        segment_writer: ChromaSegmentWriter<'static>, // todo
+        self_address: Box<
+            dyn ReceiverForMessage<
+                TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
+            >,
+        >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        self.state = ExecutionState::Flush;
+        let span = self.get_segment_writer_span(&segment_writer);
+        let operator = CommitSegmentWriterOperator::new();
+        let input = CommitSegmentWriterInput::new(segment_writer);
+        let task = wrap(operator, input, self_address);
+        let res = self.dispatcher().send(task, Some(span)).await;
+        self.ok_or_terminate(res, ctx);
+    }
 
-        let operator = FlushS3Operator::new();
-        let input = FlushS3Input::new(
-            record_segment_writer,
-            hnsw_segment_writer,
-            metadata_segment_writer,
-        );
-
-        let task = wrap(operator, input, ctx.receiver());
-        self.send(task, ctx).await;
+    async fn dispatch_segment_flush(
+        &mut self,
+        segment_flusher: ChromaSegmentFlusher,
+        self_address: Box<
+            dyn ReceiverForMessage<
+                TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
+            >,
+        >,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+    ) {
+        let span = self.get_segment_flusher_span(&segment_flusher);
+        let operator = FlushSegmentWriterOperator::new();
+        let input = FlushSegmentWriterInput::new(segment_flusher);
+        let task = wrap(operator, input, self_address);
+        let res = self.dispatcher().send(task, Some(span)).await;
+        self.ok_or_terminate(res, ctx);
     }
 
     async fn register(
         &mut self,
         log_position: i64,
-        segment_flush_info: Arc<[SegmentFlushInfo]>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::Register;
@@ -398,7 +474,7 @@ impl CompactOrchestrator {
             self.compaction_job.collection_id,
             log_position,
             self.compaction_job.collection_version,
-            segment_flush_info,
+            self.flush_results.clone().into(),
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -529,6 +605,54 @@ impl CompactOrchestrator {
 
         Ok(borrowed_writers.clone())
     }
+
+    async fn get_segment_writer_by_id(
+        &mut self,
+        segment_id: SegmentUuid,
+    ) -> Result<ChromaSegmentWriter<'static>, GetSegmentWritersError> {
+        let writers = self.get_segment_writers().await?;
+
+        if writers.metadata.get_id() == segment_id {
+            return Ok(ChromaSegmentWriter::MetadataSegment(writers.metadata));
+        }
+
+        if writers.record.get_id() == segment_id {
+            return Ok(ChromaSegmentWriter::RecordSegment(writers.record));
+        }
+
+        if writers.vector.id == segment_id {
+            return Ok(ChromaSegmentWriter::DistributedHNSWSegment(writers.vector));
+        }
+
+        Err(GetSegmentWritersError::NoSegmentsFound)
+    }
+
+    fn get_segment_writer_span<W: SegmentWriter>(&mut self, writer: &W) -> Span {
+        let span = self
+            .segment_spans
+            .entry(writer.get_id())
+            .or_insert_with(|| {
+                tracing::span!(
+                    tracing::Level::INFO,
+                    "Segment",
+                    otel.name = format!("Segment: {:?}", writer.get_name())
+                )
+            });
+        span.clone()
+    }
+
+    fn get_segment_flusher_span(&mut self, flusher: &ChromaSegmentFlusher) -> Span {
+        match self.segment_spans.get(&flusher.get_id()) {
+            Some(span) => span.clone(),
+            None => {
+                tracing::error!(
+                    "No span found for segment: {:?}. This should never happen because get_segment_writer_span() should have previously created a span.",
+                    flusher.get_name()
+                );
+                Span::current()
+            }
+        }
+    }
 }
 
 // ============== Component Implementation ==============
@@ -629,21 +753,28 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
         message: TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
+        self.num_uncompleted_materialization_tasks -= 1;
+
         let materialized_result = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(result) => result,
             None => return,
         };
 
         if materialized_result.is_empty() {
-            self.num_write_tasks -= 3;
-
-            if self.num_write_tasks == 0 {
+            // We check the number of remaining materialization tasks to prevent a race condition
+            if self.num_uncompleted_materialization_tasks == 0
+                && self.num_uncompleted_tasks_by_segment.is_empty()
+            {
                 // There is nothing to flush, proceed to register
-                self.register(self.pulled_log_offset.unwrap(), Arc::new([]), ctx)
-                    .await;
+                self.register(self.pulled_log_offset.unwrap(), ctx).await;
             }
         } else {
-            self.write(materialized_result, ctx.receiver(), ctx).await;
+            self.dispatch_apply_log_to_segment_writer_tasks(
+                materialized_result,
+                ctx.receiver(),
+                ctx,
+            )
+            .await;
         }
     }
 }
@@ -659,43 +790,93 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(_) => (),
+        let message = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(message) => message,
             None => return,
         };
-        self.num_write_tasks -= 1;
-        if self.num_write_tasks == 0 {
-            let writers = self.get_segment_writers().await;
-            let writers = match self.ok_or_terminate(writers, ctx) {
-                Some(writers) => writers,
+
+        self.num_uncompleted_tasks_by_segment
+            .entry(message.segment_id)
+            .and_modify(|v| {
+                *v -= 1;
+            });
+
+        let num_tasks_left = {
+            let num_tasks_left = self
+                .num_uncompleted_tasks_by_segment
+                .get(&message.segment_id)
+                .ok_or(CompactionError::InvariantViolation(
+                    "Invariant violation: segment writer task count not found",
+                ))
+                .cloned();
+            match self.ok_or_terminate(num_tasks_left, ctx) {
+                Some(num_tasks_left) => num_tasks_left,
+                None => return,
+            }
+        };
+
+        if num_tasks_left == 0 {
+            let segment_writer = self.get_segment_writer_by_id(message.segment_id).await;
+            let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
+                Some(writer) => writer,
                 None => return,
             };
 
-            self.flush_s3(writers.record, writers.vector, writers.metadata, ctx)
+            self.dispatch_segment_writer_commit(segment_writer, ctx.receiver(), ctx)
                 .await;
         }
     }
 }
 
 #[async_trait]
-impl Handler<TaskResult<FlushS3Output, Box<dyn ChromaError>>> for CompactOrchestrator {
+impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>>
+    for CompactOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<FlushS3Output, Box<dyn ChromaError>>,
+        message: TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(output) => output,
+        let message = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(message) => message,
             None => return,
         };
-        self.register(
-            self.pulled_log_offset.unwrap(),
-            output.segment_flush_info,
-            ctx,
-        )
-        .await;
+
+        self.dispatch_segment_flush(message.flusher, ctx.receiver(), ctx)
+            .await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>>
+    for CompactOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
+        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+    ) {
+        let message = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(message) => message,
+            None => return,
+        };
+
+        let segment_id = message.flush_info.segment_id;
+
+        // Drops the span so that the end timestamp is accurate
+        let _ = self.segment_spans.remove(&segment_id);
+
+        self.flush_results.push(message.flush_info);
+        self.num_uncompleted_tasks_by_segment.remove(&segment_id);
+
+        if self.num_uncompleted_tasks_by_segment.is_empty() {
+            // Unwrap should be safe here as we are guaranteed to have a value by construction
+            self.register(self.pulled_log_offset.unwrap(), ctx).await;
+        }
     }
 }
 

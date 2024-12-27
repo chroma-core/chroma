@@ -193,6 +193,12 @@ impl DistributedHNSWSegmentWriter {
 }
 
 impl SegmentWriter for DistributedHNSWSegmentWriter {
+    type Flusher = DistributedHNSWSegmentWriter;
+
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     fn get_name(&self) -> &'static str {
         "DistributedHNSWSegmentWriter"
     }
@@ -260,7 +266,7 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
         let res = self.hnsw_index_provider.commit(self.index.clone());
         match res {
             Ok(_) => Ok(self),
@@ -271,6 +277,14 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
 
 #[async_trait]
 impl SegmentFlusher for DistributedHNSWSegmentWriter {
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
+    fn get_name(&self) -> &'static str {
+        "DistributedHNSWSegmentWriter"
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.inner.read().id;
         match self.hnsw_index_provider.flush(&hnsw_index_id).await {
