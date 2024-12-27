@@ -193,6 +193,10 @@ impl DistributedHNSWSegmentWriter {
 }
 
 impl SegmentWriter for DistributedHNSWSegmentWriter {
+    fn get_name(&self) -> &'static str {
+        "DistributedHNSWSegmentWriter"
+    }
+
     async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,

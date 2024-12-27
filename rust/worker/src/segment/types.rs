@@ -6,6 +6,7 @@ use chroma_types::{
     UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
@@ -863,11 +864,12 @@ pub async fn materialize_logs(
 // This needs to be public for testing
 #[allow(async_fn_in_trait)]
 pub trait SegmentWriter {
-    async fn apply_materialized_log_chunk(
+    fn get_name(&self) -> &'static str;
+    fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader>,
         materialized_chunk: &MaterializeLogsResult,
-    ) -> Result<(), ApplyMaterializedLogError>;
+    ) -> impl Future<Output = Result<(), ApplyMaterializedLogError>> + Send;
     async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>>;
 }
 

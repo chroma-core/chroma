@@ -240,6 +240,10 @@ struct SpannSegmentFlusher {
 }
 
 impl SegmentWriter for SpannSegmentWriter {
+    fn get_name(&self) -> &'static str {
+        "SpannSegmentWriter"
+    }
+
     async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,

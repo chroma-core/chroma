@@ -5,6 +5,10 @@ use crate::execution::dispatcher::Dispatcher;
 use crate::execution::operator::TaskError;
 use crate::execution::operator::TaskMessage;
 use crate::execution::operator::TaskResult;
+use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterInput;
+use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOperator;
+use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOperatorError;
+use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOutput;
 use crate::execution::operators::fetch_log::FetchLogError;
 use crate::execution::operators::fetch_log::FetchLogOperator;
 use crate::execution::operators::fetch_log::FetchLogOutput;
@@ -22,10 +26,6 @@ use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
 use crate::execution::operators::register::RegisterOutput;
-use crate::execution::operators::write_segments::WriteSegmentsInput;
-use crate::execution::operators::write_segments::WriteSegmentsOperator;
-use crate::execution::operators::write_segments::WriteSegmentsOperatorError;
-use crate::execution::operators::write_segments::WriteSegmentsOutput;
 use crate::log::log::Log;
 use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
 use crate::segment::metadata_segment::MetadataSegmentWriter;
@@ -151,8 +151,8 @@ pub enum CompactionError {
     Partition(#[from] PartitionError),
     #[error("MaterializeLogs error: {0}")]
     MaterializeLogs(#[from] MaterializeLogOperatorError),
-    #[error("WriteSegments error: {0}")]
-    WriteSegments(#[from] WriteSegmentsOperatorError),
+    #[error("Apply logs to segment writer error: {0}")]
+    ApplyLogToSegmentWriter(#[from] ApplyLogToSegmentWriterOperatorError),
     #[error("Could not create record segment reader: {0}")]
     RecordSegmentReaderCreationFailed(#[from] RecordSegmentReaderCreationError),
     #[error("GetSegmentWriters error: {0}")]
@@ -298,7 +298,9 @@ impl CompactOrchestrator {
         &mut self,
         materialized_logs: MaterializeLogsResult,
         self_address: Box<
-            dyn ReceiverForMessage<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>>,
+            dyn ReceiverForMessage<
+                TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
+            >,
         >,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
@@ -314,15 +316,53 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        let operator = WriteSegmentsOperator::new();
-        let input = WriteSegmentsInput::new(
-            writers,
-            self.blockfile_provider.clone(),
-            record_segment,
-            materialized_logs,
-        );
-        let task = wrap(operator, input, self_address);
-        self.send(task, ctx).await;
+        let record_segment_reader: Option<RecordSegmentReader<'_>> = match self.ok_or_terminate(
+            match RecordSegmentReader::from_segment(&record_segment, &self.blockfile_provider).await
+            {
+                Ok(reader) => Ok(Some(reader)),
+                Err(err) => match *err {
+                    RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
+                    _ => Err(*err),
+                },
+            },
+            ctx,
+        ) {
+            Some(reader) => reader,
+            None => return,
+        };
+
+        {
+            let operator = ApplyLogToSegmentWriterOperator::new();
+            let input = ApplyLogToSegmentWriterInput::new(
+                writers.metadata,
+                materialized_logs.clone(),
+                record_segment_reader.clone(),
+            );
+            let task = wrap(operator, input, self_address.clone());
+            self.send(task, ctx).await;
+        }
+
+        {
+            let operator = ApplyLogToSegmentWriterOperator::new();
+            let input = ApplyLogToSegmentWriterInput::new(
+                writers.record,
+                materialized_logs.clone(),
+                record_segment_reader.clone(),
+            );
+            let task = wrap(operator, input, self_address.clone());
+            self.send(task, ctx).await;
+        }
+
+        {
+            let operator = ApplyLogToSegmentWriterOperator::new();
+            let input = ApplyLogToSegmentWriterInput::new(
+                *writers.vector,
+                materialized_logs,
+                record_segment_reader,
+            );
+            let task = wrap(operator, input, self_address);
+            self.send(task, ctx).await;
+        }
     }
 
     async fn flush_s3(
@@ -609,27 +649,30 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>> for CompactOrchestrator {
+impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>>
+    for CompactOrchestrator
+{
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<WriteSegmentsOutput, WriteSegmentsOperatorError>,
+        message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
         ctx: &crate::system::ComponentContext<CompactOrchestrator>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(output) => output,
+        match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(_) => (),
             None => return,
         };
         self.num_write_tasks -= 1;
         if self.num_write_tasks == 0 {
-            self.flush_s3(
-                output.writers.record,
-                output.writers.vector,
-                output.writers.metadata,
-                ctx,
-            )
-            .await;
+            let writers = self.get_segment_writers().await;
+            let writers = match self.ok_or_terminate(writers, ctx) {
+                Some(writers) => writers,
+                None => return,
+            };
+
+            self.flush_s3(writers.record, writers.vector, writers.metadata, ctx)
+                .await;
         }
     }
 }
