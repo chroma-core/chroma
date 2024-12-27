@@ -117,6 +117,7 @@ jobs:
     needs: paths-filter
     if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
     with:
       property_testing_preset: 'fast'
 

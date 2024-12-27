@@ -1,8 +1,24 @@
 name: Start Tilt services
 description: "This action starts Tilt services"
+inputs:
+  depot-project-id:
+    description: "Depot project ID"
+    required: true
+  depot-token:
+    description: "Depot token"
+    required: true
 runs:
   using: "composite"
   steps:
+    - name: Set up Depot CLI
+      uses: depot/setup-action@v1
+    - name: Use Depot builder for Tilt images
+      shell: bash
+      run: |
+        depot configure-docker --project $DEPOT_PROJECT_ID --token $DEPOT_TOKEN
+      env:
+        DEPOT_PROJECT_ID: ${{ inputs.depot-project-id }}
+        DEPOT_TOKEN: ${{ inputs.depot-token }}
     - name: Install Tilt
       shell: bash
       run: |
