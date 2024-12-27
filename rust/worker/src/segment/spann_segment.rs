@@ -235,11 +235,18 @@ impl SpannSegmentWriter {
     }
 }
 
-struct SpannSegmentFlusher {
+pub struct SpannSegmentFlusher {
+    id: SegmentUuid,
     index_flusher: SpannIndexFlusher,
 }
 
 impl SegmentWriter for SpannSegmentWriter {
+    type Flusher = SpannSegmentFlusher;
+
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
     fn get_name(&self) -> &'static str {
         "SpannSegmentWriter"
     }
@@ -283,7 +290,7 @@ impl SegmentWriter for SpannSegmentWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
         let index_flusher = self
             .index
             .commit()
@@ -291,13 +298,24 @@ impl SegmentWriter for SpannSegmentWriter {
             .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterCommitError);
         match index_flusher {
             Err(e) => Err(Box::new(e)),
-            Ok(index_flusher) => Ok(SpannSegmentFlusher { index_flusher }),
+            Ok(index_flusher) => Ok(SpannSegmentFlusher {
+                id: self.id,
+                index_flusher,
+            }),
         }
     }
 }
 
 #[async_trait]
 impl SegmentFlusher for SpannSegmentFlusher {
+    fn get_id(&self) -> SegmentUuid {
+        self.id
+    }
+
+    fn get_name(&self) -> &'static str {
+        "SpannSegmentFlusher"
+    }
+
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let index_flusher_res = self
             .index_flusher

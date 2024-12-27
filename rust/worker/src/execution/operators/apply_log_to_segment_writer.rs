@@ -9,6 +9,7 @@ use crate::segment::SegmentWriter;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_types::SegmentUuid;
 use thiserror::Error;
 use tracing::Instrument;
 
@@ -73,7 +74,9 @@ impl<'bf, Writer: SegmentWriter> ApplyLogToSegmentWriterInput<'bf, Writer> {
 }
 
 #[derive(Debug)]
-pub struct ApplyLogToSegmentWriterOutput {}
+pub struct ApplyLogToSegmentWriterOutput {
+    pub segment_id: SegmentUuid,
+}
 
 #[async_trait]
 impl<Writer: SegmentWriter + Send + Sync + Clone>
@@ -114,6 +117,8 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
             }
         }
 
-        Ok(ApplyLogToSegmentWriterOutput {})
+        Ok(ApplyLogToSegmentWriterOutput {
+            segment_id: input.segment_writer.get_id(),
+        })
     }
 }
