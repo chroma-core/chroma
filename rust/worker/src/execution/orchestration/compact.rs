@@ -280,7 +280,7 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        self.num_write_tasks = partitions.len() as i32;
+        self.num_write_tasks = partitions.len() as i32 * 3;
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
