@@ -172,7 +172,7 @@ class BaseAPI(ABC):
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
     ) -> bool:
-        """[Internal] Add or update entries in the a collection specified by UUID.
+        """[Internal] Add or update entries in a collection specified by UUID.
         If an entry with the same id already exists, it will be updated,
         otherwise it will be added.
 
