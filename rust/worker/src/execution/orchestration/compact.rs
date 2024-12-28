@@ -635,7 +635,7 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
         };
 
         if materialized_result.is_empty() {
-            self.num_write_tasks -= 1;
+            self.num_write_tasks -= 3;
 
             if self.num_write_tasks == 0 {
                 // There is nothing to flush, proceed to register
