@@ -85,6 +85,7 @@ impl ArrowBlockfileProvider {
             match options.mutation_ordering {
                 BlockfileWriterMutationOrdering::Ordered => {
                     let file = ArrowOrderedBlockfileWriter::from_root(
+                        fork_from,
                         new_id,
                         self.block_manager.clone(),
                         self.root_manager.clone(),
@@ -95,6 +96,7 @@ impl ArrowBlockfileProvider {
                 }
                 BlockfileWriterMutationOrdering::Unordered => {
                     let file = ArrowUnorderedBlockfileWriter::from_root(
+                        fork_from,
                         new_id,
                         self.block_manager.clone(),
                         self.root_manager.clone(),
