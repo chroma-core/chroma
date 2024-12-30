@@ -1613,19 +1613,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1137cd7e7fc0fb5d3c5a8678be38ec56e819125d8d7907411fe24ccb943faca8"
-dependencies = [
- "crossbeam-channel",
- "crossbeam-deque",
- "crossbeam-epoch",
- "crossbeam-queue",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-channel"
 version = "0.5.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1649,15 +1636,6 @@ name = "crossbeam-epoch"
 version = "0.9.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-queue"
-version = "0.3.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df0346b5d5e76ac2fe4e327c5fd1118d6be7c51dfb18f9b7922923f287471e35"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -2002,9 +1980,9 @@ checksum = "59668941c55e5c186b8b58c391629af56774ec768f73c08bbcd56f09348eb00b"
 
 [[package]]
 name = "fastrace"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe845ecd1e3dba36bd7a20ea3b46c81ec610d5a2ffe288160a7cc6a2051496a5"
+checksum = "5242121a4de2ca29db07d2ab6ed5988ddbc3cf1ca19e52c80fde10cf498efde8"
 dependencies = [
  "fastrace-macro",
  "minstant",
@@ -2017,14 +1995,27 @@ dependencies = [
 
 [[package]]
 name = "fastrace-macro"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a09bf248c7ec91a448701fa2c31750f78be6cbc3d5269dbb82a9f3945776d1f4"
+checksum = "76b7af4a705e4ba8104724d083ae2bca76e4964f637d9d35375eb99672d45fb6"
 dependencies = [
  "proc-macro-error2",
  "proc-macro2",
  "quote",
  "syn 2.0.89",
+]
+
+[[package]]
+name = "fastrace-opentelemetry"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e7c6fae8a99c959de8eb2268a70a28ab738a5a379371265ca2e120989bdad80"
+dependencies = [
+ "fastrace",
+ "futures",
+ "log",
+ "opentelemetry",
+ "opentelemetry_sdk",
 ]
 
 [[package]]
@@ -2104,6 +2095,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2129,12 +2126,13 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.12.2"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ffa01d910407917a7c268fddf2be41163028693556b833a55f59351deffa011"
+checksum = "19c63beb108769d28b042829164139a5245359ccfdb4a8face928ac154e2c9ed"
 dependencies = [
  "ahash",
  "anyhow",
+ "equivalent",
  "fastrace",
  "foyer-common",
  "foyer-memory",
@@ -2147,61 +2145,63 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.12.2"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "797addbeabe5c42db9615e4d350a9b9d1597bebc07eefbd032d0e173430c8868"
+checksum = "68be583b3f51bcbc6b72f40a5aea6fa6aaff10692649c08b20458bb6703f79f0"
 dependencies = [
+ "ahash",
  "bytes",
  "cfg-if",
- "crossbeam",
  "fastrace",
  "futures",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.2",
  "itertools 0.13.0",
  "madsim-tokio",
- "metrics",
+ "opentelemetry",
  "parking_lot",
  "pin-project",
  "serde",
 ]
 
 [[package]]
-name = "foyer-intrusive"
-version = "0.12.2"
+name = "foyer-intrusive-collections"
+version = "0.10.0-dev"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ee0c1f19c7736f34e37e7cd4c1d5ceef3a32e24dbb14fcf2fcc836ce1cbfc4"
+checksum = "6e4fee46bea69e0596130e3210e65d3424e0ac1e6df3bde6636304bdf1ca4a3b"
 dependencies = [
- "foyer-common",
- "itertools 0.13.0",
+ "memoffset",
 ]
 
 [[package]]
 name = "foyer-memory"
-version = "0.12.2"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b46b30275039721c05b390d4df00eff88814b1877ee06d56b61a859a5cf9577"
+checksum = "0a01e64de1452409977219fe014caa427874677aacd647bec9207d98d018bcd8"
 dependencies = [
  "ahash",
  "bitflags 2.6.0",
  "cmsketch",
+ "equivalent",
  "fastrace",
  "foyer-common",
- "foyer-intrusive",
+ "foyer-intrusive-collections",
  "futures",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.2",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot",
+ "paste",
  "pin-project",
  "serde",
+ "thiserror 2.0.4",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-storage"
-version = "0.12.2"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "038ecf3211a5f984d534a5654a41613be7334fe8f5aab529708866da2de62d82"
+checksum = "9fb89bdcdf355e8cb2b29eaa0158839f4f7c6974c6cc86f6e54e4a48a2afa5b8"
 dependencies = [
  "ahash",
  "allocator-api2",
@@ -2214,13 +2214,14 @@ dependencies = [
  "bytes",
  "clap",
  "either",
+ "equivalent",
  "fastrace",
  "flume",
  "foyer-common",
  "foyer-memory",
- "fs4 0.9.1",
+ "fs4 0.12.0",
  "futures",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.2",
  "itertools 0.13.0",
  "libc",
  "lz4",
@@ -2231,7 +2232,7 @@ dependencies = [
  "pin-project",
  "rand",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.4",
  "tracing",
  "twox-hash",
  "zstd 0.13.0",
@@ -2249,9 +2250,9 @@ dependencies = [
 
 [[package]]
 name = "fs4"
-version = "0.9.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8c6b3bd49c37d2aa3f3f2220233b29a7cd23f79d1fe70e5337d25fb390793de"
+checksum = "c29c30684418547d476f0b48e84f4821639119c483b1eccd566c8cd0cd05f521"
 dependencies = [
  "rustix",
  "windows-sys 0.52.0",
@@ -2520,6 +2521,11 @@ name = "hashbrown"
 version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "heck"
@@ -3534,13 +3540,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics"
-version = "0.23.0"
+name = "memoffset"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "884adb57038347dfbaf2d5065887b6cf4312330dc8e94bc30a1a839bd79d3261"
+checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
- "ahash",
- "portable-atomic",
+ "autocfg",
 ]
 
 [[package]]
@@ -4456,7 +4461,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls 0.23.18",
  "socket2",
- "thiserror 2.0.3",
+ "thiserror 2.0.4",
  "tokio",
  "tracing",
 ]
@@ -4475,7 +4480,7 @@ dependencies = [
  "rustls 0.23.18",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.3",
+ "thiserror 2.0.4",
  "tinyvec",
  "tracing",
  "web-time",
@@ -5685,11 +5690,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.3"
+version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+checksum = "2f49a1853cf82743e3b7950f77e0f4d622ca36cf4317cba00c767838bac8d490"
 dependencies = [
- "thiserror-impl 2.0.3",
+ "thiserror-impl 2.0.4",
 ]
 
 [[package]]
@@ -5705,9 +5710,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.3"
+version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
+checksum = "8381894bb3efe0c4acac3ded651301ceee58a15d47c2e34885ed1908ad667061"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6193,13 +6198,11 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twox-hash"
-version = "1.6.3"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
+checksum = "a6db6856664807f43c17fbaf2718e2381ac1476a449aa104f5f64622defa1245"
 dependencies = [
- "cfg-if",
  "rand",
- "static_assertions",
 ]
 
 [[package]]
@@ -6789,6 +6792,8 @@ dependencies = [
  "chroma-storage",
  "chroma-types",
  "criterion",
+ "fastrace",
+ "fastrace-opentelemetry",
  "figment",
  "flatbuffers",
  "futures",
