@@ -501,14 +501,12 @@ impl<'log_data> Iterator for MaterializeLogsResultIter<'log_data> {
     }
 }
 
+/// Materializes a chunk of log records.
+/// - `record_segment_reader` can be `None` if the record segment is uninitialized.
+/// - `next_offset_id` must be provided if the log was partitioned and `materialize_logs()` is called for each partition: if it is not provided, generated offset IDs will conflict between partitions. When it is not provided, it is initialized from the max offset ID in the record segment.
 pub async fn materialize_logs(
-    // Is None when record segment is uninitialized.
     record_segment_reader: &Option<RecordSegmentReader<'_>>,
     logs: Chunk<LogRecord>,
-    // Is None for readers. In that case, the materializer reads
-    // the current maximum from the record segment and uses that
-    // for materializing. Writers pass this value to the materializer
-    // because they need to share this across all log partitions.
     next_offset_id: Option<Arc<AtomicU32>>,
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
@@ -520,7 +518,7 @@ pub async fn materialize_logs(
         None => {
             match record_segment_reader.as_ref() {
                 Some(reader) => {
-                    let offset_id = reader.get_current_max_offset_id();
+                    let offset_id = Arc::new(AtomicU32::new(reader.get_max_offset_id()));
                     offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     offset_id
                 }
