@@ -104,4 +104,14 @@ impl BlockfileWriter {
             BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => writer.id(),
         }
     }
+
+    pub fn forked_from_id(&self) -> Option<uuid::Uuid> {
+        match self {
+            BlockfileWriter::MemoryBlockfileWriter(_) => {
+                unimplemented!("in-memory blockfiles currently do not support forking")
+            }
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer.forked_from_id(),
+            BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => writer.forked_from_id(),
+        }
+    }
 }

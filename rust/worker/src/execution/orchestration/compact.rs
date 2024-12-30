@@ -21,6 +21,10 @@ use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionOutput;
+use crate::execution::operators::prefetch_for_metadata_writer::PrefetchForMetadataWriterError;
+use crate::execution::operators::prefetch_for_metadata_writer::PrefetchForMetadataWriterInput;
+use crate::execution::operators::prefetch_for_metadata_writer::PrefetchForMetadataWriterOperator;
+use crate::execution::operators::prefetch_for_metadata_writer::PrefetchForMetadataWriterOutput;
 use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
@@ -173,6 +177,8 @@ pub enum CompactionError {
     MaterializeLogs(#[from] MaterializeLogOperatorError),
     #[error("Apply logs to segment writer error: {0}")]
     ApplyLogToSegmentWriter(#[from] ApplyLogToSegmentWriterOperatorError),
+    #[error("Prefetch for metadata writer error: {0}")]
+    PrefetchForMetadataWriter(#[from] PrefetchForMetadataWriterError),
     #[error("Commit segment writer error: {0}")]
     CommitSegmentWriter(#[from] CommitSegmentWriterOperatorError),
     #[error("Flush segment writer error: {0}")]
@@ -816,6 +822,26 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         };
 
         if num_tasks_left == 0 {
+            let writers = self.get_segment_writers().await;
+            let writers = match self.ok_or_terminate(writers, ctx) {
+                Some(writers) => writers,
+                None => return,
+            };
+
+            if message.segment_id == writers.metadata.id {
+                let span = self.get_segment_writer_span(&ChromaSegmentWriter::MetadataSegment(
+                    writers.metadata.clone(),
+                ));
+                let operator = PrefetchForMetadataWriterOperator::new();
+                let input = PrefetchForMetadataWriterInput::new(
+                    self.blockfile_provider.clone(),
+                    writers.metadata,
+                );
+                let task = wrap(Box::new(operator), input, ctx.receiver());
+                let res = self.dispatcher().send(task, Some(span)).await;
+                self.ok_or_terminate(res, ctx);
+            }
+
             let segment_writer = self.get_segment_writer_by_id(message.segment_id).await;
             let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
                 Some(writer) => writer,
@@ -825,6 +851,24 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             self.dispatch_segment_writer_commit(segment_writer, ctx.receiver(), ctx)
                 .await;
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchForMetadataWriterOutput, PrefetchForMetadataWriterError>>
+    for CompactOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PrefetchForMetadataWriterOutput, PrefetchForMetadataWriterError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(message) => message,
+            None => return,
+        };
     }
 }
 

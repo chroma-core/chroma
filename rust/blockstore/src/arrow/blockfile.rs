@@ -30,6 +30,7 @@ pub struct ArrowUnorderedBlockfileWriter {
     block_deltas: Arc<Mutex<HashMap<Uuid, UnorderedBlockDelta>>>,
     root: RootWriter,
     id: Uuid,
+    forked_from_id: Option<Uuid>,
     write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 // TODO: method visibility should not be pub(crate)
@@ -76,11 +77,13 @@ impl ArrowUnorderedBlockfileWriter {
             block_deltas,
             root: root_writer,
             id,
+            forked_from_id: None,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
     pub(super) fn from_root(
+        forked_from_id: Uuid,
         id: Uuid,
         block_manager: BlockManager,
         root_manager: RootManager,
@@ -95,6 +98,7 @@ impl ArrowUnorderedBlockfileWriter {
             block_deltas,
             root: new_root,
             id,
+            forked_from_id: Some(forked_from_id),
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -352,6 +356,10 @@ impl ArrowUnorderedBlockfileWriter {
     pub(crate) fn id(&self) -> Uuid {
         self.id
     }
+
+    pub(crate) fn forked_from_id(&self) -> Option<Uuid> {
+        self.forked_from_id
+    }
 }
 
 #[derive(Clone)]
@@ -435,16 +443,11 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         join_all(futures).await;
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) {
-        let mut composite_keys = Vec::new();
-        let prefix_iter = prefixes.iter();
-        let mut key_iter = keys.iter();
-        for prefix in prefix_iter {
-            if let Some(key) = key_iter.next() {
-                let composite_key = CompositeKey::new(prefix.to_string(), key.clone());
-                composite_keys.push(composite_key);
-            }
-        }
+    pub(crate) async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
+        let composite_keys = keys
+            .into_iter()
+            .map(|(prefix, key)| CompositeKey::new(prefix, key))
+            .collect::<Vec<_>>();
         let target_block_ids = self
             .root
             .sparse_index
@@ -1779,6 +1782,7 @@ mod tests {
             block_deltas,
             root: root_writer,
             id: Uuid::new_v4(),
+            forked_from_id: None,
             write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         };
 
