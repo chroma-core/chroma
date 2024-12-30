@@ -41,6 +41,17 @@ impl BlockfileWriter {
         }
     }
 
+    pub async fn prefetch<K: Key>(
+        &self,
+        keys: impl IntoIterator<Item = (String, K)>,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            BlockfileWriter::MemoryBlockfileWriter(_) => Ok(()),
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer.prefetch(keys).await,
+            BlockfileWriter::ArrowOrderedBlockfileWriter(writer) => writer.prefetch(keys).await,
+        }
+    }
+
     pub async fn set<
         K: Key + Into<KeyWrapper> + ArrowWriteableKey,
         V: Value + Writeable + ArrowWriteableValue,

@@ -11,9 +11,11 @@ use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
+use crate::Key;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
+use futures::stream::FuturesUnordered;
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::Mutex;
 use std::collections::HashSet;
@@ -335,6 +337,42 @@ impl ArrowUnorderedBlockfileWriter {
             Some(delta) => delta,
         };
         delta.delete::<K, V>(prefix, key);
+        Ok(())
+    }
+
+    pub(crate) async fn prefetch<K: Key>(
+        &self,
+        keys: impl IntoIterator<Item = (String, K)>,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let mut block_ids = HashSet::new();
+
+        for key in keys {
+            let block_id = self
+                .root
+                .sparse_index
+                .get_target_block_id(&CompositeKey::new(key.0, key.1));
+            block_ids.insert(block_id);
+        }
+
+        let mut block_fetches = FuturesUnordered::new();
+        for block_id in &block_ids {
+            block_fetches.push(self.block_manager.get(block_id));
+        }
+
+        while let Some(block) = block_fetches.next().await {
+            match block {
+                Ok(_) => {}
+                Err(err) => match err {
+                    GetError::StorageGetError(chroma_storage::GetError::NoSuchKey(_)) => {
+                        // Ignore
+                    }
+                    _ => {
+                        return Err(Box::new(err) as Box<dyn ChromaError>);
+                    }
+                },
+            }
+        }
+
         Ok(())
     }
 
