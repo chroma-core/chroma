@@ -59,7 +59,7 @@ See [Running Chroma in client-server mode](../client-server-mode) for more.
 
 The client object has a few useful convenience methods.
 
-* `hearthbeat()` - returns a nanosecond heartbeat. Useful for making sure the client remains connected.
+* `heartbeat()` - returns a nanosecond heartbeat. Useful for making sure the client remains connected.
 * `reset()` - empties and completely resets the database. ⚠️ This is destructive and not reversible.
 
 {% TabbedCodeBlock %}
