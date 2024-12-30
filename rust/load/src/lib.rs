@@ -1439,6 +1439,7 @@ pub async fn entrypoint() {
         .unwrap();
     let runner = tokio::task::spawn(async move { load.run().await });
     axum::serve(listener, app).await.unwrap();
+    let _ = 5;
     runner.abort();
 }
 
