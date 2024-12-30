@@ -35,6 +35,7 @@ use crate::system::ChannelError;
 use crate::system::ComponentContext;
 use crate::system::ComponentHandle;
 use crate::system::Handler;
+use crate::utils::PanicError;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
@@ -143,8 +144,8 @@ impl ChromaError for GetSegmentWritersError {
 
 #[derive(Error, Debug)]
 pub enum CompactionError {
-    #[error("Panic running task: {0}")]
-    Panic(String),
+    #[error("Panic during compaction: {0}")]
+    Panic(#[from] PanicError),
     #[error("FetchLog error: {0}")]
     FetchLog(#[from] FetchLogError),
     #[error("Partition error: {0}")]
@@ -167,7 +168,7 @@ where
 {
     fn from(value: TaskError<E>) -> Self {
         match value {
-            TaskError::Panic(e) => CompactionError::Panic(e.unwrap_or_default()),
+            TaskError::Panic(e) => CompactionError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
         }
     }

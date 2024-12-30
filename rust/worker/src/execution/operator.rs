@@ -1,4 +1,4 @@
-use crate::{system::ReceiverForMessage, utils::get_panic_message};
+use crate::{system::ReceiverForMessage, utils::PanicError};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
@@ -34,7 +34,7 @@ where
 #[derive(Debug, Error)]
 pub(super) enum TaskError<Err> {
     #[error("Panic occurred while handling task: {0:?}")]
-    Panic(Option<String>),
+    Panic(PanicError),
     #[error("Task failed with error: {0:?}")]
     TaskFailed(#[from] Err),
 }
@@ -149,13 +149,11 @@ where
                 }
             }
             Err(panic_value) => {
-                let panic_message = get_panic_message(panic_value);
-
                 match self
                     .reply_channel
                     .send(
                         TaskResult {
-                            result: Err(TaskError::Panic(panic_message.clone())),
+                            result: Err(TaskError::Panic(PanicError::new(panic_value))),
                             task_id: self.task_id,
                         },
                         None,
@@ -171,12 +169,6 @@ where
                         );
                     }
                 };
-
-                // Re-panic so the message handler can catch it
-                panic!(
-                    "{}",
-                    panic_message.unwrap_or("Unknown panic occurred in task".to_string())
-                );
             }
         };
     }
@@ -296,6 +288,7 @@ mod tests {
         let result = &results_guard.first().unwrap().result;
 
         assert!(result.is_err());
-        matches!(result, Err(TaskError::Panic(Some(msg))) if msg == "MockOperator panicking");
+        let err = result.as_ref().unwrap_err();
+        assert!(err.to_string().contains("MockOperator panicking"));
     }
 }

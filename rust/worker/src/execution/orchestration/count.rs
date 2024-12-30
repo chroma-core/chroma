@@ -17,6 +17,7 @@ use crate::{
         },
     },
     system::{ChannelError, ComponentContext, ComponentHandle, Handler},
+    utils::PanicError,
 };
 
 use super::orchestrator::Orchestrator;
@@ -29,8 +30,8 @@ pub enum CountError {
     FetchLog(#[from] FetchLogError),
     #[error("Error running Count Record Operator: {0}")]
     CountRecord(#[from] CountRecordsError),
-    #[error("Panic running task: {0}")]
-    Panic(String),
+    #[error("Panic: {0}")]
+    Panic(#[from] PanicError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
 }
@@ -53,7 +54,7 @@ where
 {
     fn from(value: TaskError<E>) -> Self {
         match value {
-            TaskError::Panic(e) => CountError::Panic(e.unwrap_or_default()),
+            TaskError::Panic(e) => CountError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
         }
     }

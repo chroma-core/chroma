@@ -29,6 +29,7 @@ use crate::{
         utils::distance_function_from_segment,
     },
     system::{ChannelError, ComponentContext, ComponentHandle, Handler},
+    utils::PanicError,
 };
 
 use super::orchestrator::Orchestrator;
@@ -57,8 +58,8 @@ pub enum KnnError {
     KnnProjection(#[from] KnnProjectionError),
     #[error("Error inspecting collection dimension")]
     NoCollectionDimension,
-    #[error("Panic running task: {0}")]
-    Panic(String),
+    #[error("Panic: {0}")]
+    Panic(#[from] PanicError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
     #[error("Invalid distance function")]
@@ -92,7 +93,7 @@ where
 {
     fn from(value: TaskError<E>) -> Self {
         match value {
-            TaskError::Panic(e) => KnnError::Panic(e.unwrap_or_default()),
+            TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
         }
     }
@@ -116,32 +117,32 @@ type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 ///
 /// # Pipeline
 /// ```text
-///       ┌────────────┐           
-///       │            │           
-///       │  on_start  │           
-///       │            │           
-///       └──────┬─────┘           
-///              │                 
-///              ▼                 
-///    ┌────────────────────┐      
-///    │                    │      
-///    │  FetchLogOperator  │      
-///    │                    │      
-///    └─────────┬──────────┘      
-///              │                 
-///              ▼                 
-///    ┌───────────────────┐       
-///    │                   │       
-///    │   FilterOperator  │       
-///    │                   │       
-///    └─────────┬─────────┘       
-///              │                 
-///              ▼                 
-///     ┌──────────────────┐       
-///     │                  │       
-///     │  result_channel  │       
-///     │                  │       
-///     └──────────────────┘       
+///       ┌────────────┐
+///       │            │
+///       │  on_start  │
+///       │            │
+///       └──────┬─────┘
+///              │
+///              ▼
+///    ┌────────────────────┐
+///    │                    │
+///    │  FetchLogOperator  │
+///    │                    │
+///    └─────────┬──────────┘
+///              │
+///              ▼
+///    ┌───────────────────┐
+///    │                   │
+///    │   FilterOperator  │
+///    │                   │
+///    └─────────┬─────────┘
+///              │
+///              ▼
+///     ┌──────────────────┐
+///     │                  │
+///     │  result_channel  │
+///     │                  │
+///     └──────────────────┘
 /// ```
 #[derive(Debug)]
 pub struct KnnFilterOrchestrator {

@@ -18,6 +18,7 @@ use crate::{
         },
     },
     system::{ChannelError, ComponentContext, ComponentHandle, Handler},
+    utils::PanicError,
 };
 
 use super::orchestrator::Orchestrator;
@@ -32,8 +33,8 @@ pub enum GetError {
     Filter(#[from] FilterError),
     #[error("Error running Limit Operator: {0}")]
     Limit(#[from] LimitError),
-    #[error("Panic running task: {0}")]
-    Panic(String),
+    #[error("Panic: {0}")]
+    Panic(#[from] PanicError),
     #[error("Error running Projection Operator: {0}")]
     Projection(#[from] ProjectionError),
     #[error("Error receiving final result: {0}")]
@@ -60,7 +61,7 @@ where
 {
     fn from(value: TaskError<E>) -> Self {
         match value {
-            TaskError::Panic(e) => GetError::Panic(e.unwrap_or_default()),
+            TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
         }
     }
@@ -75,46 +76,46 @@ type GetResult = Result<GetOutput, GetError>;
 ///
 /// # Pipeline
 /// ```text
-///       ┌────────────┐           
-///       │            │           
-///       │  on_start  │           
-///       │            │           
-///       └──────┬─────┘           
-///              │                 
-///              ▼                 
-///    ┌────────────────────┐      
-///    │                    │      
-///    │  FetchLogOperator  │      
-///    │                    │      
-///    └─────────┬──────────┘      
-///              │                 
-///              ▼                 
-///    ┌───────────────────┐       
-///    │                   │       
-///    │   FilterOperator  │       
-///    │                   │       
-///    └─────────┬─────────┘       
-///              │                 
-///              ▼                 
-///     ┌─────────────────┐        
-///     │                 │        
-///     │  LimitOperator  │        
-///     │                 │        
-///     └────────┬────────┘        
-///              │                 
-///              ▼                 
-///   ┌──────────────────────┐     
-///   │                      │     
-///   │  ProjectionOperator  │     
-///   │                      │     
-///   └──────────┬───────────┘     
-///              │                 
-///              ▼                 
-///     ┌──────────────────┐       
-///     │                  │       
-///     │  result_channel  │       
-///     │                  │       
-///     └──────────────────┘       
+///       ┌────────────┐
+///       │            │
+///       │  on_start  │
+///       │            │
+///       └──────┬─────┘
+///              │
+///              ▼
+///    ┌────────────────────┐
+///    │                    │
+///    │  FetchLogOperator  │
+///    │                    │
+///    └─────────┬──────────┘
+///              │
+///              ▼
+///    ┌───────────────────┐
+///    │                   │
+///    │   FilterOperator  │
+///    │                   │
+///    └─────────┬─────────┘
+///              │
+///              ▼
+///     ┌─────────────────┐
+///     │                 │
+///     │  LimitOperator  │
+///     │                 │
+///     └────────┬────────┘
+///              │
+///              ▼
+///   ┌──────────────────────┐
+///   │                      │
+///   │  ProjectionOperator  │
+///   │                      │
+///   └──────────┬───────────┘
+///              │
+///              ▼
+///     ┌──────────────────┐
+///     │                  │
+///     │  result_channel  │
+///     │                  │
+///     └──────────────────┘
 /// ```
 #[derive(Debug)]
 pub struct GetOrchestrator {

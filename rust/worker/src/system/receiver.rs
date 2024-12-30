@@ -70,8 +70,6 @@ pub enum RequestError {
     SendError,
     #[error("Failed to receive response")]
     ReceiveError,
-    #[error("Message handler panicked")]
-    HandlerPanic(Option<String>),
 }
 
 impl ChromaError for RequestError {

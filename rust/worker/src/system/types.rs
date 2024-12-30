@@ -44,6 +44,11 @@ pub trait Component: Send + Sized + Debug + 'static {
         ComponentRuntime::Inherit
     }
     async fn start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
+    fn on_handler_panic(&mut self, panic: Box<dyn core::any::Any + Send>) {
+        // Default behavior is to log and then resume the panic
+        tracing::error!("Handler panicked: {:?}", panic);
+        std::panic::resume_unwind(panic);
+    }
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -154,12 +159,7 @@ impl<C: Component> ComponentSender<C> {
 
         let result = rx.await.map_err(|_| RequestError::ReceiveError)?;
 
-        match result {
-            Ok(result) => Ok(result),
-            Err(err) => match err {
-                super::MessageHandlerError::Panic(p) => Err(RequestError::HandlerPanic(p)),
-            },
-        }
+        Ok(result)
     }
 }
 
