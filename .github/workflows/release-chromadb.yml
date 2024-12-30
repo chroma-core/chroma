@@ -279,7 +279,7 @@ jobs:
                 // - This workflow finishes for A and deploys A to Chroma Cloud
                 // Chroma Cloud is now running A, but the last commit was B.
                 "environment": "staging",
-                "planes": "data"
+                "planes": "data,control"
               }
             })
 
