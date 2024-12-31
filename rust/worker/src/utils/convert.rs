@@ -1,14 +1,19 @@
+use std::str::FromStr;
+
 use chroma_types::{
     chroma_proto::{self, GetResult, KnnBatchResult, KnnResult},
-    ConversionError, ScalarEncoding, Where,
+    CollectionUuid, ConversionError, ScalarEncoding, Where,
 };
 
-use crate::execution::operators::{
-    filter::FilterOperator,
-    knn::KnnOperator,
-    knn_projection::{KnnProjectionOperator, KnnProjectionOutput, KnnProjectionRecord},
-    limit::LimitOperator,
-    projection::{ProjectionOperator, ProjectionOutput, ProjectionRecord},
+use crate::{
+    compactor::OneOffCompactionMessage,
+    execution::operators::{
+        filter::FilterOperator,
+        knn::KnnOperator,
+        knn_projection::{KnnProjectionOperator, KnnProjectionOutput, KnnProjectionRecord},
+        limit::LimitOperator,
+        projection::{ProjectionOperator, ProjectionOutput, ProjectionRecord},
+    },
 };
 
 impl TryFrom<chroma_proto::FilterOperator> for FilterOperator {
@@ -110,7 +115,7 @@ impl TryFrom<KnnProjectionRecord> for chroma_proto::KnnProjectionRecord {
     type Error = ConversionError;
 
     fn try_from(value: KnnProjectionRecord) -> Result<Self, ConversionError> {
-        Ok(chroma_proto::KnnProjectionRecord {
+        Ok(Self {
             record: Some(value.record.try_into()?),
             distance: value.distance,
         })
@@ -121,7 +126,7 @@ impl TryFrom<KnnProjectionOutput> for KnnResult {
     type Error = ConversionError;
 
     fn try_from(value: KnnProjectionOutput) -> Result<Self, ConversionError> {
-        Ok(KnnResult {
+        Ok(Self {
             records: value
                 .records
                 .into_iter()
@@ -153,4 +158,23 @@ pub fn to_proto_knn_batch_result(
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()?,
     })
+}
+
+impl TryFrom<chroma_proto::CompactionRequest> for OneOffCompactionMessage {
+    type Error = ConversionError;
+
+    fn try_from(value: chroma_proto::CompactionRequest) -> Result<Self, ConversionError> {
+        Ok(Self {
+            collection_ids: value
+                .ids
+                .map(|ids| {
+                    ids.ids
+                        .into_iter()
+                        .map(|id| CollectionUuid::from_str(&id))
+                        .collect::<Result<_, _>>()
+                })
+                .transpose()
+                .map_err(|_| ConversionError::DecodeError)?,
+        })
+    }
 }

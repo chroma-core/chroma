@@ -2,6 +2,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the protobuf files in the chromadb proto directory.
     let mut proto_paths = vec![
         "../../idl/chromadb/proto/chroma.proto",
+        "../../idl/chromadb/proto/compactor.proto",
         "../../idl/chromadb/proto/coordinator.proto",
         "../../idl/chromadb/proto/logservice.proto",
         "../../idl/chromadb/proto/query_executor.proto",
