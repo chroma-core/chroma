@@ -29,7 +29,7 @@ for POD in $PODS; do
 done
 
 # Get traces from Jaeger for all services
-curl "http://jaeger.chroma.svc.cluster.local:16686/api/services" | jq -r '.data[]' | while read -r service; do curl "http://jaeger.chroma.svc.cluster.local:16686/api/traces?limit=100&lookback=1h&maxDuration&minDuration&service=$service" > "$TEMP_DIR/traces/$service.json"; done
+curl "http://localhost:16686/api/services" | jq -r '.data[]' | while read -r service; do curl "http://localhost:16686/api/traces?limit=100&lookback=1h&maxDuration&minDuration&service=$service" > "$TEMP_DIR/traces/$service.json"; done
 
 # Zip all log files
 cd $TEMP_DIR &&zip -r "$OUTPUT_FILE_PATH" . && cd -
