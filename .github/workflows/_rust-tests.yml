@@ -36,6 +36,12 @@ jobs:
         uses: ./.github/actions/tilt
       - name: Run tests
         run: cargo nextest run --profile k8s_integration
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
+        with:
+          artifact-name: "rust-integration-test"
+
   test-benches:
     strategy:
       matrix:

@@ -27,21 +27,11 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: slow
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "3.12"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_3.12" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_3.12_logs.zip" >> $GITHUB_OUTPUT
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          artifact-name: "tilt-logs"
       - name: Send PagerDuty alert on failure
         if: ${{ failure() }}
         uses: Entle/action-pagerduty-alert@0.2.0
