@@ -328,7 +328,7 @@ impl Handler<OneOffCompactionMessage> for CompactionManager {
     type Result = ();
     async fn handle(
         &mut self,
-        message: OneOffCompactionMessage,
+        _message: OneOffCompactionMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!("CompactionManager: Performing compaction");
