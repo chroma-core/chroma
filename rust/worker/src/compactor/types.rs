@@ -9,4 +9,9 @@ pub(crate) struct CompactionJob {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScheduleMessage {}
+pub struct ScheduledCompactionMessage {}
+
+#[derive(Clone, Debug)]
+pub struct OneOffCompactionMessage {
+    pub collection_ids: Option<Vec<CollectionUuid>>,
+}
