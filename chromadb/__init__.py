@@ -47,7 +47,6 @@ __settings = Settings()
 
 __version__ = "0.6.0"
 
-
 # Workaround to deal with Colab's old sqlite3 version
 def is_in_colab() -> bool:
     try:

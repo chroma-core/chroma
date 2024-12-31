@@ -407,6 +407,9 @@ extern "C" {
 
 #[cfg(test)]
 pub mod test {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
     use super::*;
     use crate::utils;
     use chroma_distance::DistanceFunction;
@@ -848,5 +851,75 @@ pub mod test {
             Err(_) => {}
             Ok(_) => panic!("Expected error"),
         }
+    }
+
+    #[test]
+    fn it_can_detect_corruption() {
+        let n = 1000;
+        let d: usize = 960;
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let id = Uuid::new_v4();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function.clone(),
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 32,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path.clone(),
+            }),
+            IndexUuid(id),
+        );
+
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
+        let data: Vec<f32> = utils::generate_random_data(n, d);
+        let ids: Vec<usize> = (0..n).collect();
+
+        (0..n).for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data).expect("Should not error");
+        });
+
+        // Persist the index
+        let res = index.save();
+        if let Err(e) = res {
+            panic!("Error saving index: {}", e);
+        }
+
+        // Corrupt the linked list
+        let link_list_path = persist_path.clone() + "/link_lists.bin";
+        let mut link_list_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(link_list_path)
+            .unwrap();
+        link_list_file.write_all(&u32::MAX.to_le_bytes()).unwrap();
+
+        // Load the corrupted index
+        let index = HnswIndex::load(
+            &persist_path,
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function,
+            },
+            IndexUuid(id),
+        );
+
+        assert!(index.is_err());
+        assert!(index
+            .map(|_| ())
+            .unwrap_err()
+            .to_string()
+            .contains("HNSW Integrity failure"))
     }
 }

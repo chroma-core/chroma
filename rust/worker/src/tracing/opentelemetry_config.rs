@@ -3,8 +3,10 @@
 //
 // Keep them in-sync manually.
 
-use opentelemetry::global;
+use std::borrow::Cow;
+
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_bunyan_formatter::BunyanFormattingLayer;
@@ -71,21 +73,33 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     )]);
 
     // Prepare tracer.
-    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
+    let tracing_span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .with_endpoint(otel_endpoint)
         .build()
-        .expect("could not build span exporter");
+        .expect("could not build span exporter for tracing");
     let trace_config = opentelemetry_sdk::trace::Config::default()
         .with_sampler(ChromaShouldSample)
         .with_resource(resource.clone());
     let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-        .with_batch_exporter(span_exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_batch_exporter(tracing_span_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_config(trace_config)
         .build();
     let tracer = tracer_provider.tracer(service_name.clone());
-    // TODO(MrCroxx): Should we the tracer provider as global?
-    // global::set_tracer_provider(tracer_provider);
+    let fastrace_span_exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(otel_endpoint)
+        .build()
+        .expect("could not build span exporter for fastrace");
+    fastrace::set_reporter(
+        fastrace_opentelemetry::OpenTelemetryReporter::new(
+            fastrace_span_exporter,
+            opentelemetry::trace::SpanKind::Server,
+            Cow::Owned(resource.clone()),
+            InstrumentationScope::builder("chroma").build(),
+        ),
+        fastrace::collector::Config::default(),
+    );
 
     // Prepare meter.
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
@@ -129,7 +143,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // global filter layer. Don't filter anything at above trace at the global layer for chroma.
     // And enable errors for every other library.
     let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "info,".to_string()
+        "error,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -149,7 +163,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
                 "worker",
             ]
             .into_iter()
-            .map(|s| s.to_string() + "=debug")
+            .map(|s| s.to_string() + "=trace")
             .collect::<Vec<String>>()
             .join(",")
     }));

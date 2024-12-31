@@ -106,7 +106,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
             Err(e) => Err(*e),
         }?;
 
-        let materialized_logs = materialize_logs(&record_segment_reader, &input.logs, None)
+        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
 
@@ -116,10 +116,10 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
         // It contains all records from the logs that should be present in the final result
         let offset_id_to_log_record: HashMap<_, _> = materialized_logs
             .iter()
-            .flat_map(|(log, _)| {
+            .flat_map(|log| {
                 offset_id_set
-                    .contains(&log.offset_id)
-                    .then_some((log.offset_id, log))
+                    .contains(&log.get_offset_id())
+                    .then_some((log.get_offset_id(), log))
             })
             .collect();
 
@@ -128,15 +128,27 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
         for offset_id in &input.offset_ids {
             let record = match offset_id_to_log_record.get(offset_id) {
                 // The offset id is in the log
-                Some(&log) => ProjectionRecord {
-                    id: log.merged_user_id().to_string(),
-                    document: log.merged_document().filter(|_| self.document),
-                    embedding: self.embedding.then_some(log.merged_embeddings().to_vec()),
-                    metadata: self
-                        .metadata
-                        .then_some(log.merged_metadata())
-                        .filter(|metadata| !metadata.is_empty()),
-                },
+                Some(log) => {
+                    let log = log
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ProjectionError::LogMaterializer)?;
+
+                    ProjectionRecord {
+                        id: log.get_user_id().to_string(),
+                        document: log
+                            .merged_document_ref()
+                            .filter(|_| self.document)
+                            .map(str::to_string),
+                        embedding: self
+                            .embedding
+                            .then_some(log.merged_embeddings_ref().to_vec()),
+                        metadata: self
+                            .metadata
+                            .then_some(log.merged_metadata())
+                            .filter(|metadata| !metadata.is_empty()),
+                    }
+                }
                 // The offset id is in the record segment
                 None => {
                     if let Some(reader) = &record_segment_reader {

@@ -91,7 +91,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["depot-ubuntu-22.04-16"]
+        platform: ["depot-ubuntu-22.04-4"]
         test-globs: ["chromadb/test/db/test_system.py",
                    "chromadb/test/api/test_collection.py",
                    "chromadb/test/api/test_limit_offset.py",
