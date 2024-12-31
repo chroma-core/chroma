@@ -18,6 +18,25 @@ We will aim to provide:
 
 ## Migration Log
 
+### v0.6.0
+
+Previously, `list_collections` returned a list of `Collection` objects. This could lead to some errors if any of your collections were created with a custom embedding function (i.e. not the default). So moving forward, `list_collections` will only return collections names.
+
+For example, if you created all your collections with the `OpenAIEmbeddingFunction` , this is how you will use `list_collections` and `get_collection` correctly:
+
+```python
+collection_names = client.list_collections()
+ef = OpenAIEmbeddingFunction(...)
+collections = [
+	client.get_collection(name=name, embedding_function=ef)
+	for name in collection_names
+]
+```
+
+In the future, we plan on supporting embedding function persistence, so `list_collections` can return properly configured `Collection` objects, and you won’t need to supply the correct embedding function to `get_collection`.
+
+Additionally, we have dropped support for Python 3.8
+
 ### v0.5.17
 
 We no longer support sending empty lists or dictionaries for metadata filtering, ID filtering, etc. For example,
