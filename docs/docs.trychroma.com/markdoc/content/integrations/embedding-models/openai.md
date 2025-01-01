@@ -56,7 +56,7 @@ import { OpenAIEmbeddingFunction } from 'chromadb';
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
     openai_api_key: "apiKey",
-    model: "text-embedding-3-small"
+    openai_model: "text-embedding-3-small"
 })
 
 // use directly
