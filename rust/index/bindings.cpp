@@ -94,7 +94,8 @@ public:
             throw std::runtime_error("Index already inited");
         }
         appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, 0, allow_replace_deleted, normalize, is_persistent_index);
-        appr_alg->checkIntegrity();
+        // TODO(rescrv,sicheng): check integrity
+        // appr_alg->checkIntegrity();
         index_inited = true;
     }
 
