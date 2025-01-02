@@ -6,7 +6,7 @@
 import chromadb
 from chromadb.config import Settings
 import sys
-
+from chromadb.errors import InvalidArgumentError
 
 def main() -> None:
     try:
@@ -18,7 +18,7 @@ def main() -> None:
                 chroma_client_auth_credentials="admin:testDb@home2",
             ),
         )
-    except ValueError:
+    except InvalidArgumentError:
         # We don't expect to be able to connect to Chroma. We just want to make sure
         # there isn't an ImportError.
         sys.exit(0)

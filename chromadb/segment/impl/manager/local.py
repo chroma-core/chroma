@@ -14,7 +14,7 @@ from chromadb.segment.impl.manager.cache.cache import (
     SegmentCache,
 )
 import os
-
+from chromadb.errors import InvalidArgumentError
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
 from overrides import override
@@ -204,7 +204,7 @@ class LocalSegmentManager(SegmentManager):
         elif type == VectorReader:
             scope = SegmentScope.VECTOR
         else:
-            raise ValueError(f"Invalid segment type: {type}")
+            raise InvalidArgumentError(f"Invalid segment type: {type}")
 
         segment = self.segment_cache[scope].get(collection_id)
         if segment is None:

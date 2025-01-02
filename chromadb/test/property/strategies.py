@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 import chromadb.api.types as types
 import re
+from chromadb.errors import InvalidArgumentError
 from hypothesis.strategies._internal.strategies import SearchStrategy
 from chromadb.test.conftest import NOT_CLUSTER_ONLY
 from dataclasses import dataclass
@@ -300,7 +301,7 @@ def collections(
     use_persistent_hnsw_params = draw(with_persistent_hnsw_params)
 
     if use_persistent_hnsw_params and not with_hnsw_params:
-        raise ValueError(
+        raise InvalidArgumentError(
             "with_persistent_hnsw_params requires with_hnsw_params to be true"
         )
 

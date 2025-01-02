@@ -6,6 +6,8 @@ import logging
 import hypothesis
 import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
+from chromadb.errors import InvalidArgumentError
+
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
 from chromadb.api.types import (
@@ -1157,7 +1159,7 @@ def test_escape_chars_in_ids(client: ClientAPI) -> None:
 def test_delete_empty_fails(client: ClientAPI) -> None:
     reset(client)
     coll = client.create_collection(name="foo")
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         coll.delete()
 
 
@@ -1235,7 +1237,7 @@ def test_autocasting_validate_embeddings_incompatible_types(
     unsupported_types: List[Any],
 ) -> None:
     embds = strategies.create_embeddings(10, 10, unsupported_types)
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         validate_embeddings(cast(Embeddings, normalize_embeddings(embds)))
 
     assert (
@@ -1246,7 +1248,7 @@ def test_autocasting_validate_embeddings_incompatible_types(
 
 def test_0dim_embedding_validation() -> None:
     embds: Embeddings = [np.array([])]
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         validate_embeddings(embds)
     assert (
         "Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos"
