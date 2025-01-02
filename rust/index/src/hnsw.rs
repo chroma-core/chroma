@@ -1,6 +1,5 @@
 use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::MetadataValueConversionError;
 use std::ffi::CString;
 use std::ffi::{c_char, c_int};
 use std::path::Path;
@@ -37,14 +36,12 @@ pub struct HnswIndexConfig {
 }
 
 #[derive(Error, Debug)]
-pub enum HnswIndexFromSegmentError {
+pub enum HnswIndexConfigError {
     #[error("Missing config `{0}`")]
     MissingConfig(String),
-    #[error("Invalid metadata value")]
-    MetadataValueError(#[from] MetadataValueConversionError),
 }
 
-impl ChromaError for HnswIndexFromSegmentError {
+impl ChromaError for HnswIndexConfigError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::InvalidArgument
     }
@@ -56,11 +53,11 @@ impl HnswIndexConfig {
         ef_construction: usize,
         ef_search: usize,
         persist_path: &Path,
-    ) -> Result<Self, Box<HnswIndexFromSegmentError>> {
+    ) -> Result<Self, Box<HnswIndexConfigError>> {
         let persist_path = match persist_path.to_str() {
             Some(persist_path) => persist_path,
             None => {
-                return Err(Box::new(HnswIndexFromSegmentError::MissingConfig(
+                return Err(Box::new(HnswIndexConfigError::MissingConfig(
                     "persist_path".to_string(),
                 )))
             }
@@ -233,6 +230,28 @@ impl Index<HnswIndexConfig> for HnswIndex {
             Ok(Some(data))
         }
     }
+
+    fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
+        let mut sizes = vec![0usize; 2];
+        unsafe { get_all_ids_sizes(self.ffi_ptr, sizes.as_mut_ptr()) };
+        read_and_return_hnsw_error(self.ffi_ptr)?;
+        Ok(sizes)
+    }
+
+    fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>> {
+        let sizes = self.get_all_ids_sizes()?;
+        let mut non_deleted_ids = vec![0usize; sizes[0]];
+        let mut deleted_ids = vec![0usize; sizes[1]];
+        unsafe {
+            get_all_ids(
+                self.ffi_ptr,
+                non_deleted_ids.as_mut_ptr(),
+                deleted_ids.as_mut_ptr(),
+            );
+        }
+        read_and_return_hnsw_error(self.ffi_ptr)?;
+        Ok((non_deleted_ids, deleted_ids))
+    }
 }
 
 impl PersistentIndex<HnswIndexConfig> for HnswIndex {
@@ -362,6 +381,8 @@ extern "C" {
     fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
     fn mark_deleted(index: *const IndexPtrFFI, id: usize);
     fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
+    fn get_all_ids_sizes(index: *const IndexPtrFFI, sizes: *mut usize);
+    fn get_all_ids(index: *const IndexPtrFFI, non_deleted_ids: *mut usize, deleted_ids: *mut usize);
     fn knn_query(
         index: *const IndexPtrFFI,
         query_vector: *const f32,
@@ -386,6 +407,9 @@ extern "C" {
 
 #[cfg(test)]
 pub mod test {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
     use super::*;
     use crate::utils;
     use chroma_distance::DistanceFunction;
@@ -827,5 +851,75 @@ pub mod test {
             Err(_) => {}
             Ok(_) => panic!("Expected error"),
         }
+    }
+
+    #[test]
+    fn it_can_detect_corruption() {
+        let n = 1000;
+        let d: usize = 960;
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let id = Uuid::new_v4();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function.clone(),
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 32,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path.clone(),
+            }),
+            IndexUuid(id),
+        );
+
+        let index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
+        let data: Vec<f32> = utils::generate_random_data(n, d);
+        let ids: Vec<usize> = (0..n).collect();
+
+        (0..n).for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data).expect("Should not error");
+        });
+
+        // Persist the index
+        let res = index.save();
+        if let Err(e) = res {
+            panic!("Error saving index: {}", e);
+        }
+
+        // Corrupt the linked list
+        let link_list_path = persist_path.clone() + "/link_lists.bin";
+        let mut link_list_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(link_list_path)
+            .unwrap();
+        link_list_file.write_all(&u32::MAX.to_le_bytes()).unwrap();
+
+        // Load the corrupted index
+        let index = HnswIndex::load(
+            &persist_path,
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function,
+            },
+            IndexUuid(id),
+        );
+
+        assert!(index.is_err());
+        assert!(index
+            .map(|_| ())
+            .unwrap_err()
+            .to_string()
+            .contains("HNSW Integrity failure"))
     }
 }

@@ -22,7 +22,7 @@ pub(crate) enum ComponentState {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub(crate) enum ComponentRuntime {
+pub enum ComponentRuntime {
     Inherit,
     Dedicated,
 }
@@ -37,13 +37,13 @@ pub(crate) enum ComponentRuntime {
 /// - queue_size: The size of the queue to use for the component before it starts dropping messages
 /// - on_start: Called when the component is started
 #[async_trait]
-pub(crate) trait Component: Send + Sized + Debug + 'static {
+pub trait Component: Send + Sized + Debug + 'static {
     fn get_name() -> &'static str;
     fn queue_size(&self) -> usize;
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
     }
-    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
+    async fn start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
 }
 
 /// A handler is a component that can process messages of a given type.
@@ -180,7 +180,7 @@ impl<C: Component> Clone for ComponentSender<C> {
 /// - join_handle: The join handle for the component, used to join on the component
 /// - sender: A channel to send messages to the component
 #[derive(Debug)]
-pub(crate) struct ComponentHandle<C: Component + Debug> {
+pub struct ComponentHandle<C: Component + Debug> {
     cancellation_token: tokio_util::sync::CancellationToken,
     state: Arc<Mutex<ComponentState>>,
     join_handle: Option<ConsumableJoinHandle>,
@@ -271,7 +271,7 @@ impl<C: Component> ComponentHandle<C> {
 }
 
 /// The component context is passed to all Component Handler methods
-pub(crate) struct ComponentContext<C>
+pub struct ComponentContext<C>
 where
     C: Component + 'static,
 {
@@ -346,7 +346,7 @@ mod tests {
             self.queue_size
         }
 
-        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }

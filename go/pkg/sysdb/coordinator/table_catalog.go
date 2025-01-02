@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -244,20 +245,6 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		} else {
 			return nil, false, common.ErrCollectionUniqueConstraintViolation
 		}
-	} else {
-		// If collection is soft-deleted, then new collection will throw an error since name should be unique, so we need to rename it.
-		isSoftDeleted, sdCollectionID, err := tc.metaDomain.CollectionDb(txCtx).CheckCollectionIsSoftDeleted(createCollection.Name, tenantID, databaseName)
-		if err != nil {
-			return nil, false, fmt.Errorf("failed to create collection: %w", err)
-		}
-		if isSoftDeleted {
-			log.Info("new collection create request with same name as collection that was soft deleted", zap.Any("collection", createCollection))
-			// Rename the soft deleted collection to a new name with timestamp
-			err = tc.renameSoftDeletedCollection(txCtx, sdCollectionID, createCollection.Name, tenantID, databaseName)
-			if err != nil {
-				return nil, false, fmt.Errorf("failed to create collection: %w", err)
-			}
-		}
 	}
 
 	dbCollection := &dbmodel.Collection{
@@ -311,6 +298,31 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 	return result, created, nil
 }
 
+// Returns true if collection is deleted (either soft-deleted or hard-deleted)
+// and false otherwise.
+func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.CheckCollection")
+		defer span.End()
+	}
+
+	collectionInfo, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(collectionID), nil)
+	if err != nil {
+		return false, err
+	}
+	// Collection is hard deleted.
+	if collectionInfo == nil {
+		return true, nil
+	}
+	// Collection is soft deleted.
+	if collectionInfo.IsDeleted {
+		return true, nil
+	}
+	// Collection is not deleted.
+	return false, nil
+}
+
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
@@ -324,6 +336,43 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	}
 	collections := convertCollectionToModel(collectionAndMetadataList)
 	return collections, nil
+}
+
+func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollections")
+		defer span.End()
+	}
+
+	var collection *model.Collection
+	var segments []*model.Segment
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		collections, e := tc.GetCollections(ctx, collectionID, nil, "", "", nil, nil)
+		if e != nil {
+			return e
+		}
+		if len(collections) == 0 {
+			return common.ErrCollectionNotFound
+		}
+		if len(collections) > 1 {
+			return common.ErrCollectionUniqueConstraintViolation
+		}
+		collection = collections[0]
+
+		segments, e = tc.GetSegments(ctx, types.NilUniqueID(), nil, nil, collectionID)
+		if e != nil {
+			return e
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return collection, segments, nil
 }
 
 func (tc *Catalog) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection, softDelete bool) error {
@@ -389,25 +438,6 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 	})
 }
 
-func (tc *Catalog) renameSoftDeletedCollection(ctx context.Context, collectionID string, collectionName string, tenantID string, databaseName string) error {
-	log.Info("Renaming soft deleted collection", zap.String("collectionID", collectionID), zap.String("collectionName", collectionName), zap.Any("tenantID", tenantID), zap.String("databaseName", databaseName))
-	// Generate new name with timestamp
-	newName := fmt.Sprintf("deleted_%s_%d", collectionName, time.Now().Unix())
-
-	dbCollection := &dbmodel.Collection{
-		ID:        collectionID,
-		Name:      &newName,
-		IsDeleted: true,
-	} // Not updating the timestamp or updated_at.
-
-	err := tc.metaDomain.CollectionDb(ctx).Update(dbCollection)
-	if err != nil {
-		log.Error("rename soft deleted collection failed", zap.Error(err))
-		return fmt.Errorf("collection rename failed due to update error: %w", err)
-	}
-	return nil
-}
-
 func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
 	log.Info("Soft deleting collection", zap.Any("softDeleteCollection", deleteCollection))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
@@ -420,8 +450,13 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 			return common.ErrCollectionDeleteNonExistingCollection
 		}
 
+		// Generate new name with timestamp and random number
+		oldName := *collections[0].Collection.Name
+		newName := fmt.Sprintf("_deleted_%s_%d_%d", oldName, time.Now().Unix(), rand.Intn(1000))
+
 		dbCollection := &dbmodel.Collection{
 			ID:        deleteCollection.ID.String(),
+			Name:      &newName,
 			IsDeleted: true,
 			Ts:        deleteCollection.Ts,
 			UpdatedAt: time.Now(),
@@ -461,13 +496,29 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	var result *model.Collection
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Check if collection exists
+		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(
+			types.FromUniqueID(updateCollection.ID),
+			nil,
+			updateCollection.TenantID,
+			updateCollection.DatabaseName,
+			nil,
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+		if len(collections) == 0 {
+			return common.ErrCollectionNotFound
+		}
+
 		dbCollection := &dbmodel.Collection{
 			ID:        updateCollection.ID.String(),
 			Name:      updateCollection.Name,
 			Dimension: updateCollection.Dimension,
 			Ts:        ts,
 		}
-		err := tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
+		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
 		if err != nil {
 			return err
 		}
@@ -765,8 +816,20 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	}
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Check if collection exists.
+		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
+		if err != nil {
+			return err
+		}
+		if collection == nil {
+			return common.ErrCollectionNotFound
+		}
+		if collection.IsDeleted {
+			return common.ErrCollectionSoftDeleted
+		}
+
 		// register files to Segment metadata
-		err := tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+		err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
 		if err != nil {
 			return err
 		}

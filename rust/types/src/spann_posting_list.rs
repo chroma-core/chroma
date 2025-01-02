@@ -1,3 +1,4 @@
+#[derive(Clone, Debug)]
 pub struct SpannPostingList<'referred_data> {
     pub doc_offset_ids: &'referred_data [u32],
     pub doc_versions: &'referred_data [u32],

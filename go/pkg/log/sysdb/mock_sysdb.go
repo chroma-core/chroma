@@ -12,9 +12,13 @@ func NewMockSysDB() *MockSysDB {
 	}
 }
 
-func (s *MockSysDB) CheckCollection(ctx context.Context, collectionId string) (bool, error) {
-	_, ok := s.collections[collectionId]
-	return ok, nil
+func (s *MockSysDB) CheckCollections(ctx context.Context, collectionIds []string) ([]bool, error) {
+	result := make([]bool, len(collectionIds))
+	for i, collectionId := range collectionIds {
+		_, ok := s.collections[collectionId]
+		result[i] = ok
+	}
+	return result, nil
 }
 
 func (s *MockSysDB) AddCollection(ctx context.Context, collectionId string) error {

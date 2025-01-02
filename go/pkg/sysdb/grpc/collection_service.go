@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -144,7 +145,72 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		collectionpb := convertCollectionToProto(collection)
 		res.Collections = append(res.Collections, collectionpb)
 	}
-	log.Info("GetCollections succeeded", zap.Any("response", res.Collections), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
+	return res, nil
+}
+
+func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckCollectionsRequest) (*coordinatorpb.CheckCollectionsResponse, error) {
+	res := &coordinatorpb.CheckCollectionsResponse{}
+	res.Deleted = make([]bool, len(req.CollectionIds))
+
+	for i, collectionID := range req.CollectionIds {
+		parsedId, err := types.ToUniqueID(&collectionID)
+		if err != nil {
+			log.Error("CheckCollection failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+		deleted, err := s.coordinator.CheckCollection(ctx, parsedId)
+
+		if err != nil {
+			log.Error("CheckCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+
+		res.Deleted[i] = deleted
+	}
+	return res, nil
+}
+
+func (s *Server) GetCollectionWithSegments(ctx context.Context, req *coordinatorpb.GetCollectionWithSegmentsRequest) (*coordinatorpb.GetCollectionWithSegmentsResponse, error) {
+	collectionID := req.Id
+
+	res := &coordinatorpb.GetCollectionWithSegmentsResponse{}
+
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	if err != nil {
+		log.Error("GetCollectionWithSegments failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	collection, segments, err := s.coordinator.GetCollectionWithSegments(ctx, parsedCollectionID)
+	if err != nil {
+		log.Error("GetCollectionWithSegments failed. ", zap.Error(err), zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res.Collection = convertCollectionToProto(collection)
+	segmentpbList := make([]*coordinatorpb.Segment, 0, len(segments))
+	scopeToSegmentMap := map[coordinatorpb.SegmentScope]*coordinatorpb.Segment{}
+	for _, segment := range segments {
+		segmentpb := convertSegmentToProto(segment)
+		scopeToSegmentMap[segmentpb.GetScope()] = segmentpb
+		segmentpbList = append(segmentpbList, segmentpb)
+	}
+
+	if len(segmentpbList) != 3 {
+		log.Error("GetCollectionWithSegments failed. Unexpected number of collection segments", zap.String("collection_id", collectionID))
+		return res, grpcutils.BuildInternalGrpcError(fmt.Sprintf("Unexpected number of segments for collection %s: %d", collectionID, len(segmentpbList)))
+	}
+
+	scopes := []coordinatorpb.SegmentScope{coordinatorpb.SegmentScope_METADATA, coordinatorpb.SegmentScope_RECORD, coordinatorpb.SegmentScope_VECTOR}
+
+	for _, scope := range scopes {
+		if _, exists := scopeToSegmentMap[scope]; !exists {
+			log.Error("GetCollectionWithSegments failed. Collection segment scope not found", zap.String("collection_id", collectionID), zap.String("missing_scope", scope.String()))
+			return res, grpcutils.BuildInternalGrpcError(fmt.Sprintf("Missing segment scope for collection %s: %s", collectionID, scope.String()))
+		}
+	}
+
+	res.Segments = segmentpbList
 	return res, nil
 }
 
@@ -226,7 +292,6 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	log.Info("UpdateCollection succeeded", zap.String("collection_id", collectionID))
 	return res, nil
 }
 
@@ -276,6 +341,5 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		CollectionVersion:  flushCollectionInfo.CollectionVersion,
 		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
 	}
-	log.Info("FlushCollectionCompaction succeeded", zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
 	return res, nil
 }

@@ -8,34 +8,32 @@ use rand::{
 
 pub const TEST_EMBEDDING_DIMENSION: usize = 6;
 
-pub struct LogGenerator<G>
-where
-    G: Fn(usize) -> OperationRecord,
-{
-    pub generator: G,
+pub trait LogGenerator {
+    fn generate_vec<O>(&self, offsets: O) -> Vec<LogRecord>
+    where
+        O: Iterator<Item = usize>;
+    fn generate_chunk<O>(&self, offsets: O) -> Chunk<LogRecord>
+    where
+        O: Iterator<Item = usize>,
+    {
+        Chunk::new(self.generate_vec(offsets).into())
+    }
 }
 
-impl<G> LogGenerator<G>
+impl<G> LogGenerator for G
 where
     G: Fn(usize) -> OperationRecord,
 {
-    pub fn generate_vec<O>(&self, offsets: O) -> Vec<LogRecord>
+    fn generate_vec<O>(&self, offsets: O) -> Vec<LogRecord>
     where
         O: Iterator<Item = usize>,
     {
         offsets
             .map(|log_offset| LogRecord {
                 log_offset: log_offset as i64,
-                record: (self.generator)(log_offset),
+                record: self(log_offset),
             })
             .collect()
-    }
-
-    pub fn generate_chunk<O>(&self, offsets: O) -> Chunk<LogRecord>
-    where
-        O: Iterator<Item = usize>,
-    {
-        Chunk::new(self.generate_vec(offsets).into())
     }
 }
 

@@ -121,12 +121,12 @@ impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data [u32
                         // we should introduce versioning to the blockfile
                         // to ensure that this sort of behavior is only done when needed.
                         // (Yes this is not great :( )
-                        return unsafe {
+                        unsafe {
                             std::slice::from_raw_parts(
                                 i32array.values()[start..end].as_ptr() as *const u32,
                                 i32array.values()[start..end].len(),
                             )
-                        };
+                        }
                     }
                     None => panic!(
                         "Expected UInt32Array or Int32Array (for legacy reasons) got neither"

@@ -7,7 +7,7 @@ from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
 from chromadb.errors import VersionMismatchError
 from chromadb.execution.executor.abstract import Executor
-from chromadb.execution.expression.operator import Scan, SegmentScan
+from chromadb.execution.expression.operator import Scan
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.proto import convert
 
@@ -15,7 +15,6 @@ from chromadb.proto.query_executor_pb2_grpc import QueryExecutorStub
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
-from chromadb.types import SegmentScope
 
 
 def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
@@ -55,30 +54,18 @@ class DistributedExecutor(Executor):
     @overrides
     def count(self, plan: CountPlan) -> int:
         executor = self._grpc_executuor_stub(plan.scan)
-        plan.scan = self._segment_scan(plan.scan)
         try:
             count_result = executor.Count(convert.to_proto_count_plan(plan))
         except grpc.RpcError as rpc_error:
-            if (
-                rpc_error.code() == grpc.StatusCode.INTERNAL
-                and "version mismatch" in rpc_error.details()
-            ):
-                raise VersionMismatchError()
             raise rpc_error
         return convert.from_proto_count_result(count_result)
 
     @overrides
     def get(self, plan: GetPlan) -> GetResult:
         executor = self._grpc_executuor_stub(plan.scan)
-        plan.scan = self._segment_scan(plan.scan)
         try:
             get_result = executor.Get(convert.to_proto_get_plan(plan))
         except grpc.RpcError as rpc_error:
-            if (
-                rpc_error.code() == grpc.StatusCode.INTERNAL
-                and "version mismatch" in rpc_error.details()
-            ):
-                raise VersionMismatchError()
             raise rpc_error
         records = convert.from_proto_get_result(get_result)
 
@@ -118,15 +105,9 @@ class DistributedExecutor(Executor):
     @overrides
     def knn(self, plan: KNNPlan) -> QueryResult:
         executor = self._grpc_executuor_stub(plan.scan)
-        plan.scan = self._segment_scan(plan.scan)
         try:
             knn_result = executor.KNN(convert.to_proto_knn_plan(plan))
         except grpc.RpcError as rpc_error:
-            if (
-                rpc_error.code() == grpc.StatusCode.INTERNAL
-                and "version mismatch" in rpc_error.details()
-            ):
-                raise VersionMismatchError()
             raise rpc_error
         results = convert.from_proto_knn_batch_result(knn_result)
 
@@ -181,19 +162,10 @@ class DistributedExecutor(Executor):
             included=plan.projection.included,
         )
 
-    def _segment_scan(self, scan: Scan) -> SegmentScan:
-        knn = self._manager.get_segment(scan.collection.id, SegmentScope.VECTOR)
-        metadata = self._manager.get_segment(scan.collection.id, SegmentScope.METADATA)
-        record = self._manager.get_segment(scan.collection.id, SegmentScope.RECORD)
-        return SegmentScan(
-            collection=scan.collection,
-            knn_id=knn["id"],
-            metadata_id=metadata["id"],
-            record_id=record["id"],
-        )
-
     def _grpc_executuor_stub(self, scan: Scan) -> QueryExecutorStub:
-        grpc_url = self._manager.get_endpoint(scan.collection.id)
+        # Since grpc endpoint is endpoint is determined by collection uuid,
+        # the endpoint should be the same for all segments of the same collection
+        grpc_url = self._manager.get_endpoint(scan.record)
         if grpc_url not in self._grpc_stub_pool:
             channel = grpc.insecure_channel(grpc_url)
             interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]

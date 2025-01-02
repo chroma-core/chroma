@@ -40,7 +40,7 @@ pub(crate) struct CollectionRecord {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum Log {
+pub enum Log {
     Grpc(GrpcLog),
     #[allow(dead_code)]
     InMemory(InMemoryLog),
@@ -95,7 +95,7 @@ impl Log {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct GrpcLog {
+pub struct GrpcLog {
     #[allow(clippy::type_complexity)]
     client: LogServiceClient<
         interceptor::InterceptedService<
@@ -229,7 +229,6 @@ impl GrpcLog {
         match response {
             Ok(response) => {
                 let collections = response.into_inner().all_collection_info;
-                println!("Log got collections with new data: {:?}", collections);
                 let mut result = Vec::new();
                 for collection in collections {
                     let collection_uuid = match Uuid::parse_str(&collection.collection_id) {
@@ -330,7 +329,7 @@ impl ChromaError for UpdateCollectionLogOffsetError {
 // This is used for testing only, it represents a log record that is stored in memory
 // internal to a mock log implementation
 #[derive(Clone)]
-pub(crate) struct InternalLogRecord {
+pub struct InternalLogRecord {
     pub(crate) collection_id: CollectionUuid,
     pub(crate) log_offset: i64,
     pub(crate) log_ts: i64,
@@ -350,13 +349,12 @@ impl Debug for InternalLogRecord {
 
 // This is used for testing only
 #[derive(Clone, Debug)]
-pub(crate) struct InMemoryLog {
+pub struct InMemoryLog {
     collection_to_log: HashMap<CollectionUuid, Vec<InternalLogRecord>>,
     offsets: HashMap<CollectionUuid, i64>,
 }
 
 impl InMemoryLog {
-    #[cfg(test)]
     pub fn new() -> InMemoryLog {
         InMemoryLog {
             collection_to_log: HashMap::new(),
@@ -449,5 +447,11 @@ impl InMemoryLog {
     ) -> Result<(), UpdateCollectionLogOffsetError> {
         self.offsets.insert(collection_id, new_offset);
         Ok(())
+    }
+}
+
+impl Default for InMemoryLog {
+    fn default() -> Self {
+        Self::new()
     }
 }

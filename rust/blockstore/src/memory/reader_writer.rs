@@ -123,18 +123,6 @@ impl<
             .map(|(key, value)| (K::try_from(&key.key).unwrap(), value)))
     }
 
-    pub(crate) fn get_at_index(
-        &'storage self,
-        index: usize,
-    ) -> Result<(&'storage str, K, V), Box<dyn ChromaError>> {
-        let res = V::get_at_index(&self.storage, index);
-        let (key, value) = match res {
-            Some((key, value)) => (key, value),
-            None => return Err(Box::new(BlockfileError::NotFoundError)),
-        };
-        Ok((key.prefix.as_str(), K::try_from(&key.key).unwrap(), value))
-    }
-
     pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         V::count(&self.storage)
     }
@@ -145,6 +133,10 @@ impl<
 
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.storage.id
+    }
+
+    pub(crate) fn rank(&'storage self, prefix: &'storage str, key: K) -> usize {
+        V::rank(prefix, key.into(), &self.storage)
     }
 }
 
@@ -860,7 +852,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_by_index() {
+    async fn test_rank() {
         let storage_manager = StorageManager::new();
         let writer = MemoryBlockfileWriter::new(storage_manager.clone());
         let id = writer.id;
@@ -876,13 +868,9 @@ mod tests {
         let reader: MemoryBlockfileReader<&str, &str> =
             MemoryBlockfileReader::open(id, storage_manager.clone());
         for i in 0..n {
-            let expected_key = format!("key{:04}", i);
-            let expected_value = format!("value{:04}", i);
-            let (prefix, key, value) =
-                MemoryBlockfileReader::<&str, &str>::get_at_index(&reader, i).unwrap();
-            assert_eq!(prefix, "prefix");
-            assert_eq!(key, expected_key.as_str());
-            assert_eq!(value, expected_value.as_str());
+            let rank_key = format!("key{:04}", i);
+            let rank = MemoryBlockfileReader::<&str, &str>::rank(&reader, "prefix", &rank_key);
+            assert_eq!(rank, i);
         }
     }
 }

@@ -7,20 +7,11 @@ docker_build(
 )
 
 docker_build(
-  'local:log-service',
+  'local:logservice',
   '.',
-  only=['go/'],
+  only=['go/', 'idl/'],
   dockerfile='./go/Dockerfile',
   target='logservice'
-)
-
-
-docker_build(
-  'local:sysdb-migration',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile.migration',
-  target='sysdb-migration'
 )
 
 docker_build(
@@ -37,6 +28,14 @@ docker_build(
   only=['go/', 'idl/'],
   dockerfile='./go/Dockerfile',
   target='sysdb'
+)
+
+docker_build(
+  'local:sysdb-migration',
+  '.',
+  only=['go/'],
+  dockerfile='./go/Dockerfile.migration',
+  target='sysdb-migration'
 )
 
 docker_build(
@@ -146,4 +145,4 @@ k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"]
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
 
 # Local S3
-k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards='9000:9000')
+k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])

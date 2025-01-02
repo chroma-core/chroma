@@ -1,11 +1,11 @@
 use std::collections::BinaryHeap;
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_types::{MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use thiserror::Error;
-use tonic::async_trait;
 
 use crate::{
     execution::operator::Operator,
@@ -73,7 +73,7 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
             Err(e) => Err(*e),
         }?;
 
-        let logs = materialize_logs(&record_segment_reader, &input.logs, None).await?;
+        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
 
         let target_vector;
         let target_embedding = if let DistanceFunction::Cosine = input.distance_function {
@@ -85,24 +85,29 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
 
         let mut max_heap = BinaryHeap::with_capacity(self.fetch as usize);
 
-        for (log, _) in logs.iter() {
+        for log in &logs {
             if !matches!(
-                log.final_operation,
+                log.get_operation(),
                 MaterializedLogOperation::DeleteExisting
             ) && match &input.log_offset_ids {
-                SignedRoaringBitmap::Include(rbm) => rbm.contains(log.offset_id),
-                SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(log.offset_id),
+                SignedRoaringBitmap::Include(rbm) => rbm.contains(log.get_offset_id()),
+                SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(log.get_offset_id()),
             } {
+                let log = log
+                    .hydrate(record_segment_reader.as_ref())
+                    .await
+                    .map_err(KnnLogError::LogMaterializer)?;
+
                 let log_vector;
                 let log_embedding = if let DistanceFunction::Cosine = input.distance_function {
-                    log_vector = normalize(log.merged_embeddings());
+                    log_vector = normalize(log.merged_embeddings_ref());
                     &log_vector
                 } else {
-                    log.merged_embeddings()
+                    log.merged_embeddings_ref()
                 };
 
                 let distance = RecordDistance {
-                    offset_id: log.offset_id,
+                    offset_id: log.get_offset_id(),
                     measure: input
                         .distance_function
                         .distance(target_embedding, log_embedding),
@@ -143,11 +148,8 @@ mod tests {
         log_offset_ids: SignedRoaringBitmap,
     ) -> KnnLogInput {
         let test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
         KnnLogInput {
-            logs: generator.generate_chunk(1..=100),
+            logs: upsert_generator.generate_chunk(1..=100),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             distance_function: metric,

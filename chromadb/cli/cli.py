@@ -154,7 +154,8 @@ def vacuum(
                 sqlite, system.instance(SegmentManager)
             )
 
-            for collection in collections:
+            for collection_name in collections:
+                collection = client.get_collection(collection_name)
                 sqlite.purge_log(collection_id=collection.id)
                 progress.update(task, advance=1)
         except Exception as e:

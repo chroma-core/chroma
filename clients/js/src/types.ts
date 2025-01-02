@@ -54,13 +54,6 @@ export type WhereDocument = {
     | WhereDocument[];
 };
 
-export type CollectionType = {
-  name: string;
-  id: string;
-  metadata: Metadata | null;
-  configuration_json: any;
-};
-
 export type MultiGetResponse = {
   ids: IDs;
   embeddings: Embeddings | null;

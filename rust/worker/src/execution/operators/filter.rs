@@ -3,6 +3,7 @@ use std::{
     ops::{BitAnd, BitOr, Bound},
 };
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
@@ -13,7 +14,6 @@ use chroma_types::{
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
 use crate::{
@@ -22,7 +22,7 @@ use crate::{
         materialize_logs,
         metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializerError, MaterializedLogRecord,
+        LogMaterializerError, MaterializeLogsResult,
     },
 };
 
@@ -96,7 +96,7 @@ pub(crate) struct MetadataLogReader<'me> {
     // This maps metadata keys to `BTreeMap`s, which further map values to offset ids
     // This mimics the layout in the metadata segment
     // //TODO: Maybe a sorted vector with binary search is more lightweight and performant?
-    compact_metadata: HashMap<&'me str, BTreeMap<&'me MetadataValue, RoaringBitmap>>,
+    compact_metadata: HashMap<String, BTreeMap<MetadataValue, RoaringBitmap>>,
     // This maps offset ids to documents, excluding deleted ones
     document: HashMap<u32, &'me str>,
     // This contains all existing offset ids that are touched by the logs
@@ -106,44 +106,49 @@ pub(crate) struct MetadataLogReader<'me> {
 }
 
 impl<'me> MetadataLogReader<'me> {
-    pub(crate) fn new(logs: &'me Chunk<MaterializedLogRecord<'me>>) -> Self {
-        let mut compact_metadata: HashMap<_, BTreeMap<&MetadataValue, RoaringBitmap>> =
+    pub(crate) async fn create(
+        logs: &'me MaterializeLogsResult,
+        record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
+    ) -> Result<Self, LogMaterializerError> {
+        let mut compact_metadata: HashMap<String, BTreeMap<MetadataValue, RoaringBitmap>> =
             HashMap::new();
         let mut document = HashMap::new();
         let mut updated_offset_ids = RoaringBitmap::new();
         let mut user_id_to_offset_id = HashMap::new();
-        for (log, _) in logs.iter() {
+
+        for log in logs {
             if !matches!(
-                log.final_operation,
+                log.get_operation(),
                 MaterializedLogOperation::Initial | MaterializedLogOperation::AddNew
             ) {
-                updated_offset_ids.insert(log.offset_id);
+                updated_offset_ids.insert(log.get_offset_id());
             }
             if !matches!(
-                log.final_operation,
+                log.get_operation(),
                 MaterializedLogOperation::DeleteExisting
             ) {
-                user_id_to_offset_id.insert(log.merged_user_id_ref(), log.offset_id);
-                let log_metadata = log.merged_metadata_ref();
+                let log = log.hydrate(record_segment_reader.as_ref()).await?;
+                user_id_to_offset_id.insert(log.get_user_id(), log.get_offset_id());
+                let log_metadata = log.merged_metadata();
                 for (key, val) in log_metadata.into_iter() {
                     compact_metadata
                         .entry(key)
                         .or_default()
                         .entry(val)
                         .or_default()
-                        .insert(log.offset_id);
+                        .insert(log.get_offset_id());
                 }
                 if let Some(doc) = log.merged_document_ref() {
-                    document.insert(log.offset_id, doc);
+                    document.insert(log.get_offset_id(), doc);
                 }
             }
         }
-        Self {
+        Ok(Self {
             compact_metadata,
             document,
             updated_offset_ids,
             user_id_to_offset_id,
-        }
+        })
     }
     pub(crate) fn get(
         &self,
@@ -153,17 +158,17 @@ impl<'me> MetadataLogReader<'me> {
     ) -> Result<RoaringBitmap, FilterError> {
         if let Some(metadata_value_to_offset_ids) = self.compact_metadata.get(key) {
             let bounds = match op {
-                PrimitiveOperator::Equal => (Bound::Included(&val), Bound::Included(&val)),
-                PrimitiveOperator::GreaterThan => (Bound::Excluded(&val), Bound::Unbounded),
-                PrimitiveOperator::GreaterThanOrEqual => (Bound::Included(&val), Bound::Unbounded),
-                PrimitiveOperator::LessThan => (Bound::Unbounded, Bound::Excluded(&val)),
-                PrimitiveOperator::LessThanOrEqual => (Bound::Unbounded, Bound::Included(&val)),
+                PrimitiveOperator::Equal => (Bound::Included(val), Bound::Included(val)),
+                PrimitiveOperator::GreaterThan => (Bound::Excluded(val), Bound::Unbounded),
+                PrimitiveOperator::GreaterThanOrEqual => (Bound::Included(val), Bound::Unbounded),
+                PrimitiveOperator::LessThan => (Bound::Unbounded, Bound::Excluded(val)),
+                PrimitiveOperator::LessThanOrEqual => (Bound::Unbounded, Bound::Included(val)),
                 PrimitiveOperator::NotEqual => unreachable!(
                     "Inequality filter should be handled above the metadata provider level"
                 ),
             };
             Ok(metadata_value_to_offset_ids
-                .range::<&MetadataValue, _>(bounds)
+                .range(bounds)
                 .map(|(_, v)| v)
                 .fold(RoaringBitmap::new(), BitOr::bitor))
         } else {
@@ -418,10 +423,14 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             Err(e) => Err(*e),
         }?;
         let cloned_record_segment_reader = record_segment_reader.clone();
-        let materialized_logs = materialize_logs(&cloned_record_segment_reader, &input.logs, None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
-        let metadata_log_reader = MetadataLogReader::new(&materialized_logs);
+        let materialized_logs =
+            materialize_logs(&cloned_record_segment_reader, input.logs.clone(), None)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
+        let metadata_log_reader =
+            MetadataLogReader::create(&materialized_logs, &record_segment_reader)
+                .await
+                .map_err(FilterError::LogMaterializer)?;
         let log_metadata_provider =
             MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
 
@@ -443,7 +452,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                             .as_slice(),
                     ),
                 );
-                let compact_offset_ids = if let Some(reader) = record_segment_reader {
+                let compact_offset_ids = if let Some(reader) = record_segment_reader.as_ref() {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
                         match reader.get_offset_id_for_user_id(user_id.as_str()).await {
@@ -515,12 +524,11 @@ mod tests {
     /// - Compacted: Delete [1..=10] deletion, add [11..=50]
     async fn setup_filter_input() -> FilterInput {
         let mut test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: add_delete_generator,
-        };
-        test_segment.populate_with_generator(60, &generator).await;
+        test_segment
+            .populate_with_generator(60, add_delete_generator)
+            .await;
         FilterInput {
-            logs: generator.generate_chunk(61..=120),
+            logs: add_delete_generator.generate_chunk(61..=120),
             blockfile_provider: test_segment.blockfile_provider,
             metadata_segment: test_segment.metadata_segment,
             record_segment: test_segment.record_segment,
