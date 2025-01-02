@@ -710,7 +710,7 @@ bad_metadata_records = {
 def test_metadata_validation_add(client):
     client.reset()
     collection = client.create_collection("test_metadata_validation")
-    with pytest.raises(ValueError, match="metadata"):
+    with pytest.raises(InvalidArgumentError, match="metadata"):
         collection.add(**bad_metadata_records)
 
 
