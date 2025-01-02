@@ -17,6 +17,8 @@ use tracing::Instrument;
 
 #[derive(Error, Debug)]
 pub enum WriteSegmentsOperatorError {
+    #[error("Log materialization result empty")]
+    LogMaterializationResultEmpty,
     #[error("Preparation for log materialization failed {0}")]
     LogMaterializationPreparationError(#[from] RecordSegmentReaderCreationError),
     #[error("Log materialization failed {0}")]
@@ -30,6 +32,7 @@ pub enum WriteSegmentsOperatorError {
 impl ChromaError for WriteSegmentsOperatorError {
     fn code(&self) -> ErrorCodes {
         match self {
+            WriteSegmentsOperatorError::LogMaterializationResultEmpty => ErrorCodes::Internal,
             WriteSegmentsOperatorError::LogMaterializationPreparationError(e) => e.code(),
             WriteSegmentsOperatorError::LogMaterializationError(e) => e.code(),
             WriteSegmentsOperatorError::ApplyMaterializedLogsError(e) => e.code(),
@@ -85,6 +88,10 @@ impl Operator<WriteSegmentsInput, WriteSegmentsOutput> for WriteSegmentsOperator
     }
 
     async fn run(&self, input: &WriteSegmentsInput) -> Result<WriteSegmentsOutput, Self::Error> {
+        if input.materialized_logs.is_empty() {
+            return Err(WriteSegmentsOperatorError::LogMaterializationResultEmpty);
+        }
+
         // Prepare for log materialization.
         let record_segment_reader: Option<RecordSegmentReader>;
         match RecordSegmentReader::from_segment(&input.record_segment, &input.provider).await {
