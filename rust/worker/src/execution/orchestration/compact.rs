@@ -436,7 +436,7 @@ impl CompactOrchestrator {
                     {
                         Ok(writer) => writer,
                         Err(e) => {
-                            println!("Error creating metadata Segment Writer: {:?}", e);
+                            tracing::error!("Error creating metadata segment writer: {:?}", e);
                             return Err(GetSegmentWritersError::MetadataSegmentWriterError);
                         }
                     };
@@ -471,7 +471,7 @@ impl CompactOrchestrator {
                     {
                         Ok(writer) => writer,
                         Err(e) => {
-                            println!("Error creating HNSW Segment Writer: {:?}", e);
+                            tracing::error!("Error creating HNSW segment writer: {:?}", e);
                             return Err(GetSegmentWritersError::HnswSegmentWriterError);
                         }
                     };
