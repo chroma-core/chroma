@@ -468,7 +468,7 @@ def log_size_for_collections_match_expected(
 @contextmanager
 def collection_deleted(client: ClientAPI, collection_name: str):
     # Invariant checks before deletion
-    assert collection_name in [c.name for c in client.list_collections()]
+    assert collection_name in client.list_collections()
     collection = client.get_collection(collection_name)
     segments = []
     if isinstance(client._server, SegmentAPI):  # type: ignore
@@ -501,7 +501,7 @@ def collection_deleted(client: ClientAPI, collection_name: str):
     yield
 
     # Invariant checks after deletion
-    assert collection_name not in [c.name for c in client.list_collections()]
+    assert collection_name not in client.list_collections()
     if len(segments) > 0:
         sysdb: SysDB = client._server._sysdb  # type: ignore
         segments_after = sysdb.get_segments(collection=collection.id)
