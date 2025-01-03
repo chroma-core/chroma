@@ -138,7 +138,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::system::RequestError;
+    use crate::utils::get_panic_message;
+    use std::sync::Mutex;
 
     use super::*;
     use async_trait::async_trait;
@@ -147,13 +148,15 @@ mod tests {
     struct TestComponent {
         queue_size: usize,
         counter: usize,
+        caught_panic: Arc<Mutex<Option<String>>>,
     }
 
     impl TestComponent {
-        fn new(queue_size: usize) -> Self {
+        fn new(queue_size: usize, caught_panic: Arc<Mutex<Option<String>>>) -> Self {
             TestComponent {
                 queue_size,
                 counter: 0,
+                caught_panic,
             }
         }
     }
@@ -185,12 +188,19 @@ mod tests {
         fn queue_size(&self) -> usize {
             self.queue_size
         }
+
+        fn on_handler_panic(&mut self, panic_value: Box<dyn std::any::Any + Send>) {
+            self.caught_panic
+                .lock()
+                .unwrap()
+                .replace(get_panic_message(&panic_value).unwrap());
+        }
     }
 
     #[tokio::test]
     async fn response_types() {
         let system = System::new();
-        let component = TestComponent::new(10);
+        let component = TestComponent::new(10, Arc::new(Mutex::new(None)));
         let handle = system.start_component(component);
 
         assert_eq!(1, handle.request(1, None).await.unwrap());
@@ -198,15 +208,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn catches_panic() {
+    async fn catches_handler_panic_with_hook() {
+        let caught_panic = Arc::new(Mutex::new(None));
+
         let system = System::new();
-        let component = TestComponent::new(10);
+        let component = TestComponent::new(10, caught_panic.clone());
         let handle = system.start_component(component);
 
-        let err = handle.request(0, None).await.unwrap_err();
+        handle.request(0, None).await.unwrap_err();
+
         assert_eq!(
-            RequestError::HandlerPanic(Some("Invalid input".to_string())),
-            err
+            caught_panic.lock().unwrap().clone().unwrap(),
+            "Invalid input".to_string()
         );
 
         // Component is still alive

@@ -1,20 +1,20 @@
-use core::fmt::Debug;
-use std::any::type_name;
-
 use async_trait::async_trait;
 use chroma_error::ChromaError;
+use core::fmt::Debug;
+use std::any::type_name;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tracing::Span;
 
 use crate::{
     execution::{dispatcher::Dispatcher, operator::TaskMessage},
     system::{ChannelError, Component, ComponentContext, ComponentHandle, System},
+    utils::PanicError,
 };
 
 #[async_trait]
 pub trait Orchestrator: Debug + Send + Sized + 'static {
     type Output: Send;
-    type Error: ChromaError + From<ChannelError> + From<RecvError>;
+    type Error: ChromaError + From<PanicError> + From<ChannelError> + From<RecvError>;
 
     /// Returns the handle of the dispatcher
     fn dispatcher(&self) -> ComponentHandle<Dispatcher>;
@@ -107,5 +107,14 @@ impl<O: Orchestrator> Component for O {
                 break;
             }
         }
+    }
+
+    fn on_handler_panic(&mut self, panic_value: Box<dyn std::any::Any + Send>) {
+        let channel = self.take_result_channel();
+        let error = PanicError::new(panic_value);
+
+        if channel.send(Err(O::Error::from(error))).is_err() {
+            tracing::error!("Error reporting panic to {}", Self::name());
+        };
     }
 }
