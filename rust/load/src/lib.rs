@@ -1197,7 +1197,9 @@ impl LoadService {
                         .step(&client, &this.metrics, &*data_set, &mut state)
                         .await
                         .map_err(|err| {
-                            tracing::error!("workload failed: {err:?}");
+                            if !format!("{err:?}").contains("429") {
+                                tracing::error!("workload failed: {err:?}");
+                            }
                             Error::FailWorkload(err.to_string())
                         })
                 };
