@@ -1,5 +1,6 @@
 pub(super) mod count_records;
 pub(super) mod flush_s3;
+pub mod materialize_logs;
 pub(super) mod partition;
 pub(super) mod register;
 pub mod spann_bf_pl;
