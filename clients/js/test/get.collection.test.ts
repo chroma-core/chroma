@@ -12,9 +12,7 @@ describe("get collections", () => {
   });
 
   beforeEach(async () => {
-    console.log(`>> Starting beforeEach: ${expect.getState().currentTestName}`);
     await client.reset();
-    console.log(`>> Finished beforeEach: ${expect.getState().currentTestName}`);
   });
 
   test("it should get documents from a collection", async () => {
