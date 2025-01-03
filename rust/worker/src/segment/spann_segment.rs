@@ -18,7 +18,7 @@ use super::record_segment::RecordSegmentReader;
 use super::{
     record_segment::ApplyMaterializedLogError,
     utils::{distance_function_from_segment, hnsw_params_from_segment},
-    SegmentFlusher, SegmentWriter,
+    SegmentFlusher,
 };
 use super::{BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult};
 
@@ -233,25 +233,9 @@ impl SpannSegmentWriter {
             .await
             .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
-}
 
-pub struct SpannSegmentFlusher {
-    id: SegmentUuid,
-    index_flusher: SpannIndexFlusher,
-}
-
-impl SegmentWriter for SpannSegmentWriter {
-    type Flusher = SpannSegmentFlusher;
-
-    fn get_id(&self) -> SegmentUuid {
-        self.id
-    }
-
-    fn get_name(&self) -> &'static str {
-        "SpannSegmentWriter"
-    }
-
-    async fn apply_materialized_log_chunk(
+    #[allow(dead_code)]
+    pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized_chunk: &MaterializeLogsResult,
@@ -290,7 +274,8 @@ impl SegmentWriter for SpannSegmentWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
+    #[allow(dead_code)]
+    pub async fn commit(self) -> Result<SpannSegmentFlusher, Box<dyn ChromaError>> {
         let index_flusher = self
             .index
             .commit()
@@ -304,6 +289,11 @@ impl SegmentWriter for SpannSegmentWriter {
             }),
         }
     }
+}
+
+pub struct SpannSegmentFlusher {
+    id: SegmentUuid,
+    index_flusher: SpannIndexFlusher,
 }
 
 #[async_trait]
@@ -527,7 +517,7 @@ mod test {
     use crate::segment::{
         materialize_logs,
         spann_segment::{SpannSegmentReader, SpannSegmentWriter},
-        SegmentFlusher, SegmentWriter,
+        SegmentFlusher,
     };
 
     #[tokio::test]

@@ -207,7 +207,7 @@ mod tests {
             operator::Operator,
             operators::count_records::{CountRecordsInput, CountRecordsOperator},
         },
-        segment::{record_segment::RecordSegmentWriter, SegmentWriter},
+        segment::record_segment::RecordSegmentWriter,
     };
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};

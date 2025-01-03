@@ -1,5 +1,4 @@
 use super::spann_segment::SpannSegmentWriterError;
-use super::types::SegmentWriter;
 use super::{
     HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult, SegmentFlusher,
 };
@@ -302,59 +301,8 @@ impl RecordSegmentWriter {
             id: segment.id,
         })
     }
-}
 
-#[derive(Error, Debug)]
-// TODO(Sanket): Should compose errors here but can't currently because
-// of Box<dyn ChromaError>.
-// Since blockfile does not support read then write semantics natively
-// all write operations to it are either set or delete.
-pub enum ApplyMaterializedLogError {
-    #[error("Error setting to blockfile")]
-    BlockfileSet,
-    #[error("Error deleting from blockfile")]
-    BlockfileDelete,
-    #[error("Error updating blockfile")]
-    BlockfileUpdate,
-    #[error("Allocation error")]
-    Allocation,
-    #[error("Error writing to the full text index: {0}")]
-    FullTextIndex(#[from] FullTextIndexError),
-    #[error("Error writing to hnsw index")]
-    HnswIndex(#[from] Box<dyn ChromaError>),
-    #[error("Log materialization error: {0}")]
-    Materialization(#[from] LogMaterializerError),
-    #[error("Error applying materialized records to spann segment: {0}")]
-    SpannSegmentError(#[from] SpannSegmentWriterError),
-}
-
-impl ChromaError for ApplyMaterializedLogError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            ApplyMaterializedLogError::BlockfileSet => ErrorCodes::Internal,
-            ApplyMaterializedLogError::BlockfileDelete => ErrorCodes::Internal,
-            ApplyMaterializedLogError::BlockfileUpdate => ErrorCodes::Internal,
-            ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
-            ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
-            ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
-            ApplyMaterializedLogError::Materialization(e) => e.code(),
-            ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
-        }
-    }
-}
-
-impl SegmentWriter for RecordSegmentWriter {
-    type Flusher = RecordSegmentFlusher;
-
-    fn get_id(&self) -> SegmentUuid {
-        self.id
-    }
-
-    fn get_name(&self) -> &'static str {
-        "RecordSegmentWriter"
-    }
-
-    async fn apply_materialized_log_chunk(
+    pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
@@ -499,7 +447,7 @@ impl SegmentWriter for RecordSegmentWriter {
         Ok(())
     }
 
-    async fn commit(mut self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
+    pub async fn commit(mut self) -> Result<RecordSegmentFlusher, Box<dyn ChromaError>> {
         // Commit all the blockfiles
         let flusher_user_id_to_id = self
             .user_id_to_id
@@ -568,6 +516,45 @@ impl SegmentWriter for RecordSegmentWriter {
             id_to_data_flusher: flusher_id_to_data,
             max_offset_id_flusher: flusher_max_offset_id,
         })
+    }
+}
+
+#[derive(Error, Debug)]
+// TODO(Sanket): Should compose errors here but can't currently because
+// of Box<dyn ChromaError>.
+// Since blockfile does not support read then write semantics natively
+// all write operations to it are either set or delete.
+pub enum ApplyMaterializedLogError {
+    #[error("Error setting to blockfile")]
+    BlockfileSet,
+    #[error("Error deleting from blockfile")]
+    BlockfileDelete,
+    #[error("Error updating blockfile")]
+    BlockfileUpdate,
+    #[error("Allocation error")]
+    Allocation,
+    #[error("Error writing to the full text index: {0}")]
+    FullTextIndex(#[from] FullTextIndexError),
+    #[error("Error writing to hnsw index")]
+    HnswIndex(#[from] Box<dyn ChromaError>),
+    #[error("Log materialization error: {0}")]
+    Materialization(#[from] LogMaterializerError),
+    #[error("Error applying materialized records to spann segment: {0}")]
+    SpannSegmentError(#[from] SpannSegmentWriterError),
+}
+
+impl ChromaError for ApplyMaterializedLogError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ApplyMaterializedLogError::BlockfileSet => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BlockfileDelete => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BlockfileUpdate => ErrorCodes::Internal,
+            ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
+            ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
+            ApplyMaterializedLogError::Materialization(e) => e.code(),
+            ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
+        }
     }
 }
 
@@ -900,9 +887,7 @@ mod tests {
 
     use crate::{
         log::test::{upsert_generator, LogGenerator},
-        segment::{
-            materialize_logs, record_segment::MAX_OFFSET_ID, test::TestSegment, SegmentWriter,
-        },
+        segment::{materialize_logs, record_segment::MAX_OFFSET_ID, test::TestSegment},
     };
 
     use super::RecordSegmentWriter;

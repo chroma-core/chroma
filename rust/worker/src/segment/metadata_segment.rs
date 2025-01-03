@@ -1,6 +1,5 @@
 use super::super::execution::operators::filter::MetadataProvider;
 use super::record_segment::ApplyMaterializedLogError;
-use super::types::SegmentWriter;
 use super::SegmentFlusher;
 use crate::execution::operators::filter::RoaringMetadataFilter;
 use crate::segment::record_segment::RecordSegmentReader;
@@ -470,20 +469,8 @@ impl<'me> MetadataSegmentWriter<'me> {
         // Insert new value.
         Ok(self.set_metadata(key, new_value, offset_id).await?)
     }
-}
 
-impl SegmentWriter for MetadataSegmentWriter<'_> {
-    type Flusher = MetadataSegmentFlusher;
-
-    fn get_id(&self) -> SegmentUuid {
-        self.id
-    }
-
-    fn get_name(&self) -> &'static str {
-        "MetadataSegmentWriter"
-    }
-
-    async fn apply_materialized_log_chunk(
+    pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
@@ -662,7 +649,7 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
         Ok(())
     }
 
-    async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
         let mut full_text_index_writer = match self.full_text_index_writer.take() {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
@@ -721,7 +708,7 @@ impl SegmentWriter for MetadataSegmentWriter<'_> {
         Ok(())
     }
 
-    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<MetadataSegmentFlusher, Box<dyn ChromaError>> {
         let full_text_flusher = match self.full_text_index_writer {
             Some(flusher) => match flusher.commit().await {
                 Ok(flusher) => flusher,
@@ -1127,7 +1114,7 @@ mod test {
         record_segment::{
             RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
-        SegmentFlusher, SegmentWriter,
+        SegmentFlusher,
     };
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
