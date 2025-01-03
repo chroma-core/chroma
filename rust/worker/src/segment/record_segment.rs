@@ -639,7 +639,7 @@ pub struct RecordSegmentReader<'me> {
     user_id_to_id: BlockfileReader<'me, &'me str, u32>,
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
-    curr_max_offset_id: Arc<AtomicU32>,
+    max_offset_id: u32,
 }
 
 impl Debug for RecordSegmentReader<'_> {
@@ -708,10 +708,10 @@ impl RecordSegmentReader<'_> {
                 };
                 let exising_max_offset_id = match max_offset_id_bf_reader {
                     Some(reader) => match reader.get("", MAX_OFFSET_ID).await {
-                        Ok(Some(max_offset_id)) => Arc::new(AtomicU32::new(max_offset_id)),
-                        Ok(None) | Err(_) => Arc::new(AtomicU32::new(0)),
+                        Ok(Some(max_offset_id)) => max_offset_id,
+                        Ok(None) | Err(_) => 0,
                     },
-                    None => Arc::new(AtomicU32::new(0)),
+                    None => 0,
                 };
 
                 let user_id_to_id = match blockfile_provider
@@ -773,12 +773,12 @@ impl RecordSegmentReader<'_> {
             user_id_to_id,
             id_to_user_id,
             id_to_data,
-            curr_max_offset_id: existing_max_offset_id,
+            max_offset_id: existing_max_offset_id,
         })
     }
 
-    pub(crate) fn get_current_max_offset_id(&self) -> Arc<AtomicU32> {
-        self.curr_max_offset_id.clone()
+    pub(crate) fn get_max_offset_id(&self) -> u32 {
+        self.max_offset_id
     }
 
     pub(crate) async fn get_offset_id_for_user_id(
