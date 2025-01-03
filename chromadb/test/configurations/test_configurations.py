@@ -8,7 +8,7 @@ from chromadb.api.configuration import (
     ConfigurationParameter,
     HNSWConfiguration,
 )
-
+from chromadb.errors import InvalidArgumentError
 
 class TestConfiguration(ConfigurationInternal):
     definitions = {
@@ -56,7 +56,7 @@ def test_set_values() -> None:
 
 def test_get_invalid_parameter() -> None:
     test_configuration = TestConfiguration()
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         test_configuration.get_parameter("invalid_name")
 
 
@@ -75,13 +75,13 @@ def test_validation() -> None:
     invalid_parameter_values = [
         ConfigurationParameter(name="static_str_value", value=1.0)
     ]
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         TestConfiguration(parameters=invalid_parameter_values)
 
     invalid_parameter_names = [
         ConfigurationParameter(name="invalid_name", value="some_value")
     ]
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         TestConfiguration(parameters=invalid_parameter_names)
 
 
@@ -101,10 +101,10 @@ def test_configuration_validation() -> None:
             if self.parameter_map.get("foo") != "bar":
                 raise InvalidConfigurationError("foo must be 'bar'")
 
-    with pytest.raises(ValueError, match="foo must be 'bar'"):
+    with pytest.raises(InvalidArgumentError, match="foo must be 'bar'"):
         FooConfiguration(parameters=[ConfigurationParameter(name="foo", value="baz")])
 
 
 def test_hnsw_validation() -> None:
-    with pytest.raises(ValueError, match="must be less than or equal"):
+    with pytest.raises(InvalidArgumentError, match="must be less than or equal"):
         HNSWConfiguration(batch_size=500, sync_threshold=100)

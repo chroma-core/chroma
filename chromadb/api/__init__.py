@@ -85,6 +85,7 @@ class BaseAPI(ABC):
             new_name: The new name of the collection.
                                 If None, the existing name will remain. Defaults to None.
             new_metadata: The new metadata to associate with the collection.
+
                                       Defaults to None.
         """
         pass
@@ -99,7 +100,7 @@ class BaseAPI(ABC):
             name: The name of the collection to delete.
 
         Raises:
-            ValueError: If the collection does not exist.
+            InvalidArgumentError: If the collection does not exist.
 
         Examples:
             ```python
@@ -388,8 +389,8 @@ class ClientAPI(BaseAPI, ABC):
             Collection: The newly created collection.
 
         Raises:
-            ValueError: If the collection already exists and get_or_create is False.
-            ValueError: If the collection name is invalid.
+            InvalidArgumentError: If the collection already exists and get_or_create is False.
+            InvalidArgumentError: If the collection name is invalid.
 
         Examples:
             ```python
@@ -422,7 +423,7 @@ class ClientAPI(BaseAPI, ABC):
             Collection: The collection
 
         Raises:
-            ValueError: If the collection does not exist
+            InvalidArgumentError: If the collection does not exist
 
         Examples:
             ```python

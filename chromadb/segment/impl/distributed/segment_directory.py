@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional, cast
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 from overrides import EnforceOverrides, override
-
+from chromadb.errors import InvalidArgumentError
 from chromadb.config import System
 from chromadb.segment.distributed import (
     Memberlist,
@@ -77,7 +77,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     @override
     def start(self) -> None:
         if self._memberlist_name is None:
-            raise ValueError("Memberlist name must be set before starting")
+            raise InvalidArgumentError("Memberlist name must be set before starting")
         self.get_memberlist()
         self._done_waiting_for_reset.clear()
         self._watch_worker_memberlist()
@@ -103,7 +103,7 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
         # get propagated back again
         # Note that the component must be running in order to reset the state
         if not self._system.settings.require("allow_reset"):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
         if self._memberlist_name:
@@ -242,7 +242,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     @override
     def get_segment_endpoint(self, segment: Segment) -> str:
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
-            raise ValueError("Memberlist is not initialized")
+            raise InvalidArgumentError("Memberlist is not initialized")
         # Query to the same collection should end up on the same endpoint
         assignment = assign(
             segment["collection"].hex, self._curr_memberlist, murmur3hasher, 1

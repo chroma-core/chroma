@@ -1,6 +1,7 @@
 import logging
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+from chromadb.errors import InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import cohere
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The cohere python package is not installed. Please install it with `pip install cohere`"
             )
 
