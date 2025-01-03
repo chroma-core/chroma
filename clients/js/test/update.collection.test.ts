@@ -1,17 +1,8 @@
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "@jest/globals";
+import { beforeEach, describe, expect, test } from "@jest/globals";
 import { IncludeEnum } from "../src/types";
 import { IDS, DOCUMENTS, EMBEDDINGS, METADATAS } from "./data";
 import { InvalidCollectionError } from "../src/Errors";
-import { StartedTestContainer } from "testcontainers";
 import { ChromaClient } from "../src/ChromaClient";
-import { startChromaContainer } from "./startChromaContainer";
 
 describe("update records", () => {
   // connects to the unauthenticated chroma instance started in
@@ -22,9 +13,6 @@ describe("update records", () => {
 
   beforeEach(async () => {
     await client.reset();
-    // the sleep assures the db is fully reset
-    // this should be further investigated
-    await new Promise((r) => setTimeout(r, 1000));
   });
 
   test("it should get embedding with matching documents", async () => {
@@ -73,7 +61,7 @@ describe("update records", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    expect(async () => {
+    await expect(async () => {
       await collection.update({
         ids: ["test1"],
         embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
