@@ -348,6 +348,8 @@ class Collection(CollectionCommon["ServerAPI"]):
             metadatas=upsert_request["metadatas"],
             documents=upsert_request["documents"],
             uris=upsert_request["uris"],
+            tenant=self.tenant,
+            database=self.database,
         )
 
     def delete(
@@ -383,7 +385,6 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
 
-
 class CollectionName(str):
     """
     A string wrapper to supply users with indicative message about list_collections only
@@ -408,7 +409,8 @@ class CollectionName(str):
 
     def __getattr__(self, item):
         collection_attributes_and_methods = [
-            member for member, _ in inspect.getmembers(Collection)
+            member
+            for member, _ in inspect.getmembers(Collection)
             if not member.startswith("_")
         ]
 

@@ -1,0 +1,19 @@
+name: Export Tilt logs
+description: Exports logs and traces from services in Tilt to an artifact
+inputs:
+  artifact-name:
+    description: "The name of the artifact containing logs and traces from services in Tilt"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Get logs of all services
+      id: get-logs
+      run: |
+        bin/get-logs.sh ${{ inputs.artifact-name }}.zip
+      shell: bash
+    - name: Upload logs as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: "${{ inputs.artifact-name }}.zip"

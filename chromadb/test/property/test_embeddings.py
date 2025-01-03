@@ -91,7 +91,6 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
-        reset(self.client)
         self.collection = self.client.create_collection(
             name=collection.name,
             metadata=collection.metadata,  # type: ignore[arg-type]

@@ -129,6 +129,7 @@ pub async fn client_for_url(url: String) -> ChromaClient {
                 header: ChromaTokenHeader::XChromaToken,
             },
             database: "hf-tiny-stories".to_string(),
+            connections: 4,
         })
         .await
         .unwrap()
@@ -137,6 +138,7 @@ pub async fn client_for_url(url: String) -> ChromaClient {
             url: Some(url),
             auth: ChromaAuthMethod::None,
             database: "hf-tiny-stories".to_string(),
+            connections: 4,
         })
         .await
         .unwrap()
@@ -1195,7 +1197,9 @@ impl LoadService {
                         .step(&client, &this.metrics, &*data_set, &mut state)
                         .await
                         .map_err(|err| {
-                            tracing::error!("workload failed: {err:?}");
+                            if !format!("{err:?}").contains("429") {
+                                tracing::error!("workload failed: {err:?}");
+                            }
                             Error::FailWorkload(err.to_string())
                         })
                 };

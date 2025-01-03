@@ -118,21 +118,15 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-      - name: Get logs of all services
-        id: get-logs
-        if: success() || failure()
-        run: |
-          bin/get-logs.sh "${{ matrix.test-globs }}" "${{ matrix.python }}"
-          # Output the logs zip file path as a job output
-          echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-          echo "logs_zip_path=$(pwd)/$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}_logs.zip" >> $GITHUB_OUTPUT
-        shell: bash
-      - name: Upload logs as artifact
-        if: success() || failure()
-        uses: actions/upload-artifact@v4
+      - name: Compute artifact name
+        if: always()
+        id: compute-artifact-name
+        run: echo "artifact_name=cluster_logs_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
         with:
-          name: ${{ steps.get-logs.outputs.artifact_name }}
-          path: ${{ steps.get-logs.outputs.logs_zip_path }}
+          artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
 
   merge-cluster-logs:
     runs-on: ubuntu-latest
