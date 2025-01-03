@@ -1,6 +1,9 @@
-use std::collections::HashMap;
-
-use async_trait::async_trait;
+use super::record_segment::RecordSegmentReader;
+use super::{
+    record_segment::ApplyMaterializedLogError,
+    utils::{distance_function_from_segment, hnsw_params_from_segment},
+};
+use super::{BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult};
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -11,16 +14,9 @@ use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::SegmentUuid;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
-
-use super::record_segment::RecordSegmentReader;
-use super::{
-    record_segment::ApplyMaterializedLogError,
-    utils::{distance_function_from_segment, hnsw_params_from_segment},
-    SegmentFlusher,
-};
-use super::{BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult};
 
 const HNSW_PATH: &str = "hnsw_path";
 const VERSION_MAP_PATH: &str = "version_map_path";
@@ -292,20 +288,13 @@ impl SpannSegmentWriter {
 }
 
 pub struct SpannSegmentFlusher {
+    #[allow(dead_code)]
     id: SegmentUuid,
     index_flusher: SpannIndexFlusher,
 }
 
-#[async_trait]
-impl SegmentFlusher for SpannSegmentFlusher {
-    fn get_id(&self) -> SegmentUuid {
-        self.id
-    }
-
-    fn get_name(&self) -> &'static str {
-        "SpannSegmentFlusher"
-    }
-
+impl SpannSegmentFlusher {
+    #[allow(dead_code)]
     async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let index_flusher_res = self
             .index_flusher
@@ -517,7 +506,6 @@ mod test {
     use crate::segment::{
         materialize_logs,
         spann_segment::{SpannSegmentReader, SpannSegmentWriter},
-        SegmentFlusher,
     };
 
     #[tokio::test]

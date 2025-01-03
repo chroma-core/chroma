@@ -1,10 +1,8 @@
 use super::super::execution::operators::filter::MetadataProvider;
 use super::record_segment::ApplyMaterializedLogError;
-use super::SegmentFlusher;
 use crate::execution::operators::filter::RoaringMetadataFilter;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::MaterializeLogsResult;
-use async_trait::async_trait;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::BlockfileWriterOptions;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -761,7 +759,7 @@ impl<'me> MetadataSegmentWriter<'me> {
 }
 
 pub struct MetadataSegmentFlusher {
-    id: SegmentUuid,
+    pub id: SegmentUuid,
     pub(crate) full_text_index_flusher: FullTextIndexFlusher,
     pub(crate) string_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
@@ -777,17 +775,8 @@ impl Debug for MetadataSegmentFlusher {
     }
 }
 
-#[async_trait]
-impl SegmentFlusher for MetadataSegmentFlusher {
-    fn get_id(&self) -> SegmentUuid {
-        self.id
-    }
-
-    fn get_name(&self) -> &'static str {
-        "MetadataSegmentFlusher"
-    }
-
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+impl MetadataSegmentFlusher {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let full_text_pls_id = self.full_text_index_flusher.pls_id();
         let string_metadata_id = self.string_metadata_index_flusher.id();
         let bool_metadata_id = self.bool_metadata_index_flusher.id();
@@ -1114,7 +1103,6 @@ mod test {
         record_segment::{
             RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
-        SegmentFlusher,
     };
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},

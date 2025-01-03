@@ -1,8 +1,5 @@
 use super::spann_segment::SpannSegmentWriterError;
-use super::{
-    HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult, SegmentFlusher,
-};
-use async_trait::async_trait;
+use super::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
@@ -559,7 +556,7 @@ impl ChromaError for ApplyMaterializedLogError {
 }
 
 pub struct RecordSegmentFlusher {
-    id: SegmentUuid,
+    pub id: SegmentUuid,
     user_id_to_id_flusher: BlockfileFlusher,
     id_to_user_id_flusher: BlockfileFlusher,
     id_to_data_flusher: BlockfileFlusher,
@@ -572,17 +569,8 @@ impl Debug for RecordSegmentFlusher {
     }
 }
 
-#[async_trait]
-impl SegmentFlusher for RecordSegmentFlusher {
-    fn get_name(&self) -> &'static str {
-        "RecordSegmentFlusher"
-    }
-
-    fn get_id(&self) -> SegmentUuid {
-        self.id
-    }
-
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+impl RecordSegmentFlusher {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
         let id_to_user_id_bf_id = self.id_to_user_id_flusher.id();
         let id_to_data_bf_id = self.id_to_data_flusher.id();
