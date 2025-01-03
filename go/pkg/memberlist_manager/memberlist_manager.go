@@ -128,6 +128,16 @@ func memberlistSame(oldMemberlist Memberlist, newMemberlist Memberlist) bool {
 	if len(oldMemberlist) != len(newMemberlist) {
 		return false
 	}
+	oldMemberlistIps := make(map[string]string)
+	for _, member := range oldMemberlist {
+		oldMemberlistIps[member.id] = member.ip
+	}
+	for _, member := range newMemberlist {
+		if ip, ok := oldMemberlistIps[member.id]; !ok || ip != member.ip {
+			return false
+		}
+	}
+
 	// use a map to check if the new memberlist contains all the old members
 	newMemberlistMap := make(map[string]bool)
 	for _, member := range newMemberlist {

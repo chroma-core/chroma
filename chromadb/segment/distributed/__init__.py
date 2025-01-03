@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Any, Callable, List
 
 from overrides import EnforceOverrides, overrides
@@ -22,7 +23,13 @@ class SegmentDirectory(Component):
         pass
 
 
-Memberlist = List[str]
+@dataclass
+class Member:
+    id: str
+    ip: str
+
+
+Memberlist = List[Member]
 
 
 class MemberlistProvider(Component, EnforceOverrides):

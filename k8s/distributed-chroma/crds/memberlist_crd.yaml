@@ -27,6 +27,8 @@ spec:
                     properties:
                       member_id:
                         type: string
+                      member_ip:
+                        type: string
   scope: Namespaced
   names:
     plural: memberlists
