@@ -17,3 +17,9 @@ pub(crate) struct DatabaseData {
     name: String,
     id: String, // TODO: UUID?
 }
+
+impl DatabaseData {
+    pub(crate) fn new(name: String, id: String) -> Self {
+        DatabaseData { name, id }
+    }
+}
