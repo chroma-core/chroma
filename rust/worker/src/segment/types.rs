@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
@@ -863,14 +862,6 @@ pub async fn materialize_logs(
     })
 }
 
-// This needs to be public for testing
-#[async_trait]
-pub trait SegmentFlusher {
-    fn get_id(&self) -> SegmentUuid;
-    fn get_name(&self) -> &'static str;
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>>;
-}
-
 #[derive(Clone, Debug)]
 pub enum ChromaSegmentWriter<'bf> {
     RecordSegment(RecordSegmentWriter),
@@ -883,7 +874,7 @@ impl<'a> ChromaSegmentWriter<'a> {
         match self {
             ChromaSegmentWriter::RecordSegment(writer) => writer.id,
             ChromaSegmentWriter::MetadataSegment(writer) => writer.id,
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.get_id(),
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.id,
         }
     }
 
@@ -952,27 +943,24 @@ pub enum ChromaSegmentFlusher {
     DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>),
 }
 
-#[async_trait]
-impl SegmentFlusher for ChromaSegmentFlusher {
-    fn get_id(&self) -> SegmentUuid {
+impl ChromaSegmentFlusher {
+    pub fn get_id(&self) -> SegmentUuid {
         match self {
-            ChromaSegmentFlusher::RecordSegment(flusher) => flusher.get_id(),
-            ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.get_id(),
-            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => flusher.get_id(),
+            ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,
+            ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.id,
+            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => flusher.id,
         }
     }
 
-    fn get_name(&self) -> &'static str {
+    pub fn get_name(&self) -> &'static str {
         match self {
-            ChromaSegmentFlusher::RecordSegment(flusher) => flusher.get_name(),
-            ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.get_name(),
-            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => {
-                SegmentFlusher::get_name(flusher.as_ref())
-            }
+            ChromaSegmentFlusher::RecordSegment(_) => "RecordSegmentFlusher",
+            ChromaSegmentFlusher::MetadataSegment(_) => "MetadataSegmentFlusher",
+            ChromaSegmentFlusher::DistributedHNSWSegment(_) => "DistributedHNSWSegmentFlusher",
         }
     }
 
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.flush().await,
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.flush().await,

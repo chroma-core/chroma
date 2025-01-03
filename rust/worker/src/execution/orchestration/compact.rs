@@ -40,7 +40,6 @@ use crate::segment::record_segment::RecordSegmentWriter;
 use crate::segment::ChromaSegmentFlusher;
 use crate::segment::ChromaSegmentWriter;
 use crate::segment::MaterializeLogsResult;
-use crate::segment::SegmentFlusher;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;

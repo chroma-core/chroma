@@ -1,5 +1,4 @@
 use crate::execution::operator::Operator;
-use crate::segment::types::SegmentFlusher;
 use crate::segment::ChromaSegmentFlusher;
 use async_trait::async_trait;
 use chroma_error::ChromaError;

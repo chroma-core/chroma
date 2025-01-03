@@ -201,7 +201,6 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 mod tests {
     use crate::segment::materialize_logs;
     use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
-    use crate::segment::types::SegmentFlusher;
     use crate::{
         execution::{
             operator::Operator,

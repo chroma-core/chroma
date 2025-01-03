@@ -11,7 +11,7 @@ use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
 
 use super::{
     distributed_hnsw_segment::DistributedHNSWSegmentWriter, materialize_logs,
-    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter, SegmentFlusher,
+    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter,
 };
 
 #[derive(Clone)]
