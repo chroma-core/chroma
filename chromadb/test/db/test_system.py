@@ -247,7 +247,9 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
     # Check that the segment was deleted
     by_collection_result = sysdb.get_segments(collection=c1.id)
-    assert by_collection_result == []
+    # Note: Segments are not immediately deleted because of soft deletes.
+    assert len(by_collection_result) > 0
+
 
     # Duplicate delete throws an exception
     with pytest.raises(NotFoundError):
@@ -270,7 +272,8 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     by_id_result = sysdb.get_collections(id=sample_collections[0].id)
     assert by_id_result == []
     by_collection_result = sysdb.get_segments(collection=sample_collections[0].id)
-    assert by_collection_result == []
+    # Note: Segments are not immediately deleted because of soft deletes.
+    assert len(by_collection_result) > 0
 
 def test_count_collections(sysdb: SysDB) -> None:
     logger.debug("Resetting state")
