@@ -259,10 +259,10 @@ class ClientAPI(BaseAPI, ABC)
 
 ```python
 def list_collections(limit: Optional[int] = None,
-                     offset: Optional[int] = None) -> Sequence[Collection]
+                     offset: Optional[int] = None) -> Sequence[CollectionName]
 ```
 
-List all collections.
+List all collections names.
 
 **Arguments**:
 
@@ -272,14 +272,14 @@ List all collections.
 
 **Returns**:
 
-- `Sequence[Collection]` - A list of collections
+- `Sequence[CollectionName]` - A list of collection names. `CollectionName` is a string.
 
 
 **Examples**:
 
 ```python
 client.list_collections()
-# [collection(name="my_collection", metadata={})]
+# ['my_collection']
 ```
 
 ## create_collection
