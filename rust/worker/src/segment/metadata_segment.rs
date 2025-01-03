@@ -532,6 +532,10 @@ impl<'me> MetadataSegmentWriter<'me> {
 }
 
 impl SegmentWriter for MetadataSegmentWriter<'_> {
+    fn get_name(&self) -> &'static str {
+        "MetadataSegmentWriter"
+    }
+
     async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,

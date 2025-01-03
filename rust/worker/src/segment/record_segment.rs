@@ -344,6 +344,10 @@ impl ChromaError for ApplyMaterializedLogError {
 }
 
 impl SegmentWriter for RecordSegmentWriter {
+    fn get_name(&self) -> &'static str {
+        "RecordSegmentWriter"
+    }
+
     async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
@@ -645,6 +649,12 @@ pub struct RecordSegmentReader<'me> {
     id_to_user_id: BlockfileReader<'me, u32, &'me str>,
     id_to_data: BlockfileReader<'me, u32, DataRecord<'me>>,
     curr_max_offset_id: Arc<AtomicU32>,
+}
+
+impl Debug for RecordSegmentReader<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecordSegmentReader").finish()
+    }
 }
 
 #[derive(Error, Debug)]
