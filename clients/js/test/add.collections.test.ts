@@ -24,9 +24,6 @@ describe("add collections", () => {
 
   beforeEach(async () => {
     await client.reset();
-    // the sleep assures the db is fully reset
-    // this should be further investigated
-    await new Promise((r) => setTimeout(r, 1000));
   });
 
   test("it should add single embeddings to a collection", async () => {
@@ -164,7 +161,7 @@ describe("add collections", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    expect(async () => {
+    await expect(async () => {
       await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
     }).rejects.toThrow(InvalidCollectionError);
   });
