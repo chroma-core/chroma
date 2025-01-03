@@ -1,7 +1,6 @@
 use crate::execution::operator::Operator;
 use crate::segment::ChromaSegmentFlusher;
 use crate::segment::ChromaSegmentWriter;
-use crate::segment::SegmentWriter;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;

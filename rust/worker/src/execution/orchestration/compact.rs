@@ -41,7 +41,6 @@ use crate::segment::ChromaSegmentFlusher;
 use crate::segment::ChromaSegmentWriter;
 use crate::segment::MaterializeLogsResult;
 use crate::segment::SegmentFlusher;
-use crate::segment::SegmentWriter;
 use crate::sysdb::sysdb::GetCollectionsError;
 use crate::sysdb::sysdb::GetSegmentsError;
 use crate::sysdb::sysdb::SysDb;
@@ -362,16 +361,17 @@ impl CompactOrchestrator {
 
         {
             self.num_uncompleted_tasks_by_segment
-                .entry(writers.metadata.get_id())
+                .entry(writers.metadata.id)
                 .and_modify(|v| {
                     *v += 1;
                 })
                 .or_insert(1);
 
-            let span = self.get_segment_writer_span(&writers.metadata);
+            let writer = ChromaSegmentWriter::MetadataSegment(writers.metadata);
+            let span = self.get_segment_writer_span(&writer);
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input = ApplyLogToSegmentWriterInput::new(
-                writers.metadata,
+                writer,
                 materialized_logs.clone(),
                 record_segment_reader.clone(),
             );
@@ -385,16 +385,17 @@ impl CompactOrchestrator {
 
         {
             self.num_uncompleted_tasks_by_segment
-                .entry(writers.record.get_id())
+                .entry(writers.record.id)
                 .and_modify(|v| {
                     *v += 1;
                 })
                 .or_insert(1);
 
-            let span = self.get_segment_writer_span(&writers.record);
+            let writer = ChromaSegmentWriter::RecordSegment(writers.record);
+            let span = self.get_segment_writer_span(&writer);
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input = ApplyLogToSegmentWriterInput::new(
-                writers.record,
+                writer,
                 materialized_logs.clone(),
                 record_segment_reader.clone(),
             );
@@ -414,13 +415,11 @@ impl CompactOrchestrator {
                 })
                 .or_insert(1);
 
-            let span = self.get_segment_writer_span(writers.vector.as_ref());
+            let writer = ChromaSegmentWriter::DistributedHNSWSegment(writers.vector);
+            let span = self.get_segment_writer_span(&writer);
             let operator = ApplyLogToSegmentWriterOperator::new();
-            let input = ApplyLogToSegmentWriterInput::new(
-                *writers.vector,
-                materialized_logs,
-                record_segment_reader,
-            );
+            let input =
+                ApplyLogToSegmentWriterInput::new(writer, materialized_logs, record_segment_reader);
             let task = wrap(operator, input, self_address);
             let res = self.dispatcher().send(task, Some(span)).await;
             self.ok_or_terminate(res, ctx);
@@ -613,11 +612,11 @@ impl CompactOrchestrator {
     ) -> Result<ChromaSegmentWriter<'static>, GetSegmentWritersError> {
         let writers = self.get_segment_writers().await?;
 
-        if writers.metadata.get_id() == segment_id {
+        if writers.metadata.id == segment_id {
             return Ok(ChromaSegmentWriter::MetadataSegment(writers.metadata));
         }
 
-        if writers.record.get_id() == segment_id {
+        if writers.record.id == segment_id {
             return Ok(ChromaSegmentWriter::RecordSegment(writers.record));
         }
 
@@ -628,7 +627,7 @@ impl CompactOrchestrator {
         Err(GetSegmentWritersError::NoSegmentsFound)
     }
 
-    fn get_segment_writer_span<W: SegmentWriter>(&mut self, writer: &W) -> Span {
+    fn get_segment_writer_span(&mut self, writer: &ChromaSegmentWriter) -> Span {
         let span = self
             .segment_spans
             .entry(writer.get_id())

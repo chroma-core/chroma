@@ -3,9 +3,9 @@ use crate::segment::metadata_segment::MetadataSegmentError;
 use crate::segment::record_segment::ApplyMaterializedLogError;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
+use crate::segment::ChromaSegmentWriter;
 use crate::segment::LogMaterializerError;
 use crate::segment::MaterializeLogsResult;
-use crate::segment::SegmentWriter;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
@@ -53,15 +53,15 @@ impl ApplyLogToSegmentWriterOperator {
 }
 
 #[derive(Debug)]
-pub struct ApplyLogToSegmentWriterInput<'bf, Writer: SegmentWriter> {
-    segment_writer: Writer,
+pub struct ApplyLogToSegmentWriterInput<'bf> {
+    segment_writer: ChromaSegmentWriter<'bf>,
     materialized_logs: MaterializeLogsResult,
     record_segment_reader: Option<RecordSegmentReader<'bf>>,
 }
 
-impl<'bf, Writer: SegmentWriter> ApplyLogToSegmentWriterInput<'bf, Writer> {
+impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
     pub fn new(
-        segment_writer: Writer,
+        segment_writer: ChromaSegmentWriter<'bf>,
         materialized_logs: MaterializeLogsResult,
         record_segment_reader: Option<RecordSegmentReader<'bf>>,
     ) -> Self {
@@ -79,8 +79,7 @@ pub struct ApplyLogToSegmentWriterOutput {
 }
 
 #[async_trait]
-impl<Writer: SegmentWriter + Send + Sync + Clone>
-    Operator<ApplyLogToSegmentWriterInput<'_, Writer>, ApplyLogToSegmentWriterOutput>
+impl Operator<ApplyLogToSegmentWriterInput<'_>, ApplyLogToSegmentWriterOutput>
     for ApplyLogToSegmentWriterOperator
 {
     type Error = ApplyLogToSegmentWriterOperatorError;
@@ -91,7 +90,7 @@ impl<Writer: SegmentWriter + Send + Sync + Clone>
 
     async fn run(
         &self,
-        input: &ApplyLogToSegmentWriterInput<Writer>,
+        input: &ApplyLogToSegmentWriterInput,
     ) -> Result<ApplyLogToSegmentWriterOutput, Self::Error> {
         if input.materialized_logs.is_empty() {
             return Err(ApplyLogToSegmentWriterOperatorError::LogMaterializationResultEmpty);

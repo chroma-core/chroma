@@ -6,7 +6,6 @@ use chroma_types::{
     UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
@@ -865,24 +864,6 @@ pub async fn materialize_logs(
 }
 
 // This needs to be public for testing
-#[allow(async_fn_in_trait)]
-pub trait SegmentWriter {
-    type Flusher: SegmentFlusher + Sync + Send;
-
-    fn get_id(&self) -> SegmentUuid;
-    fn get_name(&self) -> &'static str;
-    fn apply_materialized_log_chunk(
-        &self,
-        record_segment_reader: &Option<RecordSegmentReader>,
-        materialized_chunk: &MaterializeLogsResult,
-    ) -> impl Future<Output = Result<(), ApplyMaterializedLogError>> + Send;
-    fn finish(&mut self) -> impl Future<Output = Result<(), Box<dyn ChromaError>>> + Send {
-        async { Ok(()) }
-    }
-    fn commit(self) -> impl Future<Output = Result<Self::Flusher, Box<dyn ChromaError>>> + Send;
-}
-
-// This needs to be public for testing
 #[async_trait]
 pub trait SegmentFlusher {
     fn get_id(&self) -> SegmentUuid;
@@ -897,30 +878,24 @@ pub enum ChromaSegmentWriter<'bf> {
     DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>),
 }
 
-impl<'a> SegmentWriter for ChromaSegmentWriter<'a> {
-    type Flusher = ChromaSegmentFlusher;
-
-    fn get_id(&self) -> SegmentUuid {
+impl<'a> ChromaSegmentWriter<'a> {
+    pub fn get_id(&self) -> SegmentUuid {
         match self {
-            ChromaSegmentWriter::RecordSegment(writer) => writer.get_id(),
-            ChromaSegmentWriter::MetadataSegment(writer) => writer.get_id(),
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => {
-                SegmentWriter::get_id(writer.as_ref())
-            }
+            ChromaSegmentWriter::RecordSegment(writer) => writer.id,
+            ChromaSegmentWriter::MetadataSegment(writer) => writer.id,
+            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.get_id(),
         }
     }
 
-    fn get_name(&self) -> &'static str {
+    pub fn get_name(&self) -> &'static str {
         match self {
-            ChromaSegmentWriter::RecordSegment(writer) => writer.get_name(),
-            ChromaSegmentWriter::MetadataSegment(writer) => writer.get_name(),
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => {
-                SegmentWriter::get_name(writer.as_ref())
-            }
+            ChromaSegmentWriter::RecordSegment(_) => "RecordSegmentWriter",
+            ChromaSegmentWriter::MetadataSegment(_) => "MetadataSegmentWriter",
+            ChromaSegmentWriter::DistributedHNSWSegment(_) => "DistributedHNSWSegmentWriter",
         }
     }
 
-    async fn apply_materialized_log_chunk(
+    pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
@@ -944,15 +919,15 @@ impl<'a> SegmentWriter for ChromaSegmentWriter<'a> {
         }
     }
 
-    async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            ChromaSegmentWriter::RecordSegment(writer) => writer.finish().await,
+            ChromaSegmentWriter::RecordSegment(_) => Ok(()),
             ChromaSegmentWriter::MetadataSegment(writer) => writer.finish().await,
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.finish().await,
+            ChromaSegmentWriter::DistributedHNSWSegment(_) => Ok(()),
         }
     }
 
-    async fn commit(self) -> Result<Self::Flusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {
         match self {
             ChromaSegmentWriter::RecordSegment(writer) => writer
                 .commit()
@@ -983,9 +958,7 @@ impl SegmentFlusher for ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.get_id(),
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.get_id(),
-            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => {
-                SegmentWriter::get_id(flusher.as_ref())
-            }
+            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => flusher.get_id(),
         }
     }
 
