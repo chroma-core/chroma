@@ -24,7 +24,7 @@ opentelemetry_sdk = { workspace = true }
 
 # Unlikely to be used in the workspace.
 axum = "0.7"
-chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "70c79feb220c3f75c345916f6dfa073b88f8f16a" }
+chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "4017daf7c5c601a095b5c509bfddabc6125e6616" }
 guacamole = { version = "0.9", default-features = false }
 tower-http = { version = "0.6.2", features = ["trace"] }
 reqwest = { version = "0.12", features = ["json"] }
