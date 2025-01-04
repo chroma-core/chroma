@@ -11,6 +11,7 @@ use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
 use tantivy::tokenizer::Tokenizer;
 use thiserror::Error;
+use tracing::Instrument;
 use uuid::Uuid;
 
 #[derive(Error, Debug)]
@@ -166,6 +167,25 @@ impl FullTextIndexWriter {
         let mut posting_list: Vec<u32> = vec![];
 
         let token_instances = std::mem::take(&mut *self.token_instances.lock());
+
+        // Prefetch blocks
+        const PERCENT_TO_PREFETCH: f32 = 0.001;
+
+        let mut keys = vec![];
+        for group in token_instances.iter() {
+            let num_samples = (group.len() as f32 * PERCENT_TO_PREFETCH) as usize;
+            for i in 0..num_samples {
+                let idx = (i as f64 * (group.len() - 1) as f64 / (num_samples - 1).max(1) as f64)
+                    .round() as usize;
+                keys.push((group[idx].get_token(), group[idx].get_offset_id()));
+            }
+        }
+
+        self.posting_lists_blockfile_writer
+            .prefetch(keys)
+            .instrument(tracing::info_span!("prefetch blocks"))
+            .await
+            .unwrap();
 
         for encoded_instance in token_instances.into_iter().kmerge() {
             match encoded_instance.get_position() {
