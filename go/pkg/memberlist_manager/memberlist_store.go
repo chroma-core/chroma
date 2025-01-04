@@ -20,11 +20,13 @@ type IMemberlistStore interface {
 
 type Member struct {
 	id string
+	ip string
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface
 func (m Member) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("id", m.id)
+	enc.AddString("ip", m.ip)
 	return nil
 }
 
@@ -80,7 +82,14 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 		if !ok {
 			return nil, "", errors.New("failed to cast member_id to string")
 		}
-		memberlist = append(memberlist, Member{member_id})
+		// If member_ip is in the CR, extract it, otherwise set it to empty string
+		// This is for backwards compatibility with older CRs that don't have member_ip
+		member_ip, ok := member_map["member_ip"].(string)
+		if !ok {
+			member_ip = ""
+		}
+
+		memberlist = append(memberlist, Member{member_id, member_ip})
 	}
 	return memberlist, unstrucuted.GetResourceVersion(), nil
 }
@@ -107,6 +116,7 @@ func (list Memberlist) toCr(namespace string, memberlistName string, resourceVer
 	for i, member := range list {
 		members[i] = map[string]interface{}{
 			"member_id": member.id,
+			"member_ip": member.ip,
 		}
 	}
 

@@ -1,16 +1,12 @@
 from typing import Dict, Optional
-
 import grpc
 from overrides import overrides
-
 from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
-from chromadb.errors import VersionMismatchError
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.operator import Scan
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.proto import convert
-
 from chromadb.proto.query_executor_pb2_grpc import QueryExecutorStub
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
@@ -170,6 +166,6 @@ class DistributedExecutor(Executor):
             channel = grpc.insecure_channel(grpc_url)
             interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
             channel = grpc.intercept_channel(channel, *interceptors)
-            self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)  # type: ignore[no-untyped-call]
+            self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)
 
         return self._grpc_stub_pool[grpc_url]
