@@ -201,13 +201,12 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 mod tests {
     use crate::segment::materialize_logs;
     use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
-    use crate::segment::types::SegmentFlusher;
     use crate::{
         execution::{
             operator::Operator,
             operators::count_records::{CountRecordsInput, CountRecordsOperator},
         },
-        segment::{record_segment::RecordSegmentWriter, SegmentWriter},
+        segment::record_segment::RecordSegmentWriter,
     };
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};

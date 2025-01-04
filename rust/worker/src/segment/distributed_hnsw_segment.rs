@@ -1,8 +1,7 @@
 use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
 use super::utils::hnsw_params_from_segment;
-use super::{MaterializeLogsResult, SegmentFlusher, SegmentWriter};
+use super::MaterializeLogsResult;
 use crate::segment::utils::distance_function_from_segment;
-use async_trait::async_trait;
 use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
@@ -190,14 +189,8 @@ impl DistributedHNSWSegmentWriter {
             )))
         }
     }
-}
 
-impl SegmentWriter for DistributedHNSWSegmentWriter {
-    fn get_name(&self) -> &'static str {
-        "DistributedHNSWSegmentWriter"
-    }
-
-    async fn apply_materialized_log_chunk(
+    pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
@@ -260,18 +253,15 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<DistributedHNSWSegmentWriter, Box<dyn ChromaError>> {
         let res = self.hnsw_index_provider.commit(self.index.clone());
         match res {
             Ok(_) => Ok(self),
             Err(e) => Err(e),
         }
     }
-}
 
-#[async_trait]
-impl SegmentFlusher for DistributedHNSWSegmentWriter {
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.inner.read().id;
         match self.hnsw_index_provider.flush(&hnsw_index_id).await {
             Ok(_) => {}

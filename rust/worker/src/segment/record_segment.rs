@@ -1,9 +1,5 @@
 use super::spann_segment::SpannSegmentWriterError;
-use super::types::SegmentWriter;
-use super::{
-    HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult, SegmentFlusher,
-};
-use async_trait::async_trait;
+use super::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
@@ -302,53 +298,8 @@ impl RecordSegmentWriter {
             id: segment.id,
         })
     }
-}
 
-#[derive(Error, Debug)]
-// TODO(Sanket): Should compose errors here but can't currently because
-// of Box<dyn ChromaError>.
-// Since blockfile does not support read then write semantics natively
-// all write operations to it are either set or delete.
-pub enum ApplyMaterializedLogError {
-    #[error("Error setting to blockfile")]
-    BlockfileSet,
-    #[error("Error deleting from blockfile")]
-    BlockfileDelete,
-    #[error("Error updating blockfile")]
-    BlockfileUpdate,
-    #[error("Allocation error")]
-    Allocation,
-    #[error("Error writing to the full text index: {0}")]
-    FullTextIndex(#[from] FullTextIndexError),
-    #[error("Error writing to hnsw index")]
-    HnswIndex(#[from] Box<dyn ChromaError>),
-    #[error("Log materialization error: {0}")]
-    Materialization(#[from] LogMaterializerError),
-    #[error("Error applying materialized records to spann segment: {0}")]
-    SpannSegmentError(#[from] SpannSegmentWriterError),
-}
-
-impl ChromaError for ApplyMaterializedLogError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            ApplyMaterializedLogError::BlockfileSet => ErrorCodes::Internal,
-            ApplyMaterializedLogError::BlockfileDelete => ErrorCodes::Internal,
-            ApplyMaterializedLogError::BlockfileUpdate => ErrorCodes::Internal,
-            ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
-            ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
-            ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
-            ApplyMaterializedLogError::Materialization(e) => e.code(),
-            ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
-        }
-    }
-}
-
-impl SegmentWriter for RecordSegmentWriter {
-    fn get_name(&self) -> &'static str {
-        "RecordSegmentWriter"
-    }
-
-    async fn apply_materialized_log_chunk(
+    pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
@@ -493,7 +444,7 @@ impl SegmentWriter for RecordSegmentWriter {
         Ok(())
     }
 
-    async fn commit(mut self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(mut self) -> Result<RecordSegmentFlusher, Box<dyn ChromaError>> {
         // Commit all the blockfiles
         let flusher_user_id_to_id = self
             .user_id_to_id
@@ -556,6 +507,7 @@ impl SegmentWriter for RecordSegmentWriter {
 
         // Return a flusher that can be used to flush the blockfiles
         Ok(RecordSegmentFlusher {
+            id: self.id,
             user_id_to_id_flusher: flusher_user_id_to_id,
             id_to_user_id_flusher: flusher_id_to_user_id,
             id_to_data_flusher: flusher_id_to_data,
@@ -564,7 +516,47 @@ impl SegmentWriter for RecordSegmentWriter {
     }
 }
 
-pub(crate) struct RecordSegmentFlusher {
+#[derive(Error, Debug)]
+// TODO(Sanket): Should compose errors here but can't currently because
+// of Box<dyn ChromaError>.
+// Since blockfile does not support read then write semantics natively
+// all write operations to it are either set or delete.
+pub enum ApplyMaterializedLogError {
+    #[error("Error setting to blockfile")]
+    BlockfileSet,
+    #[error("Error deleting from blockfile")]
+    BlockfileDelete,
+    #[error("Error updating blockfile")]
+    BlockfileUpdate,
+    #[error("Allocation error")]
+    Allocation,
+    #[error("Error writing to the full text index: {0}")]
+    FullTextIndex(#[from] FullTextIndexError),
+    #[error("Error writing to hnsw index")]
+    HnswIndex(#[from] Box<dyn ChromaError>),
+    #[error("Log materialization error: {0}")]
+    Materialization(#[from] LogMaterializerError),
+    #[error("Error applying materialized records to spann segment: {0}")]
+    SpannSegmentError(#[from] SpannSegmentWriterError),
+}
+
+impl ChromaError for ApplyMaterializedLogError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ApplyMaterializedLogError::BlockfileSet => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BlockfileDelete => ErrorCodes::Internal,
+            ApplyMaterializedLogError::BlockfileUpdate => ErrorCodes::Internal,
+            ApplyMaterializedLogError::Allocation => ErrorCodes::Internal,
+            ApplyMaterializedLogError::FullTextIndex(e) => e.code(),
+            ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
+            ApplyMaterializedLogError::Materialization(e) => e.code(),
+            ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
+        }
+    }
+}
+
+pub struct RecordSegmentFlusher {
+    pub id: SegmentUuid,
     user_id_to_id_flusher: BlockfileFlusher,
     id_to_user_id_flusher: BlockfileFlusher,
     id_to_data_flusher: BlockfileFlusher,
@@ -577,9 +569,8 @@ impl Debug for RecordSegmentFlusher {
     }
 }
 
-#[async_trait]
-impl SegmentFlusher for RecordSegmentFlusher {
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+impl RecordSegmentFlusher {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
         let id_to_user_id_bf_id = self.id_to_user_id_flusher.id();
         let id_to_data_bf_id = self.id_to_data_flusher.id();
@@ -884,9 +875,7 @@ mod tests {
 
     use crate::{
         log::test::{upsert_generator, LogGenerator},
-        segment::{
-            materialize_logs, record_segment::MAX_OFFSET_ID, test::TestSegment, SegmentWriter,
-        },
+        segment::{materialize_logs, record_segment::MAX_OFFSET_ID, test::TestSegment},
     };
 
     use super::RecordSegmentWriter;

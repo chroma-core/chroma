@@ -11,8 +11,7 @@ use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
 
 use super::{
     distributed_hnsw_segment::DistributedHNSWSegmentWriter, materialize_logs,
-    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter, SegmentFlusher,
-    SegmentWriter,
+    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter,
 };
 
 #[derive(Clone)]
@@ -64,7 +63,7 @@ impl TestSegment {
             .await
             .expect("Should be able to apply materialized logs.");
         metadata_writer
-            .write_to_blockfiles()
+            .finish()
             .await
             .expect("Should be able to write to blockfile.");
         self.metadata_segment.file_path = metadata_writer
