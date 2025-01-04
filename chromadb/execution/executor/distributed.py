@@ -1,7 +1,6 @@
 from typing import Dict, Optional
 import grpc
 from overrides import overrides
-import os
 from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
@@ -47,7 +46,6 @@ class DistributedExecutor(Executor):
         self._request_timeout_seconds = system.settings.require(
             "chroma_query_request_timeout_seconds"
         )
-        os.environ["GRPC_DNS_RESOLVER"] = "native"
 
     @overrides
     def count(self, plan: CountPlan) -> int:

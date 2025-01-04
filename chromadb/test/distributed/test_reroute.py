@@ -34,17 +34,13 @@ def test_reroute(
     assert len(res.items) > 0
     items = res.items
     seen_ids = set()
-    old_ips = []
 
     # Restart all the pods by deleting them
     for item in items:
         seen_ids.add(item.metadata.uid)
-        old_ips.append(item.status.pod_ip)
         name = item.metadata.name
         namespace = item.metadata.namespace
         v1.delete_namespaced_pod(name, namespace)
-
-    print("old ips: ", old_ips)
 
     # Wait until we have len(seen_ids) pods running with new UIDs
     timeout_secs = 10
@@ -74,5 +70,5 @@ def test_reroute(
             assert False, "Timed out waiting for new pods to be ready"
         time.sleep(1)
 
-    print("Issuing post timeout query")
+    time.sleep(1)
     collection.query(query_embeddings=[embeddings[0]])
