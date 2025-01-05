@@ -68,7 +68,7 @@ Continue with the full [getting started guide](./getting-started).
 
 ***
 
-### Language Clients
+## Language Clients
 
 | Language      | Client                                                                                                                   |
 |---------------|--------------------------------------------------------------------------------------------------------------------------|
