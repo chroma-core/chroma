@@ -290,7 +290,8 @@ impl CompactOrchestrator {
             match RecordSegmentReader::from_segment(&record_segment, &self.blockfile_provider).await
             {
                 Ok(reader) => {
-                    let current_max_offset_id = reader.get_current_max_offset_id();
+                    let current_max_offset_id =
+                        Arc::new(AtomicU32::new(reader.get_max_offset_id()));
                     current_max_offset_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     Ok(current_max_offset_id)
                 }

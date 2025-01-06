@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, num::TryFromIntError, sync::atomic};
+use std::{cmp::Ordering, num::TryFromIntError};
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -120,8 +120,7 @@ impl<'me> SeekScanner<'me> {
 
         let mut size = self
             .record_segment
-            .get_current_max_offset_id()
-            .load(atomic::Ordering::Relaxed)
+            .get_max_offset_id()
             .max(self.log_offset_ids.max().unwrap_or(0));
         if size == 0 {
             return Ok(0);
