@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  webpack(config) {
+  webpack(config, { isServer }) {
     config.module.rules.push({
       test: /\.svg$/,
       use: [
@@ -12,8 +12,15 @@ const nextConfig = {
         },
       ],
     });
+
+    config.externals = [
+      ...(config.externals || []),
+      "@xenova/transformers",
+      "chromadb",
+    ];
+
     return config;
-  }
+  },
 };
 
 export default nextConfig;
