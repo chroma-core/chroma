@@ -1,10 +1,7 @@
-use crate::PersistentIndex;
+use crate::{HnswIndexConfigError, PersistentIndex};
 
 use super::config::HnswProviderConfig;
-use super::{
-    HnswIndex, HnswIndexConfig, HnswIndexFromSegmentError, Index, IndexConfig,
-    IndexConfigFromSegmentError, IndexUuid,
-};
+use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
 
 use async_trait::async_trait;
 use chroma_cache::{Cache, Weighted};
@@ -32,6 +29,8 @@ const FILES: [&str; 4] = [
     "length.bin",
     "link_lists.bin",
 ];
+
+const STAGED_FILE_PATH: &str = "staged_files";
 
 type CacheKey = CollectionUuid;
 
@@ -194,36 +193,73 @@ impl HnswIndexProvider {
             }
         };
 
-        match HnswIndex::load(storage_path_str, &index_config, new_id) {
-            Ok(index) => {
-                let _guard = self.write_mutex.lock().await;
-                match self.get(&new_id, cache_key).await {
-                    Some(index) => Ok(index.clone()),
-                    None => {
-                        let index = HnswIndexRef {
-                            inner: Arc::new(RwLock::new(index)),
-                        };
-                        self.cache.insert(*cache_key, index.clone()).await;
-                        Ok(index)
-                    }
+        // See the comment in open() for why we lock the write mutex here.
+        let _guard = self
+            .write_mutex
+            .lock()
+            .instrument(
+                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
+            )
+            .await;
+        // Check if the entry is in the cache, if it is, we assume
+        // another thread has loaded the index and we return it.
+        match self.get(&new_id, cache_key).await {
+            Some(index) => Ok(index.clone()),
+            None => match HnswIndex::load(storage_path_str, &index_config, new_id) {
+                Ok(index) => {
+                    let index = HnswIndexRef {
+                        inner: Arc::new(RwLock::new(index)),
+                    };
+                    self.cache.insert(*cache_key, index.clone()).await;
+                    Ok(index)
                 }
-            }
-            Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
+                Err(e) => Err(Box::new(HnswIndexProviderForkError::IndexLoadError(e))),
+            },
         }
     }
 
+    #[instrument]
     async fn copy_bytes_to_local_file(
         &self,
-        file_path: &PathBuf,
+        file_path: &Path,
         buf: Arc<Vec<u8>>,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
-        // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for write to local disk")).await;
-        let file_handle = tokio::fs::File::create(&file_path).await;
+        let path_prefix = match file_path.parent() {
+            Some(path) => path,
+            None => {
+                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
+            }
+        };
+        let path_suffix = match file_path.file_name() {
+            Some(path) => path,
+            None => {
+                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
+            }
+        };
+
+        let random_dir = path_prefix
+            .join(Path::new(STAGED_FILE_PATH))
+            .join(uuid::Uuid::new_v4().to_string());
+
+        // This is ok to be called from multiple threads concurrently. See
+        // the documentation of tokio::fs::create_dir_all to see why.
+        match self.create_dir_all(&random_dir).await {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
+        let random_file_path = random_dir.join(path_suffix);
+
+        // First write to a random file path and then rename to the actual file path.
+        // this defends against potentially concurrent writes to the same file. But still
+        // allows concurrent writes to different files.
+        let file_handle = tokio::fs::File::create(&random_file_path).await;
         let mut file_handle = match file_handle {
             Ok(file) => file,
             Err(e) => {
-                tracing::error!("Failed to create file: {}", e);
+                tracing::error!("Failed to create temporary file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         };
@@ -231,17 +267,46 @@ impl HnswIndexProvider {
         match res {
             Ok(_) => {}
             Err(e) => {
-                tracing::error!("Failed to copy file: {}", e);
+                tracing::error!("Failed to copy temporary file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
         match file_handle.flush().await {
-            Ok(_) => Ok(()),
+            Ok(_) => {}
             Err(e) => {
-                tracing::error!("Failed to flush file: {}", e);
-                Err(Box::new(HnswIndexProviderFileError::IOError(e)))
+                tracing::error!("Failed to flush temporary file: {}", e);
+                return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
+
+        async fn remove_temporary_files(
+            path: &Path,
+        ) -> Result<(), Box<HnswIndexProviderFileError>> {
+            // Remove the random directory.
+            match tokio::fs::remove_dir_all(path).await {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    tracing::error!("Failed to remove temporary directory: {}", e);
+                    Err(Box::new(HnswIndexProviderFileError::IOError(e)))
+                }
+            }
+        }
+
+        // Synchronize concurrent writes to the same file.
+        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for actual write to local disk")).await;
+        // Do nothing if the file exists, we assume the concurrent writer wrote the same data.
+        // This is a safe assumption because the data is immutable from our perspective.
+        if !file_path.exists() {
+            match tokio::fs::rename(&random_file_path, file_path).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Failed to rename file: {}", e);
+                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
+                }
+            }
+        }
+        // Remove the random file path.
+        remove_temporary_files(&random_dir).await
     }
 
     #[instrument]
@@ -324,21 +389,29 @@ impl HnswIndexProvider {
             }
         };
 
-        match HnswIndex::load(index_storage_path_str, &index_config, *id) {
-            Ok(index) => {
-                let _guard = self.write_mutex.lock().await;
-                match self.get(id, cache_key).await {
-                    Some(index) => Ok(index.clone()),
-                    None => {
-                        let index = HnswIndexRef {
-                            inner: Arc::new(RwLock::new(index)),
-                        };
-                        self.cache.insert(*cache_key, index.clone()).await;
-                        Ok(index)
-                    }
+        // We choose to lock the write mutex here because we want to check if a concurrent writer has already loaded the index
+        // and then load it. This is not great if we want concurrent loads, but we can optimize this later.
+        let _guard = self
+            .write_mutex
+            .lock()
+            .instrument(
+                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
+            )
+            .await;
+        // Check if the entry is in the cache, if it is, we assume
+        // another thread has loaded the index and we return it.
+        match self.get(id, cache_key).await {
+            Some(index) => Ok(index.clone()),
+            None => match HnswIndex::load(index_storage_path_str, &index_config, *id) {
+                Ok(index) => {
+                    let index = HnswIndexRef {
+                        inner: Arc::new(RwLock::new(index)),
+                    };
+                    self.cache.insert(*cache_key, index.clone()).await;
+                    Ok(index)
                 }
-            }
-            Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
+                Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
+            },
         }
     }
 
@@ -420,7 +493,7 @@ impl HnswIndexProvider {
                 .await;
             match res {
                 Ok(_) => {
-                    println!("Flushed hnsw index file: {}", file);
+                    tracing::info!("Flushed hnsw index file: {}", file);
                 }
                 Err(e) => {
                     return Err(Box::new(HnswIndexProviderFlushError::StoragePutError(e)));
@@ -473,12 +546,8 @@ impl HnswIndexProvider {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderOpenError {
-    #[error("Index configuration error")]
-    IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
     FileError(#[from] HnswIndexProviderFileError),
-    #[error("Hnsw config error")]
-    HnswConfigError(#[from] HnswIndexFromSegmentError),
     #[error("Index load error")]
     IndexLoadError(#[from] Box<dyn ChromaError>),
     #[error("Path: {0} could not be converted to string")]
@@ -488,9 +557,7 @@ pub enum HnswIndexProviderOpenError {
 impl ChromaError for HnswIndexProviderOpenError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswIndexProviderOpenError::IndexConfigError(e) => e.code(),
             HnswIndexProviderOpenError::FileError(_) => ErrorCodes::Internal,
-            HnswIndexProviderOpenError::HnswConfigError(e) => e.code(),
             HnswIndexProviderOpenError::IndexLoadError(e) => e.code(),
             HnswIndexProviderOpenError::PathToStringError(_) => ErrorCodes::InvalidArgument,
         }
@@ -499,12 +566,8 @@ impl ChromaError for HnswIndexProviderOpenError {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderForkError {
-    #[error("Index configuration error")]
-    IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
     FileError(#[from] HnswIndexProviderFileError),
-    #[error("Hnsw config error")]
-    HnswConfigError(#[from] HnswIndexFromSegmentError),
     #[error("Index load error")]
     IndexLoadError(#[from] Box<dyn ChromaError>),
     #[error("Path: {0} could not be converted to string")]
@@ -514,9 +577,7 @@ pub enum HnswIndexProviderForkError {
 impl ChromaError for HnswIndexProviderForkError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswIndexProviderForkError::IndexConfigError(e) => e.code(),
             HnswIndexProviderForkError::FileError(_) => ErrorCodes::Internal,
-            HnswIndexProviderForkError::HnswConfigError(e) => e.code(),
             HnswIndexProviderForkError::IndexLoadError(e) => e.code(),
             HnswIndexProviderForkError::PathToStringError(_) => ErrorCodes::InvalidArgument,
         }
@@ -525,12 +586,10 @@ impl ChromaError for HnswIndexProviderForkError {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderCreateError {
-    #[error("Index configuration error")]
-    IndexConfigError(#[from] IndexConfigFromSegmentError),
     #[error("Hnsw index file error")]
     FileError(#[from] HnswIndexProviderFileError),
     #[error("Hnsw config error")]
-    HnswConfigError(#[from] HnswIndexFromSegmentError),
+    HnswConfigError(#[from] HnswIndexConfigError),
     #[error("Index init error")]
     IndexInitError(#[from] Box<dyn ChromaError>),
 }
@@ -538,7 +597,6 @@ pub enum HnswIndexProviderCreateError {
 impl ChromaError for HnswIndexProviderCreateError {
     fn code(&self) -> ErrorCodes {
         match self {
-            HnswIndexProviderCreateError::IndexConfigError(e) => e.code(),
             HnswIndexProviderCreateError::FileError(_) => ErrorCodes::Internal,
             HnswIndexProviderCreateError::HnswConfigError(e) => e.code(),
             HnswIndexProviderCreateError::IndexInitError(e) => e.code(),
@@ -591,6 +649,8 @@ pub enum HnswIndexProviderFileError {
     StorageGetError(#[from] chroma_storage::GetError),
     #[error("Storage Put Error")]
     StoragePutError(#[from] chroma_storage::PutError),
+    #[error("Must provide full path to file")]
+    InvalidFilePath,
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 /// variables take precedence over values in the YAML file.
 /// By default, it is read from the current working directory,
 /// with the filename chroma_config.yaml.
-pub(crate) struct RootConfig {
+pub struct RootConfig {
     // The root config object wraps the worker config object so that
     // we can share the same config file between multiple services.
     pub query_service: QueryServiceConfig,
@@ -53,6 +53,7 @@ impl RootConfig {
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
+    // NOTE:  Copied to ../load/src/config.rs.
     pub(crate) fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
@@ -77,6 +78,12 @@ impl RootConfig {
     }
 }
 
+impl Default for RootConfig {
+    fn default() -> Self {
+        Self::load()
+    }
+}
+
 #[derive(Deserialize)]
 /// # Description
 /// The primary config for the worker service.
@@ -88,7 +95,7 @@ impl RootConfig {
 /// For example, to set my_ip, you would set CHROMA_WORKER__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
-pub(crate) struct QueryServiceConfig {
+pub struct QueryServiceConfig {
     pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
     #[allow(dead_code)]
@@ -101,7 +108,7 @@ pub(crate) struct QueryServiceConfig {
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
-    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+    pub dispatcher: crate::execution::config::DispatcherConfig,
     pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
@@ -117,7 +124,7 @@ pub(crate) struct QueryServiceConfig {
 /// For example, to set my_ip, you would set CHROMA_COMPACTOR__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
-pub(crate) struct CompactionServiceConfig {
+pub struct CompactionServiceConfig {
     pub(crate) service_name: String,
     pub(crate) otel_endpoint: String,
     pub(crate) my_member_id: String,

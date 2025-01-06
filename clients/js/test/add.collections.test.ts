@@ -12,6 +12,7 @@ import { IncludeEnum } from "../src/types";
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
 import { OllamaEmbeddingFunction } from "../src/embeddings/OllamaEmbeddingFunction";
+import { VoyageAIEmbeddingFunction } from "../src/embeddings/VoyageAIEmbeddingFunction";
 import { InvalidCollectionError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";
 
@@ -24,9 +25,6 @@ describe("add collections", () => {
 
   beforeEach(async () => {
     await client.reset();
-    // the sleep assures the db is fully reset
-    // this should be further investigated
-    await new Promise((r) => setTimeout(r, 1000));
   });
 
   test("it should add single embeddings to a collection", async () => {
@@ -150,6 +148,30 @@ describe("add collections", () => {
     });
   }
 
+  if (!process.env.VOYAGE_API_KEY) {
+    test.skip("it should add VoyageAI embeddings", async () => {});
+  } else {
+    test("it should add VoyageAI embeddings", async () => {
+      const embedder = new VoyageAIEmbeddingFunction({
+        api_key: process.env.VOYAGE_API_KEY || "",
+        model: "voyage-3-large"
+      });
+      const collection = await client.createCollection({
+        name: "test",
+        embeddingFunction: embedder,
+      });
+      const embeddings = await embedder.generate(DOCUMENTS);
+      await collection.add({ ids: IDS, embeddings: embeddings });
+      const count = await collection.count();
+      expect(count).toBe(3);
+      var res = await collection.get({
+        ids: IDS,
+        include: [IncludeEnum.Embeddings],
+      });
+      expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
+    });
+  }
+
   test("add documents", async () => {
     const collection = await client.createCollection({ name: "test" });
     await collection.add({
@@ -164,7 +186,7 @@ describe("add collections", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    expect(async () => {
+    await expect(async () => {
       await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
     }).rejects.toThrow(InvalidCollectionError);
   });

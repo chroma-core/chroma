@@ -143,6 +143,23 @@ message GetCollectionsResponse {
   reserved "status";
 }
 
+message GetCollectionWithSegmentsRequest {
+  string id = 1;
+}
+
+message GetCollectionWithSegmentsResponse {
+  Collection collection = 1;
+  repeated Segment segments = 2;
+}
+
+message CheckCollectionsRequest {
+  repeated string collection_ids = 1;
+}
+
+message CheckCollectionsResponse {
+  repeated bool deleted = 1;
+}
+
 message UpdateCollectionRequest {
   string id = 1;
   optional string name = 3;
@@ -211,6 +228,8 @@ service SysDB {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
+  rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}

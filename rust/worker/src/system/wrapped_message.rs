@@ -1,10 +1,7 @@
-use crate::utils::get_panic_message;
-
 use super::{Component, ComponentContext, Handler, Message};
 use async_trait::async_trait;
 use futures::FutureExt;
 use std::{fmt::Debug, panic::AssertUnwindSafe};
-use thiserror::Error;
 use tokio::sync::oneshot;
 
 // Why is this separate from the WrappedMessage struct? WrappedMessage is only generic
@@ -28,14 +25,6 @@ impl<M: Message, Result: Send> HandleableMessageImpl<M, Result> {
     }
 }
 
-#[derive(Debug, Error)]
-pub(super) enum MessageHandlerError {
-    #[error("Panic occurred while handling message: {0:?}")]
-    Panic(Option<String>),
-}
-
-type MessageHandlerWrappedResult<R> = Result<R, MessageHandlerError>;
-
 /// Erases the type of the message so it can be sent over a channel and optionally bundles a tracing context.
 #[derive(Debug)]
 pub(crate) struct WrappedMessage<C>
@@ -49,7 +38,7 @@ where
 impl<C: Component> WrappedMessage<C> {
     pub(super) fn new<M>(
         message: M,
-        reply_channel: Option<oneshot::Sender<MessageHandlerWrappedResult<C::Result>>>,
+        reply_channel: Option<oneshot::Sender<C::Result>>,
         tracing_context: Option<tracing::Span>,
     ) -> Self
     where
@@ -80,8 +69,7 @@ where
 }
 
 #[async_trait]
-impl<C, M> HandleableMessage<C>
-    for Option<HandleableMessageImpl<M, MessageHandlerWrappedResult<C::Result>>>
+impl<C, M> HandleableMessage<C> for Option<HandleableMessageImpl<M, C::Result>>
 where
     C: Component + Handler<M>,
     M: Message,
@@ -96,18 +84,13 @@ where
                 Ok(result) => {
                     if let Some(reply_channel) = message.reply_channel {
                         reply_channel
-                            .send(Ok(result))
+                            .send(result)
                             .expect("message reply channel was unexpectedly dropped by caller");
                     }
                 }
                 Err(panic_value) => {
-                    let panic_message = get_panic_message(panic_value);
-
-                    if let Some(reply_channel) = message.reply_channel {
-                        reply_channel
-                            .send(Err(MessageHandlerError::Panic(panic_message)))
-                            .expect("message reply channel was unexpectedly dropped by caller");
-                    }
+                    tracing::error!("Panic occurred while handling message: {:?}", panic_value);
+                    component.on_handler_panic(panic_value);
                 }
             };
         }

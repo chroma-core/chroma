@@ -11,7 +11,6 @@ use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
-use crate::BlockfileError;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use futures::future::join_all;
@@ -225,7 +224,7 @@ impl ArrowUnorderedBlockfileWriter {
     }
 
     #[allow(dead_code)]
-    pub(crate) async fn get_owned<K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    pub async fn get_owned<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
@@ -460,63 +459,6 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
-    pub(crate) async fn get_at_index(
-        &'me self,
-        index: usize,
-    ) -> Result<(&'me str, K, V), Box<dyn ChromaError>> {
-        let mut block_offset = 0;
-        let mut block = None;
-        let sparse_index_len = self.root.sparse_index.len();
-        for i in 0..sparse_index_len {
-            // This unwrap is safe because we are iterating over the sparse index
-            // within its len. The sparse index reader is immutable and cannot be modified
-            let uuid = self
-                .root
-                .sparse_index
-                .data
-                .forward
-                .iter()
-                .nth(i)
-                .unwrap()
-                .1
-                .id;
-            block = match self.get_block(uuid).await {
-                Ok(Some(block)) => Some(block),
-                Ok(None) => {
-                    tracing::error!("Block with id {:?} not found", uuid);
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
-            match block {
-                Some(b) => {
-                    if block_offset + b.len() > index {
-                        break;
-                    }
-                    block_offset += b.len();
-                }
-                None => {
-                    tracing::error!("Block id {:?} not found", uuid);
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            }
-        }
-        let block = block.unwrap();
-        let res = block.get_at_index::<'me, K, V>(index - block_offset);
-        match res {
-            Some((prefix, key, value)) => Ok((prefix, key, value)),
-            _ => {
-                tracing::error!(
-                    "Value not found at index {:?} for block",
-                    index - block_offset,
-                );
-                Err(Box::new(BlockfileError::NotFoundError))
-            }
-        }
-    }
-
     // Returns all Arrow records in the specified range.
     pub(crate) fn get_range_stream<'prefix, PrefixRange, KeyRange>(
         &'me self,
@@ -655,6 +597,56 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
     pub(crate) fn id(&self) -> Uuid {
         self.root.id
+    }
+
+    /// Returns the number of elements strictly less than the given prefix-key pair in the blockfile
+    /// In other words, the rank is the position where the given prefix-key pair can be inserted while maintaining the order of the blockfile
+    pub(crate) async fn rank(
+        &'me self,
+        prefix: &'me str,
+        key: K,
+    ) -> Result<usize, Box<dyn ChromaError>> {
+        let mut rank = 0;
+
+        // This should be sorted by offset id ranges
+        let block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_range(..=prefix, ..=key.clone());
+
+        // The block that may contain the prefix-key pair
+        if let Some(last_id) = block_ids.last() {
+            if self.root.version >= Version::V1_1 {
+                rank += self
+                    .root
+                    .sparse_index
+                    .data
+                    .forward
+                    .values()
+                    .take(block_ids.len() - 1)
+                    .map(|meta| meta.count)
+                    .sum::<u32>() as usize;
+            } else {
+                self.load_blocks(&block_ids).await;
+                for block_id in block_ids.iter().take(block_ids.len() - 1) {
+                    let block =
+                        self.get_block(*block_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                            .ok_or(Box::new(ArrowBlockfileError::BlockNotFound)
+                                as Box<dyn ChromaError>)?;
+                    rank += block.len();
+                }
+            }
+            let last_block = self
+                .get_block(*last_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
+            rank += last_block.binary_search_prefix_key(prefix, &key);
+        }
+
+        Ok(rank)
     }
 
     /// Check if the blockfile is valid.
@@ -1509,7 +1501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_at_index() {
+    async fn test_rank() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -1541,12 +1533,9 @@ mod tests {
             .unwrap();
 
         for i in 0..n {
-            let expected_key = format!("{:04}", i);
-            let expected_value = vec![i];
-            let res = reader.get_at_index(i as usize).await.unwrap();
-            assert_eq!(res.0, "key");
-            assert_eq!(res.1, expected_key);
-            assert_eq!(res.2, expected_value);
+            let rank_key = format!("{:04}", i);
+            let rank = reader.rank("key", &rank_key).await.unwrap();
+            assert_eq!(rank, i as usize);
         }
     }
 

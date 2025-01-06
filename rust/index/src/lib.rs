@@ -3,6 +3,7 @@ pub mod fulltext;
 mod hnsw;
 pub mod hnsw_provider;
 pub mod metadata;
+pub mod spann;
 mod types;
 pub mod utils;
 
@@ -12,6 +13,8 @@ use chroma_cache::new_non_persistent_cache_for_test;
 use chroma_storage::test_storage;
 pub use hnsw::*;
 use hnsw_provider::HnswIndexProvider;
+#[allow(unused_imports)]
+pub use spann::*;
 use tempfile::tempdir;
 pub use types::*;
 

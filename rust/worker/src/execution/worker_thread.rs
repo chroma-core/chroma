@@ -45,7 +45,7 @@ impl Component for WorkerThread {
         ComponentRuntime::Dedicated
     }
 
-    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn start(&mut self, ctx: &ComponentContext<Self>) {
         let req = TaskRequestMessage::new(ctx.receiver());
         let _req = self.dispatcher.send(req, None).await;
         // TODO: what to do with resp?

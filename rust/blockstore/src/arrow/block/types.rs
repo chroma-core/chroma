@@ -277,7 +277,7 @@ impl Block {
     /// Finds the partition point of the prefix and key.
     /// Returns the index of the first element that matches the target prefix and key. If no element matches, returns the index at which the target prefix and key could be inserted to maintain sorted order.
     #[inline]
-    fn binary_search_prefix_key<'me, K: ArrowReadableKey<'me>>(
+    pub(crate) fn binary_search_prefix_key<'me, K: ArrowReadableKey<'me>>(
         &'me self,
         prefix: &str,
         key: &K,
@@ -416,31 +416,6 @@ impl Block {
                 V::get(self.data.column(2), index),
             )
         })
-    }
-
-    /// Get all the values for a given prefix in the block where the key is between the given keys
-    /// ### Notes
-    /// - Returns a tuple of (prefix, key, value)
-    /// - Returns None if the requested index is out of bounds
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    pub fn get_at_index<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
-        &'me self,
-        index: usize,
-    ) -> Option<(&'me str, K, V)> {
-        if index >= self.data.num_rows() {
-            return None;
-        }
-        let prefix_arr = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        let prefix = prefix_arr.value(index);
-        let key = K::get(self.data.column(1), index);
-        let value = V::get(self.data.column(2), index);
-        Some((prefix, key, value))
     }
 
     /*

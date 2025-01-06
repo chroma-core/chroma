@@ -2,6 +2,7 @@ import path from "node:path";
 import { exec } from "node:child_process";
 import { GenericContainer, Wait } from "testcontainers";
 import bcrypt from "bcrypt";
+import chalk from "chalk";
 
 const CHROMADB_PORT = 8000;
 
@@ -71,6 +72,13 @@ export async function startChromaContainer({
         target: "/chromadb/test.htpasswd",
       },
     ]);
+    container.withLogConsumer((stream) => {
+      stream.on("data", (line: Buffer) => {
+        console.log(
+          chalk.blue("🐳 chromadb: ") + line.toString("utf-8").trimEnd(),
+        );
+      });
+    });
   }
 
   const env: Record<string, string> = {

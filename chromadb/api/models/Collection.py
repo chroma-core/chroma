@@ -1,3 +1,4 @@
+import inspect
 from typing import TYPE_CHECKING, Optional, Union
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -347,6 +348,8 @@ class Collection(CollectionCommon["ServerAPI"]):
             metadatas=upsert_request["metadatas"],
             documents=upsert_request["documents"],
             uris=upsert_request["uris"],
+            tenant=self.tenant,
+            database=self.database,
         )
 
     def delete(
@@ -380,3 +383,42 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+
+class CollectionName(str):
+    """
+    A string wrapper to supply users with indicative message about list_collections only
+    returning collection names, in lieu of Collection object.
+
+    When a user will try to access an attribute on a CollectionName string, the __getattribute__ method
+    of str is invoked first. If a valid str method or property is found, it will be used. Otherwise, the fallback
+    __getattr__ defined here is invoked next. It will error if the requested attribute is a Collection
+    method or property.
+
+    For example:
+    collection_name = client.list_collections()[0] # collection_name = "test"
+
+    collection_name.startsWith("t") # Evaluates to True.
+    # __getattribute__ is invoked first, selecting startsWith from str.
+
+    collection_name.add(ids=[...], documents=[...]) # Raises the error defined below
+    # __getattribute__ is invoked first, not finding a match in str.
+    # __getattr__ from this class is invoked and raises an error
+
+    """
+
+    def __getattr__(self, item):
+        collection_attributes_and_methods = [
+            member
+            for member, _ in inspect.getmembers(Collection)
+            if not member.startswith("_")
+        ]
+
+        if item in collection_attributes_and_methods:
+            raise NotImplementedError(
+                f"In Chroma v0.6.0, list_collections only returns collection names. "
+                f"Use Client.get_collection({str(self)}) to access {item}. "
+                f"See https://docs.trychroma.com/deployment/migration for more information."
+            )
+
+        raise AttributeError(f"'CollectionName' object has no attribute '{item}'")

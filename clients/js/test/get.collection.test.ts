@@ -1,17 +1,8 @@
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "@jest/globals";
+import { beforeEach, describe, expect, test } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
 import { InvalidArgumentError, InvalidCollectionError } from "../src/Errors";
 import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
-import { StartedTestContainer } from "testcontainers";
 import { ChromaClient } from "../src/ChromaClient";
-import { startChromaContainer } from "./startChromaContainer";
 
 describe("get collections", () => {
   // connects to the unauthenticated chroma instance started in
@@ -22,9 +13,6 @@ describe("get collections", () => {
 
   beforeEach(async () => {
     await client.reset();
-    // the sleep assures the db is fully reset
-    // this should be further investigated
-    await new Promise((r) => setTimeout(r, 1000));
   });
 
   test("it should get documents from a collection", async () => {
@@ -119,7 +107,7 @@ describe("get collections", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    expect(async () => {
+    await expect(async () => {
       await collection.get({ ids: IDS });
     }).rejects.toThrow(InvalidCollectionError);
   });

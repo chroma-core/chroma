@@ -1,18 +1,20 @@
-use std::{cmp::Ordering, num::TryFromIntError, sync::atomic};
+use std::{cmp::Ordering, num::TryFromIntError};
 
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
+use futures::StreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializerError,
     },
 };
 
@@ -118,8 +120,7 @@ impl<'me> SeekScanner<'me> {
 
         let mut size = self
             .record_segment
-            .get_current_max_offset_id()
-            .load(atomic::Ordering::Relaxed)
+            .get_max_offset_id()
             .max(self.log_offset_ids.max().unwrap_or(0));
         if size == 0 {
             return Ok(0);
@@ -140,44 +141,38 @@ impl<'me> SeekScanner<'me> {
 
     // Seek the start in the log and record segment, then scan for the specified number of offset ids
     async fn seek_and_scan(&self, skip: u64, mut fetch: u64) -> Result<RoaringBitmap, LimitError> {
-        let record_count = self.record_segment.count().await?;
         let starting_offset = self.seek_starting_offset(skip).await?;
         let mut log_index = self.log_offset_ids.rank(starting_offset)
             - self.log_offset_ids.contains(starting_offset) as u64;
-        let mut record_index = self
-            .record_segment
-            .get_offset_id_rank(starting_offset)
-            .await?;
+        let mut log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
+        let mut record_offset_stream = self.record_segment.get_offset_stream(starting_offset..);
+        let mut record_offset_id = record_offset_stream.next().await.transpose()?;
         let mut merged_result = Vec::new();
 
         while fetch > 0 {
-            let log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
-            let record_offset_id = (record_index < record_count).then_some(
-                self.record_segment
-                    .get_offset_id_at_index(record_index)
-                    .await?,
-            );
             match (log_offset_id, record_offset_id) {
                 (_, Some(oid)) if self.mask.contains(oid) => {
-                    record_index += 1;
+                    record_offset_id = record_offset_stream.next().await.transpose()?;
                     continue;
                 }
                 (Some(log_oid), Some(record_oid)) => {
                     if log_oid < record_oid {
                         merged_result.push(log_oid);
                         log_index += 1;
+                        log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
                     } else {
                         merged_result.push(record_oid);
-                        record_index += 1;
+                        record_offset_id = record_offset_stream.next().await.transpose()?;
                     }
                 }
                 (None, Some(oid)) => {
                     merged_result.push(oid);
-                    record_index += 1;
+                    record_offset_id = record_offset_stream.next().await.transpose()?;
                 }
                 (Some(oid), None) => {
                     merged_result.push(oid);
                     log_index += 1;
+                    log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
                 }
                 _ => break,
             };
@@ -213,21 +208,21 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
         let mut materialized_log_offset_ids = match &input.log_offset_ids {
             SignedRoaringBitmap::Include(rbm) => rbm.clone(),
             SignedRoaringBitmap::Exclude(rbm) => {
-                let materializer =
-                    LogMaterializer::new(record_segment_reader.clone(), input.logs.clone(), None);
-                let materialized_logs = materializer
-                    .materialize()
-                    .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-                    .await?;
+                let materialized_logs =
+                    materialize_logs(&record_segment_reader, input.logs.clone(), None)
+                        .instrument(
+                            tracing::trace_span!(parent: Span::current(), "Materialize logs"),
+                        )
+                        .await?;
 
                 let active_domain: RoaringBitmap = materialized_logs
                     .iter()
-                    .filter_map(|(log, _)| {
+                    .filter_map(|log| {
                         (!matches!(
-                            log.final_operation,
+                            log.get_operation(),
                             MaterializedLogOperation::DeleteExisting
                         ))
-                        .then_some(log.offset_id)
+                        .then_some(log.get_offset_id())
                     })
                     .collect();
                 active_domain - rbm
@@ -306,12 +301,11 @@ mod tests {
         compact_offset_ids: SignedRoaringBitmap,
     ) -> LimitInput {
         let mut test_segment = TestSegment::default();
-        let generator = LogGenerator {
-            generator: upsert_generator,
-        };
-        test_segment.populate_with_generator(100, &generator).await;
+        test_segment
+            .populate_with_generator(100, upsert_generator)
+            .await;
         LimitInput {
-            logs: generator.generate_chunk(31..=60),
+            logs: upsert_generator.generate_chunk(31..=60),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             log_offset_ids,

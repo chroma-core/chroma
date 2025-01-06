@@ -2,12 +2,12 @@ use crate::{
     execution::operator::Operator,
     segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
 };
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
 use thiserror::Error;
-use tonic::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct CountRecordsOperator {}
@@ -199,15 +199,14 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 
 #[cfg(test)]
 mod tests {
+    use crate::segment::materialize_logs;
     use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
-    use crate::segment::types::SegmentFlusher;
-    use crate::segment::LogMaterializer;
     use crate::{
         execution::{
             operator::Operator,
             operators::count_records::{CountRecordsInput, CountRecordsOperator},
         },
-        segment::{record_segment::RecordSegmentWriter, SegmentWriter},
+        segment::record_segment::RecordSegmentWriter,
     };
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
@@ -293,14 +292,12 @@ mod tests {
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await
                 .expect("Log materialization failed");
             segment_writer
-                .apply_materialized_log_chunk(mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materializated log failed");
             let flusher = segment_writer

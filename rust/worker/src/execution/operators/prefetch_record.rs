@@ -1,19 +1,20 @@
 use std::collections::HashSet;
 
-use chroma_blockstore::provider::BlockfileProvider;
+use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Chunk, LogRecord, Segment};
 use thiserror::Error;
-use tonic::async_trait;
 use tracing::{trace, Instrument, Span};
 
 use crate::{
     execution::operator::Operator,
     segment::{
+        materialize_logs,
         record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializer, LogMaterializerError,
+        LogMaterializerError,
     },
 };
+
+use super::projection::ProjectionInput;
 
 /// The `PrefetchRecordOperator` prefetches the relevant records from the record segments to the cache
 ///
@@ -21,10 +22,7 @@ use crate::{
 /// None
 ///
 /// # Inputs
-/// - `logs`: The latest logs of the collection
-/// - `blockfile_provider`: The blockfile provider
-/// - `record_segment`: The record segment information
-/// - `offset_ids`: The offset ids of the records to prefetch
+/// Identical to ProjectionInput
 ///
 /// # Outputs
 /// None
@@ -34,13 +32,7 @@ use crate::{
 #[derive(Debug)]
 pub struct PrefetchRecordOperator {}
 
-#[derive(Debug)]
-pub struct PrefetchRecordInput {
-    pub logs: Chunk<LogRecord>,
-    pub blockfile_provider: BlockfileProvider,
-    pub record_segment: Segment,
-    pub offset_ids: Vec<u32>,
-}
+pub type PrefetchRecordInput = ProjectionInput;
 
 pub type PrefetchRecordOutput = ();
 
@@ -84,20 +76,15 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
             Err(e) => return Err((*e).into()),
         };
 
-        let materializer = LogMaterializer::new(
-            Some(record_segment_reader.clone()),
-            input.logs.clone(),
-            None,
-        );
-        let materialized_logs = materializer
-            .materialize()
+        let some_reader = Some(record_segment_reader.clone());
+        let materialized_logs = materialize_logs(&some_reader, input.logs.clone(), None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
 
         let mut record_segment_offset_ids: HashSet<_> =
             HashSet::from_iter(input.offset_ids.iter().cloned());
-        for (log, _) in materialized_logs.iter() {
-            record_segment_offset_ids.remove(&log.offset_id);
+        for log in &materialized_logs {
+            record_segment_offset_ids.remove(&log.get_offset_id());
         }
 
         record_segment_reader

@@ -126,8 +126,7 @@ impl ObjectStore {
             file.read_exact(&mut buffer).await?;
             Ok(buffer)
         }
-        let part_count =
-            (file_size + self.upload_part_size_bytes - 1) / self.upload_part_size_bytes;
+        let part_count = file_size.div_ceil(self.upload_part_size_bytes);
         let mut pieces = vec![];
         for i in 0..part_count {
             let path = path.clone();

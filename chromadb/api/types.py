@@ -56,6 +56,12 @@ def normalize_embeddings(
 ) -> Optional[Embeddings]:
     if target is None:
         return None
+
+    if len(target) == 0:
+        raise ValueError(
+            f"Expected Embedings to be non-empty list or numpy array, got {target}"
+        )
+
     if isinstance(target, list):
         # One PyEmbedding
         if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):

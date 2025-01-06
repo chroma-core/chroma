@@ -106,7 +106,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             loop_hash = 0
 
         if loop_hash not in self._clients:
-            self._clients[loop_hash] = httpx.AsyncClient(timeout=None)
+            self._clients[loop_hash] = httpx.AsyncClient(
+                timeout=None,
+                headers=self._settings.chroma_server_headers,
+                verify=self._settings.chroma_server_ssl_verify or False,
+            )
 
         return self._clients[loop_hash]
 

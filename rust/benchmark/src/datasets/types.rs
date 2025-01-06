@@ -19,6 +19,7 @@ use super::util::{get_dir_for_persistent_dataset_files, get_or_populate_cached_d
 pub struct Record {
     pub document: String,
     pub metadata: HashMap<String, String>,
+    pub embedding: Option<Vec<f32>>,
 }
 
 /// The base trait that all datasets must implement.
@@ -221,6 +222,7 @@ mod tests {
             .map(|&content| Record {
                 document: content.to_string(),
                 metadata: HashMap::new(),
+                embedding: None,
             })
             .collect();
 
@@ -230,6 +232,7 @@ mod tests {
             .map(|&content| Record {
                 document: content.to_string(),
                 metadata: HashMap::new(),
+                embedding: None,
             })
             .collect();
 

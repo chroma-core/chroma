@@ -17,7 +17,7 @@ variable "machine_type" {
 
 variable "chroma_version" {
   description = "Chroma version to install"
-  default     = "0.5.20"
+  default     = "0.6.1"
 }
 
 variable "chroma_server_auth_credentials" {
@@ -61,7 +61,7 @@ variable "ssh_public_key_path" {
 }
 
 provider "azurerm" {
-  features = {}
+  features {}
 }
 
 # Resource Group

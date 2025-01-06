@@ -1,39 +1,38 @@
 use std::iter::once;
 
-use crate::config::QueryServiceConfig;
-use crate::execution::dispatcher::Dispatcher;
-use crate::execution::operators::fetch_log::FetchLogOperator;
-use crate::execution::operators::fetch_segment::FetchSegmentOperator;
-use crate::execution::operators::filter::FilterOperator;
-use crate::execution::operators::knn::KnnOperator;
-use crate::execution::operators::knn_projection::KnnProjectionOperator;
-use crate::execution::operators::limit::LimitOperator;
-use crate::execution::operators::projection::ProjectionOperator;
-use crate::execution::orchestration::get::GetOrchestrator;
-use crate::execution::orchestration::knn::{KnnError, KnnFilterOrchestrator, KnnOrchestrator};
-use crate::execution::orchestration::{CountQueryOrchestrator, GetVectorsOrchestrator};
-use crate::log::log::Log;
-use crate::sysdb::sysdb::SysDb;
-use crate::system::{ComponentHandle, System};
-use crate::tracing::util::wrap_span_with_parent_context;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_types::chroma_proto::{
-    self, CountRecordsRequest, CountRecordsResponse, QueryMetadataRequest, QueryMetadataResponse,
-    RequestVersionContext,
+use chroma_types::{
+    chroma_proto::{
+        self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
+        KnnBatchResult, KnnPlan,
+    },
+    CollectionAndSegments,
 };
-use chroma_types::chroma_proto::{
-    GetVectorsRequest, GetVectorsResponse, QueryVectorsRequest, QueryVectorsResponse,
-};
-use chroma_types::{CollectionUuid, MetadataValue, ScalarEncoding, SegmentUuid, Where};
-use futures::future::try_join_all;
+use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
-use uuid::Uuid;
+
+use crate::{
+    config::QueryServiceConfig,
+    execution::{
+        dispatcher::Dispatcher,
+        operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
+        orchestration::{
+            get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
+            orchestrator::Orchestrator, CountOrchestrator,
+        },
+    },
+    log::log::Log,
+    sysdb::sysdb::SysDb,
+    system::{ComponentHandle, System},
+    tracing::util::wrap_span_with_parent_context,
+    utils::convert::{from_proto_knn, to_proto_knn_batch_result},
+};
 
 #[derive(Clone)]
 pub struct WorkerServer {
@@ -43,7 +42,7 @@ pub struct WorkerServer {
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
     log: Box<Log>,
-    sysdb: Box<SysDb>,
+    _sysdb: Box<SysDb>,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
@@ -87,7 +86,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
-            sysdb,
+            _sysdb: sysdb,
             log,
             hnsw_index_provider,
             blockfile_provider,
@@ -100,13 +99,9 @@ impl WorkerServer {
     pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
-        let server = Server::builder()
-            .add_service(chroma_proto::vector_reader_server::VectorReaderServer::new(
-                worker.clone(),
-            ))
-            .add_service(
-                chroma_proto::metadata_reader_server::MetadataReaderServer::new(worker.clone()),
-            );
+        let server = Server::builder().add_service(
+            chroma_proto::query_executor_server::QueryExecutorServer::new(worker.clone()),
+        );
 
         #[cfg(debug_assertions)]
         let server =
@@ -137,461 +132,237 @@ impl WorkerServer {
         self.system = Some(system);
     }
 
-    pub(crate) async fn query_vectors_instrumented(
+    fn fetch_log(&self, collection_and_segments: &CollectionAndSegments) -> FetchLogOperator {
+        FetchLogOperator {
+            log_client: self.log.clone(),
+            // TODO: Make this configurable
+            batch_size: 100,
+            // The collection log position is inclusive, and we want to start from the next log
+            // Note that we query using the incoming log position this is critical for correctness
+            start_log_offset_id: collection_and_segments.collection.log_position as u32 + 1,
+            maximum_fetch_count: None,
+            collection_uuid: collection_and_segments.collection.collection_id,
+        }
+    }
+
+    async fn orchestrate_count(
         &self,
-        request: Request<QueryVectorsRequest>,
-    ) -> Result<Response<QueryVectorsResponse>, Status> {
-        let request = request.into_inner();
-        let segment_uuid = to_segment_uuid(&request.segment_id)?;
-        let collection_uuid = to_collection_uuid(&request.collection_id)?;
-        let (collection_version, log_position) = get_version_context(&request.version_context)?;
-        let system = self.clone_system()?;
+        count: Request<CountPlan>,
+    ) -> Result<Response<CountResult>, Status> {
+        let scan = count
+            .into_inner()
+            .scan
+            .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
+
+        let collection_and_segments = scan.try_into()?;
+        let fetch_log = self.fetch_log(&collection_and_segments);
+
+        let count_orchestrator = CountOrchestrator::new(
+            self.blockfile_provider.clone(),
+            self.clone_dispatcher()?,
+            // TODO: Make this configurable
+            1000,
+            collection_and_segments,
+            fetch_log,
+        );
+
+        match count_orchestrator.run(self.clone_system()?).await {
+            Ok(count) => Ok(Response::new(CountResult {
+                count: count as u32,
+            })),
+            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+        }
+    }
+
+    async fn orchestrate_get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
+        let get_inner = get.into_inner();
+        let scan = get_inner
+            .scan
+            .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
+
+        let collection_and_segments = scan.try_into()?;
+        let fetch_log = self.fetch_log(&collection_and_segments);
+
+        let filter = get_inner
+            .filter
+            .ok_or(Status::invalid_argument("Invalid Filter Operator"))?;
+
+        let limit = get_inner
+            .limit
+            .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
+
+        let projection = get_inner
+            .projection
+            .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
+
+        let get_orchestrator = GetOrchestrator::new(
+            self.blockfile_provider.clone(),
+            self.clone_dispatcher()?,
+            // TODO: Make this configurable
+            1000,
+            collection_and_segments,
+            fetch_log,
+            filter.try_into()?,
+            limit.into(),
+            projection.into(),
+        );
+
+        match get_orchestrator.run(self.clone_system()?).await {
+            Ok(result) => Ok(Response::new(result.try_into()?)),
+            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+        }
+    }
+
+    async fn orchestrate_knn(
+        &self,
+        knn: Request<KnnPlan>,
+    ) -> Result<Response<KnnBatchResult>, Status> {
         let dispatcher = self.clone_dispatcher()?;
+        let system = self.clone_system()?;
 
-        let mut query_vectors = Vec::with_capacity(request.vectors.len());
-        for proto_query_vector in request.vectors {
-            let (query_vector, _encoding) = proto_query_vector
-                .try_into()
-                .map_err(|e| Status::internal(format!("Error converting vector: {}", e)))?;
+        let knn_inner = knn.into_inner();
 
-            query_vectors.push(query_vector);
+        let scan = knn_inner
+            .scan
+            .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
+
+        let collection_and_segments = scan.try_into()?;
+
+        let fetch_log = self.fetch_log(&collection_and_segments);
+
+        let filter = knn_inner
+            .filter
+            .ok_or(Status::invalid_argument("Invalid Filter Operator"))?;
+
+        let knn = knn_inner
+            .knn
+            .ok_or(Status::invalid_argument("Invalid Knn Operator"))?;
+
+        let projection = knn_inner
+            .projection
+            .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
+        let knn_projection = KnnProjectionOperator::try_from(projection)
+            .map_err(|e| Status::invalid_argument(format!("Invalid Projection Operator: {}", e)))?;
+
+        if knn.embeddings.is_empty() {
+            return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
+        }
+
+        // If dimension is not set and segment is uninitialized, we assume
+        // this is a query on empty collection, so we return early here
+        if collection_and_segments.collection.dimension.is_none()
+            && collection_and_segments.vector_segment.file_path.is_empty()
+        {
+            return Ok(Response::new(to_proto_knn_batch_result(
+                once(Default::default())
+                    .cycle()
+                    .take(knn.embeddings.len())
+                    .collect(),
+            )?));
         }
 
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
             self.hnsw_index_provider.clone(),
-            // TODO: Load the configuration for this
+            // TODO: Make this configurable
             1000,
-            FetchLogOperator {
-                log_client: self.log.clone(),
-                batch_size: 100,
-                start_log_offset_id: log_position as u32 + 1,
-                maximum_fetch_count: None,
-                collection_uuid,
-            },
-            FetchSegmentOperator {
-                sysdb: self.sysdb.clone(),
-                collection_uuid,
-                collection_version,
-                metadata_uuid: None,
-                record_uuid: None,
-                vector_uuid: Some(SegmentUuid(segment_uuid)),
-            },
-            FilterOperator {
-                query_ids: (!request.allowed_ids.is_empty()).then_some(request.allowed_ids),
-                where_clause: None,
-            },
+            collection_and_segments,
+            fetch_log,
+            filter.try_into()?,
         );
 
-        let knn_filter_output = match knn_filter_orchestrator.run(system.clone()).await {
+        let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
             Ok(output) => output,
-            Err(KnnError::EmptyCollection) => {
-                return Ok(Response::new(chroma_proto::QueryVectorsResponse {
-                    results: once(chroma_proto::VectorQueryResults {
-                        results: Vec::new(),
-                    })
-                    .cycle()
-                    .take(query_vectors.len())
-                    .collect(),
-                }));
-            }
             Err(e) => {
-                tracing::error!("Error running orchestrator: {}", e);
-                return Err(Status::new(
-                    e.code().into(),
-                    format!("Error running orchestrator: {}", e),
-                ));
+                return Err(Status::new(e.code().into(), e.to_string()));
             }
         };
 
-        let embedding_dim = query_vectors[0].len();
-
-        let knn_orchestrators: Vec<_> = query_vectors
+        let knn_orchestrator_futures = from_proto_knn(knn)?
             .into_iter()
-            .map(|embedding| {
+            .map(|knn| {
                 KnnOrchestrator::new(
                     self.blockfile_provider.clone(),
                     dispatcher.clone(),
-                    // TODO: Load the configuration for this
+                    // TODO: Make this configurable
                     1000,
-                    knn_filter_output.clone(),
-                    KnnOperator {
-                        embedding,
-                        fetch: request.k as u32,
-                    },
-                    KnnProjectionOperator {
-                        projection: ProjectionOperator {
-                            document: false,
-                            embedding: request.include_embeddings,
-                            metadata: false,
-                        },
-                        distance: true,
-                    },
+                    matching_records.clone(),
+                    knn,
+                    knn_projection.clone(),
                 )
             })
-            .collect();
+            .map(|knner| knner.run(system.clone()));
 
-        let result = try_join_all(
-            knn_orchestrators
-                .into_iter()
-                .map(|knn| knn.run(system.clone())),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Error running orchestrator: {}", e);
-            Status::new(
-                e.code().into(),
-                format!("Error running orchestrator: {}", e),
-            )
-        })?;
-
-        let mut proto_results_for_all = Vec::with_capacity(result.len());
-        for result_set in result {
-            let mut proto_results = Vec::with_capacity(result_set.records.len());
-            for query_result in result_set.records {
-                let proto_result = chroma_proto::VectorQueryResult {
-                    id: query_result.record.id,
-                    distance: query_result
-                        .distance
-                        .expect("The distance should be present"),
-                    vector: match query_result.record.embedding {
-                        Some(vector) => {
-                            match (vector, ScalarEncoding::FLOAT32, embedding_dim).try_into() {
-                                Ok(proto_vector) => Some(proto_vector),
-                                Err(e) => {
-                                    return Err(Status::internal(format!(
-                                        "Error converting vector: {}",
-                                        e
-                                    )));
-                                }
-                            }
-                        }
-                        None => None,
-                    },
-                };
-                proto_results.push(proto_result);
-            }
-            proto_results_for_all.push(chroma_proto::VectorQueryResults {
-                results: proto_results,
-            });
+        match stream::iter(knn_orchestrator_futures)
+            .buffered(32)
+            .try_collect::<Vec<_>>()
+            .await
+        {
+            Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
+            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
-
-        let resp = chroma_proto::QueryVectorsResponse {
-            results: proto_results_for_all,
-        };
-
-        Ok(Response::new(resp))
-    }
-
-    async fn get_vectors_instrumented(
-        &self,
-        request: Request<GetVectorsRequest>,
-    ) -> Result<Response<GetVectorsResponse>, Status> {
-        let request = request.into_inner();
-        let segment_uuid = to_segment_uuid(&request.segment_id)?;
-        let collection_uuid = to_collection_uuid(&request.collection_id)?;
-        let (collection_version, log_position) = get_version_context(&request.version_context)?;
-
-        let orchestrator = GetVectorsOrchestrator::new(
-            self.clone_system()?,
-            request.ids,
-            segment_uuid,
-            collection_uuid,
-            self.log.clone(),
-            self.sysdb.clone(),
-            self.clone_dispatcher()?,
-            self.blockfile_provider.clone(),
-            collection_version,
-            log_position,
-        );
-        let result = orchestrator.run().await.map_err(|e| {
-            tracing::error!("Error running orchestrator: {}", e);
-            Status::new(
-                e.code().into(),
-                format!("Error running orchestrator: {}", e),
-            )
-        })?;
-
-        let mut output = Vec::with_capacity(result.ids.len());
-        for (id, vector) in result.ids.into_iter().zip(result.vectors.into_iter()) {
-            let vector_len = vector.len();
-            let proto_vector = match (vector, ScalarEncoding::FLOAT32, vector_len).try_into() {
-                Ok(vector) => vector,
-                Err(_) => {
-                    return Err(Status::internal("Error converting vector"));
-                }
-            };
-
-            let proto_vector_record = chroma_proto::VectorEmbeddingRecord {
-                id,
-                vector: Some(proto_vector),
-            };
-            output.push(proto_vector_record);
-        }
-
-        let response = chroma_proto::GetVectorsResponse { records: output };
-        Ok(Response::new(response))
-    }
-
-    async fn query_metadata_instrumented(
-        &self,
-        request: Request<QueryMetadataRequest>,
-    ) -> Result<Response<QueryMetadataResponse>, Status> {
-        let request = request.into_inner();
-        let segment_uuid = to_segment_uuid(&request.segment_id)?;
-        let collection_uuid = to_collection_uuid(&request.collection_id)?;
-        let (collection_version, log_position) = get_version_context(&request.version_context)?;
-
-        // If no ids are provided, pass None to the orchestrator
-        let query_ids = request.ids.map(|uids| uids.ids);
-
-        let where_clause = match request.r#where {
-            Some(where_clause) => match where_clause.try_into() {
-                Ok(where_clause) => Some(where_clause),
-                Err(_) => {
-                    tracing::error!("Error converting where clause");
-                    return Err(Status::internal(
-                        "Error converting where clause".to_string(),
-                    ));
-                }
-            },
-            None => None,
-        };
-
-        let where_document_clause = match request.where_document {
-            Some(where_document_clause) => match where_document_clause.try_into() {
-                Ok(where_document_clause) => Some(where_document_clause),
-                Err(_) => {
-                    tracing::error!("Error converting where document clause");
-                    return Err(Status::internal(
-                        "Error converting where document clause".to_string(),
-                    ));
-                }
-            },
-            None => None,
-        };
-
-        let clause = match (where_clause, where_document_clause) {
-            (Some(wc), Some(wdc)) => Some(Where::conjunction(vec![wc, wdc])),
-            (Some(c), None) | (None, Some(c)) => Some(c),
-            _ => None,
-        };
-
-        let orchestrator = GetOrchestrator::new(
-            self.blockfile_provider.clone(),
-            self.clone_dispatcher()?,
-            // TODO: Load the configuration for this
-            1000,
-            FetchLogOperator {
-                log_client: self.log.clone(),
-                batch_size: 100,
-                start_log_offset_id: log_position as u32 + 1,
-                maximum_fetch_count: None,
-                collection_uuid,
-            },
-            FetchSegmentOperator {
-                sysdb: self.sysdb.clone(),
-                vector_uuid: None,
-                metadata_uuid: Some(SegmentUuid(segment_uuid)),
-                record_uuid: None,
-                collection_uuid,
-                collection_version,
-            },
-            FilterOperator {
-                query_ids,
-                where_clause: clause,
-            },
-            LimitOperator {
-                skip: request.offset.unwrap_or_default(),
-                fetch: request.limit,
-            },
-            ProjectionOperator {
-                document: request.include_metadata,
-                embedding: request.include_metadata,
-                metadata: request.include_metadata,
-            },
-        );
-
-        let system = self.clone_system()?;
-        let result = orchestrator.run(system).await.map_err(|e| {
-            tracing::error!("Error running orchestrator: {}", e);
-            Status::new(
-                e.code().into(),
-                format!("Error running orchestrator: {}", e),
-            )
-        })?;
-
-        let mut output = Vec::with_capacity(result.records.len());
-        for record in result.records {
-            let metadata = if request.include_metadata {
-                let mut meta = record.metadata.unwrap_or_default();
-
-                // The transport layer assumes the document exists in the metadata
-                // with the special key "chroma:document"
-                if let Some(doc) = record.document {
-                    meta.insert("chroma:document".to_string(), MetadataValue::Str(doc));
-                }
-                Some(chroma_proto::UpdateMetadata::from(meta))
-            } else {
-                None
-            };
-
-            output.push(chroma_proto::MetadataEmbeddingRecord {
-                id: record.id,
-                metadata,
-            });
-        }
-
-        // This is an implementation stub
-        let response = chroma_proto::QueryMetadataResponse { records: output };
-        Ok(Response::new(response))
     }
 
     fn clone_dispatcher(&self) -> Result<ComponentHandle<Dispatcher>, Status> {
-        let dispatcher = self
-            .dispatcher
+        self.dispatcher
             .as_ref()
-            .ok_or_else(|| Status::internal("No dispatcher found"))?;
-        Ok(dispatcher.clone())
+            .ok_or(Status::internal("Dispatcher is not initialized"))
+            .cloned()
     }
 
     fn clone_system(&self) -> Result<System, Status> {
-        let system = self
-            .system
+        self.system
             .as_ref()
-            .ok_or_else(|| Status::internal("No system found"))?;
-        Ok(system.clone())
+            .ok_or(Status::internal("System is not initialized"))
+            .cloned()
     }
 }
 
-#[tonic::async_trait]
-impl chroma_proto::vector_reader_server::VectorReader for WorkerServer {
-    async fn get_vectors(
-        &self,
-        request: Request<GetVectorsRequest>,
-    ) -> Result<Response<GetVectorsResponse>, Status> {
+#[async_trait]
+impl QueryExecutor for WorkerServer {
+    async fn count(&self, count: Request<CountPlan>) -> Result<Response<CountResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let request_span = trace_span!(
-            "Get vectors",
-            segment_id = request.get_ref().segment_id,
-            ids = ?request.get_ref().ids
+        let count_span = trace_span!(
+            "CountPlan",
+            count = ?count
         );
-
-        let instrumented_span = wrap_span_with_parent_context(request_span, request.metadata());
-        self.get_vectors_instrumented(request)
+        let instrumented_span = wrap_span_with_parent_context(count_span, count.metadata());
+        self.orchestrate_count(count)
             .instrument(instrumented_span)
             .await
     }
 
-    async fn query_vectors(
-        &self,
-        request: Request<QueryVectorsRequest>,
-    ) -> Result<Response<QueryVectorsResponse>, Status> {
+    async fn get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let query_span = trace_span!(
-            "Query vectors",
-            k = request.get_ref().k,
-            segment_id = request.get_ref().segment_id,
-            include_embeddings = request.get_ref().include_embeddings,
-            allowed_ids = ?request.get_ref().allowed_ids
+        let get_span = trace_span!(
+            "GetPlan",
+            get = ?get
         );
-        let instrumented_span = wrap_span_with_parent_context(query_span, request.metadata());
-        self.query_vectors_instrumented(request)
+        let instrumented_span = wrap_span_with_parent_context(get_span, get.metadata());
+        self.orchestrate_get(get)
             .instrument(instrumented_span)
             .await
     }
-}
 
-#[tonic::async_trait]
-impl chroma_proto::metadata_reader_server::MetadataReader for WorkerServer {
-    async fn count_records(
-        &self,
-        request: Request<CountRecordsRequest>,
-    ) -> Result<Response<CountRecordsResponse>, Status> {
-        let request = request.into_inner();
-        let segment_uuid = match Uuid::parse_str(&request.segment_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Segment UUID"));
-            }
-        };
-        let collection_uuid = match Uuid::parse_str(&request.collection_id) {
-            Ok(uuid) => uuid,
-            Err(_) => {
-                return Err(Status::invalid_argument("Invalid Collection UUID"));
-            }
-        };
-        let collection_uuid = CollectionUuid(collection_uuid);
-
-        let (collection_version, log_position) = match request.version_context {
-            Some(version_context) => (
-                version_context.collection_version,
-                version_context.log_position,
-            ),
-            None => {
-                return Err(Status::invalid_argument("No version context provided"));
-            }
-        };
-
-        let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher,
-            None => {
-                return Err(Status::internal("No dispatcher found"));
-            }
-        };
-
-        let system = match self.system {
-            Some(ref system) => system,
-            None => {
-                return Err(Status::internal("No system found"));
-            }
-        };
-
-        let orchestrator = CountQueryOrchestrator::new(
-            system.clone(),
-            &segment_uuid,
-            &collection_uuid,
-            self.log.clone(),
-            self.sysdb.clone(),
-            dispatcher.clone(),
-            self.blockfile_provider.clone(),
-            collection_version,
-            log_position,
+    async fn knn(&self, knn: Request<KnnPlan>) -> Result<Response<KnnBatchResult>, Status> {
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let knn_span = trace_span!(
+            "KnnPlan",
+            knn = ?knn
         );
-
-        let result = orchestrator.run().await;
-        let c = match result {
-            Ok(r) => {
-                println!("Count value {}", r);
-                r
-            }
-            Err(e) => {
-                println!("Error! {:?}", e);
-                // TODO: Return 0 for now but should return an error at some point.
-                0
-            }
-        };
-        let response = CountRecordsResponse { count: c as u32 };
-        Ok(Response::new(response))
-    }
-
-    async fn query_metadata(
-        &self,
-        request: Request<QueryMetadataRequest>,
-    ) -> Result<Response<QueryMetadataResponse>, Status> {
-        let query_span = trace_span!("Query metadata", segment_id = request.get_ref().segment_id);
-        let instrumented_span = wrap_span_with_parent_context(query_span, request.metadata());
-        self.query_metadata_instrumented(request)
+        let instrumented_span = wrap_span_with_parent_context(knn_span, knn.metadata());
+        self.orchestrate_knn(knn)
             .instrument(instrumented_span)
             .await
     }
 }
 
 #[cfg(debug_assertions)]
-#[tonic::async_trait]
+#[async_trait]
 impl chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
         &self,
@@ -622,87 +393,35 @@ impl chroma_proto::debug_server::Debug for WorkerServer {
     }
 }
 
-fn to_collection_uuid(uuid: &str) -> Result<CollectionUuid, Status> {
-    parse_uuid(uuid, "Invalid Collection UUID").map(CollectionUuid)
-}
-
-fn to_segment_uuid(segment_id: &str) -> Result<Uuid, Status> {
-    parse_uuid(segment_id, "Invalid Segment UUID")
-}
-
-fn parse_uuid(uuid: &str, error_msg: &str) -> Result<Uuid, Status> {
-    let uuid = Uuid::parse_str(uuid)
-        .map_err(|_| Status::invalid_argument(format!("{}: {}", error_msg, uuid)))?;
-
-    Ok(uuid)
-}
-
-fn get_version_context(ctx: &Option<RequestVersionContext>) -> Result<(u32, u64), Status> {
-    let ctx = ctx
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("No version context provided"))?;
-    Ok((ctx.collection_version, ctx.log_position))
-}
-
 #[cfg(test)]
 mod tests {
-    #[cfg(debug_assertions)]
+    use std::collections::HashMap;
+
     use super::*;
-    #[cfg(debug_assertions)]
     use crate::execution::dispatcher;
-    #[cfg(debug_assertions)]
     use crate::log::log::InMemoryLog;
-    #[cfg(debug_assertions)]
+    use crate::segment::test::TestSegment;
     use crate::sysdb::test_sysdb::TestSysDb;
-    #[cfg(debug_assertions)]
     use crate::system;
-    #[cfg(debug_assertions)]
-    use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
-    #[cfg(debug_assertions)]
-    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_index::test_hnsw_index_provider;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
-    #[cfg(debug_assertions)]
-    use chroma_storage::{local::LocalStorage, Storage};
-    #[cfg(debug_assertions)]
-    use tempfile::tempdir;
+    use chroma_proto::query_executor_client::QueryExecutorClient;
+    use uuid::Uuid;
 
-    #[cfg(debug_assertions)]
-    const COLLECTION_UUID: &str = "00000000-0000-0000-0000-000000000001";
-    #[cfg(debug_assertions)]
-    const SEGMENT_UUID: &str = "00000000-0000-0000-0000-000000000003";
-    #[cfg(debug_assertions)]
-    const INVALID_UUID: &str = "00000000";
-
-    #[cfg(debug_assertions)]
     fn run_server() -> String {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
-        let tmp_dir = tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let block_cache = new_cache_for_test();
-        let sparse_index_cache = new_cache_for_test();
-        let hnsw_index_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let segments = TestSegment::default();
         let port = random_port::PortPicker::new().random(true).pick().unwrap();
 
         let mut server = WorkerServer {
             dispatcher: None,
             system: None,
-            sysdb: Box::new(SysDb::Test(sysdb)),
+            _sysdb: Box::new(SysDb::Test(sysdb)),
             log: Box::new(Log::InMemory(log)),
-            hnsw_index_provider: HnswIndexProvider::new(
-                storage.clone(),
-                tmp_dir.path().to_path_buf(),
-                hnsw_index_cache,
-                rx,
-            ),
-            blockfile_provider: BlockfileProvider::new_arrow(
-                storage,
-                TEST_MAX_BLOCK_SIZE_BYTES,
-                block_cache,
-                sparse_index_cache,
-            ),
+            hnsw_index_provider: test_hnsw_index_provider(),
+            blockfile_provider: segments.blockfile_provider,
             port,
         };
 
@@ -720,6 +439,47 @@ mod tests {
         format!("http://localhost:{}", port)
     }
 
+    fn scan() -> chroma_proto::ScanOperator {
+        let collection_id = Uuid::new_v4().to_string();
+        chroma_proto::ScanOperator {
+            collection: Some(chroma_proto::Collection {
+                id: collection_id.clone(),
+                name: "test-collection".to_string(),
+                configuration_json_str: String::new(),
+                metadata: None,
+                dimension: None,
+                tenant: "test-tenant".to_string(),
+                database: "test-database".to_string(),
+                log_position: 0,
+                version: 0,
+            }),
+            knn: Some(chroma_proto::Segment {
+                id: Uuid::new_v4().to_string(),
+                r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
+                scope: 0,
+                collection: collection_id.clone(),
+                metadata: None,
+                file_paths: HashMap::new(),
+            }),
+            metadata: Some(chroma_proto::Segment {
+                id: Uuid::new_v4().to_string(),
+                r#type: "urn:chroma:segment/metadata/blockfile".to_string(),
+                scope: 1,
+                collection: collection_id.clone(),
+                metadata: None,
+                file_paths: HashMap::new(),
+            }),
+            record: Some(chroma_proto::Segment {
+                id: Uuid::new_v4().to_string(),
+                r#type: "urn:chroma:segment/record/blockfile".to_string(),
+                scope: 2,
+                collection: collection_id.clone(),
+                metadata: None,
+                file_paths: HashMap::new(),
+            }),
+        }
+    }
+
     #[tokio::test]
     #[cfg(debug_assertions)]
     async fn gracefully_handles_panics() {
@@ -735,197 +495,281 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(debug_assertions)]
-    async fn validate_get_vectors_request() {
-        use chroma_proto::vector_reader_client::VectorReaderClient as Client;
-        use chroma_types::chroma_proto::GetVectorsRequest as Request;
-
-        let mut reader = Client::connect(run_server()).await.unwrap();
-
-        let first_request = Request {
-            ids: vec![],
-            segment_id: SEGMENT_UUID.to_string(),
-            collection_id: COLLECTION_UUID.to_string(),
-            version_context: Some(RequestVersionContext {
-                collection_version: 0,
-                log_position: 0,
-            }),
+    async fn validate_count_plan() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan_operator = scan();
+        scan_operator.metadata = Some(chroma_proto::Segment {
+            id: "invalid-metadata-segment-id".to_string(),
+            r#type: "urn:chroma:segment/metadata/blockfile".to_string(),
+            scope: 1,
+            collection: scan_operator
+                .collection
+                .as_ref()
+                .expect("The collection should exist")
+                .id
+                .clone(),
+            metadata: None,
+            file_paths: HashMap::new(),
+        });
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator.clone()),
         };
-        // segment or collection not found
-        let request = first_request.clone();
-        let response = reader.get_vectors(request).await;
-        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
-
-        // invalid collection uuid
-        let mut request = first_request.clone();
-        request.collection_id = INVALID_UUID.into();
-        let response = reader.get_vectors(request).await;
-
-        assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Collection UUID"));
 
         // invalid segment uuid
-        let mut request = first_request.clone();
-        request.segment_id = INVALID_UUID.into();
-        let response = reader.get_vectors(request).await;
-
+        let response = executor.count(request).await;
         assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Segment UUID"));
-
-        // invalid version context
-        let mut request = first_request.clone();
-        request.version_context = None;
-        let response = reader.get_vectors(request).await;
-
-        assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("context"));
+        assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
     #[tokio::test]
-    #[cfg(debug_assertions)]
-    async fn validate_query_vectors_request() {
-        use chroma_proto::vector_reader_client::VectorReaderClient as Client;
-        use chroma_types::chroma_proto::QueryVectorsRequest as Request;
-        use chroma_types::chroma_proto::Vector;
-
-        let mut reader = Client::connect(run_server()).await.unwrap();
-
-        let floats: Vec<f32> = vec![1.0, 2.0];
-
-        let first_request = Request {
-            vectors: vec![Vector {
-                vector: to_byte_slice(&floats).into(),
-                encoding: chroma_proto::ScalarEncoding::Float32 as i32,
-                dimension: 2,
-            }],
-            k: 1,
-            collection_id: COLLECTION_UUID.to_string(),
-            segment_id: SEGMENT_UUID.into(),
-            version_context: Some(RequestVersionContext {
-                collection_version: 0,
-                log_position: 0,
+    async fn validate_get_plan() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan_operator = scan();
+        let request = chroma_proto::GetPlan {
+            scan: Some(scan_operator.clone()),
+            filter: None,
+            limit: Some(chroma_proto::LimitOperator {
+                skip: 0,
+                fetch: None,
             }),
-            ..Default::default()
+            projection: Some(chroma_proto::ProjectionOperator {
+                document: false,
+                embedding: false,
+                metadata: false,
+            }),
         };
-        let response = reader.query_vectors(first_request.clone()).await;
 
+        // error parsing filter
+        let response = executor.get(request.clone()).await;
         assert!(response.is_err());
-        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
+        assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
+
+        scan_operator.collection = Some(chroma_proto::Collection {
+            id: "invalid-collection-iD".to_string(),
+            name: "broken-collection".to_string(),
+            configuration_json_str: String::new(),
+            metadata: None,
+            dimension: None,
+            tenant: "test-tenant".to_string(),
+            database: "test-database".to_string(),
+            log_position: 0,
+            version: 0,
+        });
+        let request = chroma_proto::GetPlan {
+            scan: Some(scan_operator.clone()),
+            filter: Some(chroma_proto::FilterOperator {
+                ids: None,
+                r#where: None,
+                where_document: None,
+            }),
+            limit: Some(chroma_proto::LimitOperator {
+                skip: 0,
+                fetch: None,
+            }),
+            projection: Some(chroma_proto::ProjectionOperator {
+                document: false,
+                embedding: false,
+                metadata: false,
+            }),
+        };
 
         // invalid collection uuid
-        let mut request = first_request.clone();
-        request.collection_id = INVALID_UUID.into();
-        let response = reader.query_vectors(request).await;
-
+        let response = executor.get(request.clone()).await;
         assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    fn gen_knn_request(
+        mut scan_operator: Option<chroma_proto::ScanOperator>,
+    ) -> chroma_proto::KnnPlan {
+        if scan_operator.is_none() {
+            scan_operator = Some(scan());
+        }
+        chroma_proto::KnnPlan {
+            scan: scan_operator,
+            filter: Some(chroma_proto::FilterOperator {
+                ids: None,
+                r#where: None,
+                where_document: None,
+            }),
+            knn: Some(chroma_proto::KnnOperator {
+                embeddings: vec![],
+                fetch: 0,
+            }),
+            projection: Some(chroma_proto::KnnProjectionOperator {
+                projection: Some(chroma_proto::ProjectionOperator {
+                    document: false,
+                    embedding: false,
+                    metadata: false,
+                }),
+                distance: false,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_knn_plan_empty_embeddings() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let response = executor.knn(gen_knn_request(None)).await;
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().into_inner().results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn validate_knn_plan_filter() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
+        request.filter = None;
+        let response = executor.knn(request).await;
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Collection UUID"));
-
-        // invalid segment uuid
-        let mut request = first_request.clone();
-        request.segment_id = INVALID_UUID.into();
-        let response = reader.query_vectors(request).await;
-
-        assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Segment UUID"));
-
-        // invalid version context
-        let mut request = first_request.clone();
-        request.version_context = None;
-        let response = reader.query_vectors(request).await;
-
-        assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("context"));
-
-        // invalid vector
-        let mut request = first_request.clone();
-        request.vectors = vec![Vector {
-            dimension: 1,
-            vector: vec![0],
-            encoding: 0,
-        }];
-
-        let response = reader.query_vectors(request).await;
-        assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::Internal);
-        let sub_str = "converting vector";
         assert!(
-            err.message().contains(sub_str),
-            "message: {}, sub_str: {}",
-            err.message(),
-            sub_str
+            err.message().to_lowercase().contains("filter operator"),
+            "{}",
+            err.message()
         );
     }
 
     #[tokio::test]
-    #[cfg(debug_assertions)]
-    async fn validate_query_metadata_request() {
-        use chroma_proto::metadata_reader_client::MetadataReaderClient as Client;
-        use chroma_types::chroma_proto::QueryMetadataRequest as Request;
-
-        let mut reader = Client::connect(run_server()).await.unwrap();
-
-        let first_request = Request {
-            collection_id: COLLECTION_UUID.to_string(),
-            segment_id: SEGMENT_UUID.into(),
-            version_context: Some(RequestVersionContext {
-                collection_version: 0,
-                log_position: 0,
-            }),
-            ..Default::default()
-        };
-
-        // segment or collection
-        let response = reader.query_metadata(first_request.clone()).await;
-        assert!(response.is_err());
-        assert_eq!(response.unwrap_err().code(), tonic::Code::NotFound);
-
-        // invalid collection uuid
-        let mut request = first_request.clone();
-        request.collection_id = INVALID_UUID.into();
-        let response = reader.query_metadata(request).await;
-
+    async fn validate_knn_plan_knn() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
+        request.knn = None;
+        let response = executor.knn(request).await;
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Collection UUID"));
-
-        // invalid segment uuid
-        let mut request = first_request.clone();
-        request.segment_id = INVALID_UUID.into();
-        let response = reader.query_metadata(request).await;
-
-        assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Segment UUID"));
-
-        // invalid version context
-        let mut request = first_request.clone();
-        request.version_context = None;
-        let response = reader.query_metadata(request).await;
-
-        assert!(response.is_err());
-        let err = response.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("context"));
+        assert!(
+            err.message().to_lowercase().contains("knn operator"),
+            "{}",
+            err.message()
+        );
     }
 
-    #[cfg(debug_assertions)]
-    fn to_byte_slice(v: &[f32]) -> &[u8] {
-        let raw_ptr = v.as_ptr() as *const u8;
-        unsafe { std::slice::from_raw_parts(raw_ptr, std::mem::size_of_val(v)) }
+    #[tokio::test]
+    async fn validate_knn_plan_projection() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
+        request.projection = None;
+        let response = executor.knn(request).await;
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(
+            err.message().to_lowercase().contains("projection operator"),
+            "{}",
+            err.message()
+        );
+
+        let mut request = gen_knn_request(None);
+        request.projection = Some(chroma_proto::KnnProjectionOperator {
+            projection: None,
+            distance: false,
+        });
+        let response = executor.knn(request).await;
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(
+            err.message()
+                .to_lowercase()
+                .contains("projection operator: "),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_knn_plan_scan() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut request = gen_knn_request(None);
+        request.scan = None;
+        let response = executor.knn(request).await;
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(
+            err.message().to_lowercase().contains("scan operator"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_knn_plan_scan_collection() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan = scan();
+        scan.collection.as_mut().unwrap().id = "invalid-collection-id".to_string();
+        let response = executor.knn(gen_knn_request(Some(scan))).await;
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn validate_knn_plan_scan_vector() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        // invalid vector uuid
+        let mut scan_operator = scan();
+        scan_operator.knn = Some(chroma_proto::Segment {
+            id: "invalid-knn-segment-id".to_string(),
+            r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
+            scope: 0,
+            collection: scan_operator
+                .collection
+                .as_ref()
+                .expect("The collection should exist")
+                .id
+                .clone(),
+            metadata: None,
+            file_paths: HashMap::new(),
+        });
+        let response = executor.knn(gen_knn_request(Some(scan_operator))).await;
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn validate_knn_plan_scan_record() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan_operator = scan();
+        scan_operator.record = Some(chroma_proto::Segment {
+            id: "invalid-record-segment-id".to_string(),
+            r#type: "urn:chroma:segment/record/blockfile".to_string(),
+            scope: 2,
+            collection: scan_operator
+                .collection
+                .as_ref()
+                .expect("The collection should exist")
+                .id
+                .clone(),
+            metadata: None,
+            file_paths: HashMap::new(),
+        });
+        let response = executor.knn(gen_knn_request(Some(scan_operator))).await;
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn validate_knn_plan_scan_metadata() {
+        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut scan_operator = scan();
+        scan_operator.metadata = Some(chroma_proto::Segment {
+            id: "invalid-metadata-segment-id".to_string(),
+            r#type: "urn:chroma:segment/metadata/blockfile".to_string(),
+            scope: 1,
+            collection: scan_operator
+                .collection
+                .as_ref()
+                .expect("The collection should exist")
+                .id
+                .clone(),
+            metadata: None,
+            file_paths: HashMap::new(),
+        });
+        let response = executor.knn(gen_knn_request(Some(scan_operator))).await;
+        assert!(response.is_err());
+        let err = response.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 }

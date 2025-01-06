@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -304,6 +305,21 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 		suite.Len(segmentResult, 1)
 		suite.Equal(segment.ID, segmentResult[0].ID)
 	}
+
+	// The same information should be returned by the GetCollectionWithSegments endpoint
+	collection, collection_segments, error := suite.coordinator.GetCollectionWithSegments(ctx, newCollection.ID)
+	suite.NoError(error)
+	suite.Equal(newCollection.ID, collection.ID)
+	suite.Equal(newCollection.Name, collection.Name)
+	expected_ids, actual_ids := []types.UniqueID{}, []types.UniqueID{}
+	for _, segment := range segments {
+		expected_ids = append(expected_ids, segment.ID)
+	}
+	for _, segment := range collection_segments {
+		suite.Equal(collection.ID, segment.CollectionID)
+		actual_ids = append(actual_ids, segment.ID)
+	}
+	suite.ElementsMatch(expected_ids, actual_ids)
 
 	// Attempt to create a duplicate collection (should fail)
 	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
@@ -1134,6 +1150,18 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	results, err = suite.coordinator.GetCollections(ctx, testCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(results)
+
+	// Do a flush collection compaction
+	flushCollectionInfo, err := suite.coordinator.FlushCollectionCompaction(ctx, &model.FlushCollectionCompaction{
+		ID:       testCollection.ID,
+		TenantID: testCollection.TenantID,
+	})
+	// The flush collection compaction should fail because the collection is soft deleted.
+	suite.Error(err)
+	// Check for ErrCollectionSoftDeleted error.
+	suite.True(errors.Is(err, common.ErrCollectionSoftDeleted))
+	// Check that the flush collection info is nil.
+	suite.Nil(flushCollectionInfo)
 
 	// Verify collection appears in soft deleted list
 	id = testCollection.ID.String()

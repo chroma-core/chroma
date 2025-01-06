@@ -1,6 +1,7 @@
 use super::{CacheError, Weighted};
 use chroma_error::ChromaError;
 use clap::Parser;
+use foyer::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
     InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
@@ -233,7 +234,7 @@ impl<'a> Stopwatch<'a> {
     }
 }
 
-impl<'a> Drop for Stopwatch<'a> {
+impl Drop for Stopwatch<'_> {
     fn drop(&mut self) {
         let elapsed = self.1.elapsed().as_micros() as u64;
         self.0.record(elapsed, &[]);
@@ -247,6 +248,8 @@ where
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
     cache: foyer::HybridCache<K, V>,
+    cache_hit: opentelemetry::metrics::Counter<u64>,
+    cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
@@ -270,6 +273,7 @@ where
             .with_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
 
         let builder = HybridCacheBuilder::<K, V>::new()
+            .with_metrics_registry(OpenTelemetryMetricsRegistry::new(global::meter("chroma")))
             .with_tracing_options(tracing_options)
             .memory(config.mem)
             .with_shards(config.shards);
@@ -330,12 +334,16 @@ where
             TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)),
         );
         let meter = global::meter("chroma");
-        let get_latency = meter.u64_histogram("get_latency").init();
-        let insert_latency = meter.u64_histogram("insert_latency").init();
-        let remove_latency = meter.u64_histogram("remove_latency").init();
-        let clear_latency = meter.u64_histogram("clear_latency").init();
+        let cache_hit = meter.u64_counter("cache_hit").build();
+        let cache_miss = meter.u64_counter("cache_miss").build();
+        let get_latency = meter.u64_histogram("get_latency").build();
+        let insert_latency = meter.u64_histogram("insert_latency").build();
+        let remove_latency = meter.u64_histogram("remove_latency").build();
+        let clear_latency = meter.u64_histogram("clear_latency").build();
         Ok(FoyerHybridCache {
             cache,
+            cache_hit,
+            cache_miss,
             get_latency,
             insert_latency,
             remove_latency,
@@ -353,7 +361,13 @@ where
     #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
-        Ok(self.cache.get(key).await?.map(|v| v.value().clone()))
+        let res = self.cache.get(key).await?.map(|v| v.value().clone());
+        if res.is_some() {
+            self.cache_hit.add(1, &[]);
+        } else {
+            self.cache_miss.add(1, &[]);
+        }
+        Ok(res)
     }
 
     #[tracing::instrument(skip(self, key, value))]
@@ -389,8 +403,10 @@ where
     V: Clone + Send + Sync + Weighted + 'static,
 {
     cache: foyer::Cache<K, V>,
-    insert_latency: opentelemetry::metrics::Histogram<u64>,
+    cache_hit: opentelemetry::metrics::Counter<u64>,
+    cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
+    insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
 }
@@ -409,14 +425,18 @@ where
             .with_weighter(|_: &_, v: &V| v.weight())
             .build();
         let meter = global::meter("chroma");
-        let insert_latency = meter.u64_histogram("insert_latency").init();
-        let get_latency = meter.u64_histogram("get_latency").init();
-        let remove_latency = meter.u64_histogram("remove_latency").init();
-        let clear_latency = meter.u64_histogram("clear_latency").init();
+        let cache_hit = meter.u64_counter("cache_hit").build();
+        let cache_miss = meter.u64_counter("cache_miss").build();
+        let get_latency = meter.u64_histogram("get_latency").build();
+        let insert_latency = meter.u64_histogram("insert_latency").build();
+        let remove_latency = meter.u64_histogram("remove_latency").build();
+        let clear_latency = meter.u64_histogram("clear_latency").build();
         Ok(FoyerPlainCache {
             cache,
-            insert_latency,
+            cache_hit,
+            cache_miss,
             get_latency,
+            insert_latency,
             remove_latency,
             clear_latency,
         })
@@ -439,13 +459,14 @@ where
             type Key = K;
             type Value = V;
 
-            fn on_memory_release(&self, key: Self::Key, value: Self::Value)
+            fn on_leave(&self, _: foyer::Event, key: &Self::Key, value: &Self::Value)
             where
-                K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+                Self::Key: foyer::Key,
+                Self::Value: foyer::Value,
             {
                 // NOTE(rescrv):  There's no mechanism by which we can error.  We could log a
                 // metric, but this should really never happen.
-                let _ = self.0.send((key, value));
+                let _ = self.0.send((key.clone(), value.clone()));
             }
         }
         let evl = TokioEventListener(tx);
@@ -455,20 +476,19 @@ where
             .with_weighter(|_: &_, v: &V| v.weight())
             .with_event_listener(Arc::new(evl))
             .build();
-        let get_latency = global::meter("chroma").u64_histogram("get_latency").init();
-        let insert_latency = global::meter("chroma")
-            .u64_histogram("insert_latency")
-            .init();
-        let remove_latency = global::meter("chroma")
-            .u64_histogram("remove_latency")
-            .init();
-        let clear_latency = global::meter("chroma")
-            .u64_histogram("clear_latency")
-            .init();
+        let meter = global::meter("chroma");
+        let cache_hit = meter.u64_counter("cache_hit").build();
+        let cache_miss = meter.u64_counter("cache_miss").build();
+        let get_latency = meter.u64_histogram("get_latency").build();
+        let insert_latency = meter.u64_histogram("insert_latency").build();
+        let remove_latency = meter.u64_histogram("remove_latency").build();
+        let clear_latency = meter.u64_histogram("clear_latency").build();
         Ok(FoyerPlainCache {
             cache,
-            insert_latency,
+            cache_hit,
+            cache_miss,
             get_latency,
+            insert_latency,
             remove_latency,
             clear_latency,
         })
@@ -484,7 +504,13 @@ where
     #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
-        Ok(self.cache.get(key).map(|v| v.value().clone()))
+        let res = self.cache.get(key).map(|v| v.value().clone());
+        if res.is_some() {
+            self.cache_hit.add(1, &[]);
+        } else {
+            self.cache_miss.add(1, &[]);
+        }
+        Ok(res)
     }
 
     #[tracing::instrument(skip(self, key, value))]

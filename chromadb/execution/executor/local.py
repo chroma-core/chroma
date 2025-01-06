@@ -1,18 +1,14 @@
 from typing import Optional, Sequence
 
-from chromadb.api.types import (
-    GetResult,
-    IncludeEnum,
-    Metadata,
-    QueryResult,
-)
+from overrides import overrides
+
+from chromadb.api.types import GetResult, IncludeEnum, Metadata, QueryResult
 from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
-from chromadb.segment.impl.manager.local import LocalSegmentManager
 from chromadb.segment import MetadataReader, VectorReader
-from chromadb.types import VectorQuery, VectorQueryResult, Collection
-from overrides import overrides
+from chromadb.segment.impl.manager.local import LocalSegmentManager
+from chromadb.types import Collection, VectorQuery, VectorQueryResult
 
 
 def _clean_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:

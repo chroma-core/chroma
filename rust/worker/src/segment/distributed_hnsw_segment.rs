@@ -1,16 +1,16 @@
-use super::record_segment::ApplyMaterializedLogError;
-use super::{SegmentFlusher, SegmentWriter};
-use async_trait::async_trait;
-use chroma_distance::{DistanceFunction, DistanceFunctionError};
+use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::utils::hnsw_params_from_segment;
+use super::MaterializeLogsResult;
+use crate::segment::utils::distance_function_from_segment;
+use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{Index, IndexUuid};
-use chroma_index::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
 use chroma_types::SegmentUuid;
-use chroma_types::{get_metadata_value_as, MaterializedLogOperation, MetadataValue, Segment};
+use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -25,7 +25,7 @@ pub struct HnswIndexParamsFromSegment {
 }
 
 #[derive(Clone)]
-pub(crate) struct DistributedHNSWSegmentWriter {
+pub struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
     pub(crate) id: SegmentUuid,
@@ -71,56 +71,6 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
     }
 }
 
-fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParamsFromSegment {
-    let metadata = match &segment.metadata {
-        Some(metadata) => metadata,
-        None => {
-            return HnswIndexParamsFromSegment {
-                m: DEFAULT_HNSW_M,
-                ef_construction: DEFAULT_HNSW_EF_CONSTRUCTION,
-                ef_search: DEFAULT_HNSW_EF_SEARCH,
-            };
-        }
-    };
-
-    let m = match get_metadata_value_as::<i64>(metadata, "hnsw:M") {
-        Ok(m) => m as usize,
-        Err(_) => DEFAULT_HNSW_M,
-    };
-    let ef_construction = match get_metadata_value_as::<i64>(metadata, "hnsw:construction_ef") {
-        Ok(ef_construction) => ef_construction as usize,
-        Err(_) => DEFAULT_HNSW_EF_CONSTRUCTION,
-    };
-    let ef_search = match get_metadata_value_as::<i64>(metadata, "hnsw:search_ef") {
-        Ok(ef_search) => ef_search as usize,
-        Err(_) => DEFAULT_HNSW_EF_SEARCH,
-    };
-
-    HnswIndexParamsFromSegment {
-        m,
-        ef_construction,
-        ef_search,
-    }
-}
-
-pub fn distance_function_from_segment(
-    segment: &Segment,
-) -> Result<DistanceFunction, Box<DistributedHNSWSegmentFromSegmentError>> {
-    let space = match segment.metadata {
-        Some(ref metadata) => match metadata.get("hnsw:space") {
-            Some(MetadataValue::Str(space)) => space,
-            _ => "l2",
-        },
-        None => "l2",
-    };
-    match DistanceFunction::try_from(space) {
-        Ok(distance_function) => Ok(distance_function),
-        Err(e) => Err(Box::new(
-            DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(e),
-        )),
-    }
-}
-
 impl DistributedHNSWSegmentWriter {
     pub(crate) fn new(
         index: HnswIndexRef,
@@ -134,7 +84,7 @@ impl DistributedHNSWSegmentWriter {
         }
     }
 
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
@@ -144,7 +94,6 @@ impl DistributedHNSWSegmentWriter {
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
-            println!("Loading HNSW index from files");
             // Check if its in the providers cache, if not load the index from the files
             let index_id = match &segment.file_path.get(HNSW_INDEX) {
                 None => {
@@ -176,7 +125,9 @@ impl DistributedHNSWSegmentWriter {
             let distance_function = match distance_function_from_segment(segment) {
                 Ok(distance_function) => distance_function,
                 Err(e) => {
-                    return Err(e);
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
+                    ));
                 }
             };
 
@@ -208,7 +159,9 @@ impl DistributedHNSWSegmentWriter {
             let distance_function = match distance_function_from_segment(segment) {
                 Ok(distance_function) => distance_function,
                 Err(e) => {
-                    return Err(e);
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
+                    ));
                 }
             };
             let index = match hnsw_index_provider
@@ -236,22 +189,25 @@ impl DistributedHNSWSegmentWriter {
             )))
         }
     }
-}
 
-impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
-    async fn apply_materialized_log_chunk(
+    pub async fn apply_materialized_log_chunk(
         &self,
-        records: chroma_types::Chunk<super::MaterializedLogRecord<'a>>,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
-        for (record, _) in records.iter() {
-            match record.final_operation {
+        for record in materialized {
+            match record.get_operation() {
                 // If embedding is not found in case of adds it means that user
                 // did not supply them and thus we should return an error as
                 // opposed to panic.
                 MaterializedLogOperation::AddNew
                 | MaterializedLogOperation::UpdateExisting
                 | MaterializedLogOperation::OverwriteExisting => {
-                    let embedding = record.merged_embeddings();
+                    let record = record
+                        .hydrate(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ApplyMaterializedLogError::Materialization)?;
+                    let embedding = record.merged_embeddings_ref();
 
                     let mut index = self.index.inner.upgradable_read();
                     let index_len = index.len();
@@ -265,7 +221,7 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                         })?;
                     }
 
-                    match index.add(record.offset_id as usize, embedding) {
+                    match index.add(record.get_offset_id() as usize, embedding) {
                         Ok(_) => {}
                         Err(e) => {
                             return Err(ApplyMaterializedLogError::HnswIndex(e));
@@ -277,7 +233,12 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
                     // the assumption here is that the materialized log records
                     // contain the correct offset ids pertaining to records that
                     // are actually meant to be deleted.
-                    match self.index.inner.read().delete(record.offset_id as usize) {
+                    match self
+                        .index
+                        .inner
+                        .read()
+                        .delete(record.get_offset_id() as usize)
+                    {
                         Ok(_) => {}
                         Err(e) => {
                             return Err(ApplyMaterializedLogError::HnswIndex(e));
@@ -292,18 +253,15 @@ impl<'a> SegmentWriter<'a> for DistributedHNSWSegmentWriter {
         Ok(())
     }
 
-    async fn commit(self) -> Result<impl SegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<DistributedHNSWSegmentWriter, Box<dyn ChromaError>> {
         let res = self.hnsw_index_provider.commit(self.index.clone());
         match res {
             Ok(_) => Ok(self),
             Err(e) => Err(e),
         }
     }
-}
 
-#[async_trait]
-impl SegmentFlusher for DistributedHNSWSegmentWriter {
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.inner.read().id;
         match self.hnsw_index_provider.flush(&hnsw_index_id).await {
             Ok(_) => {}
@@ -316,9 +274,9 @@ impl SegmentFlusher for DistributedHNSWSegmentWriter {
 }
 
 #[derive(Clone)]
-pub(crate) struct DistributedHNSWSegmentReader {
+pub struct DistributedHNSWSegmentReader {
     index: HnswIndexRef,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for DistributedHNSWSegmentReader {
@@ -344,7 +302,6 @@ impl DistributedHNSWSegmentReader {
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
-            println!("Loading HNSW index from files");
             // Check if its in the providers cache, if not load the index from the files
             let index_id = match &segment.file_path.get(HNSW_INDEX) {
                 None => {
@@ -373,37 +330,40 @@ impl DistributedHNSWSegmentReader {
             };
             let index_uuid = IndexUuid(index_uuid);
 
-            let index =
-                match hnsw_index_provider
-                    .get(&index_uuid, &segment.collection)
-                    .await
-                {
-                    Some(index) => index,
-                    None => {
-                        let distance_function = match distance_function_from_segment(segment) {
-                            Ok(distance_function) => distance_function,
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        };
-                        match hnsw_index_provider
-                            .open(
-                                &index_uuid,
-                                &segment.collection,
-                                dimensionality as i32,
-                                distance_function,
-                            )
-                            .await
-                        {
-                            Ok(index) => index,
-                            Err(e) => return Err(Box::new(
+            let index = match hnsw_index_provider
+                .get(&index_uuid, &segment.collection)
+                .await
+            {
+                Some(index) => index,
+                None => {
+                    let distance_function = match distance_function_from_segment(segment) {
+                        Ok(distance_function) => distance_function,
+                        Err(e) => {
+                            return Err(Box::new(
+                                DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
+                            ));
+                        }
+                    };
+                    match hnsw_index_provider
+                        .open(
+                            &index_uuid,
+                            &segment.collection,
+                            dimensionality as i32,
+                            distance_function,
+                        )
+                        .await
+                    {
+                        Ok(index) => index,
+                        Err(e) => {
+                            return Err(Box::new(
                                 DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
                                     *e,
                                 ),
-                            )),
+                            ))
                         }
                     }
-                };
+                }
+            };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
                 index, segment.id,

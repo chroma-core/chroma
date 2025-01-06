@@ -1,4 +1,4 @@
-use crate::{system::ReceiverForMessage, utils::get_panic_message};
+use crate::{system::ReceiverForMessage, utils::PanicError};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
@@ -34,7 +34,7 @@ where
 #[derive(Debug, Error)]
 pub(super) enum TaskError<Err> {
     #[error("Panic occurred while handling task: {0:?}")]
-    Panic(Option<String>),
+    Panic(PanicError),
     #[error("Task failed with error: {0:?}")]
     TaskFailed(#[from] Err),
 }
@@ -51,15 +51,6 @@ where
     }
 }
 
-impl<Err> TaskError<Err>
-where
-    Err: Debug + ChromaError + 'static,
-{
-    pub(super) fn boxed(self) -> Box<dyn ChromaError> {
-        Box::new(self)
-    }
-}
-
 /// A task result is a wrapper around the result of a task.
 /// It contains the task id for tracking purposes.
 #[derive(Debug)]
@@ -73,6 +64,7 @@ impl<Output, Error> TaskResult<Output, Error> {
         self.result
     }
 
+    #[allow(dead_code)]
     pub(super) fn id(&self) -> Uuid {
         self.task_id
     }
@@ -93,14 +85,15 @@ where
 }
 
 /// A message type used by the dispatcher to send tasks to worker threads.
-pub(crate) type TaskMessage = Box<dyn TaskWrapper>;
+pub type TaskMessage = Box<dyn TaskWrapper>;
 
 /// A task wrapper is a trait that can be used to run a task. We use it to
 /// erase the I, O types from the Task struct so that tasks.
 #[async_trait]
-pub(crate) trait TaskWrapper: Send + Debug {
+pub trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
     async fn run(&self);
+    #[allow(dead_code)]
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
 }
@@ -156,13 +149,11 @@ where
                 }
             }
             Err(panic_value) => {
-                let panic_message = get_panic_message(panic_value);
-
                 match self
                     .reply_channel
                     .send(
                         TaskResult {
-                            result: Err(TaskError::Panic(panic_message.clone())),
+                            result: Err(TaskError::Panic(PanicError::new(panic_value))),
                             task_id: self.task_id,
                         },
                         None,
@@ -178,12 +169,6 @@ where
                         );
                     }
                 };
-
-                // Re-panic so the message handler can catch it
-                panic!(
-                    "{}",
-                    panic_message.unwrap_or("Unknown panic occurred in task".to_string())
-                );
             }
         };
     }
@@ -262,7 +247,7 @@ mod tests {
             1000
         }
 
-        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn start(&mut self, ctx: &ComponentContext<Self>) {
             let task = wrap(Box::new(MockOperator {}), (), ctx.receiver());
             self.dispatcher.send(task, None).await.unwrap();
         }
@@ -303,6 +288,7 @@ mod tests {
         let result = &results_guard.first().unwrap().result;
 
         assert!(result.is_err());
-        matches!(result, Err(TaskError::Panic(Some(msg))) if msg == "MockOperator panicking");
+        let err = result.as_ref().unwrap_err();
+        assert!(err.to_string().contains("MockOperator panicking"));
     }
 }
