@@ -129,7 +129,7 @@ pub async fn client_for_url(url: String) -> ChromaClient {
                 header: ChromaTokenHeader::XChromaToken,
             },
             database: "hf-tiny-stories".to_string(),
-            connections: 4,
+            connections: 32,
         })
         .await
         .unwrap()
@@ -138,7 +138,7 @@ pub async fn client_for_url(url: String) -> ChromaClient {
             url: Some(url),
             auth: ChromaAuthMethod::None,
             database: "hf-tiny-stories".to_string(),
-            connections: 4,
+            connections: 32,
         })
         .await
         .unwrap()
@@ -1097,9 +1097,7 @@ impl LoadService {
                     let inhibit = Arc::clone(&self.inhibit);
                     let task = tokio::task::spawn(async move {
                         let _enter = root.enter();
-                        this.run_one_workload(done, inhibit, declared)
-                            .instrument(tracing::info_span!("run one workload"))
-                            .await
+                        this.run_one_workload(done, inhibit, declared).await
                     });
                     entry.insert((done_p, task));
                 }
@@ -1123,7 +1121,9 @@ impl LoadService {
         let reaper = tokio::spawn(async move {
             while let Some(task) = rx.recv().await {
                 if let Err(err) = task.await.unwrap() {
-                    tracing::error!("workload task failed: {err:?}");
+                    if !format!("{err:?}").contains("429") {
+                        tracing::error!("workload task failed: {err:?}");
+                    }
                 }
             }
         });
@@ -1196,12 +1196,7 @@ impl LoadService {
                     workload
                         .step(&client, &this.metrics, &*data_set, &mut state)
                         .await
-                        .map_err(|err| {
-                            if !format!("{err:?}").contains("429") {
-                                tracing::error!("workload failed: {err:?}");
-                            }
-                            Error::FailWorkload(err.to_string())
-                        })
+                        .map_err(|err| Error::FailWorkload(err.to_string()))
                 };
                 tx.send(tokio::spawn(fut)).await.unwrap();
             }
