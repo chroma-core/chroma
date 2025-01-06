@@ -2,7 +2,6 @@ import React, {
   createContext,
   useState,
   ReactNode,
-  useContext,
   useEffect,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -26,12 +25,14 @@ export const AppContextProvider = ({ children }: { children: ReactNode }) => {
   );
   const router = useRouter();
   const pathname = usePathname();
+  // Don't consider the hash if the user is going to a differnet path.
+  const anchor = (pathname == window.location.pathname) ? window.location.hash : "";
 
   useEffect(() => {
     if (language === "typescript") {
-      router.replace(`${pathname}?lang=typescript`);
+      router.replace(pathname + "?lang=typescript" + anchor);
     } else {
-      router.replace(pathname);
+      router.replace(pathname + anchor);
     }
   }, [language]);
 
