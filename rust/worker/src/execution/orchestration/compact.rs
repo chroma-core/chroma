@@ -874,7 +874,7 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
 
         if self.num_uncompleted_tasks_by_segment.is_empty() {
             // Unwrap should be safe here as we are guaranteed to have a value by construction
-            self.register(self.pulled_log_offset.unwrap(), ctx).await;
+            self.register(self.pulled_log_offset.expect("Invariant violation: pulled_log_offset should have been populated at this point."), ctx).await;
         }
     }
 }
