@@ -1,6 +1,5 @@
 name: Apply hotfix to branch
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       pr_number:
@@ -16,7 +15,7 @@ jobs:
       branch_name: ${{ steps.resolve_branch.outputs.branch_name }}
       branch_type: ${{ steps.resolve_branch.outputs.branch_type }}
     steps:
-      - name: Check out hosted repo
+      - name: Check out repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
