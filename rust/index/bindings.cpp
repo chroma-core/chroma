@@ -430,6 +430,7 @@ extern "C"
     }
 
     // Can not throw std::exception
+    // Note: includes deleted items
     int len(Index<float> *index)
     {
         if (!index->index_inited)
@@ -438,6 +439,18 @@ extern "C"
         }
 
         return index->appr_alg->getCurrentElementCount() - index->appr_alg->getDeletedCount();
+    }
+
+    // Can not throw std::exception
+    // Note: does not include deleted items
+    int len_with_deleted(Index<float> *index)
+    {
+        if (!index->index_inited)
+        {
+            return 0;
+        }
+
+        return index->appr_alg->getCurrentElementCount();
     }
 
     // Can not throw std::exception
