@@ -2,7 +2,6 @@ import React, {
   createContext,
   useState,
   ReactNode,
-  useContext,
   useEffect,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -14,7 +13,7 @@ export interface AppContextValue {
 
 const AppContextDefaultValue: AppContextValue = {
   language: "python",
-  setLanguage: () => {},
+  setLanguage: () => { },
 };
 
 const AppContext = createContext<AppContextValue>(AppContextDefaultValue);
@@ -28,12 +27,15 @@ export const AppContextProvider = ({ children }: { children: ReactNode }) => {
   const pathname = usePathname();
 
   useEffect(() => {
+    // Don't consider the hash if the user is going to a differnet path.
+    const anchor = (pathname === window.location.pathname) ? window.location.hash : "";
+
     if (language === "typescript") {
-      router.replace(`${pathname}?lang=typescript`);
+      router.replace(pathname + "?lang=typescript" + anchor);
     } else {
-      router.replace(pathname);
+      router.replace(pathname + anchor);
     }
-  }, [language]);
+  }, [language, pathname]);
 
   return (
     <AppContext.Provider value={{ language, setLanguage }}>
