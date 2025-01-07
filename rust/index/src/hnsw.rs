@@ -308,6 +308,11 @@ impl HnswIndex {
         // Does not return an error
     }
 
+    pub fn len_with_deleted(&self) -> usize {
+        unsafe { len_with_deleted(self.ffi_ptr) as usize }
+        // Does not return an error
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -397,9 +402,9 @@ extern "C" {
 
     #[cfg(test)]
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
-
     fn set_ef(index: *const IndexPtrFFI, ef: c_int);
     fn len(index: *const IndexPtrFFI) -> c_int;
+    fn len_with_deleted(index: *const IndexPtrFFI) -> c_int;
     fn capacity(index: *const IndexPtrFFI) -> c_int;
     fn resize_index(index: *const IndexPtrFFI, new_size: usize);
     fn get_last_error(index: *const IndexPtrFFI) -> *const c_char;
@@ -924,5 +929,54 @@ pub mod test {
             .unwrap_err()
             .to_string()
             .contains("HNSW Integrity failure"))
+    }
+
+    #[test]
+    fn it_can_resize_correctly() {
+        let n: usize = 10;
+        let d: usize = 960;
+        let distance_function = DistanceFunction::Euclidean;
+        let tmp_dir = tempdir().unwrap();
+        let persist_path = tmp_dir.path().to_str().unwrap().to_string();
+        let id = Uuid::new_v4();
+        let index = HnswIndex::init(
+            &IndexConfig {
+                dimensionality: d as i32,
+                distance_function: distance_function.clone(),
+            },
+            Some(&HnswIndexConfig {
+                max_elements: n,
+                m: 32,
+                ef_construction: 100,
+                ef_search: 100,
+                random_seed: 0,
+                persist_path: persist_path.clone(),
+            }),
+            IndexUuid(id),
+        );
+
+        let mut index = match index {
+            Err(e) => panic!("Error initializing index: {}", e),
+            Ok(index) => index,
+        };
+
+        let data: Vec<f32> = utils::generate_random_data(n, d);
+        let ids: Vec<usize> = (0..n).collect();
+
+        (0..n).for_each(|i| {
+            let data = &data[i * d..(i + 1) * d];
+            index.add(ids[i], data).expect("Should not error");
+        });
+
+        index.delete(0).unwrap();
+        let data = &data[d..2 * d];
+
+        let index_len = index.len_with_deleted();
+        let index_capacity = index.capacity();
+        if index_len + 1 > index_capacity {
+            index.resize(index_capacity * 2).unwrap();
+        }
+        // this will fail if the index is not resized correctly
+        index.add(100, data).unwrap();
     }
 }
