@@ -194,4 +194,7 @@ error_types: Dict[str, Type[ChromaError]] = {
     "VersionMismatchError": VersionMismatchError,
     "RateLimitError": RateLimitError,
     "AuthError": ChromaAuthError,
+    "UniqueConstraintError": UniqueConstraintError,
+    "QuotaError": QuotaError,
+    "InternalError": InternalError,
 }
