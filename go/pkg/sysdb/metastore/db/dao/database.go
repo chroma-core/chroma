@@ -38,6 +38,28 @@ func (s *databaseDb) GetAllDatabases() ([]*dbmodel.Database, error) {
 	return databases, nil
 }
 
+func (s *databaseDb) ListDatabases(limit *int32, offset *int32, tenantID string) ([]*dbmodel.Database, error) {
+	var databases []*dbmodel.Database
+	query := s.db.Table("databases").
+		Select("databases.id, databases.name, databases.tenant_id").
+		Where("databases.tenant_id = ?", tenantID).
+		Order("databases.created_at ASC")
+
+	if limit != nil {
+		query = query.Limit(int(*limit))
+	}
+
+	if offset != nil {
+		query = query.Offset(int(*offset))
+	}
+
+	if err := query.Find(&databases).Error; err != nil {
+		log.Error("ListDatabases", zap.Error(err))
+		return nil, err
+	}
+	return databases, nil
+}
+
 func (s *databaseDb) GetDatabases(tenantID string, databaseName string) ([]*dbmodel.Database, error) {
 	var databases []*dbmodel.Database
 	query := s.db.Table("databases").

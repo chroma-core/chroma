@@ -1,4 +1,3 @@
-import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
@@ -27,6 +26,7 @@ from chromadb.proto.coordinator_pb2 import (
     GetDatabaseRequest,
     GetSegmentsRequest,
     GetTenantRequest,
+    ListDatabasesRequest,
     UpdateCollectionRequest,
     UpdateSegmentRequest,
 )
@@ -133,7 +133,26 @@ class GrpcSysDB(SysDB):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
-        raise NotImplementedError()
+        try:
+            request = ListDatabasesRequest(limit=limit, offset=offset, tenant=tenant)
+            response = self._sys_db_stub.ListDatabases(
+                request, timeout=self._request_timeout_seconds
+            )
+            results: List[Database] = []
+            for proto_database in response.databases:
+                results.append(
+                    Database(
+                        id=UUID(hex=proto_database.id),
+                        name=proto_database.name,
+                        tenant=proto_database.tenant,
+                    )
+                )
+            return results
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to list databases for tenant {tenant} due to error: {e}"
+            )
+            raise InternalError()
 
     @overrides
     def create_tenant(self, name: str) -> None:
