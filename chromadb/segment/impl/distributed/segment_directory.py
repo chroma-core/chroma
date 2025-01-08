@@ -8,6 +8,7 @@ from overrides import EnforceOverrides, override
 
 from chromadb.config import System
 from chromadb.segment.distributed import (
+    Member,
     Memberlist,
     MemberlistProvider,
     SegmentDirectory,
@@ -35,7 +36,11 @@ class MockMemberlistProvider(MemberlistProvider, EnforceOverrides):
 
     def __init__(self, system: System):
         super().__init__(system)
-        self._memberlist = ["a", "b", "c"]
+        self._memberlist = [
+            Member(id="a", ip="10.0.0.1"),
+            Member(id="b", ip="10.0.0.2"),
+            Member(id="c", ip="10.0.0.3"),
+        ]
 
     @override
     def get_memberlist(self) -> Memberlist:
@@ -203,7 +208,12 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     ) -> Memberlist:
         if "members" not in api_response_spec:
             return []
-        return [m["member_id"] for m in api_response_spec["members"]]
+        parsed = []
+        for m in api_response_spec["members"]:
+            id = m["member_id"]
+            ip = m["member_ip"] if "member_ip" in m else ""
+            parsed.append(Member(id=id, ip=ip))
+        return parsed
 
     def _notify(self, memberlist: Memberlist) -> None:
         for callback in self.callbacks:
@@ -245,11 +255,23 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
             raise ValueError("Memberlist is not initialized")
         # Query to the same collection should end up on the same endpoint
         assignment = assign(
-            segment["collection"].hex, self._curr_memberlist, murmur3hasher, 1
+            segment["collection"].hex,
+            [m.id for m in self._curr_memberlist],
+            murmur3hasher,
+            1,
         )[0]
         service_name = self.extract_service_name(assignment)
-        assignment = f"{assignment}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"  # TODO: make port configurable
-        return assignment
+
+        # If the memberlist has an ip, use it, otherwise use the member id with the headless service
+        # this is for backwards compatibility with the old memberlist which only had ids
+        for member in self._curr_memberlist:
+            if member.id == assignment:
+                if member.ip is not None and member.ip != "":
+                    endpoint = f"{member.ip}:50051"
+                    return endpoint
+
+        endpoint = f"{assignment}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"  # TODO: make port configurable
+        return endpoint
 
     @override
     def register_updated_segment_callback(
@@ -263,7 +285,9 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     )
     def _update_memberlist(self, memberlist: Memberlist) -> None:
         with self._curr_memberlist_mutex:
-            add_attributes_to_current_span({"new_memberlist": memberlist})
+            add_attributes_to_current_span(
+                {"new_memberlist": [m.id for m in memberlist]}
+            )
             self._curr_memberlist = memberlist
 
     def extract_service_name(self, pod_name: str) -> Optional[str]:
