@@ -31,7 +31,7 @@ jobs:
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
-          artifact-name: "tilt-logs-${{ github.run_id }}-${{ github.job }}"
+          artifact-name: "tilt-logs-${{ github.run_id }}-${{ matrix.test-globs }}"
       - name: Send PagerDuty alert on failure
         if: ${{ failure() }}
         uses: Entle/action-pagerduty-alert@0.2.0
@@ -46,5 +46,5 @@ jobs:
       - name: Merge
         uses: actions/upload-artifact/merge@v4
         with:
-          name: cluster_test_logs-${{ github.run_id }}-${{ github.job }}
+          name: cluster_test_logs-${{ github.run_id }}
           pattern: cluster_logs_*
