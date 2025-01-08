@@ -130,3 +130,7 @@ jobs:
               reviewers: [assignee]
             })
             core.info(`Requested review from ${assignee} on PR #${pr.number}`)
+
+            // Add a link to the hotfix PR in the action summary
+            core.summary.addHeading('Link to Hotfix PR', '2')
+            core.summary.addLink(`chroma-core/chroma #${pr.number}`, pr.html.url)
