@@ -213,7 +213,7 @@ impl SegmentWriter for DistributedHNSWSegmentWriter {
                     let embedding = record.merged_embeddings_ref();
 
                     let mut index = self.index.inner.upgradable_read();
-                    let index_len = index.len();
+                    let index_len = index.len_with_deleted();
                     let index_capacity = index.capacity();
                     if index_len + 1 > index_capacity {
                         index.with_upgraded(|index| {
