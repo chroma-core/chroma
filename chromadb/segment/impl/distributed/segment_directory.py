@@ -36,7 +36,6 @@ class MockMemberlistProvider(MemberlistProvider, EnforceOverrides):
 
     def __init__(self, system: System):
         super().__init__(system)
-        # self._memberlist = ["a", "b", "c"]
         self._memberlist = [
             Member(id="a", ip="10.0.0.1"),
             Member(id="b", ip="10.0.0.2"),
@@ -268,7 +267,6 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         for member in self._curr_memberlist:
             if member.id == assignment:
                 if member.ip is not None and member.ip != "":
-                    print(f"[HAMMAD DEBUG] Using member ip: {member.ip}")
                     endpoint = f"{member.ip}:50051"
                     return endpoint
 
