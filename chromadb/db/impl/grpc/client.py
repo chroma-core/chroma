@@ -127,6 +127,15 @@ class GrpcSysDB(SysDB):
             raise InternalError()
 
     @overrides
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        raise NotImplementedError()
+
+    @overrides
     def create_tenant(self, name: str) -> None:
         try:
             request = CreateTenantRequest(name=name)
@@ -310,7 +319,9 @@ class GrpcSysDB(SysDB):
                 f"Failed to delete collection id {id} for database {database} and tenant {tenant} due to error: {e}"
             )
             e = cast(grpc.Call, e)
-            logger.error(f"Error code: {e.code()}, NotFoundError: {grpc.StatusCode.NOT_FOUND}")
+            logger.error(
+                f"Error code: {e.code()}, NotFoundError: {grpc.StatusCode.NOT_FOUND}"
+            )
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 raise NotFoundError()
             raise InternalError()
@@ -367,13 +378,17 @@ class GrpcSysDB(SysDB):
             raise InternalError()
 
     @overrides
-    def get_collection_with_segments(self, collection_id: UUID) -> CollectionAndSegments:
+    def get_collection_with_segments(
+        self, collection_id: UUID
+    ) -> CollectionAndSegments:
         try:
             request = GetCollectionWithSegmentsRequest(id=collection_id.hex)
-            response: GetCollectionWithSegmentsResponse = self._sys_db_stub.GetCollectionWithSegments(request)
+            response: GetCollectionWithSegmentsResponse = (
+                self._sys_db_stub.GetCollectionWithSegments(request)
+            )
             return CollectionAndSegments(
                 collection=from_proto_collection(response.collection),
-                segments=[from_proto_segment(segment) for segment in response.segments]
+                segments=[from_proto_segment(segment) for segment in response.segments],
             )
         except grpc.RpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:

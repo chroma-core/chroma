@@ -78,7 +78,7 @@ export class Collection {
       (await prepareRecordRequest(
         params,
         this.embeddingFunction,
-      )) as GeneratedApi.AddEmbedding,
+      )) as GeneratedApi.AddRequest,
       this.client.api.options,
     );
   }
@@ -113,7 +113,7 @@ export class Collection {
       (await prepareRecordRequest(
         params,
         this.embeddingFunction,
-      )) as GeneratedApi.AddEmbedding,
+      )) as GeneratedApi.AddRequest,
       this.client.api.options,
     );
   }
