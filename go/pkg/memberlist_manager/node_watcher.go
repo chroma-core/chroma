@@ -165,7 +165,8 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 		for _, condition := range pod.Status.Conditions {
 			if condition.Type == v1.PodReady {
 				if condition.Status == v1.ConditionTrue {
-					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP})
+					log.Debug("Pod registered", zap.String("pod name", pod.Name), zap.String("node name", pod.Spec.NodeName))
+					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP, pod.Spec.NodeName})
 				}
 				break
 			}

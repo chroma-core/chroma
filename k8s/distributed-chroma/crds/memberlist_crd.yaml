@@ -29,6 +29,8 @@ spec:
                         type: string
                       member_ip:
                         type: string
+                      member_node_name:
+                        type: string
   scope: Namespaced
   names:
     plural: memberlists
