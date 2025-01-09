@@ -57,8 +57,7 @@ impl Handler<TaskMessage> for WorkerThread {
     type Result = ();
 
     async fn handle(&mut self, task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
-        let child_span =
-            trace_span!(parent: Span::current(), "Task execution", name = task.get_name());
+        let child_span = trace_span!(parent: Span::current(), "Task execution", otel.name = format!("Task execution: {}", task.get_name()), name = task.get_name());
         task.run().instrument(child_span).await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.receiver());
         let _res = self.dispatcher.send(req, None).await;
