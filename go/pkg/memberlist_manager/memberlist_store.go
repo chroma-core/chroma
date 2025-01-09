@@ -34,6 +34,10 @@ func (m Member) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 
 type Memberlist []Member
 
+func (p Memberlist) Len() int           { return len(p) }
+func (p Memberlist) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+func (p Memberlist) Less(i, j int) bool { return p[i].id < p[j].id }
+
 // MarshalLogArray implements the zapcore.ArrayMarshaler interface
 func (ml Memberlist) MarshalLogArray(enc zapcore.ArrayEncoder) error {
 	for _, member := range ml {
