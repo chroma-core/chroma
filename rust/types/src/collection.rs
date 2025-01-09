@@ -143,6 +143,7 @@ mod test {
             database: "qux".to_string(),
             log_position: 0,
             version: 0,
+            num_records_last_compaction: None,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(
@@ -154,5 +155,6 @@ mod test {
         assert_eq!(converted_collection.dimension, None);
         assert_eq!(converted_collection.tenant, "baz".to_string());
         assert_eq!(converted_collection.database, "qux".to_string());
+        assert_eq!(converted_collection.num_records_last_compaction, None);
     }
 }
