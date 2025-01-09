@@ -29,6 +29,8 @@ func init() {
 
 	// GRPC
 	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
+	Cmd.Flags().IntVar(&conf.MaxConcurrentStreams, "max-concurrent-streams", 100, "Max concurrent streams")
+	Cmd.Flags().IntVar(&conf.MaxConcurrentStreams, "num-stream-workers", 100, "Number of stream workers")
 
 	// System Catalog
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "database", "System catalog provider")
