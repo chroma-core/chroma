@@ -46,5 +46,5 @@ jobs:
       - name: Merge
         uses: actions/upload-artifact/merge@v4
         with:
-          name: cluster_test_logs-${{ github.run_id }}
+          name: cluster_test_logs
           pattern: cluster_logs_*
