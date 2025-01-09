@@ -724,6 +724,44 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 			};
 		},
 		/**
+		 * @summary Delete Database
+		 * @param {string} databaseName
+		 * @param {string} tenant
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		deleteDatabase(databaseName: string, tenant: string, options: RequestInit = {}): FetchArgs {
+			// verify required parameter 'databaseName' is not null or undefined
+			if (databaseName === null || databaseName === undefined) {
+				throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling deleteDatabase.');
+			}
+			// verify required parameter 'tenant' is not null or undefined
+			if (tenant === null || tenant === undefined) {
+				throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling deleteDatabase.');
+			}
+			let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}`
+				.replace('{database_name}', encodeURIComponent(String(databaseName)))
+				.replace('{tenant}', encodeURIComponent(String(tenant)));
+			const localVarPathQueryStart = localVarPath.indexOf("?");
+			const localVarRequestOptions: RequestInit = Object.assign({ method: 'DELETE' }, options);
+			const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
+			const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+			if (localVarPathQueryStart !== -1) {
+				localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+			}
+
+			localVarRequestOptions.headers = localVarHeaderParameter;
+
+			const localVarQueryParameterString = localVarQueryParameter.toString();
+			if (localVarQueryParameterString) {
+				localVarPath += "?" + localVarQueryParameterString;
+			}
+			return {
+				url: localVarPath,
+				options: localVarRequestOptions,
+			};
+		},
+		/**
 		 * @summary Delete V1
 		 * @param {string} collectionId
 		 * @param {Api.DeleteV1Request} request
@@ -2334,6 +2372,36 @@ export const ApiApiFp = function(configuration?: Configuration) {
 			};
 		},
 		/**
+		 * @summary Delete Database
+		 * @param {string} databaseName
+		 * @param {string} tenant
+		 * @param {RequestInit} [options] Override http request option.
+		 * @throws {RequiredError}
+		 */
+		deleteDatabase(databaseName: string, tenant: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.DeleteDatabase200Response> {
+			const localVarFetchArgs = ApiApiFetchParamCreator(configuration).deleteDatabase(databaseName, tenant, options);
+			return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+				return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+					const contentType = response.headers.get('Content-Type');
+					const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+
+					if (response.status === 200) {
+						if (mimeType === 'application/json') {
+							return response.json() as any;
+						}
+						throw response;
+					}
+					if (response.status === 422) {
+						if (mimeType === 'application/json') {
+							throw response;
+						}
+						throw response;
+					}
+					throw response;
+				});
+			};
+		},
+		/**
 		 * @summary Delete V1
 		 * @param {string} collectionId
 		 * @param {Api.DeleteV1Request} request
@@ -3358,6 +3426,17 @@ export class ApiApi extends BaseAPI {
 	 */
 	public deleteCollectionV1(collectionName: string, tenant: string | undefined, database: string | undefined, options?: RequestInit) {
 		return ApiApiFp(this.configuration).deleteCollectionV1(collectionName, tenant, database, options)(this.fetch, this.basePath);
+	}
+
+	/**
+	 * @summary Delete Database
+	 * @param {string} databaseName
+	 * @param {string} tenant
+	 * @param {RequestInit} [options] Override http request option.
+	 * @throws {RequiredError}
+	 */
+	public deleteDatabase(databaseName: string, tenant: string, options?: RequestInit) {
+		return ApiApiFp(this.configuration).deleteDatabase(databaseName, tenant, options)(this.fetch, this.basePath);
 	}
 
 	/**

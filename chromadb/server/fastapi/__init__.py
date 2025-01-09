@@ -289,6 +289,13 @@ class FastAPI(Server):
         )
 
         self.router.add_api_route(
+            "/api/v2/tenants/{tenant}/databases/{database_name}",
+            self.delete_database,
+            methods=["DELETE"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
             "/api/v2/tenants",
             self.create_tenant,
             methods=["POST"],
@@ -557,6 +564,28 @@ class FastAPI(Server):
                 tenant,
                 limiter=self._capacity_limiter,
             ),
+        )
+
+    @trace_method("FastAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    async def delete_database(
+        self,
+        request: Request,
+        database_name: str,
+        tenant: str,
+    ) -> None:
+        self.auth_request(
+            request.headers,
+            AuthzAction.DELETE_DATABASE,
+            tenant,
+            database_name,
+            None,
+        )
+
+        await to_thread.run_sync(
+            self._api.delete_database,
+            database_name,
+            tenant,
+            limiter=self._capacity_limiter,
         )
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)

@@ -244,6 +244,26 @@ export class AdminClient {
   }
 
   /**
+   * Deletes a database.
+   *
+   * @param {Object} params - The parameters for deleting a database.
+   * @param {string} params.name - The name of the database.
+   * @param {string} params.tenantName - The name of the tenant.
+   *
+   * @returns {Promise<void>} A promise that returns nothing.
+   * @throws {Error} If there is an issue deleting the database.
+   */
+  public async deleteDatabase({
+    name,
+    tenantName,
+  }: {
+    name: string;
+    tenantName: string;
+  }): Promise<void> {
+    await this.api.deleteDatabase(name, tenantName, this.api.options);
+  }
+
+  /**
    * Lists database for a specific tenant.
    *
    * @param {Object} params - The parameters for listing databases.

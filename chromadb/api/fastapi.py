@@ -127,6 +127,19 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
         )
 
+    @trace_method("FastAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    def delete_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+    ) -> None:
+        """Deletes a database"""
+        self._make_request(
+            "delete",
+            f"/tenants/{tenant}/databases/{name}",
+        )
+
     @trace_method("FastAPI.list_databases", OpenTelemetryGranularity.OPERATION)
     @override
     def list_databases(

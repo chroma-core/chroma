@@ -35,6 +35,11 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database."""
+        pass
+
+    @abstractmethod
     def list_databases(
         self,
         limit: Optional[int] = None,

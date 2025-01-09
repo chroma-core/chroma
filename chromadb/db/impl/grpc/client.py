@@ -127,6 +127,10 @@ class GrpcSysDB(SysDB):
             raise InternalError()
 
     @overrides
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        raise NotImplementedError()
+
+    @overrides
     def list_databases(
         self,
         limit: Optional[int] = None,

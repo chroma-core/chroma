@@ -517,6 +517,17 @@ class AdminAPI(ABC):
         pass
 
     @abstractmethod
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database. Raises an error if the database does not exist.
+
+        Args:
+            database: The name of the database to delete.
+            tenant: The tenant of the database to delete.
+
+        """
+        pass
+
+    @abstractmethod
     def list_databases(
         self,
         limit: Optional[int] = None,
