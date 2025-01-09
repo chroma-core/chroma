@@ -61,7 +61,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	collections := make([]string, 2)
 	for i := 0; i < 2; i++ {
 		collectionName := "cleanup_test_collection_" + strconv.Itoa(i)
-		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, 100)
 		suite.NoError(err)
 		collections[i] = collectionID
 	}
@@ -97,7 +97,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 
 	// Create a test collection
 	collectionName := "cleanup_test_collection_double_delete"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, 100)
 	suite.NoError(err)
 
 	// Hard delete it once

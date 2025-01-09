@@ -15,11 +15,12 @@ import (
 
 type CollectionDbTestSuite struct {
 	suite.Suite
-	db           *gorm.DB
-	collectionDb *collectionDb
-	tenantName   string
-	databaseName string
-	databaseId   string
+	db                       *gorm.DB
+	collectionDb             *collectionDb
+	tenantName               string
+	databaseName             string
+	databaseId               string
+	numRecordsLastCompaction *int64
 }
 
 func (suite *CollectionDbTestSuite) SetupSuite() {
@@ -33,6 +34,8 @@ func (suite *CollectionDbTestSuite) SetupSuite() {
 	DbId, err := CreateTestTenantAndDatabase(suite.db, suite.tenantName, suite.databaseName)
 	suite.NoError(err)
 	suite.databaseId = DbId
+	num_records := int64(100)
+	suite.numRecordsLastCompaction = &num_records
 }
 
 func (suite *CollectionDbTestSuite) TearDownSuite() {
@@ -45,7 +48,7 @@ func (suite *CollectionDbTestSuite) TearDownSuite() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collectionName := "test_collection_get_collections"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, 100)
 	suite.NoError(err)
 
 	testKey := "test"
@@ -75,6 +78,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Len(collections[0].CollectionMetadata, 1)
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
+	suite.Equal(suite.numRecordsLastCompaction, collections[0].Collection.NumRecordsLastCompaction)
 
 	// Test when filtering by ID
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -89,7 +93,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
 	// Test limit and offset
-	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
+	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId, 100)
 	suite.NoError(err)
 
 	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -122,7 +126,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion() {
 	collectionName := "test_collection_get_collections"
-	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, 100)
 	// verify default values
 	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.NoError(err)
@@ -171,9 +175,9 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	// Create 2 collections.
 	collectionName1 := "test_collection_soft_delete1"
 	collectionName2 := "test_collection_soft_delete2"
-	collectionID1, err := CreateTestCollection(suite.db, collectionName1, 128, suite.databaseId)
+	collectionID1, err := CreateTestCollection(suite.db, collectionName1, 128, suite.databaseId, 100)
 	suite.NoError(err)
-	collectionID2, err := CreateTestCollection(suite.db, collectionName2, 128, suite.databaseId)
+	collectionID2, err := CreateTestCollection(suite.db, collectionName2, 128, suite.databaseId, 100)
 	suite.NoError(err)
 
 	// Soft delete collection 1 by Updating the is_deleted column

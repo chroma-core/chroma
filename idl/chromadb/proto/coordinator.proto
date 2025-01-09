@@ -107,6 +107,7 @@ message CreateCollectionRequest {
   // When segments are set, then the collection and segments will be created as
   // a single atomic operation.
   repeated Segment segments = 9;  // Optional.
+  optional int64 num_records_last_compaction = 10;
 }
 
 message CreateCollectionResponse {
@@ -168,6 +169,7 @@ message UpdateCollectionRequest {
     UpdateMetadata metadata = 5;
     bool reset_metadata = 6;
   }
+  optional int64 num_records_last_compaction = 7;
 }
 
 message UpdateCollectionResponse {

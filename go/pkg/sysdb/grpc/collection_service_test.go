@@ -324,7 +324,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	log.Info("TestServer_FlushCollectionCompaction")
 	// create test collection
 	collectionName := "collection_service_test_flush_collection_compaction"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, 100)
 	suite.NoError(err)
 
 	// flush collection compaction

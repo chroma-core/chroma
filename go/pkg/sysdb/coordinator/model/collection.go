@@ -5,29 +5,31 @@ import (
 )
 
 type Collection struct {
-	ID                   types.UniqueID
-	Name                 string
-	ConfigurationJsonStr string
-	Dimension            *int32
-	Metadata             *CollectionMetadata[CollectionMetadataValueType]
-	TenantID             string
-	DatabaseName         string
-	Ts                   types.Timestamp
-	LogPosition          int64
-	Version              int32
-	UpdatedAt            types.Timestamp
+	ID                       types.UniqueID
+	Name                     string
+	ConfigurationJsonStr     string
+	Dimension                *int32
+	Metadata                 *CollectionMetadata[CollectionMetadataValueType]
+	TenantID                 string
+	DatabaseName             string
+	Ts                       types.Timestamp
+	LogPosition              int64
+	Version                  int32
+	UpdatedAt                types.Timestamp
+	NumRecordsLastCompaction *int64
 }
 
 type CreateCollection struct {
-	ID                   types.UniqueID
-	Name                 string
-	ConfigurationJsonStr string
-	Dimension            *int32
-	Metadata             *CollectionMetadata[CollectionMetadataValueType]
-	GetOrCreate          bool
-	TenantID             string
-	DatabaseName         string
-	Ts                   types.Timestamp
+	ID                       types.UniqueID
+	Name                     string
+	ConfigurationJsonStr     string
+	Dimension                *int32
+	Metadata                 *CollectionMetadata[CollectionMetadataValueType]
+	GetOrCreate              bool
+	TenantID                 string
+	DatabaseName             string
+	Ts                       types.Timestamp
+	NumRecordsLastCompaction *int64
 }
 
 type DeleteCollection struct {
@@ -38,14 +40,15 @@ type DeleteCollection struct {
 }
 
 type UpdateCollection struct {
-	ID            types.UniqueID
-	Name          *string
-	Dimension     *int32
-	Metadata      *CollectionMetadata[CollectionMetadataValueType]
-	ResetMetadata bool
-	TenantID      string
-	DatabaseName  string
-	Ts            types.Timestamp
+	ID                       types.UniqueID
+	Name                     *string
+	Dimension                *int32
+	Metadata                 *CollectionMetadata[CollectionMetadataValueType]
+	ResetMetadata            bool
+	TenantID                 string
+	DatabaseName             string
+	Ts                       types.Timestamp
+	NumRecordsLastCompaction *int64
 }
 
 type FlushCollectionCompaction struct {
