@@ -218,7 +218,7 @@ impl HnswIndexProvider {
         }
     }
 
-    #[instrument]
+    #[instrument(skip(self, buf))]
     async fn copy_bytes_to_local_file(
         &self,
         file_path: &Path,
@@ -344,8 +344,7 @@ impl HnswIndexProvider {
                 })
                 .await?;
             let file_path = index_storage_path.join(file);
-            let bytes_read = buf.len();
-            self.copy_bytes_to_local_file(&file_path, buf).instrument(tracing::info_span!(parent: Span::current(), "hnsw provider copy bytes to local file", file = file, bytes = bytes_read)).await?;
+            self.copy_bytes_to_local_file(&file_path, buf).await?;
         }
         Ok(())
     }

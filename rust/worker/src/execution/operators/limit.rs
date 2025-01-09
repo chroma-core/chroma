@@ -87,7 +87,7 @@ struct SeekScanner<'me> {
     mask: &'me RoaringBitmap,
 }
 
-impl<'me> SeekScanner<'me> {
+impl SeekScanner<'_> {
     // Find the rank of the target offset id in the imaginary segment
     //
     // The rank of a target is the number of elements strictly less than it

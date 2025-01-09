@@ -867,7 +867,7 @@ pub enum ChromaSegmentWriter<'bf> {
     DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>),
 }
 
-impl<'a> ChromaSegmentWriter<'a> {
+impl ChromaSegmentWriter<'_> {
     pub fn get_id(&self) -> SegmentUuid {
         match self {
             ChromaSegmentWriter::RecordSegment(writer) => writer.id,
