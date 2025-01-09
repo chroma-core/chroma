@@ -38,6 +38,11 @@ const MenuItem: React.FC<{ section: AppSection; active: boolean }> = ({
               Coming Soon
             </div>
           )}
+          {section.override && (
+            <div className="absolute top-1/2 -translate-y-1/2 text-xs px-2 py-0.5 w-fit -right-12 bg-gray-800 rounded-md text-gray-200">
+              New
+            </div>
+          )}
         </div>
       </div>
     </Link>
