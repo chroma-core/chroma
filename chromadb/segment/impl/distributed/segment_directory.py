@@ -1,3 +1,4 @@
+from enum import Enum
 import threading
 import time
 from typing import Any, Callable, Dict, Optional, cast
@@ -221,16 +222,37 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
             callback(memberlist)
 
 
+class RoutingMode(Enum):
+    """
+    Routing mode for the segment directory
+
+    node - Assign based on the node name, used in production with multi-node settings with the assumption that
+    there is one query service pod per node. This is useful for when there is a disk based cache on the
+    node that we want to route to.
+
+    id - Assign based on the member id, used in development and testing environments where the node name is not
+    guaranteed to be unique. (I.e a local development kubernetes env). Or when there are multiple query service
+    pods per node.
+    """
+
+    NODE = "node"
+    ID = "id"
+
+
 class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     _memberlist_provider: MemberlistProvider
     _curr_memberlist_mutex: threading.Lock
     _curr_memberlist: Optional[Memberlist]
+    _routing_mode: RoutingMode
 
     def __init__(self, system: System):
         super().__init__(system)
         self._memberlist_provider = self.require(MemberlistProvider)
         memberlist_name = system.settings.require("worker_memberlist_name")
         self._memberlist_provider.set_memberlist_name(memberlist_name)
+        self._routing_mode = system.settings.require(
+            "chroma_segment_directory_routing_mode"
+        )
 
         self._curr_memberlist = None
         self._curr_memberlist_mutex = threading.Lock()
@@ -254,19 +276,47 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
     def get_segment_endpoint(self, segment: Segment) -> str:
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
-        # Query to the same collection should end up on the same endpoint
-        assignment = assign(
-            segment["collection"].hex,
-            [m.id for m in self._curr_memberlist],
-            murmur3hasher,
-            1,
-        )[0]
-        service_name = self.extract_service_name(assignment)
 
+        # Check if all members in the memberlist have a node set,
+        # if so, route using the node
+        # NOTE(@hammadb) 1/8/2024: This is to handle the migration between routing
+        # using the member id and routing using the node name
+        # We want to route using the node name over the member id
+        # because the node may have a disk cache that we want a
+        # stable identifier for over deploys.
+        can_use_node_routing = all([m.node != "" for m in self._curr_memberlist])
+        if can_use_node_routing:
+            # In production, the assumption is one query service pod per node
+            # and so we can route to the node name since it will be unique
+            # in the memberlist.
+
+            # If we are using node routing and the segments
+            assignment = assign(
+                segment["collection"].hex,
+                [m.node for m in self._curr_memberlist],
+                murmur3hasher,
+                1,
+            )[0]
+        else:
+            # Query to the same collection should end up on the same endpoint
+            assignment = assign(
+                segment["collection"].hex,
+                [m.id for m in self._curr_memberlist],
+                murmur3hasher,
+                1,
+            )[0]
+
+        service_name = self.extract_service_name(assignment)
         # If the memberlist has an ip, use it, otherwise use the member id with the headless service
         # this is for backwards compatibility with the old memberlist which only had ids
         for member in self._curr_memberlist:
-            if member.id == assignment:
+            is_chosen_with_node_routing = (
+                can_use_node_routing and member.node == assignment
+            )
+            is_chosen_with_id_routing = (
+                not can_use_node_routing and member.id == assignment
+            )
+            if is_chosen_with_node_routing or is_chosen_with_id_routing:
                 if member.ip is not None and member.ip != "":
                     endpoint = f"{member.ip}:50051"
                     return endpoint

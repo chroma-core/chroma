@@ -12,6 +12,8 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
+from chromadb.segment.impl.distributed.segment_directory import RoutingMode
+
 
 in_pydantic_v2 = False
 try:
@@ -228,6 +230,8 @@ class Settings(BaseSettings):  # type: ignore
     # ==================
 
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
+    chroma_segment_directory_routing_mode: RoutingMode = RoutingMode.ID
+
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
     worker_memberlist_name: str = "query-service-memberlist"
 
