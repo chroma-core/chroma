@@ -1,5 +1,9 @@
 name: Setup Rust
 description: "This action sets up Rust"
+inputs:
+  sccache-token:
+    description: "Auth token for sccache"
+    required: true
 runs:
   using: "composite"
   steps:
@@ -14,9 +18,11 @@ runs:
       shell: bash
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
-    - name: Cache
-      uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: rust/worker
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.7
+    - name: Set Rust caching env vars only on non-release runs
+      shell: bash
+      run: |
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
