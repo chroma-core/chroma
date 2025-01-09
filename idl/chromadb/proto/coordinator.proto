@@ -5,7 +5,6 @@ option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 import "chromadb/proto/chroma.proto";
 import "google/protobuf/empty.proto";
-import "google/protobuf/timestamp.proto";
 
 message CreateDatabaseRequest {
   string id = 1;
@@ -236,7 +235,7 @@ message CollectionInfoImmutable {
   // This is the collection name at the time of creation.
   // This will not be updated if the collection name is changed.
   string collection_name = 7;
-  google.protobuf.Timestamp collection_creation_time = 8;
+  int64 collection_creation_secs = 8;
 }
 
 // Contains information about the version history of a collection.
@@ -257,7 +256,7 @@ message CollectionVersionInfo {
   // then they are not reflected in the version history.
   CollectionInfoMutable collection_info_mutable = 3;
   // Timestamp at which this version was created.
-  google.protobuf.Timestamp created_at = 4;
+  int64 created_at_secs = 4;
   // Reason for the version change.
   // NOTE: As of now, we only support version change due to data compaction.
   // There is a good chance to include other reasons in the future, especially
@@ -274,8 +273,8 @@ message CollectionVersionInfo {
 message CollectionInfoMutable {
   int64 current_log_position = 1;
   int64 current_collection_version = 2;
-  google.protobuf.Timestamp updated_at = 3;
-  google.protobuf.Timestamp last_compaction_time = 4;
+  int64 updated_at_secs = 3;
+  int64 last_compaction_time_secs = 4;
   int64 dimension = 5;
 }
 
@@ -317,10 +316,10 @@ message ListCollectionVersionsRequest {
   // Maximum number of versions to return.
   optional int64 max_count = 3;
   // Only return versions before this timestamp.
-  optional google.protobuf.Timestamp versions_before = 4;
+  optional int64 versions_before = 4;
   // Only return versions at or after this timestamp.
   // Together with versions_before, this forms an inclusive range.
-  optional google.protobuf.Timestamp versions_at_or_after = 5;
+  optional int64 versions_at_or_after = 5;
 }
 
 // Response to ListCollectionVersionsRequest.
