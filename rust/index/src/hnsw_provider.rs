@@ -344,7 +344,6 @@ impl HnswIndexProvider {
                 })
                 .await?;
             let file_path = index_storage_path.join(file);
-            let bytes_read = buf.len();
             self.copy_bytes_to_local_file(&file_path, buf).await?;
         }
         Ok(())
