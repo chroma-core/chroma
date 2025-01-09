@@ -1,6 +1,6 @@
-// NOTE:  This is file is copied to a file of the same name in the
-// load/src/opentelemetry_config.rs file.
-//
+// NOTE:  This is file is copied to files of the same name in the
+// load/src/opentelemetry_config.rs file
+// and garbage_collector/src/opentelemetry_config.rs file.
 // Keep them in-sync manually.
 
 use std::borrow::Cow;

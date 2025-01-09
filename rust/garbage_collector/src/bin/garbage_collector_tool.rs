@@ -1,6 +1,5 @@
-use garbage_collector_library::garbage_collector_service_entrypoint;
-
 #[tokio::main]
 async fn main() {
-    garbage_collector_service_entrypoint().await
+    // TODO: Parse the arguments and define an entry point.
+    todo!()
 }

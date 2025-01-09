@@ -63,7 +63,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
         BunyanFormattingLayer::new(service_name.clone().to_string(), std::io::stdout)
             .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
     // global filter layer. Don't filter anything at above trace at the global layer for gc.
-    let global_layer = EnvFilter::new("none,garbage_collector=trace");
+    let global_layer = EnvFilter::new("none,garbage_collector_library=trace");
 
     // Create subscriber.
     let subscriber = tracing_subscriber::registry()

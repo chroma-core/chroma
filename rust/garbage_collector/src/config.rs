@@ -9,6 +9,7 @@ pub(super) struct GarbageCollectorConfig {
     cutoff_time_hours: u32,
     max_collections_to_gc: u32,
     gc_interval_mins: u32,
+    disallow_collection_names: Vec<String>,
     sysdb_connection: SysdbConnectionConfig,
 }
 
@@ -39,5 +40,26 @@ impl GarbageCollectorConfig {
             Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_config() {
+        let config = GarbageCollectorConfig::load();
+        assert_eq!(config.service_name, "garbage-collector");
+        assert_eq!(config.otel_endpoint, "http://otel-collector:4317");
+        assert_eq!(config.cutoff_time_hours, 12);
+        assert_eq!(config.max_collections_to_gc, 1000);
+        assert_eq!(config.gc_interval_mins, 120);
+        let empty_vec: Vec<String> = vec![];
+        assert_eq!(config.disallow_collection_names, empty_vec);
+        assert_eq!(config.sysdb_connection.host, "sysdb.chroma");
+        assert_eq!(config.sysdb_connection.port, 50051);
+        assert_eq!(config.sysdb_connection.connect_timeout_ms, 60000);
+        assert_eq!(config.sysdb_connection.request_timeout_ms, 60000);
     }
 }
