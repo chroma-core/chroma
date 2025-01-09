@@ -38,6 +38,13 @@ message ListDatabasesResponse {
   repeated Database databases = 1;
 }
 
+message DeleteDatabaseRequest {
+  string name = 1;
+  string tenant = 2;
+}
+
+message DeleteDatabaseResponse {}
+
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
@@ -357,6 +364,7 @@ service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
+  rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}

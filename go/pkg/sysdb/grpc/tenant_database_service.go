@@ -80,6 +80,22 @@ func (s *Server) ListDatabases(ctx context.Context, req *coordinatorpb.ListDatab
 	return res, nil
 }
 
+func (s *Server) DeleteDatabase(ctx context.Context, req *coordinatorpb.DeleteDatabaseRequest) (*coordinatorpb.DeleteDatabaseResponse, error) {
+	deleteDatabase := &model.DeleteDatabase{
+		Name:   req.GetName(),
+		Tenant: req.GetTenant(),
+	}
+	err := s.coordinator.DeleteDatabase(ctx, deleteDatabase)
+	if err != nil {
+		log.Error("error DeleteDatabase", zap.String("request", req.String()), zap.Error(err))
+		if errors.Is(err, common.ErrDatabaseNotFound) {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &coordinatorpb.DeleteDatabaseResponse{}, nil
+}
+
 func (s *Server) CreateTenant(ctx context.Context, req *coordinatorpb.CreateTenantRequest) (*coordinatorpb.CreateTenantResponse, error) {
 	res := &coordinatorpb.CreateTenantResponse{}
 	createTenant := &model.CreateTenant{

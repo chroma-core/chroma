@@ -95,6 +95,20 @@ func (s *databaseDb) Insert(database *dbmodel.Database) error {
 	return err
 }
 
+func (s *databaseDb) Delete(databaseID string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("id = ?", databaseID).Delete(&dbmodel.Database{}).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("database_id = ?", databaseID).Delete(&dbmodel.Collection{}).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
 func (s *databaseDb) GetDatabasesByTenantID(tenantID string) ([]*dbmodel.Database, error) {
 	var databases []*dbmodel.Database
 	query := s.db.Table("databases").

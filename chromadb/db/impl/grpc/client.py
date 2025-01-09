@@ -18,6 +18,7 @@ from chromadb.proto.coordinator_pb2 import (
     CreateSegmentRequest,
     CreateTenantRequest,
     DeleteCollectionRequest,
+    DeleteDatabaseRequest,
     DeleteSegmentRequest,
     GetCollectionsRequest,
     GetCollectionsResponse,
@@ -128,7 +129,18 @@ class GrpcSysDB(SysDB):
 
     @overrides
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        raise NotImplementedError()
+        try:
+            request = DeleteDatabaseRequest(name=name, tenant=tenant)
+            self._sys_db_stub.DeleteDatabase(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to delete database {name} for tenant {tenant} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
+            raise InternalError
 
     @overrides
     def list_databases(

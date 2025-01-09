@@ -74,6 +74,10 @@ func (s *Coordinator) ListDatabases(ctx context.Context, listDatabases *model.Li
 	return databases, nil
 }
 
+func (s *Coordinator) DeleteDatabase(ctx context.Context, deleteDatabase *model.DeleteDatabase) error {
+	return s.catalog.DeleteDatabase(ctx, deleteDatabase)
+}
+
 func (s *Coordinator) CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error) {
 	tenant, err := s.catalog.CreateTenant(ctx, createTenant, createTenant.Ts)
 	if err != nil {

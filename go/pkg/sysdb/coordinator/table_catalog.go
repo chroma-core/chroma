@@ -160,6 +160,23 @@ func (tc *Catalog) ListDatabases(ctx context.Context, listDatabases *model.ListD
 	return result, nil
 }
 
+func (tc *Catalog) DeleteDatabase(ctx context.Context, deleteDatabase *model.DeleteDatabase) error {
+	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(deleteDatabase.Tenant, deleteDatabase.Name)
+		if err != nil {
+			return err
+		}
+		if len(databases) == 0 {
+			return common.ErrDatabaseNotFound
+		}
+		err = tc.metaDomain.DatabaseDb(txCtx).Delete(databases[0].ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 func (tc *Catalog) GetAllDatabases(ctx context.Context, ts types.Timestamp) ([]*model.Database, error) {
 	databases, err := tc.metaDomain.DatabaseDb(ctx).GetAllDatabases()
 	if err != nil {
