@@ -18,7 +18,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from InstructorEmbedding import INSTRUCTOR
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The InstructorEmbedding python package is not installed. Please install it with `pip install InstructorEmbedding`"
             )
         self._model = INSTRUCTOR(model_name, device=device)

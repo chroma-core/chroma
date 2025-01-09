@@ -11,7 +11,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             from text2vec import SentenceModel
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The text2vec python package is not installed. Please install it with `pip install text2vec`"
             )
         self._model = SentenceModel(model_name_or_path=model_name)

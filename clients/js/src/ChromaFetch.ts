@@ -5,7 +5,7 @@ import {
   ChromaForbiddenError,
   ChromaNotFoundError,
   ChromaServerError,
-  ChromaValueError,
+  ChromaInvalidArgumentError,
   ChromaError,
   createErrorByType,
   ChromaUniqueError,
@@ -14,7 +14,7 @@ import { FetchAPI } from "./generated";
 
 function isOfflineError(error: any): boolean {
   return Boolean(
-    (error?.name === "TypeError" || error?.name === "FetchError") &&
+    (error?.name === "InvalidArgumentError" || error?.name === "FetchError") &&
       (error.message?.includes("fetch failed") ||
         error.message?.includes("Failed to fetch") ||
         error.message?.includes("ENOTFOUND")),
@@ -27,8 +27,8 @@ function parseServerError(error: string | undefined): Error {
   if (match) {
     const [, name, message] = match;
     switch (name) {
-      case "ValueError":
-        return new ChromaValueError(message);
+      case "InvalidArgumentError":
+        return new ChromaInvalidArgumentError(message);
       default:
         return new ChromaError(name, message);
     }

@@ -117,7 +117,7 @@ class SqlDB(Component):
         elif len(seq_id_bytes) == 24:
             return int.from_bytes(seq_id_bytes, "big")
         else:
-            raise ValueError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
+            raise InvalidArgumentError(f"Unknown SeqID type with length {len(seq_id_bytes)}")
 
     @staticmethod
     def encode_seq_id(seq_id: SeqId) -> bytes:
@@ -127,7 +127,7 @@ class SqlDB(Component):
         elif seq_id.bit_length() <= 192:
             return int.to_bytes(seq_id, 24, "big")
         else:
-            raise ValueError(f"Unsupported SeqID: {seq_id}")
+            raise InvalidArgumentError(f"Unsupported SeqID: {seq_id}")
 
 
 _context = local()

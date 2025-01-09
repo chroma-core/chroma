@@ -35,7 +35,7 @@ class SharedSystemClient:
 
             # For now, the settings must match
             if previous_system.settings != settings:
-                raise ValueError(
+                raise InvalidArgumentError(
                     f"An instance of Chroma already exists for {identifier} with different settings"
                 )
 
@@ -47,7 +47,7 @@ class SharedSystemClient:
         api_impl = settings.chroma_api_impl
 
         if api_impl is None:
-            raise ValueError("Chroma API implementation must be set in settings")
+            raise InvalidArgumentError("Chroma API implementation must be set in settings")
         elif api_impl == "chromadb.api.segment.SegmentAPI":
             if settings.is_persistent:
                 identifier = settings.persist_directory
@@ -62,7 +62,7 @@ class SharedSystemClient:
             # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
             identifier = str(uuid.uuid4())
         else:
-            raise ValueError(f"Unsupported Chroma API implementation {api_impl}")
+            raise InvalidArgumentError(f"Unsupported Chroma API implementation {api_impl}")
 
         return identifier
 
