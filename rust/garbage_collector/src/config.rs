@@ -4,8 +4,7 @@ const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 
 #[allow(dead_code)]
 #[derive(Debug, serde::Deserialize)]
-// TODO(rohitcpbot):  Remove this dead code annotation.
-#[allow(dead_code)]
+// TODO(Sanket):  Remove this dead code annotation.
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
@@ -18,8 +17,7 @@ pub(super) struct GarbageCollectorConfig {
 
 #[allow(dead_code)]
 #[derive(Debug, serde::Deserialize)]
-// TODO(rohitcpbot):  Remove this dead code annotation.
-#[allow(dead_code)]
+// TODO(Sanket):  Remove this dead code annotation.
 pub(super) struct SysdbConnectionConfig {
     host: String,
     port: u32,
