@@ -15,7 +15,7 @@ from chromadb.api.configuration import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
-from chromadb.errors import InvalidCollectionException, NotFoundError, UniqueConstraintError
+from chromadb.errors import InvalidCollectionException, NotFoundError, UniqueConstraintError, InvalidArgumentError
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -219,7 +219,7 @@ class SqlSysDB(SqlDB, SysDB):
         database: str = DEFAULT_DATABASE,
     ) -> Tuple[Collection, bool]:
         if id is None and not get_or_create:
-            raise ValueError("id must be specified if get_or_create is False")
+            raise InvalidArgumentError("id must be specified if get_or_create is False")
 
         add_attributes_to_current_span(
             {
@@ -388,7 +388,7 @@ class SqlSysDB(SqlDB, SysDB):
         """Get collections by name, embedding function and/or metadata"""
 
         if name is not None and (tenant is None or database is None):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "If name is specified, tenant and database must also be specified in order to uniquely identify the collection"
             )
 
@@ -813,7 +813,7 @@ class SqlSysDB(SqlDB, SysDB):
         try:
             config_json = json.loads(json_str)
         except json.JSONDecodeError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Unable to decode configuration from JSON string: {json_str}"
             )
 

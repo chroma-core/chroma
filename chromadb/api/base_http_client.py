@@ -3,7 +3,7 @@ from urllib.parse import quote, urlparse, urlunparse
 import logging
 import orjson as json
 import httpx
-
+from chromadb.errors import InvalidArgumentError
 import chromadb.errors as errors
 from chromadb.config import Settings
 
@@ -18,11 +18,11 @@ class BaseHTTPClient:
     def _validate_host(host: str) -> None:
         parsed = urlparse(host)
         if "/" in host and parsed.scheme not in {"http", "https"}:
-            raise ValueError(
+            raise InvalidArgumentError (
                 "Invalid URL. " f"Unrecognized protocol - {parsed.scheme}."
             )
         if "/" in host and (not host.startswith("http")):
-            raise ValueError(
+            raise InvalidArgumentError (
                 "Invalid URL. "
                 "Seems that you are trying to pass URL as a host but without \
                   specifying the protocol. "

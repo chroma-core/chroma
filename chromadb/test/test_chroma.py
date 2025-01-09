@@ -6,6 +6,7 @@ import chromadb
 import chromadb.config
 from chromadb.db.system import SysDB
 from chromadb.ingest import Consumer, Producer
+from chromadb.errors import InvalidArgumentError
 
 
 class GetDBTest(unittest.TestCase):
@@ -100,7 +101,7 @@ class GetAPITest(unittest.TestCase):
 
 
 def test_legacy_values() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         client = chromadb.Client(
             chromadb.config.Settings(
                 chroma_api_impl="chromadb.api.local.LocalAPI",

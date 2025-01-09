@@ -1,6 +1,7 @@
 from typing import Dict, Generator, List, Optional, Sequence, Union
 import numpy as np
 from numpy.typing import NDArray
+from chromadb.errors import InvalidArgumentError
 
 import pytest
 import chromadb
@@ -59,14 +60,14 @@ def test_without_data_loader(
     record_set = record_set_with_uris(n=n_examples)
 
     # Can't embed data in URIs without a data loader
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection_without_data_loader.add(
             ids=record_set["ids"],
             uris=record_set["uris"],
         )
 
     # Can't get data from URIs without a data loader
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         collection_without_data_loader.get(include=["data"])
 
 

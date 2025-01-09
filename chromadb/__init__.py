@@ -23,6 +23,8 @@ from chromadb.api.types import (
     UpdateCollectionMetadata,
 )
 
+from chromadb.errors import InvalidArgumentError
+
 # Re-export types from chromadb.types
 __all__ = [
     "Collection",
@@ -188,12 +190,12 @@ def HttpClient(
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
-        raise ValueError(
+        raise InvalidArgumentError (
             f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
         )
     settings.chroma_server_host = host
     if settings.chroma_server_http_port and settings.chroma_server_http_port != port:
-        raise ValueError(
+        raise InvalidArgumentError (
             f"Chroma server http port provided in settings[{settings.chroma_server_http_port}] is different to the one provided in HttpClient: [{port}]"
         )
     settings.chroma_server_http_port = port
@@ -239,12 +241,12 @@ async def AsyncHttpClient(
 
     settings.chroma_api_impl = "chromadb.api.async_fastapi.AsyncFastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
-        raise ValueError(
+        raise InvalidArgumentError (
             f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
         )
     settings.chroma_server_host = host
     if settings.chroma_server_http_port and settings.chroma_server_http_port != port:
-        raise ValueError(
+        raise InvalidArgumentError (
             f"Chroma server http port provided in settings[{settings.chroma_server_http_port}] is different to the one provided in HttpClient: [{port}]"
         )
     settings.chroma_server_http_port = port
