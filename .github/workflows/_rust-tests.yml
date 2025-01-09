@@ -11,6 +11,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: 16 # assume that most results are already cached, so we're I/O bound and not CPU bound
     steps:
       - name: Checkout
         uses: actions/checkout@v4
