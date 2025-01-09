@@ -27,11 +27,16 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: slow
+      - name: Create artifact name
+        id: create-artifact-name
+        run: |
+          ARTIFACT_NAME=$(echo "${{ matrix.test-globs }}" | tr '/' '_' | tr '.' '_')
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
-          artifact-name: "tilt-logs-${{ github.run_id }}-${{ matrix.test-globs }}"
+          artifact-name: "tilt-logs-${{ steps.create-artifact-name.outputs.artifact_name }}"
       - name: Send PagerDuty alert on failure
         if: ${{ failure() }}
         uses: Entle/action-pagerduty-alert@0.2.0
