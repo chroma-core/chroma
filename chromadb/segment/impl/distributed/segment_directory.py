@@ -257,8 +257,14 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
 
+        # assign() will throw an error if n is greater than the number of members
+        # clamp n to the number of members to align with the contract of this method
+        # which is to return at most n endpoints
+        n = min(n, len(self._curr_memberlist))
+
         # Check if all members in the memberlist have a node set,
         # if so, route using the node
+
         # NOTE(@hammadb) 1/8/2024: This is to handle the migration between routing
         # using the member id and routing using the node name
         # We want to route using the node name over the member id

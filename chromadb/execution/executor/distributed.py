@@ -40,6 +40,7 @@ class DistributedExecutor(Executor):
     _grpc_stub_pool: Dict[str, QueryExecutorStub]
     _manager: DistributedSegmentManager
     _request_timeout_seconds: int
+    _query_replication_factor: int
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -48,6 +49,9 @@ class DistributedExecutor(Executor):
         self._manager = self.require(DistributedSegmentManager)
         self._request_timeout_seconds = system.settings.require(
             "chroma_query_request_timeout_seconds"
+        )
+        self._query_replication_factor = system.settings.require(
+            "chroma_query_replication"
         )
 
     @overrides
@@ -164,7 +168,7 @@ class DistributedExecutor(Executor):
     def _grpc_executor_stub(self, scan: Scan) -> QueryExecutorStub:
         # Since grpc endpoint is endpoint is determined by collection uuid,
         # the endpoint should be the same for all segments of the same collection
-        grpc_url = self._manager.get_endpoint(scan.record, 3)
+        grpc_url = self._manager.get_endpoint(scan.record, self._query_replication_factor)
         with self._mtx:
             if grpc_url not in self._grpc_stub_pool:
                 channel = grpc.insecure_channel(
