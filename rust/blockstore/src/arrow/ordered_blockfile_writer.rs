@@ -284,7 +284,7 @@ impl ArrowOrderedBlockfileWriter {
         Ok(inner)
     }
 
-    pub(crate) async fn set<'a, K: ArrowWriteableKey, V: ArrowWriteableValue>(
+    pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
