@@ -217,6 +217,12 @@ message FlushCollectionCompactionResponse {
   int64 last_compaction_time = 3;
 }
 
+// Used for serializing contents in collection version history file.
+message CollectionVersionFile {
+  CollectionInfoImmutable collection_info_immutable = 1;
+  CollectionVersionHistory version_history = 2;
+}
+
 // This is metadata about the Collection that is fixed at creation time.
 message CollectionInfoImmutable {
   string tenant_id = 1;
@@ -233,53 +239,54 @@ message CollectionInfoImmutable {
   google.protobuf.Timestamp collection_creation_time = 8;
 }
 
+// Contains information about the version history of a collection.
+message CollectionVersionHistory {
+  // List of versions of the collection.
+  repeated CollectionVersionInfo versions = 1;
+}
+
+// Contains information about a collection at a particular version.
+// Currently, new versions are ONLY created by data compaction.
+message CollectionVersionInfo {
+  int64 version = 1;
+  // Information about segments that are part of this version.
+  // Contains file paths for each segment.
+  CollectionSegmentInfo segment_info = 2;
+  // Metadata about the collection at this version.
+  // If there are multiple updates to this information in between compactions,
+  // then they are not reflected in the version history.
+  CollectionInfoMutable collection_info_mutable = 3;
+  // Timestamp at which this version was created.
+  google.protobuf.Timestamp created_at = 4;
+  // Reason for the version change.
+  // NOTE: As of now, we only support version change due to data compaction.
+  // There is a good chance to include other reasons in the future, especially
+  // for DDL operations, recovery, etc.
+  enum VersionChangeReason {
+    VERSION_CHANGE_REASON_DATA_COMPACTION = 0;
+  }
+  VersionChangeReason version_change_reason = 5;
+}
+
 // This is metadata about the Collection that is mutable.
+// This does not contain information about segments.
+// TODO(rohitcp): Add more fields here to help with Restore.
 message CollectionInfoMutable {
   int64 current_log_position = 1;
   int64 current_collection_version = 2;
   google.protobuf.Timestamp updated_at = 3;
   google.protobuf.Timestamp last_compaction_time = 4;
-}
-
-message CollectionVersionFile {
-  CollectionInfoImmutable collection_info_immutable = 1;
-  CollectionInfoMutable collection_info_mutable = 2;
-  CollectionVersionHistory version_history = 3;
-}
-
-
-// Contains information about the version history of a collection.
-// This message is written to disk and is used for version history.
-message CollectionVersionHistory {
-    // ID of the collection.
-    string collection_id = 1;
-    repeated CollectionVersionInfo versions = 2;
-    // Timestamp of the last update.
-    google.protobuf.Timestamp created_at = 3;
-    // TODO(rohitcp): Add additional information from Compaction about the
-    // number of files creates, and other helpful information that can help with
-    // GC's {collection,version} selection policy.
+  int64 dimension = 5;
 }
 
 // Contains information about a collection at a particular version.
-message CollectionVersionInfo {
-    // Version of the collection.
-    int64 version = 1;
+message CollectionSegmentInfo {
     // Information about segments that are part of this version.
     // Contains file paths for each segment.
     repeated FlushSegmentCompactionInfo segments = 2;
-    // Timestamp of creation.
-    google.protobuf.Timestamp created_at = 3;
-    // Whether the collection is marked for deletion.
-    bool marked_for_deletion = 4;
-    // Reason for the version change.
-    // NOTE: As of now, we only support version change due to data compaction.
-    // There is a good chance to include other reasons in the future, especially
-    // for DDL operations, recovery, etc.
-    enum VersionChangeReason {
-      VERSION_CHANGE_REASON_DATA_COMPACTION = 0;
-    }
-    VersionChangeReason version_change_reason = 5;
+    // TODO(rohitcp): Add additional information from Compaction about the
+    // number of files creates, and other helpful information that can help with
+    // GC's {collection,version} selection policy.
 }
 
 // Tuple of collection ID, tenant ID, and version.
