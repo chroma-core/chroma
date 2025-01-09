@@ -285,11 +285,7 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         # because the node may have a disk cache that we want a
         # stable identifier for over deploys.
         can_use_node_routing = all([m.node != "" for m in self._curr_memberlist])
-        if can_use_node_routing:
-            # In production, the assumption is one query service pod per node
-            # and so we can route to the node name since it will be unique
-            # in the memberlist.
-
+        if can_use_node_routing and self._routing_mode == RoutingMode.NODE:
             # If we are using node routing and the segments
             assignment = assign(
                 segment["collection"].hex,
