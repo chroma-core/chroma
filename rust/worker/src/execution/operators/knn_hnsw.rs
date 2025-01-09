@@ -4,9 +4,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SignedRoaringBitmap;
 use thiserror::Error;
 
-use crate::{
-    execution::operator::Operator, segment::distributed_hnsw_segment::DistributedHNSWSegmentReader,
-};
+use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentReader;
+use chroma_system::Operator;
 
 use super::knn::{KnnOperator, RecordDistance};
 

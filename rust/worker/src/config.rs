@@ -108,7 +108,7 @@ pub struct QueryServiceConfig {
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
-    pub dispatcher: crate::execution::config::DispatcherConfig,
+    pub dispatcher: chroma_system::DispatcherConfig,
     pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
@@ -135,7 +135,7 @@ pub struct CompactionServiceConfig {
     pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
-    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+    pub(crate) dispatcher: chroma_system::DispatcherConfig,
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
     pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,

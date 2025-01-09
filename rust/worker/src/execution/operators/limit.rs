@@ -1,22 +1,19 @@
 use std::{cmp::Ordering, num::TryFromIntError};
 
+use crate::segment::{
+    materialize_logs,
+    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    LogMaterializerError,
+};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use futures::StreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{trace, Instrument, Span};
-
-use crate::{
-    execution::operator::Operator,
-    segment::{
-        materialize_logs,
-        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializerError,
-    },
-};
 
 /// The `LimitOperator` selects a range or records sorted by their offset ids
 ///
@@ -280,11 +277,12 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
     use roaring::RoaringBitmap;
 
     use crate::{
-        execution::{operator::Operator, operators::limit::LimitOperator},
+        execution::operators::limit::LimitOperator,
         log::test::{upsert_generator, LogGenerator},
         segment::test::TestSegment,
     };

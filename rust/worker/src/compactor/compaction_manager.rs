@@ -3,21 +3,21 @@ use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
 use crate::config::CompactionServiceConfig;
-use crate::execution::dispatcher::Dispatcher;
-use crate::execution::orchestration::orchestrator::Orchestrator;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
 use crate::sysdb;
 use crate::sysdb::sysdb::SysDb;
-use crate::system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_storage::Storage;
+use chroma_system::Dispatcher;
+use chroma_system::Orchestrator;
+use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -276,7 +276,7 @@ impl Component for CompactionManager {
         self.compaction_manager_queue_size
     }
 
-    async fn start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
+    async fn start(&mut self, ctx: &ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
         ctx.scheduler
             .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
@@ -329,13 +329,13 @@ mod tests {
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
-    use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
     use crate::sysdb::test_sysdb::TestSysDb;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_storage::local::LocalStorage;
+    use chroma_system::Dispatcher;
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;

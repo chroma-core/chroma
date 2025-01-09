@@ -1,32 +1,22 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_system::{wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage, TaskResult};
 use tokio::sync::oneshot::Sender;
 
-use crate::{
-    execution::{
-        dispatcher::Dispatcher,
-        operator::{wrap, TaskMessage, TaskResult},
-        operators::{
-            knn::{KnnOperator, RecordDistance},
-            knn_hnsw::{KnnHnswError, KnnHnswInput, KnnHnswOutput},
-            knn_log::{KnnLogError, KnnLogInput, KnnLogOutput},
-            knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOperator, KnnMergeOutput},
-            knn_projection::{
-                KnnProjectionError, KnnProjectionInput, KnnProjectionOperator, KnnProjectionOutput,
-            },
-            prefetch_record::{
-                PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator,
-                PrefetchRecordOutput,
-            },
-        },
+use crate::execution::operators::{
+    knn::{KnnOperator, RecordDistance},
+    knn_hnsw::{KnnHnswError, KnnHnswInput, KnnHnswOutput},
+    knn_log::{KnnLogError, KnnLogInput, KnnLogOutput},
+    knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOperator, KnnMergeOutput},
+    knn_projection::{
+        KnnProjectionError, KnnProjectionInput, KnnProjectionOperator, KnnProjectionOutput,
     },
-    system::{ComponentContext, ComponentHandle, Handler},
+    prefetch_record::{
+        PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator, PrefetchRecordOutput,
+    },
 };
 
-use super::{
-    knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult},
-    orchestrator::Orchestrator,
-};
+use super::knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult};
 
 /// The `KnnOrchestrator` finds the nearest neighbor of a target embedding given the search domain.
 /// When used together with `KnnFilterOrchestrator`, they evaluate a `<collection>.query(...)` query

@@ -8,7 +8,7 @@ use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
 
-pub(crate) trait Message: Debug + Send + 'static {}
+pub trait Message: Debug + Send + 'static {}
 impl<M: Debug + Send + 'static> Message for M {}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -55,7 +55,7 @@ pub trait Component: Send + Sized + Debug + 'static {
 /// # Methods
 /// - handle: Handle a message
 #[async_trait]
-pub(crate) trait Handler<M>
+pub trait Handler<M>
 where
     Self: Component + Sized + 'static,
 {
@@ -72,7 +72,7 @@ where
 /// # Methods
 /// - handle: Handle a message from a stream
 /// - register_stream: Register a stream to be processed, this is provided and you do not need to implement it
-pub(crate) trait StreamHandler<M>
+pub trait StreamHandler<M>
 where
     Self: Component + 'static + Handler<M>,
     M: Message,
@@ -216,14 +216,14 @@ impl<C: Component> ComponentHandle<C> {
         }
     }
 
-    pub(crate) fn stop(&mut self) {
+    pub fn stop(&mut self) {
         let mut state = self.state.lock();
         self.cancellation_token.cancel();
         *state = ComponentState::Stopped;
     }
 
     /// Consumes the underlying join handle. Panics if it is consumed twice.
-    pub(crate) async fn join(&mut self) -> Result<(), JoinError> {
+    pub async fn join(&mut self) -> Result<(), JoinError> {
         if let Some(join_handle) = &mut self.join_handle {
             join_handle.consume().await
         } else {
@@ -236,7 +236,7 @@ impl<C: Component> ComponentHandle<C> {
         return *self.state.lock();
     }
 
-    pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
+    pub fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Message,
@@ -244,7 +244,7 @@ impl<C: Component> ComponentHandle<C> {
         Box::new(self.sender.clone())
     }
 
-    pub(crate) async fn send<M>(
+    pub async fn send<M>(
         &mut self,
         message: M,
         tracing_context: Option<tracing::Span>,
@@ -277,12 +277,12 @@ where
 {
     pub(crate) system: System,
     pub(crate) sender: ComponentSender<C>,
-    pub(crate) cancellation_token: tokio_util::sync::CancellationToken,
-    pub(crate) scheduler: Scheduler,
+    pub cancellation_token: tokio_util::sync::CancellationToken,
+    pub scheduler: Scheduler,
 }
 
 impl<C: Component> ComponentContext<C> {
-    pub(crate) fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
+    pub fn receiver<M>(&self) -> Box<dyn ReceiverForMessage<M>>
     where
         C: Component + Handler<M>,
         M: Message,

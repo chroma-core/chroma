@@ -1,11 +1,11 @@
+use crate::execution::operators::projection::ProjectionInput;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
+use chroma_system::Operator;
 use chroma_types::Segment;
 use thiserror::Error;
 use tracing::trace;
-
-use crate::execution::{operator::Operator, operators::projection::ProjectionInput};
 
 use super::{
     fetch_log::FetchLogOutput,
@@ -121,16 +121,14 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
 #[cfg(test)]
 mod tests {
     use crate::{
-        execution::{
-            operator::Operator,
-            operators::{
-                knn::RecordDistance, knn_projection::KnnProjectionOperator,
-                projection::ProjectionOperator,
-            },
+        execution::operators::{
+            knn::RecordDistance, knn_projection::KnnProjectionOperator,
+            projection::ProjectionOperator,
         },
         log::test::{int_as_id, upsert_generator, LogGenerator},
         segment::test::TestSegment,
     };
+    use chroma_system::Operator;
 
     use super::KnnProjectionInput;
 

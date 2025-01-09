@@ -1,5 +1,7 @@
-use super::{scheduler::Scheduler, system::System, Component, ComponentSender, WrappedMessage};
-use crate::system::ComponentContext;
+use super::{
+    scheduler::Scheduler, system::System, Component, ComponentContext, ComponentSender,
+    WrappedMessage,
+};
 use std::sync::Arc;
 use tokio::select;
 use tracing::{trace_span, Instrument, Span};

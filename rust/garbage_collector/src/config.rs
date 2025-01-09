@@ -2,6 +2,7 @@ use figment::providers::{Env, Format, Yaml};
 
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 
+#[allow(dead_code)]
 #[derive(Debug, serde::Deserialize)]
 // TODO(rohitcpbot):  Remove this dead code annotation.
 #[allow(dead_code)]
@@ -15,6 +16,7 @@ pub(super) struct GarbageCollectorConfig {
     sysdb_connection: SysdbConnectionConfig,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, serde::Deserialize)]
 // TODO(rohitcpbot):  Remove this dead code annotation.
 #[allow(dead_code)]

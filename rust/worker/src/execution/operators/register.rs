@@ -1,4 +1,4 @@
-use crate::execution::operator::Operator;
+use chroma_system::Operator;
 use crate::log::log::Log;
 use crate::log::log::UpdateCollectionLogOffsetError;
 use crate::sysdb::sysdb::FlushCompactionError;

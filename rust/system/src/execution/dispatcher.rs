@@ -1,7 +1,7 @@
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
-use crate::system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
+use crate::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
@@ -223,10 +223,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::{
-        execution::operator::{wrap, Operator, TaskResult},
-        system::{ComponentHandle, System},
-    };
+    use crate::{operator::*, ComponentHandle};
     use std::{
         collections::HashSet,
         sync::{

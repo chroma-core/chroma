@@ -1,4 +1,4 @@
-use crate::{system::ReceiverForMessage, utils::PanicError};
+use crate::{utils::PanicError, ReceiverForMessage};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
@@ -32,7 +32,7 @@ where
 }
 
 #[derive(Debug, Error)]
-pub(super) enum TaskError<Err> {
+pub enum TaskError<Err> {
     #[error("Panic occurred while handling task: {0:?}")]
     Panic(PanicError),
     #[error("Task failed with error: {0:?}")]
@@ -54,13 +54,13 @@ where
 /// A task result is a wrapper around the result of a task.
 /// It contains the task id for tracking purposes.
 #[derive(Debug)]
-pub(super) struct TaskResult<Output, Error> {
+pub struct TaskResult<Output, Error> {
     result: Result<Output, TaskError<Error>>,
     task_id: Uuid,
 }
 
 impl<Output, Error> TaskResult<Output, Error> {
-    pub(super) fn into_inner(self) -> Result<Output, TaskError<Error>> {
+    pub fn into_inner(self) -> Result<Output, TaskError<Error>> {
         self.result
     }
 
@@ -183,7 +183,7 @@ where
 }
 
 /// Wrap an operator and its input into a task message.
-pub(super) fn wrap<Input, Output, Error>(
+pub fn wrap<Input, Output, Error>(
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
@@ -211,7 +211,7 @@ mod tests {
 
     use crate::{
         execution::dispatcher::Dispatcher,
-        system::{Component, ComponentContext, ComponentHandle, Handler, System},
+        {Component, ComponentContext, ComponentHandle, Handler, System},
     };
 
     use super::*;

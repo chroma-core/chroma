@@ -14,17 +14,15 @@ use chroma_index::{
     },
 };
 use chroma_storage::{local::LocalStorage, Storage};
+use chroma_system::Operator;
 use chroma_types::CollectionUuid;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::StreamExt;
 use rand::seq::SliceRandom;
 use roaring::RoaringBitmap;
-use worker::execution::{
-    operator::Operator,
-    operators::{
-        spann_bf_pl::{SpannBfPlInput, SpannBfPlOperator},
-        spann_knn_merge::{SpannKnnMergeInput, SpannKnnMergeOperator},
-    },
+use worker::execution::operators::{
+    spann_bf_pl::{SpannBfPlInput, SpannBfPlOperator},
+    spann_knn_merge::{SpannKnnMergeInput, SpannKnnMergeOperator},
 };
 
 fn get_records(runtime: &tokio::runtime::Runtime) -> Vec<(u32, Vec<f32>)> {

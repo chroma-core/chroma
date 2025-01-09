@@ -17,7 +17,6 @@ pub mod config;
 pub mod execution;
 pub mod log;
 pub mod segment;
-pub mod system;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
@@ -35,15 +34,14 @@ pub async fn query_service_entrypoint() {
         &config.otel_endpoint,
     );
 
-    let system: system::System = system::System::new();
-    let dispatcher =
-        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
-            Ok(dispatcher) => dispatcher,
-            Err(err) => {
-                println!("Failed to create dispatcher component: {:?}", err);
-                return;
-            }
-        };
+    let system = chroma_system::System::new();
+    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
+        Ok(dispatcher) => dispatcher,
+        Err(err) => {
+            println!("Failed to create dispatcher component: {:?}", err);
+            return;
+        }
+    };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut worker_server = match server::WorkerServer::try_from_config(&config).await {
         Ok(worker_server) => worker_server,
@@ -96,7 +94,7 @@ pub async fn compaction_service_entrypoint() {
         &config.otel_endpoint,
     );
 
-    let system: system::System = system::System::new();
+    let system = chroma_system::System::new();
 
     let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
         &config.memberlist_provider,
@@ -110,14 +108,13 @@ pub async fn compaction_service_entrypoint() {
         }
     };
 
-    let dispatcher =
-        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
-            Ok(dispatcher) => dispatcher,
-            Err(err) => {
-                println!("Failed to create dispatcher component: {:?}", err);
-                return;
-            }
-        };
+    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
+        Ok(dispatcher) => dispatcher,
+        Err(err) => {
+            println!("Failed to create dispatcher component: {:?}", err);
+            return;
+        }
+    };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut compaction_manager =
         match crate::compactor::CompactionManager::try_from_config(&config).await {

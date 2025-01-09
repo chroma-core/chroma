@@ -56,6 +56,7 @@ chroma-types = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-index = { workspace = true }
 chroma-distance = { workspace = true }
+chroma-system = { workspace = true }
 
 fastrace = "0.7"
 fastrace-opentelemetry = "0.8"

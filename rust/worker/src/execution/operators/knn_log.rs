@@ -1,20 +1,17 @@
 use std::collections::BinaryHeap;
 
+use crate::segment::{
+    materialize_logs,
+    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    LogMaterializerError,
+};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
+use chroma_system::Operator;
 use chroma_types::{MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use thiserror::Error;
-
-use crate::{
-    execution::operator::Operator,
-    segment::{
-        materialize_logs,
-        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializerError,
-    },
-};
 
 use super::{
     fetch_log::{FetchLogError, FetchLogOutput},
@@ -131,10 +128,11 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
 #[cfg(test)]
 mod tests {
     use chroma_distance::{normalize, DistanceFunction};
+    use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
 
     use crate::{
-        execution::{operator::Operator, operators::knn::KnnOperator},
+        execution::operators::knn::KnnOperator,
         log::test::{random_embedding, upsert_generator, LogGenerator, TEST_EMBEDDING_DIMENSION},
         segment::test::TestSegment,
     };
