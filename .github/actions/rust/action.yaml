@@ -15,7 +15,7 @@ runs:
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
       secrets:
-        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Cache
       uses: Swatinem/rust-cache@v2
       with:
