@@ -1,4 +1,5 @@
 import threading
+import random
 from typing import Dict, Optional
 import grpc
 from overrides import overrides
@@ -163,7 +164,7 @@ class DistributedExecutor(Executor):
     def _grpc_executor_stub(self, scan: Scan) -> QueryExecutorStub:
         # Since grpc endpoint is endpoint is determined by collection uuid,
         # the endpoint should be the same for all segments of the same collection
-        grpc_url = self._manager.get_endpoint(scan.record)
+        grpc_url = self._manager.get_endpoint(scan.record, 3)
         with self._mtx:
             if grpc_url not in self._grpc_stub_pool:
                 channel = grpc.insecure_channel(
