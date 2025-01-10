@@ -28,6 +28,16 @@ message GetDatabaseResponse {
   reserved "status";
 }
 
+message ListDatabasesRequest {
+  string tenant = 1;
+  optional int32 limit = 2;
+  optional int32 offset = 3;
+}
+
+message ListDatabasesResponse {
+  repeated Database databases = 1;
+}
+
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
@@ -346,6 +356,7 @@ message RestoreCollectionResponse {
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
+  rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}

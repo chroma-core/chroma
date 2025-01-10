@@ -66,6 +66,14 @@ func (s *Coordinator) GetDatabase(ctx context.Context, getDatabase *model.GetDat
 	return database, nil
 }
 
+func (s *Coordinator) ListDatabases(ctx context.Context, listDatabases *model.ListDatabases) ([]*model.Database, error) {
+	databases, err := s.catalog.ListDatabases(ctx, listDatabases, listDatabases.Ts)
+	if err != nil {
+		return nil, err
+	}
+	return databases, nil
+}
+
 func (s *Coordinator) CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error) {
 	tenant, err := s.catalog.CreateTenant(ctx, createTenant, createTenant.Ts)
 	if err != nil {

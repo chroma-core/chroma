@@ -148,6 +148,18 @@ func (tc *Catalog) GetDatabases(ctx context.Context, getDatabase *model.GetDatab
 	return result[0], nil
 }
 
+func (tc *Catalog) ListDatabases(ctx context.Context, listDatabases *model.ListDatabases, ts types.Timestamp) ([]*model.Database, error) {
+	databases, err := tc.metaDomain.DatabaseDb(ctx).ListDatabases(listDatabases.Limit, listDatabases.Offset, listDatabases.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*model.Database, 0, len(databases))
+	for _, database := range databases {
+		result = append(result, convertDatabaseToModel(database))
+	}
+	return result, nil
+}
+
 func (tc *Catalog) GetAllDatabases(ctx context.Context, ts types.Timestamp) ([]*model.Database, error) {
 	databases, err := tc.metaDomain.DatabaseDb(ctx).GetAllDatabases()
 	if err != nil {

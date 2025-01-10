@@ -22,3 +22,10 @@ type GetDatabase struct {
 	Tenant string
 	Ts     types.Timestamp
 }
+
+type ListDatabases struct {
+	Limit  *int32
+	Offset *int32
+	Tenant string
+	Ts     types.Timestamp
+}

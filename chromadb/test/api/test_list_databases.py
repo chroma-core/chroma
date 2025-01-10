@@ -1,14 +1,10 @@
 from typing import Dict, List
 from hypothesis import given
-import pytest
-from chromadb.test.conftest import NOT_CLUSTER_ONLY, ClientFactories
+from chromadb.test.conftest import ClientFactories
 import hypothesis.strategies as st
 
 
 def test_list_databases(client_factories: ClientFactories) -> None:
-    if not NOT_CLUSTER_ONLY:
-        pytest.skip("This API is not yet supported by distributed")
-
     admin_client = client_factories.create_admin_client_from_system()
 
     for i in range(10):
@@ -66,9 +62,6 @@ def test_list_databases_with_limit_offset(
     tenants_and_databases: Dict[str, List[str]],
     client_factories: ClientFactories,
 ) -> None:
-    if not NOT_CLUSTER_ONLY:
-        pytest.skip("This API is not yet supported by distributed")
-
     client = client_factories.create_client()
     client.reset()
 
