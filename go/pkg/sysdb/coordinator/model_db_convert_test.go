@@ -142,7 +142,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 			Name:                       &collectionName,
 			ConfigurationJsonStr:       &colllectionConfigurationJsonStr,
 			Dimension:                  &collectionDimension,
-			TotalRecordsPostCompaction: &collectionTotalRecordsPostCompaction,
+			TotalRecordsPostCompaction: collectionTotalRecordsPostCompaction,
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
 	}
@@ -153,6 +153,6 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Equal(t, collectionName, modelCollections[0].Name)
 	assert.Equal(t, colllectionConfigurationJsonStr, modelCollections[0].ConfigurationJsonStr)
 	assert.Equal(t, collectionDimension, *modelCollections[0].Dimension)
-	assert.Equal(t, collectionTotalRecordsPostCompaction, *modelCollections[0].TotalRecordsPostCompaction)
+	assert.Equal(t, collectionTotalRecordsPostCompaction, modelCollections[0].TotalRecordsPostCompaction)
 	assert.Nil(t, modelCollections[0].Metadata)
 }

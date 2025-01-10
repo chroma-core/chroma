@@ -63,7 +63,7 @@ func TestConvertCollectionToProto(t *testing.T) {
 				"key3": &model.CollectionMetadataValueFloat64Type{Value: 3.14},
 			},
 		},
-		TotalRecordsPostCompaction: &num_records,
+		TotalRecordsPostCompaction: num_records,
 	}
 	collectionpb = convertCollectionToProto(collection)
 	assert.NotNil(t, collectionpb)
@@ -74,7 +74,7 @@ func TestConvertCollectionToProto(t *testing.T) {
 	assert.Equal(t, "value1", collectionpb.Metadata.Metadata["key1"].GetStringValue())
 	assert.Equal(t, int64(123), collectionpb.Metadata.Metadata["key2"].GetIntValue())
 	assert.Equal(t, 3.14, collectionpb.Metadata.Metadata["key3"].GetFloatValue())
-	assert.Equal(t, int64(0), *collectionpb.TotalRecordsPostCompaction)
+	assert.Equal(t, int64(0), collectionpb.TotalRecordsPostCompaction)
 }
 
 func TestConvertCollectionMetadataToProto(t *testing.T) {

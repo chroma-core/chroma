@@ -96,7 +96,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 			collectionCreatedAt            sql.NullTime
 			databaseName                   string
 			databaseTenantID               string
-			totalRecordsPostCompaction     sql.NullInt64
+			totalRecordsPostCompaction     int64
 		)
 
 		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &totalRecordsPostCompaction, &databaseName, &databaseTenantID)
@@ -106,22 +106,20 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		}
 
 		collection := &dbmodel.Collection{
-			ID:                   collectionID,
-			Name:                 &collectionName,
-			ConfigurationJsonStr: &collectionConfigurationJsonStr,
-			DatabaseID:           collectionDatabaseID,
-			LogPosition:          logPosition,
-			Version:              version,
-			IsDeleted:            collectionIsDeleted,
+			ID:                         collectionID,
+			Name:                       &collectionName,
+			ConfigurationJsonStr:       &collectionConfigurationJsonStr,
+			DatabaseID:                 collectionDatabaseID,
+			LogPosition:                logPosition,
+			Version:                    version,
+			IsDeleted:                  collectionIsDeleted,
+			TotalRecordsPostCompaction: totalRecordsPostCompaction,
 		}
 		if collectionDimension.Valid {
 			collection.Dimension = &collectionDimension.Int32
 		}
 		if collectionCreatedAt.Valid {
 			collection.CreatedAt = collectionCreatedAt.Time
-		}
-		if totalRecordsPostCompaction.Valid {
-			collection.TotalRecordsPostCompaction = &totalRecordsPostCompaction.Int64
 		}
 
 		collectionWithMetdata = append(collectionWithMetdata, &dbmodel.CollectionAndMetadata{
