@@ -216,6 +216,133 @@ message FlushCollectionCompactionResponse {
   int64 last_compaction_time = 3;
 }
 
+// Used for serializing contents in collection version history file.
+message CollectionVersionFile {
+  CollectionInfoImmutable collection_info_immutable = 1;
+  CollectionVersionHistory version_history = 2;
+}
+
+// This is metadata about the Collection that is fixed at creation time.
+message CollectionInfoImmutable {
+  string tenant_id = 1;
+  string database_id = 2;
+  // This is the database name at the time of creation.
+  // This will not be updated if the database name is changed.
+  string database_name = 3;
+  bool is_deleted = 4;
+  int32 dimension = 5;
+  string collection_id = 6;
+  // This is the collection name at the time of creation.
+  // This will not be updated if the collection name is changed.
+  string collection_name = 7;
+  int64 collection_creation_secs = 8;
+}
+
+// Contains information about the version history of a collection.
+message CollectionVersionHistory {
+  // List of versions of the collection.
+  repeated CollectionVersionInfo versions = 1;
+}
+
+// Contains information about a collection at a particular version.
+// Currently, new versions are ONLY created by data compaction.
+message CollectionVersionInfo {
+  int64 version = 1;
+  // Information about segments that are part of this version.
+  // Contains file paths for each segment.
+  CollectionSegmentInfo segment_info = 2;
+  // Metadata about the collection at this version.
+  // If there are multiple updates to this information in between compactions,
+  // then they are not reflected in the version history.
+  CollectionInfoMutable collection_info_mutable = 3;
+  // Timestamp at which this version was created.
+  int64 created_at_secs = 4;
+  // Reason for the version change.
+  // NOTE: As of now, we only support version change due to data compaction.
+  // There is a good chance to include other reasons in the future, especially
+  // for DDL operations, recovery, etc.
+  enum VersionChangeReason {
+    VERSION_CHANGE_REASON_DATA_COMPACTION = 0;
+  }
+  VersionChangeReason version_change_reason = 5;
+}
+
+// This is metadata about the Collection that is mutable.
+// This does not contain information about segments.
+// TODO(rohitcp): Add more fields here to help with Restore.
+message CollectionInfoMutable {
+  int64 current_log_position = 1;
+  int64 current_collection_version = 2;
+  int64 updated_at_secs = 3;
+  int64 last_compaction_time_secs = 4;
+  int64 dimension = 5;
+}
+
+// Contains information about a collection at a particular version.
+message CollectionSegmentInfo {
+    // Information about segments that are part of this version.
+    // Contains file paths for each segment.
+    repeated FlushSegmentCompactionInfo segments = 2;
+    // TODO(rohitcp): Add additional information from Compaction about the
+    // number of files creates, and other helpful information that can help with
+    // GC's {collection,version} selection policy.
+}
+
+// Tuple of collection ID, tenant ID, and version.
+message CollectionVersionTuple {
+    string collection_id = 1;
+    string tenant_id = 2;
+    int64 version = 3;
+}
+
+// Contains information about the lineage of a collection.
+message CollectionLineageInfo {
+    // ID of the collection.
+    string collection_id = 1;
+    // ID of the tenant.
+    string tenant_id = 2;
+    // Whether the collection is a root collection.
+    bool is_root_collection = 3;
+    // An ordered list of descendant collections.
+    // The first element is the root {collection, version}, and the last
+    // element is the direct parent of the current collection.
+    repeated CollectionVersionTuple parent_collections = 4;
+}
+
+// Request to list versions of a collection.
+message ListCollectionVersionsRequest {
+  string collection_id = 1;
+  string tenant_id = 2;
+  // Maximum number of versions to return.
+  optional int64 max_count = 3;
+  // Only return versions before this timestamp.
+  optional int64 versions_before = 4;
+  // Only return versions at or after this timestamp.
+  // Together with versions_before, this forms an inclusive range.
+  optional int64 versions_at_or_after = 5;
+}
+
+// Response to ListCollectionVersionsRequest.
+message ListCollectionVersionsResponse {
+  repeated CollectionVersionInfo versions = 1;
+  // Whether the list is truncated.
+  bool list_is_truncated = 2;
+}
+
+// Request to restore a collection.
+message RestoreCollectionRequest {
+  string collection_id = 1;
+  string tenant_id = 2;
+  // Version of the collection to restore.
+  int64 version_to_restore = 3;
+}
+
+// Response to RestoreCollectionRequest.
+message RestoreCollectionResponse {
+  // Version of the new collection.
+  int64 new_collection_version = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -235,4 +362,6 @@ service SysDB {
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
+  rpc RestoreCollection(RestoreCollectionRequest) returns (RestoreCollectionResponse) {}
+  rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
 }
