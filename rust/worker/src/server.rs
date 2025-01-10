@@ -452,7 +452,7 @@ mod tests {
                 database: "test-database".to_string(),
                 log_position: 0,
                 version: 0,
-                total_records_post_compaction: None,
+                total_records_post_compaction: 0,
             }),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
@@ -555,7 +555,7 @@ mod tests {
             database: "test-database".to_string(),
             log_position: 0,
             version: 0,
-            total_records_post_compaction: None,
+            total_records_post_compaction: 0,
         });
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),

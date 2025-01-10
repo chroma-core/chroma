@@ -41,7 +41,7 @@ pub struct Collection {
     pub database: String,
     pub log_position: i64,
     pub version: i32,
-    pub total_records_post_compaction: Option<i64>,
+    pub total_records_post_compaction: i64,
 }
 
 #[derive(Error, Debug)]
@@ -145,7 +145,7 @@ mod test {
             database: "qux".to_string(),
             log_position: 0,
             version: 0,
-            total_records_post_compaction: None,
+            total_records_post_compaction: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(
@@ -157,6 +157,6 @@ mod test {
         assert_eq!(converted_collection.dimension, None);
         assert_eq!(converted_collection.tenant, "baz".to_string());
         assert_eq!(converted_collection.database, "qux".to_string());
-        assert_eq!(converted_collection.total_records_post_compaction, None);
+        assert_eq!(converted_collection.total_records_post_compaction, 0);
     }
 }

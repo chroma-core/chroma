@@ -162,7 +162,7 @@ mod tests {
             database: "database_1".to_string(),
             log_position: 0,
             version: collection_version,
-            total_records_post_compaction: Some(100),
+            total_records_post_compaction: 0,
         };
 
         let collection_uuid_2 =
@@ -177,7 +177,7 @@ mod tests {
             database: "database_2".to_string(),
             log_position: 0,
             version: collection_version,
-            total_records_post_compaction: Some(100),
+            total_records_post_compaction: 0,
         };
 
         match *sysdb {
