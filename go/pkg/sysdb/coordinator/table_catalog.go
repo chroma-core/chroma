@@ -248,14 +248,13 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 
 	dbCollection := &dbmodel.Collection{
-		ID:                       createCollection.ID.String(),
-		Name:                     &createCollection.Name,
-		ConfigurationJsonStr:     &createCollection.ConfigurationJsonStr,
-		Dimension:                createCollection.Dimension,
-		DatabaseID:               databases[0].ID,
-		Ts:                       ts,
-		LogPosition:              0,
-		NumRecordsLastCompaction: createCollection.NumRecordsLastCompaction,
+		ID:                   createCollection.ID.String(),
+		Name:                 &createCollection.Name,
+		ConfigurationJsonStr: &createCollection.ConfigurationJsonStr,
+		Dimension:            createCollection.Dimension,
+		DatabaseID:           databases[0].ID,
+		Ts:                   ts,
+		LogPosition:          0,
 	}
 
 	err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
@@ -514,11 +513,10 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		}
 
 		dbCollection := &dbmodel.Collection{
-			ID:                       updateCollection.ID.String(),
-			Name:                     updateCollection.Name,
-			Dimension:                updateCollection.Dimension,
-			Ts:                       ts,
-			NumRecordsLastCompaction: updateCollection.NumRecordsLastCompaction,
+			ID:        updateCollection.ID.String(),
+			Name:      updateCollection.Name,
+			Dimension: updateCollection.Dimension,
+			Ts:        ts,
 		}
 
 		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)

@@ -41,7 +41,7 @@ pub struct Collection {
     pub database: String,
     pub log_position: i64,
     pub version: i32,
-    pub num_records_last_compaction: Option<i64>,
+    pub total_records_post_compaction: Option<i64>,
 }
 
 #[derive(Error, Debug)]
@@ -86,7 +86,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             database: proto_collection.database,
             log_position: proto_collection.log_position,
             version: proto_collection.version,
-            num_records_last_compaction: proto_collection.num_records_last_compaction,
+            total_records_post_compaction: proto_collection.total_records_post_compaction,
         })
     }
 }
@@ -145,7 +145,7 @@ mod test {
             database: "qux".to_string(),
             log_position: 0,
             version: 0,
-            num_records_last_compaction: None,
+            total_records_post_compaction: None,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(
@@ -157,6 +157,6 @@ mod test {
         assert_eq!(converted_collection.dimension, None);
         assert_eq!(converted_collection.tenant, "baz".to_string());
         assert_eq!(converted_collection.database, "qux".to_string());
-        assert_eq!(converted_collection.num_records_last_compaction, None);
+        assert_eq!(converted_collection.total_records_post_compaction, None);
     }
 }

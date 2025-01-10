@@ -51,7 +51,7 @@ func TestConvertCollectionToProto(t *testing.T) {
 
 	// Test case 2: collection is not nil
 	dimention := int32(10)
-	num_records := int64(100)
+	num_records := int64(0)
 	collection := &model.Collection{
 		ID:        types.NewUniqueID(),
 		Name:      "test_collection",
@@ -63,7 +63,7 @@ func TestConvertCollectionToProto(t *testing.T) {
 				"key3": &model.CollectionMetadataValueFloat64Type{Value: 3.14},
 			},
 		},
-		NumRecordsLastCompaction: &num_records,
+		TotalRecordsPostCompaction: &num_records,
 	}
 	collectionpb = convertCollectionToProto(collection)
 	assert.NotNil(t, collectionpb)
@@ -74,7 +74,7 @@ func TestConvertCollectionToProto(t *testing.T) {
 	assert.Equal(t, "value1", collectionpb.Metadata.Metadata["key1"].GetStringValue())
 	assert.Equal(t, int64(123), collectionpb.Metadata.Metadata["key2"].GetIntValue())
 	assert.Equal(t, 3.14, collectionpb.Metadata.Metadata["key3"].GetFloatValue())
-	assert.Equal(t, int64(100), *collectionpb.NumRecordsLastCompaction)
+	assert.Equal(t, int64(0), *collectionpb.TotalRecordsPostCompaction)
 }
 
 func TestConvertCollectionMetadataToProto(t *testing.T) {
@@ -108,7 +108,6 @@ func TestConvertToCreateCollectionModel(t *testing.T) {
 
 	// Test case 2: everything is valid
 	testDimension := int32(10)
-	num_records := int64(100)
 	req = &coordinatorpb.CreateCollectionRequest{
 		Id:   "e9e9d6c8-9e1a-4c5c-9b8c-8f6f5e5d5d5d",
 		Name: "test_collection",
@@ -131,8 +130,7 @@ func TestConvertToCreateCollectionModel(t *testing.T) {
 				},
 			},
 		},
-		Dimension:                &testDimension,
-		NumRecordsLastCompaction: &num_records,
+		Dimension: &testDimension,
 	}
 	collectionMetadata, err = convertToCreateCollectionModel(req)
 	assert.NotNil(t, collectionMetadata)
@@ -144,7 +142,6 @@ func TestConvertToCreateCollectionModel(t *testing.T) {
 	assert.Equal(t, "value1", collectionMetadata.Metadata.Get("key1").(*model.CollectionMetadataValueStringType).Value)
 	assert.Equal(t, int64(123), collectionMetadata.Metadata.Get("key2").(*model.CollectionMetadataValueInt64Type).Value)
 	assert.Equal(t, 3.14, collectionMetadata.Metadata.Get("key3").(*model.CollectionMetadataValueFloat64Type).Value)
-	assert.Equal(t, int64(100), *collectionMetadata.NumRecordsLastCompaction)
 }
 
 func TestConvertSegmentMetadataToModel(t *testing.T) {

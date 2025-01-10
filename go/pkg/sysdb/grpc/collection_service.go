@@ -65,14 +65,13 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	if err != nil {
 		log.Error("CreateCollection failed. error converting to create collection model", zap.Error(err), zap.String("collection_id", req.Id), zap.String("collection_name", req.Name))
 		res.Collection = &coordinatorpb.Collection{
-			Id:                       req.Id,
-			Name:                     req.Name,
-			ConfigurationJsonStr:     req.ConfigurationJsonStr,
-			Dimension:                req.Dimension,
-			Metadata:                 req.Metadata,
-			Tenant:                   req.Tenant,
-			Database:                 req.Database,
-			NumRecordsLastCompaction: req.NumRecordsLastCompaction,
+			Id:                   req.Id,
+			Name:                 req.Name,
+			ConfigurationJsonStr: req.ConfigurationJsonStr,
+			Dimension:            req.Dimension,
+			Metadata:             req.Metadata,
+			Tenant:               req.Tenant,
+			Database:             req.Database,
 		}
 		res.Created = false
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
@@ -100,14 +99,13 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	if err != nil {
 		log.Error("CreateCollection failed. error creating collection", zap.Error(err), zap.String("collection_id", req.Id), zap.String("collection_name", req.Name))
 		res.Collection = &coordinatorpb.Collection{
-			Id:                       req.Id,
-			Name:                     req.Name,
-			ConfigurationJsonStr:     req.ConfigurationJsonStr,
-			Dimension:                req.Dimension,
-			Metadata:                 req.Metadata,
-			Tenant:                   req.Tenant,
-			Database:                 req.Database,
-			NumRecordsLastCompaction: req.NumRecordsLastCompaction,
+			Id:                   req.Id,
+			Name:                 req.Name,
+			ConfigurationJsonStr: req.ConfigurationJsonStr,
+			Dimension:            req.Dimension,
+			Metadata:             req.Metadata,
+			Tenant:               req.Tenant,
+			Database:             req.Database,
 		}
 		res.Created = false
 		if err == common.ErrCollectionUniqueConstraintViolation {
@@ -255,11 +253,6 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 		ID:        parsedCollectionID,
 		Name:      req.Name,
 		Dimension: req.Dimension,
-	}
-
-	numRecordsLastCompaction := req.NumRecordsLastCompaction
-	if numRecordsLastCompaction != nil {
-		updateCollection.NumRecordsLastCompaction = numRecordsLastCompaction
 	}
 
 	resetMetadata := req.GetResetMetadata()

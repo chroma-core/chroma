@@ -53,7 +53,7 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, collections.num_records_last_compaction, databases.name, databases.tenant_id").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, collections.total_records_post_compaction, databases.name, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -96,10 +96,10 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 			collectionCreatedAt            sql.NullTime
 			databaseName                   string
 			databaseTenantID               string
-			numRecordsLastCompaction       sql.NullInt64
+			totalRecordsPostCompaction     sql.NullInt64
 		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &numRecordsLastCompaction, &databaseName, &databaseTenantID)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &totalRecordsPostCompaction, &databaseName, &databaseTenantID)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
@@ -120,8 +120,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		if collectionCreatedAt.Valid {
 			collection.CreatedAt = collectionCreatedAt.Time
 		}
-		if numRecordsLastCompaction.Valid {
-			collection.NumRecordsLastCompaction = &numRecordsLastCompaction.Int64
+		if totalRecordsPostCompaction.Valid {
+			collection.TotalRecordsPostCompaction = &totalRecordsPostCompaction.Int64
 		}
 
 		collectionWithMetdata = append(collectionWithMetdata, &dbmodel.CollectionAndMetadata{
@@ -187,8 +187,8 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	if in.IsDeleted {
 		ret["is_deleted"] = true
 	}
-	if in.NumRecordsLastCompaction != nil {
-		ret["num_records_last_compaction"] = *in.NumRecordsLastCompaction
+	if in.TotalRecordsPostCompaction != nil {
+		ret["total_records_post_compaction"] = *in.TotalRecordsPostCompaction
 	}
 	return ret
 }

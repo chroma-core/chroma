@@ -36,7 +36,7 @@ impl TestSegment {
             database: String::new(),
             log_position: 0,
             version: 0,
-            num_records_last_compaction: None,
+            total_records_post_compaction: None,
         };
         Self {
             blockfile_provider: test_arrow_blockfile_provider(2 << 22),

@@ -408,7 +408,7 @@ mod tests {
             database: "database_1".to_string(),
             log_position: -1,
             version: 0,
-            num_records_last_compaction: Some(100),
+            total_records_post_compaction: Some(100),
         };
 
         let tenant_2 = "tenant_2".to_string();
@@ -421,7 +421,7 @@ mod tests {
             database: "database_2".to_string(),
             log_position: -1,
             version: 0,
-            num_records_last_compaction: Some(100),
+            total_records_post_compaction: Some(100),
         };
         match *sysdb {
             SysDb::Test(ref mut sysdb) => {

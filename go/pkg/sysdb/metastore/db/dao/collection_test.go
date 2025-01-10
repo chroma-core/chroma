@@ -15,12 +15,12 @@ import (
 
 type CollectionDbTestSuite struct {
 	suite.Suite
-	db                       *gorm.DB
-	collectionDb             *collectionDb
-	tenantName               string
-	databaseName             string
-	databaseId               string
-	numRecordsLastCompaction *int64
+	db                         *gorm.DB
+	collectionDb               *collectionDb
+	tenantName                 string
+	databaseName               string
+	databaseId                 string
+	totalRecordsPostCompaction *int64
 }
 
 func (suite *CollectionDbTestSuite) SetupSuite() {
@@ -35,7 +35,7 @@ func (suite *CollectionDbTestSuite) SetupSuite() {
 	suite.NoError(err)
 	suite.databaseId = DbId
 	num_records := int64(100)
-	suite.numRecordsLastCompaction = &num_records
+	suite.totalRecordsPostCompaction = &num_records
 }
 
 func (suite *CollectionDbTestSuite) TearDownSuite() {
@@ -78,7 +78,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Len(collections[0].CollectionMetadata, 1)
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
-	suite.Equal(suite.numRecordsLastCompaction, collections[0].Collection.NumRecordsLastCompaction)
+	suite.Equal(suite.totalRecordsPostCompaction, collections[0].Collection.TotalRecordsPostCompaction)
 
 	// Test when filtering by ID
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)

@@ -60,13 +60,12 @@ func (suite *APIsTestSuite) SetupTest() {
 	suite.coordinator = c
 	for _, collection := range suite.sampleCollections {
 		_, _, errCollectionCreation := c.CreateCollection(ctx, &model.CreateCollection{
-			ID:                       collection.ID,
-			Name:                     collection.Name,
-			Metadata:                 collection.Metadata,
-			Dimension:                collection.Dimension,
-			TenantID:                 collection.TenantID,
-			DatabaseName:             collection.DatabaseName,
-			NumRecordsLastCompaction: collection.NumRecordsLastCompaction,
+			ID:           collection.ID,
+			Name:         collection.Name,
+			Metadata:     collection.Metadata,
+			Dimension:    collection.Dimension,
+			TenantID:     collection.TenantID,
+			DatabaseName: collection.DatabaseName,
 		})
 		suite.NoError(errCollectionCreation)
 	}
@@ -215,7 +214,7 @@ func TestAPIs(t *testing.T) {
 
 func SampleCollections(tenantID string, databaseName string) []*model.Collection {
 	dimension := int32(128)
-	numRecordsLastCompaction := int64(100)
+	totalRecordsPostCompaction := int64(0)
 	metadata1 := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	metadata1.Add("test_str", &model.CollectionMetadataValueStringType{Value: "str1"})
 	metadata1.Add("test_int", &model.CollectionMetadataValueInt64Type{Value: 1})
@@ -232,31 +231,31 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 	metadata3.Add("test_float", &model.CollectionMetadataValueFloat64Type{Value: 3.3})
 	sampleCollections := []*model.Collection{
 		{
-			ID:                       types.MustParse("93ffe3ec-0107-48d4-8695-51f978c509dc"),
-			Name:                     "test_collection_1",
-			Metadata:                 metadata1,
-			Dimension:                &dimension,
-			TenantID:                 tenantID,
-			DatabaseName:             databaseName,
-			NumRecordsLastCompaction: &numRecordsLastCompaction,
+			ID:                         types.MustParse("93ffe3ec-0107-48d4-8695-51f978c509dc"),
+			Name:                       "test_collection_1",
+			Metadata:                   metadata1,
+			Dimension:                  &dimension,
+			TenantID:                   tenantID,
+			DatabaseName:               databaseName,
+			TotalRecordsPostCompaction: &totalRecordsPostCompaction,
 		},
 		{
-			ID:                       types.MustParse("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
-			Name:                     "test_collection_2",
-			Metadata:                 metadata2,
-			Dimension:                nil,
-			TenantID:                 tenantID,
-			DatabaseName:             databaseName,
-			NumRecordsLastCompaction: nil,
+			ID:                         types.MustParse("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
+			Name:                       "test_collection_2",
+			Metadata:                   metadata2,
+			Dimension:                  nil,
+			TenantID:                   tenantID,
+			DatabaseName:               databaseName,
+			TotalRecordsPostCompaction: &totalRecordsPostCompaction,
 		},
 		{
-			ID:                       types.MustParse("43babc1a-e403-4a50-91a9-16621ba29ab0"),
-			Name:                     "test_collection_3",
-			Metadata:                 metadata3,
-			Dimension:                nil,
-			TenantID:                 tenantID,
-			DatabaseName:             databaseName,
-			NumRecordsLastCompaction: nil,
+			ID:                         types.MustParse("43babc1a-e403-4a50-91a9-16621ba29ab0"),
+			Name:                       "test_collection_3",
+			Metadata:                   metadata3,
+			Dimension:                  nil,
+			TenantID:                   tenantID,
+			DatabaseName:               databaseName,
+			TotalRecordsPostCompaction: &totalRecordsPostCompaction,
 		},
 	}
 	return sampleCollections
@@ -432,14 +431,13 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	// Re-create the deleted collection
 	// Recreating the deleted collection with new ID since the old ID is already in use by the soft deleted collection.
 	createCollection := &model.CreateCollection{
-		ID:                       types.NewUniqueID(),
-		Name:                     suite.sampleCollections[0].Name,
-		Dimension:                suite.sampleCollections[0].Dimension,
-		Metadata:                 suite.sampleCollections[0].Metadata,
-		TenantID:                 suite.tenantName,
-		DatabaseName:             suite.databaseName,
-		Ts:                       types.Timestamp(time.Now().Unix()),
-		NumRecordsLastCompaction: suite.sampleCollections[0].NumRecordsLastCompaction,
+		ID:           types.NewUniqueID(),
+		Name:         suite.sampleCollections[0].Name,
+		Dimension:    suite.sampleCollections[0].Dimension,
+		Metadata:     suite.sampleCollections[0].Metadata,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		Ts:           types.Timestamp(time.Now().Unix()),
 	}
 	_, _, err = suite.coordinator.CreateCollection(ctx, createCollection)
 	suite.NoError(err)
@@ -452,7 +450,6 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	suite.Equal(createCollection.Name, results[0].Name)
 	suite.Equal(createCollection.Dimension, results[0].Dimension)
 	suite.Equal(createCollection.Metadata, results[0].Metadata)
-	suite.Equal(createCollection.NumRecordsLastCompaction, results[0].NumRecordsLastCompaction)
 
 	// Create segments associated with collection
 	segment := &model.CreateSegment{
@@ -503,13 +500,13 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 func (suite *APIsTestSuite) TestUpdateCollections() {
 	ctx := context.Background()
 	coll := &model.Collection{
-		Name:                     suite.sampleCollections[0].Name,
-		ID:                       suite.sampleCollections[0].ID,
-		Metadata:                 suite.sampleCollections[0].Metadata,
-		Dimension:                suite.sampleCollections[0].Dimension,
-		TenantID:                 suite.sampleCollections[0].TenantID,
-		DatabaseName:             suite.sampleCollections[0].DatabaseName,
-		NumRecordsLastCompaction: suite.sampleCollections[0].NumRecordsLastCompaction,
+		Name:                       suite.sampleCollections[0].Name,
+		ID:                         suite.sampleCollections[0].ID,
+		Metadata:                   suite.sampleCollections[0].Metadata,
+		Dimension:                  suite.sampleCollections[0].Dimension,
+		TenantID:                   suite.sampleCollections[0].TenantID,
+		DatabaseName:               suite.sampleCollections[0].DatabaseName,
+		TotalRecordsPostCompaction: suite.sampleCollections[0].TotalRecordsPostCompaction,
 	}
 
 	// Update name
@@ -525,16 +522,6 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	newDimension := int32(128)
 	coll.Dimension = &newDimension
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
-	suite.NoError(err)
-	suite.Equal(coll, result)
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
-	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
-
-	// Update num records
-	newNumRecords := int64(200)
-	coll.NumRecordsLastCompaction = &newNumRecords
-	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, NumRecordsLastCompaction: coll.NumRecordsLastCompaction})
 	suite.NoError(err)
 	suite.Equal(coll, result)
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -672,13 +659,12 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		collection.TenantID = suite.tenantName
 		collection.DatabaseName = newDatabaseName
 		_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
-			ID:                       collection.ID,
-			Name:                     collection.Name,
-			Metadata:                 collection.Metadata,
-			Dimension:                collection.Dimension,
-			TenantID:                 collection.TenantID,
-			DatabaseName:             collection.DatabaseName,
-			NumRecordsLastCompaction: collection.NumRecordsLastCompaction,
+			ID:           collection.ID,
+			Name:         collection.Name,
+			Metadata:     collection.Metadata,
+			Dimension:    collection.Dimension,
+			TenantID:     collection.TenantID,
+			DatabaseName: collection.DatabaseName,
 		})
 		suite.NoError(err)
 		suite.sampleCollections[index] = collection
@@ -742,13 +728,12 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	suite.sampleCollections[0].ID = types.NewUniqueID()
 	suite.sampleCollections[0].Name = suite.sampleCollections[0].Name + "1"
 	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
-		ID:                       suite.sampleCollections[0].ID,
-		Name:                     suite.sampleCollections[0].Name,
-		Metadata:                 suite.sampleCollections[0].Metadata,
-		Dimension:                suite.sampleCollections[0].Dimension,
-		TenantID:                 newTenantName,
-		DatabaseName:             newDatabaseName,
-		NumRecordsLastCompaction: suite.sampleCollections[0].NumRecordsLastCompaction,
+		ID:           suite.sampleCollections[0].ID,
+		Name:         suite.sampleCollections[0].Name,
+		Metadata:     suite.sampleCollections[0].Metadata,
+		Dimension:    suite.sampleCollections[0].Dimension,
+		TenantID:     newTenantName,
+		DatabaseName: newDatabaseName,
 	})
 	suite.NoError(err)
 
@@ -756,13 +741,12 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	suite.sampleCollections[1].ID = types.NewUniqueID()
 	suite.sampleCollections[1].Name = suite.sampleCollections[1].Name + "2"
 	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
-		ID:                       suite.sampleCollections[1].ID,
-		Name:                     suite.sampleCollections[1].Name,
-		Metadata:                 suite.sampleCollections[1].Metadata,
-		Dimension:                suite.sampleCollections[1].Dimension,
-		TenantID:                 suite.tenantName,
-		DatabaseName:             newDatabaseName,
-		NumRecordsLastCompaction: suite.sampleCollections[1].NumRecordsLastCompaction,
+		ID:           suite.sampleCollections[1].ID,
+		Name:         suite.sampleCollections[1].Name,
+		Metadata:     suite.sampleCollections[1].Metadata,
+		Dimension:    suite.sampleCollections[1].Dimension,
+		TenantID:     suite.tenantName,
+		DatabaseName: newDatabaseName,
 	})
 	suite.NoError(err)
 

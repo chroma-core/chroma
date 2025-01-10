@@ -15,16 +15,16 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 	collections := make([]*model.Collection, 0, len(collectionAndMetadataList))
 	for _, collectionAndMetadata := range collectionAndMetadataList {
 		collection := &model.Collection{
-			ID:                       types.MustParse(collectionAndMetadata.Collection.ID),
-			Name:                     *collectionAndMetadata.Collection.Name,
-			ConfigurationJsonStr:     *collectionAndMetadata.Collection.ConfigurationJsonStr,
-			Dimension:                collectionAndMetadata.Collection.Dimension,
-			TenantID:                 collectionAndMetadata.TenantID,
-			DatabaseName:             collectionAndMetadata.DatabaseName,
-			Ts:                       collectionAndMetadata.Collection.Ts,
-			LogPosition:              collectionAndMetadata.Collection.LogPosition,
-			Version:                  collectionAndMetadata.Collection.Version,
-			NumRecordsLastCompaction: collectionAndMetadata.Collection.NumRecordsLastCompaction,
+			ID:                         types.MustParse(collectionAndMetadata.Collection.ID),
+			Name:                       *collectionAndMetadata.Collection.Name,
+			ConfigurationJsonStr:       *collectionAndMetadata.Collection.ConfigurationJsonStr,
+			Dimension:                  collectionAndMetadata.Collection.Dimension,
+			TenantID:                   collectionAndMetadata.TenantID,
+			DatabaseName:               collectionAndMetadata.DatabaseName,
+			Ts:                         collectionAndMetadata.Collection.Ts,
+			LogPosition:                collectionAndMetadata.Collection.LogPosition,
+			Version:                    collectionAndMetadata.Collection.Version,
+			TotalRecordsPostCompaction: collectionAndMetadata.Collection.TotalRecordsPostCompaction,
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
 		collections = append(collections, collection)
