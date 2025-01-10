@@ -187,9 +187,6 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	if in.IsDeleted {
 		ret["is_deleted"] = true
 	}
-	if in.TotalRecordsPostCompaction != nil {
-		ret["total_records_post_compaction"] = *in.TotalRecordsPostCompaction
-	}
 	return ret
 }
 

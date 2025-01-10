@@ -518,7 +518,6 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 			Dimension: updateCollection.Dimension,
 			Ts:        ts,
 		}
-
 		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
 		if err != nil {
 			return err
