@@ -100,7 +100,7 @@ spec:
               member-type: compaction-service
         - maxSkew: 1
           topologyKey: "topology.kubernetes.io/zone"
-          whenUnsatisfiable: ScheduleAnyway
+          whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
               app: compaction-service
