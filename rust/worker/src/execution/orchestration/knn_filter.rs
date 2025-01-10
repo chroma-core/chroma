@@ -3,24 +3,21 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_system::{wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, PanicError, TaskError, TaskMessage, TaskResult};
 use chroma_types::{CollectionAndSegments, Segment};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
 use crate::{
-    execution::{
-        dispatcher::Dispatcher,
-        operator::{wrap, TaskError, TaskMessage, TaskResult},
-        operators::{
-            fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-            filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
-            knn_hnsw::KnnHnswError,
-            knn_log::KnnLogError,
-            knn_projection::{KnnProjectionError, KnnProjectionOutput},
-            spann_bf_pl::SpannBfPlError,
-            spann_centers_search::SpannCentersSearchError,
-            spann_fetch_pl::SpannFetchPlError,
-        },
+    execution::operators::{
+        fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+        filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
+        knn_hnsw::KnnHnswError,
+        knn_log::KnnLogError,
+        knn_projection::{KnnProjectionError, KnnProjectionOutput},
+        spann_bf_pl::SpannBfPlError,
+        spann_centers_search::SpannCentersSearchError,
+        spann_fetch_pl::SpannFetchPlError,
     },
     segment::{
         distributed_hnsw_segment::{
@@ -28,11 +25,7 @@ use crate::{
         },
         utils::distance_function_from_segment,
     },
-    system::{ChannelError, ComponentContext, ComponentHandle, Handler},
-    utils::PanicError,
 };
-
-use super::orchestrator::Orchestrator;
 
 #[derive(Error, Debug)]
 pub enum KnnError {

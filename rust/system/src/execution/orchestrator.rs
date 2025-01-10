@@ -1,3 +1,4 @@
+use crate::{ChannelError, Component, ComponentContext, ComponentHandle, PanicError, System};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use core::fmt::Debug;
@@ -5,11 +6,7 @@ use std::any::type_name;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tracing::Span;
 
-use crate::{
-    execution::{dispatcher::Dispatcher, operator::TaskMessage},
-    system::{ChannelError, Component, ComponentContext, ComponentHandle, System},
-    utils::PanicError,
-};
+use crate::{Dispatcher, TaskMessage};
 
 #[async_trait]
 pub trait Orchestrator: Debug + Send + Sized + 'static {

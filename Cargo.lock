@@ -1349,6 +1349,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-system"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "futures",
+ "parking_lot",
+ "rand",
+ "serde",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "chroma-types"
 version = "0.1.0"
 dependencies = [
@@ -6813,6 +6832,7 @@ dependencies = [
  "chroma-error",
  "chroma-index",
  "chroma-storage",
+ "chroma-system",
  "chroma-types",
  "criterion",
  "fastrace",

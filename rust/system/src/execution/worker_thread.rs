@@ -1,5 +1,5 @@
 use super::{dispatcher::TaskRequestMessage, operator::TaskMessage};
-use crate::system::{Component, ComponentContext, ComponentRuntime, Handler, ReceiverForMessage};
+use crate::{Component, ComponentContext, ComponentRuntime, Handler, ReceiverForMessage};
 use async_trait::async_trait;
 use std::fmt::{Debug, Formatter, Result};
 use tracing::{trace_span, Instrument, Span};

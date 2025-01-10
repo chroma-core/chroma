@@ -1,27 +1,18 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::{wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, PanicError, TaskError, TaskMessage, TaskResult};
 use chroma_types::CollectionAndSegments;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
-use crate::{
-    execution::{
-        dispatcher::Dispatcher,
-        operator::{wrap, TaskError, TaskMessage, TaskResult},
-        operators::{
-            fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-            filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
-            limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
-            prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
-            projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
-        },
-    },
-    system::{ChannelError, ComponentContext, ComponentHandle, Handler},
-    utils::PanicError,
+use crate::execution::operators::{
+    fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+    filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
+    limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
+    prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
+    projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
 };
-
-use super::orchestrator::Orchestrator;
 
 #[derive(Error, Debug)]
 pub enum GetError {

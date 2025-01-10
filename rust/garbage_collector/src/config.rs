@@ -2,9 +2,9 @@ use figment::providers::{Env, Format, Yaml};
 
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 
-#[derive(Debug, serde::Deserialize)]
-// TODO(rohitcpbot):  Remove this dead code annotation.
 #[allow(dead_code)]
+#[derive(Debug, serde::Deserialize)]
+// TODO(Sanket):  Remove this dead code annotation.
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
@@ -15,9 +15,9 @@ pub(super) struct GarbageCollectorConfig {
     sysdb_connection: SysdbConnectionConfig,
 }
 
-#[derive(Debug, serde::Deserialize)]
-// TODO(rohitcpbot):  Remove this dead code annotation.
 #[allow(dead_code)]
+#[derive(Debug, serde::Deserialize)]
+// TODO(Sanket):  Remove this dead code annotation.
 pub(super) struct SysdbConnectionConfig {
     host: String,
     port: u32,

@@ -1,4 +1,4 @@
-use crate::execution::operator::Operator;
+use chroma_system::Operator;
 use crate::segment::ChromaSegmentFlusher;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
@@ -61,8 +61,8 @@ impl Operator<FlushSegmentWriterInput, FlushSegmentWriterOutput> for FlushSegmen
         "FlushSegmentWriterOperator"
     }
 
-    fn get_type(&self) -> crate::execution::operator::OperatorType {
-        crate::execution::operator::OperatorType::IO
+    fn get_type(&self) -> chroma_system::OperatorType {
+        chroma_system::OperatorType::IO
     }
 
     async fn run(

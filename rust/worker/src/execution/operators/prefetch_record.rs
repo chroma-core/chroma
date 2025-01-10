@@ -1,18 +1,15 @@
 use std::collections::HashSet;
 
+use crate::segment::{
+    materialize_logs,
+    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    LogMaterializerError,
+};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::Operator;
 use thiserror::Error;
 use tracing::{trace, Instrument, Span};
-
-use crate::{
-    execution::operator::Operator,
-    segment::{
-        materialize_logs,
-        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializerError,
-    },
-};
 
 use super::projection::ProjectionInput;
 

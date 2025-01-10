@@ -1,13 +1,13 @@
 use std::iter::once;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
+use chroma_system::Operator;
 use chroma_types::{
     BooleanOperator, Chunk, DirectWhereComparison, MetadataValue, PrimitiveOperator, Where,
     WhereChildren, WhereComparison,
 };
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use worker::execution::operator::Operator;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
 use worker::log::test::upsert_generator;
 use worker::segment::test::TestSegment;

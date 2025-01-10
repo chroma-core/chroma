@@ -14,7 +14,7 @@ pub(crate) struct SchedulerTaskHandle {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Scheduler {
+pub struct Scheduler {
     handles: Arc<RwLock<Vec<SchedulerTaskHandle>>>,
 }
 
@@ -28,7 +28,7 @@ impl Scheduler {
     /// Schedule a message to be sent to the component after the specified duration.
     ///
     /// `span_factory` is called immediately before sending the scheduled message to the component.
-    pub(crate) fn schedule<C, M, S>(
+    pub fn schedule<C, M, S>(
         &self,
         message: M,
         duration: Duration,

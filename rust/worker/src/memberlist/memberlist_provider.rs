@@ -1,9 +1,8 @@
 use super::config::MemberlistProviderConfig;
-use crate::system::ReceiverForMessage;
-use crate::system::{Component, ComponentContext, Handler, StreamHandler};
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, StreamHandler};
 use futures::StreamExt;
 use kube::runtime::watcher::Config;
 use kube::{
@@ -241,7 +240,7 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::System;
+    use chroma_system::System;
 
     #[tokio::test]
     // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::execution::operator::Operator;
+use chroma_system::Operator;
 
 use super::knn::RecordDistance;
 
@@ -83,10 +83,8 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
 
 #[cfg(test)]
 mod tests {
-    use crate::execution::{
-        operator::Operator,
-        operators::{knn::RecordDistance, knn_merge::KnnMergeOperator},
-    };
+    use crate::execution::operators::{knn::RecordDistance, knn_merge::KnnMergeOperator};
+    use chroma_system::Operator;
 
     use super::KnnMergeInput;
 

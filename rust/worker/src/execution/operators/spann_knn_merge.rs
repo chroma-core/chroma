@@ -2,7 +2,7 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 
 use async_trait::async_trait;
 
-use crate::execution::operator::Operator;
+use chroma_system::Operator;
 
 use super::knn::RecordDistance;
 
@@ -100,7 +100,7 @@ impl Operator<SpannKnnMergeInput, SpannKnnMergeOutput> for SpannKnnMergeOperator
 
 #[cfg(test)]
 mod test {
-    use crate::execution::operator::Operator;
+    use chroma_system::Operator;
 
     // Basic operator test.
     #[tokio::test]

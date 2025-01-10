@@ -24,7 +24,7 @@ struct Inner {
 }
 
 impl System {
-    pub(crate) fn new() -> System {
+    pub fn new() -> System {
         System {
             inner: Arc::new(Inner {
                 scheduler: Scheduler::new(),
@@ -87,11 +87,11 @@ impl System {
         tokio::spawn(async move { stream_loop(stream, &ctx).await });
     }
 
-    pub(crate) async fn stop(&self) {
+    pub async fn stop(&self) {
         self.inner.scheduler.stop();
     }
 
-    pub(crate) async fn join(&self) {
+    pub async fn join(&self) {
         self.inner.scheduler.join().await;
     }
 }
