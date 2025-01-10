@@ -21,6 +21,8 @@ runs:
     - name: Set up kind
       shell: bash
       run: ctlptl create cluster kind --registry=ctlptl-registry
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
     - name: Start Tilt
       shell: bash
       run: tilt ci

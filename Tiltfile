@@ -46,22 +46,16 @@ docker_build(
   ignore=['**/*.pyc', 'chromadb/test/'],
 )
 
-docker_build(
+custom_build(
   'local:query-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/worker/Dockerfile',
-  target='query_service',
-  cache_from=['type=registry,ref=registry.depot.dev/' + os.getenv('CACHED_IMAGE_REF')]
+  'docker buildx build --load -t $EXPECTED_REF --target query_service --cache-from=type=gha --cache-to=type=gha --file rust/worker/Dockerfile .',
+  deps=['rust/worker/Dockerfile', 'rust/worker/Cargo.toml', 'rust/worker/Cargo.lock', 'rust/worker/src/'],
 )
 
-docker_build(
+custom_build(
   'local:compaction-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/worker/Dockerfile',
-  target='compaction_service',
-  cache_from=['type=registry,ref=registry.depot.dev/' + os.getenv('CACHED_IMAGE_REF')]
+  'docker buildx build --load -t $EXPECTED_REF --target compaction_service --cache-from=type=gha --cache-to=type=gha --file rust/worker/Dockerfile .',
+  deps=['rust/worker/Dockerfile', 'rust/worker/Cargo.toml', 'rust/worker/Cargo.lock', 'rust/worker/src/'],
 )
 
 k8s_yaml(

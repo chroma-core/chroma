@@ -44,19 +44,8 @@ jobs:
         uses: ./.github/actions/go
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
-      - name: (temp) build rust image
-        run: |
-          docker login registry.depot.dev -u x-token -p $DEPOT_TOKEN
-          depot build --save --metadata-file build.json .
-          project_id=$(cat build.json | jq -r '."depot.build".projectID')
-          build_id=$(cat build.json | jq -r '."depot.build".buildID')
-
-          echo "cached_image_ref=$project_id/$build_id" >> $GITHUB_ENV
-        env:
-          DEPOT_TOKEN: ${{ secrets.DEPOT_PROJECT_TOKEN }}
+      - uses: crazy-max/ghaction-github-runtime@v3
       - uses: ./.github/actions/tilt
-        with:
-          cached-image-ref: ${{ env.cached_image_ref }}
       - run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'
       - name: Save service logs to artifact
         if: always()
