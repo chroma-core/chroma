@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs";
 import matter from "gray-matter";
 import ScrollableContent from "./scrollable-content";
+import CloudSignUp from "@/components/header/cloud-signup";
 
 const generatePages = (slug: string[]): { id: string; name: string }[] => {
   const dirPath = path.join(process.cwd(), "markdoc", "content", ...slug);

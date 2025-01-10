@@ -5,6 +5,7 @@ import ThemeProvider from "@/components/ui/theme-provider";
 import { Inter } from "next/font/google";
 import Header from "@/components/header/header";
 import PostHogProvider from "@/components/posthog/posthog-provider";
+import CloudSignUp from "@/components/header/cloud-signup";
 
 export const metadata: Metadata = {
   title: "Chroma Docs",
@@ -32,6 +33,7 @@ export default function RootLayout({
               <div className="absolute inset-0 bg-[url('/background.jpg')] bg-cover bg-center opacity-10 dark:invert dark:opacity-10" />
               <div className="relative z-10 flex flex-col h-full">
                 <Header />
+                <CloudSignUp />
                 {children}
               </div>
             </div>

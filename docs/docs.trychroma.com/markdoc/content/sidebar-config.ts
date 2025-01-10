@@ -90,7 +90,7 @@ const sidebarConfig: AppSection[] = [
     id: "cloud",
     name: "Chroma Cloud",
     icon: CloudIcon,
-    override: "https://airtable.com/appG6DhLoDUnTawwh/shrOAiDUtS2ILy5vZ",
+    override: "https://trychroma.com/signup",
   },
   {
     id: "production",

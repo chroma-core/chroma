@@ -4,9 +4,7 @@
 
 **Hosted Chroma**
 
-Chroma Cloud, our fully managed hosted service, is in early access. Fill out the survey to jump the waitlist and get the best retrieval experience. Full access coming Q1 2025.
-
-[📝 30 second survey](https://airtable.com/shrOAiDUtS2ILy5vZ)
+Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup) for early access.
 
 {% /Banner %}
 
