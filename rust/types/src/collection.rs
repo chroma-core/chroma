@@ -41,6 +41,7 @@ pub struct Collection {
     pub database: String,
     pub log_position: i64,
     pub version: i32,
+    pub num_records_last_compaction: Option<i64>,
 }
 
 #[derive(Error, Debug)]
@@ -85,6 +86,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             database: proto_collection.database,
             log_position: proto_collection.log_position,
             version: proto_collection.version,
+            num_records_last_compaction: proto_collection.num_records_last_compaction,
         })
     }
 }
