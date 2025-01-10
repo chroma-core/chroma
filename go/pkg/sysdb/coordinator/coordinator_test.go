@@ -214,7 +214,6 @@ func TestAPIs(t *testing.T) {
 
 func SampleCollections(tenantID string, databaseName string) []*model.Collection {
 	dimension := int32(128)
-	totalRecordsPostCompaction := int64(0)
 	metadata1 := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	metadata1.Add("test_str", &model.CollectionMetadataValueStringType{Value: "str1"})
 	metadata1.Add("test_int", &model.CollectionMetadataValueInt64Type{Value: 1})
@@ -231,31 +230,28 @@ func SampleCollections(tenantID string, databaseName string) []*model.Collection
 	metadata3.Add("test_float", &model.CollectionMetadataValueFloat64Type{Value: 3.3})
 	sampleCollections := []*model.Collection{
 		{
-			ID:                         types.MustParse("93ffe3ec-0107-48d4-8695-51f978c509dc"),
-			Name:                       "test_collection_1",
-			Metadata:                   metadata1,
-			Dimension:                  &dimension,
-			TenantID:                   tenantID,
-			DatabaseName:               databaseName,
-			TotalRecordsPostCompaction: &totalRecordsPostCompaction,
+			ID:           types.MustParse("93ffe3ec-0107-48d4-8695-51f978c509dc"),
+			Name:         "test_collection_1",
+			Metadata:     metadata1,
+			Dimension:    &dimension,
+			TenantID:     tenantID,
+			DatabaseName: databaseName,
 		},
 		{
-			ID:                         types.MustParse("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
-			Name:                       "test_collection_2",
-			Metadata:                   metadata2,
-			Dimension:                  nil,
-			TenantID:                   tenantID,
-			DatabaseName:               databaseName,
-			TotalRecordsPostCompaction: &totalRecordsPostCompaction,
+			ID:           types.MustParse("f444f1d7-d06c-4357-ac22-5a4a1f92d761"),
+			Name:         "test_collection_2",
+			Metadata:     metadata2,
+			Dimension:    nil,
+			TenantID:     tenantID,
+			DatabaseName: databaseName,
 		},
 		{
-			ID:                         types.MustParse("43babc1a-e403-4a50-91a9-16621ba29ab0"),
-			Name:                       "test_collection_3",
-			Metadata:                   metadata3,
-			Dimension:                  nil,
-			TenantID:                   tenantID,
-			DatabaseName:               databaseName,
-			TotalRecordsPostCompaction: &totalRecordsPostCompaction,
+			ID:           types.MustParse("43babc1a-e403-4a50-91a9-16621ba29ab0"),
+			Name:         "test_collection_3",
+			Metadata:     metadata3,
+			Dimension:    nil,
+			TenantID:     tenantID,
+			DatabaseName: databaseName,
 		},
 	}
 	return sampleCollections
@@ -500,13 +496,12 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 func (suite *APIsTestSuite) TestUpdateCollections() {
 	ctx := context.Background()
 	coll := &model.Collection{
-		Name:                       suite.sampleCollections[0].Name,
-		ID:                         suite.sampleCollections[0].ID,
-		Metadata:                   suite.sampleCollections[0].Metadata,
-		Dimension:                  suite.sampleCollections[0].Dimension,
-		TenantID:                   suite.sampleCollections[0].TenantID,
-		DatabaseName:               suite.sampleCollections[0].DatabaseName,
-		TotalRecordsPostCompaction: suite.sampleCollections[0].TotalRecordsPostCompaction,
+		Name:         suite.sampleCollections[0].Name,
+		ID:           suite.sampleCollections[0].ID,
+		Metadata:     suite.sampleCollections[0].Metadata,
+		Dimension:    suite.sampleCollections[0].Dimension,
+		TenantID:     suite.sampleCollections[0].TenantID,
+		DatabaseName: suite.sampleCollections[0].DatabaseName,
 	}
 
 	// Update name
