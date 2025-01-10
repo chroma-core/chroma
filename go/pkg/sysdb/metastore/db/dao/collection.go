@@ -247,6 +247,31 @@ func (s *collectionDb) Update(in *dbmodel.Collection) error {
 	return nil
 }
 
+func (s *collectionDb) UpdateLogPositionAndVersionInfo(
+	collectionID string,
+	logPosition int64,
+	currentCollectionVersion int32,
+	currentVersionFileName string,
+	newCollectionVersion int32,
+	newVersionFileName string,
+) (int64, error) {
+	result := s.db.Model(&dbmodel.Collection{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND version = ? AND version_file_name = ?",
+			collectionID,
+			currentCollectionVersion,
+			currentVersionFileName).
+		Updates(map[string]interface{}{
+			"log_position":      logPosition,
+			"version":           newCollectionVersion,
+			"version_file_name": newVersionFileName,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection

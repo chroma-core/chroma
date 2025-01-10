@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
+	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/chroma-core/chroma/go/shared/otel"
 	"github.com/pingcap/log"
@@ -17,14 +19,18 @@ import (
 
 // The catalog backed by databases using GORM.
 type Catalog struct {
-	metaDomain dbmodel.IMetaDomain
-	txImpl     dbmodel.ITransaction
+	metaDomain         dbmodel.IMetaDomain
+	txImpl             dbmodel.ITransaction
+	s3Store            *s3metastore.S3MetaStore
+	versionFileEnabled bool
 }
 
-func NewTableCatalog(txImpl dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain) *Catalog {
+func NewTableCatalog(txImpl dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain, s3Store *s3metastore.S3MetaStore, versionFileEnabled bool) *Catalog {
 	return &Catalog{
-		txImpl:     txImpl,
-		metaDomain: metaDomain,
+		txImpl:             txImpl,
+		metaDomain:         metaDomain,
+		s3Store:            s3Store,
+		versionFileEnabled: versionFileEnabled,
 	}
 }
 
@@ -869,7 +875,102 @@ func (tc *Catalog) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs [
 	return tenants, err
 }
 
+// ListCollectionVersions lists all versions of a collection that have not been marked for deletion.
+func (tc *Catalog) ListCollectionVersions(ctx context.Context,
+	collectionID types.UniqueID,
+	tenantID string,
+	maxCount *int64,
+	versionsBefore *time.Time,
+	versionsAtOrAfter *time.Time,
+) ([]*coordinatorpb.CollectionVersionInfo, error) {
+	// Get the latest version of the collection. If collection does not exist, return an error.
+	collectionIDString := collectionID.String()
+	collection, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(&collectionIDString, nil)
+	if err != nil {
+		return nil, err
+	}
+	if collection == nil {
+		return nil, common.ErrCollectionNotFound
+	}
+	currentVersion := collection.Version
+
+	// Get the version history from the version file.
+	versionHistory, err := tc.s3Store.GetLatestVersionFile(tenantID, collectionID.String(), int64(currentVersion))
+	if err != nil {
+		return nil, err
+	}
+
+	// Honor the maxCount, versionsBefore, and versionsAtOrAfter.
+	// First filter by time range if specified
+	var filteredVersions []*coordinatorpb.CollectionVersionInfo
+
+	// First filter by time range if specified
+	if versionsBefore != nil || versionsAtOrAfter != nil {
+		// Create a new slice for time-filtered versions
+		timeFilteredVersions := make([]*coordinatorpb.CollectionVersionInfo, 0)
+
+		for _, version := range versionHistory.Versions {
+			versionTime := version.CreatedAt.AsTime()
+
+			// Check if version is before the specified time
+			if versionsBefore != nil && !versionTime.Before(*versionsBefore) {
+				continue
+			}
+
+			// Check if version is at or after the specified time
+			if versionsAtOrAfter != nil && versionTime.Before(*versionsAtOrAfter) {
+				continue
+			}
+
+			timeFilteredVersions = append(timeFilteredVersions, version)
+		}
+
+		filteredVersions = timeFilteredVersions
+	} else {
+		// If no time filters, use all versions
+		filteredVersions = versionHistory.Versions
+	}
+
+	// Remove versions that are marked for deletion.
+	nonDeletedVersions := make([]*coordinatorpb.CollectionVersionInfo, 0, len(filteredVersions))
+	for _, version := range filteredVersions {
+		if !version.MarkedForDeletion {
+			nonDeletedVersions = append(nonDeletedVersions, version)
+		}
+	}
+	filteredVersions = nonDeletedVersions
+
+	// Apply maxCount limit if specified
+	if maxCount != nil && *maxCount > 0 && int64(len(filteredVersions)) > *maxCount {
+		filteredVersions = filteredVersions[:*maxCount]
+	}
+
+	return filteredVersions, nil
+}
+
+func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction) (string, error) {
+	// TODO: Prepare the new version file contents.
+	existingVersionFilePb.GetVersionHistory().Versions = append(existingVersionFilePb.GetVersionHistory().Versions, &coordinatorpb.CollectionVersionInfo{
+		Version:       int64(flushCollectionCompaction.CurrentCollectionVersion) + 1,
+		CreatedAtSecs: time.Now().Unix(),
+	})
+
+	// Write the new version file to S3.
+	// TODO: Create the new version file name.
+	newVersionFileName := ""
+	err := tc.s3Store.PutVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
+	if err != nil {
+		return "", err
+	}
+
+	return newVersionFileName, nil
+}
+
 func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	if tc.versionFileEnabled {
+		return tc.FlushCollectionCompactionForVersionedCollection(ctx, flushCollectionCompaction)
+	}
+
 	flushCollectionInfo := &model.FlushCollectionInfo{
 		ID: flushCollectionCompaction.ID.String(),
 	}
@@ -917,4 +1018,150 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		return nil, err
 	}
 	return flushCollectionInfo, nil
+}
+
+// Pre-Context for understanding this method:
+//  1. Information about collection version history is maintained in the VersionFile in S3.
+//  2. The VersionFileName is maintained in the Postgres table.
+//  3. When updating CollectionEntry, a CAS operation against both version and version file name is performed.
+//  4. Since Segment information is maintained in a separate table, a Transaction
+//     is used to atomically update the CollectionEntry and Segment data.
+//
+// Algorithm:
+// 1. Get the collection entry from the table.
+// 2. Prepare the new version file.
+// 3. Write the version file to S3.
+// 4. Till the CAS operation succeeds, retry the operation (i.e. goto 1)
+// 5. 		If version CAS fails - then fail the operation to the Compactor.
+// 6. 		If version file name CAS fails - read updated file and write a new version file to S3.
+func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	// The result that is sent back to the Compactor.
+	flushCollectionInfo := &model.FlushCollectionInfo{
+		ID: flushCollectionCompaction.ID.String(),
+	}
+
+	// Do the operation in a loop until the CollectionEntry is updated,
+	// 		OR FAIL the operation if the version is stale
+	//      OR other DB error.
+	//
+	// In common case, the loop will run only once.
+	// The loop with run more than once only when GC competes to update the
+	// VersionFileName. More precisely, when GC updates the VersionFile in S3
+	// to mark certain versions and then tries to update the VersionFileName in
+	// the table at the same time.
+	for {
+		// Get the current version info and the version file from the table.
+		collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
+		if err != nil {
+			return nil, err
+		}
+		if collectionEntry == nil {
+			return nil, common.ErrCollectionNotFound
+		}
+		if collectionEntry.IsDeleted {
+			return nil, common.ErrCollectionSoftDeleted
+		}
+
+		versionAtCompactionStart := int64(flushCollectionCompaction.CurrentCollectionVersion)
+		existingVersion := int64(collectionEntry.Version)
+
+		// Do a check to see if the version is stale.
+		if existingVersion > versionAtCompactionStart {
+			// Compactor is trying to flush a version that is no longer valid, since
+			// a different compaction instance has already incremented the version.
+			log.Info("Compactor is trying to flush a stale version", zap.Int64("existing_version", existingVersion), zap.Int64("current_collection_version", versionAtCompactionStart))
+			return nil, common.ErrCollectionVersionStale
+		}
+
+		existingVersionFileName := collectionEntry.VersionFileName
+		// Read the VersionFile from S3MetaStore.
+		existingVersionFilePb, err := tc.s3Store.GetVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), existingVersion, existingVersionFileName)
+		if err != nil {
+			return nil, err
+		}
+
+		// The update function takes the content of the existing version file,
+		// and the set of segments that are part of the new version file.
+		// NEW VersionFile is created in S3 at this step.
+		newVersionFileName, err := tc.updateVersionFileInS3(ctx, existingVersionFilePb, flushCollectionCompaction)
+		if err != nil {
+			return nil, err
+		}
+
+		txErr := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+			// register files to Segment metadata
+			err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+			if err != nil {
+				return err
+			}
+
+			// At this point, a concurrent Transaction can still update/commit
+			// the Collection entry.
+			// Since this Tx is ReadCommitted, the result of other Tx will be
+			// visible to the statement below. Hence the statement below will
+			// use WHERE clause to ensure that its update will not go through
+			// if the Collection entry is updated by another Tx.
+
+			// Update collection log position and version
+			rowsAffected, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionAndVersionInfo(
+				flushCollectionCompaction.ID.String(),
+				flushCollectionCompaction.LogPosition,
+				flushCollectionCompaction.CurrentCollectionVersion,
+				existingVersionFileName,
+				flushCollectionCompaction.CurrentCollectionVersion+1,
+				newVersionFileName,
+			)
+			if err != nil {
+				return err
+			}
+			if rowsAffected == 0 {
+				// CAS operation failed.
+				// Error out the transaction, so that segment is not updated.
+				return common.ErrCollectionEntryIsStale
+			}
+
+			// CAS operation succeeded. Update tenant compaction time and then
+			// COMMIT the transaction.
+
+			// update tenant last compaction time
+			// TODO: add a system configuration to disable
+			// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
+			lastCompactionTime := time.Now().Unix()
+			err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
+			if err != nil {
+				return err
+			}
+			// Set the result values that will be returned to the Compactor.
+			flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime
+			flushCollectionInfo.CollectionVersion = flushCollectionCompaction.CurrentCollectionVersion + 1
+
+			// return nil will commit the transaction
+			return nil
+		}) // End of transaction
+
+		if txErr == nil {
+			// CAS operation succeeded.
+			// Return the result to the Compactor.
+			return flushCollectionInfo, nil
+		}
+
+		// There are only two possible reasons for this error:
+		// 1. The entry was stale because either another Compactor or GarbageCollector updated the entry
+		//    between the start of this operation, and before the Update was run.
+		//    => Retry the operation.
+		// 2. Some other DB error
+		//    => Return error to Compactor.
+		switch txErr {
+		case common.ErrCollectionEntryIsStale:
+			// CAS operation failed. i.e. no rows were updated.
+			// Retry the CAS operation.
+			// TODO: Convert this to log.Debug in future.
+			// TODO: The version file that was just created can be deleted. Delete it.
+			log.Info("version file name stale", zap.String("existing_version_file_name", existingVersionFileName), zap.String("committed_version_file_name", newVersionFileName))
+			continue
+		default:
+			// Return the error to Compactor.
+			return nil, txErr
+		}
+	} // End of loop
 }

@@ -2,12 +2,15 @@ package coordinator
 
 import (
 	"context"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
+	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -27,21 +30,25 @@ const (
 // Currently, it only has the system catalog related APIs and will be extended to
 // support other functionalities such as membership managed and propagation.
 type Coordinator struct {
-	ctx        context.Context
-	catalog    Catalog
-	deleteMode DeleteMode
+	ctx         context.Context
+	catalog     Catalog
+	deleteMode  DeleteMode
+	objectStore *s3metastore.S3MetaStore
 }
 
-func NewCoordinator(ctx context.Context, deleteMode DeleteMode) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, deleteMode DeleteMode, objectStore *s3metastore.S3MetaStore) (*Coordinator, error) {
 	s := &Coordinator{
-		ctx:        ctx,
-		deleteMode: deleteMode,
+		ctx:         ctx,
+		deleteMode:  deleteMode,
+		objectStore: objectStore,
 	}
 
 	// catalog
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	s.catalog = *NewTableCatalog(txnImpl, metaDomain)
+	// TODO(rohitcp): Enable version file from config.
+	// Keeping it disabled till feature is ready.
+	s.catalog = *NewTableCatalog(txnImpl, metaDomain, s.objectStore, false)
 	return s, nil
 }
 
@@ -227,6 +234,11 @@ func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollec
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }
 
+<<<<<<< HEAD
 func (s *Coordinator) ListCollectionsToGc(ctx context.Context) ([]*model.CollectionToGc, error) {
 	return s.catalog.ListCollectionsToGc(ctx)
+=======
+func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *time.Time, versionsAtOrAfter *time.Time) ([]*coordinatorpb.CollectionVersionInfo, error) {
+	return s.catalog.ListCollectionVersions(ctx, collectionID, tenantID, maxCount, versionsBefore, versionsAtOrAfter)
+>>>>>>> a1075ad11 ([ENH] Create VersionFiles in S3 from Sysdb.)
 }

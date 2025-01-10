@@ -37,6 +37,17 @@ type CreateCollection struct {
 	Ts                   types.Timestamp
 }
 
+// type ForkCollection struct {
+// 	ID                      types.UniqueID
+// 	Name                    string
+// 	TenantID                string
+// 	DatabaseName            string
+// 	Ts                      types.Timestamp
+// 	SourceCollectionID      types.UniqueID
+// 	SourceCollectionVersion int64
+// 	SourceTenantID          string
+// }
+
 type DeleteCollection struct {
 	ID           types.UniqueID
 	TenantID     string
@@ -69,6 +80,15 @@ type FlushCollectionInfo struct {
 	CollectionVersion        int32
 	TenantLastCompactionTime int64
 }
+
+// type CollectionVersionInfo struct {
+// 	ID                string
+// 	Version           int64
+// 	Segments          []*FlushSegmentCompaction
+// 	CreatedAt         time.Time
+// 	MarkedForDeletion bool
+// 	VersionFile       string
+// }
 
 func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string) bool {
 	if collectionID != types.NilUniqueID() && collectionID != collection.ID {
