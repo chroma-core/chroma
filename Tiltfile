@@ -51,7 +51,8 @@ docker_build(
   '.',
   only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
   dockerfile='./rust/worker/Dockerfile',
-  target='query_service'
+  target='query_service',
+  cache_from=['type=registry,ref=registry.depot.dev/' + os.getenv('CACHED_IMAGE_REF')]
 )
 
 docker_build(
@@ -59,7 +60,8 @@ docker_build(
   '.',
   only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
   dockerfile='./rust/worker/Dockerfile',
-  target='compaction_service'
+  target='compaction_service',
+  cache_from=['type=registry,ref=registry.depot.dev/' + os.getenv('CACHED_IMAGE_REF')]
 )
 
 k8s_yaml(
