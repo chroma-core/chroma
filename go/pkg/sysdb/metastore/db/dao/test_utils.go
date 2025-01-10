@@ -106,7 +106,7 @@ func CleanUpTestTenant(db *gorm.DB, tenantName string) error {
 	return nil
 }
 
-func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, databaseID string, totalRecordsPostCompaction int64) (string, error) {
+func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, databaseID string) (string, error) {
 	log.Info("create test collection", zap.String("collectionName", collectionName), zap.Int32("dimension", dimension), zap.String("databaseID", databaseID))
 	collectionDb := &collectionDb{
 		db: db,
@@ -118,13 +118,12 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 
 	defaultConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	err := collectionDb.Insert(&dbmodel.Collection{
-		ID:                         collectionId,
-		Name:                       &collectionName,
-		ConfigurationJsonStr:       &defaultConfigurationJsonStr,
-		Dimension:                  &dimension,
-		DatabaseID:                 databaseID,
-		CreatedAt:                  time.Now(),
-		TotalRecordsPostCompaction: &totalRecordsPostCompaction,
+		ID:                   collectionId,
+		Name:                 &collectionName,
+		ConfigurationJsonStr: &defaultConfigurationJsonStr,
+		Dimension:            &dimension,
+		DatabaseID:           databaseID,
+		CreatedAt:            time.Now(),
 	})
 	if err != nil {
 		return "", err
