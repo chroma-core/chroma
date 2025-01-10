@@ -21,14 +21,17 @@ use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, Syste
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
 use tracing::Span;
+use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -220,6 +223,11 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         let min_compaction_size = config.compactor.min_compaction_size;
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
+        let mut disabled_collections =
+            HashSet::with_capacity(config.compactor.disabled_collections.len());
+        for collection_id_str in &config.compactor.disabled_collections {
+            disabled_collections.insert(CollectionUuid(Uuid::from_str(collection_id_str).unwrap()));
+        }
 
         let assignment_policy_config = &config.assignment_policy;
         let assignment_policy = match crate::assignment::from_config(assignment_policy_config).await
@@ -237,6 +245,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             max_concurrent_jobs,
             min_compaction_size,
             assignment_policy,
+            disabled_collections,
         );
 
         let blockfile_provider = BlockfileProvider::try_from_config(&(
@@ -519,6 +528,7 @@ mod tests {
             max_concurrent_jobs,
             min_compaction_size,
             assignment_policy,
+            HashSet::new(),
         );
         // Set memberlist
         scheduler.set_memberlist(vec![my_member_id.clone()]);
