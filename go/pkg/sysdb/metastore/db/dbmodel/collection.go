@@ -18,6 +18,7 @@ type Collection struct {
 	UpdatedAt            time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 	LogPosition          int64           `gorm:"log_position;default:0"`
 	Version              int32           `gorm:"version;default:0"`
+	VersionFileName      string          `gorm:"version_file_name"`
 }
 
 func (v Collection) TableName() string {
@@ -40,5 +41,6 @@ type ICollectionDb interface {
 	Update(in *Collection) error
 	DeleteAll() error
 	UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error)
+	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFileName string, newCollectionVersion int32, newVersionFileName string) (int32, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 }
