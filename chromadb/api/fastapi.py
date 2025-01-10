@@ -127,6 +127,31 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
         )
 
+    @trace_method("FastAPI.list_databases", OpenTelemetryGranularity.OPERATION)
+    @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        """Returns a list of all databases"""
+        json_databases = self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases",
+            params=BaseHTTPClient._clean_params(
+                {
+                    "limit": limit,
+                    "offset": offset,
+                }
+            ),
+        )
+        databases = [
+            Database(id=db["id"], name=db["name"], tenant=db["tenant"])
+            for db in json_databases
+        ]
+        return databases
+
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:

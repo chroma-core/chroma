@@ -453,6 +453,15 @@ class AdminClient(SharedSystemClient, AdminAPI):
         return self._server.get_database(name=name, tenant=tenant)
 
     @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        return self._server.list_databases(limit, offset, tenant=tenant)
+
+    @override
     def create_tenant(self, name: str) -> None:
         return self._server.create_tenant(name=name)
 

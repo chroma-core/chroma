@@ -304,6 +304,13 @@ class FastAPI(Server):
         )
 
         self.router.add_api_route(
+            "/api/v2/tenants/{tenant}/databases",
+            self.list_databases,
+            methods=["GET"],
+            response_model=None,
+        )
+
+        self.router.add_api_route(
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections",
             self.list_collections,
             methods=["GET"],
@@ -595,6 +602,33 @@ class FastAPI(Server):
             Tenant,
             await to_thread.run_sync(
                 self._api.get_tenant,
+                tenant,
+                limiter=self._capacity_limiter,
+            ),
+        )
+
+    @trace_method("FastAPI.list_databases", OpenTelemetryGranularity.OPERATION)
+    async def list_databases(
+        self,
+        request: Request,
+        tenant: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[Database]:
+        self.auth_request(
+            request.headers,
+            AuthzAction.LIST_DATABASES,
+            tenant,
+            None,
+            None,
+        )
+
+        return cast(
+            Sequence[Database],
+            await to_thread.run_sync(
+                self._api.list_databases,
+                limit,
+                offset,
                 tenant,
                 limiter=self._capacity_limiter,
             ),

@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
 from overrides import override
@@ -15,7 +16,11 @@ from chromadb.api.configuration import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
-from chromadb.errors import InvalidCollectionException, NotFoundError, UniqueConstraintError
+from chromadb.errors import (
+    InvalidCollectionException,
+    NotFoundError,
+    UniqueConstraintError,
+)
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -112,6 +117,37 @@ class SqlSysDB(SqlDB, SysDB):
             )
 
     @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        with self.tx() as cur:
+            databases = Table("databases")
+            q = (
+                self.querybuilder()
+                .from_(databases)
+                .select(databases.id, databases.name)
+                .where(databases.tenant_id == ParameterValue(tenant))
+                .offset(offset)
+                .limit(
+                    sys.maxsize if limit is None else limit
+                )  # SQLite requires that a limit is provided to use offset
+                .orderby(databases.created_at)
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            rows = cur.execute(sql, params).fetchall()
+            return [
+                Database(
+                    id=cast(UUID, self.uuid_from_db(row[0])),
+                    name=row[1],
+                    tenant=tenant,
+                )
+                for row in rows
+            ]
+
+    @override
     def create_tenant(self, name: str) -> None:
         with self.tx() as cur:
             tenants = Table("tenants")
@@ -195,14 +231,12 @@ class SqlSysDB(SqlDB, SysDB):
                 logger.error(f"Error inserting segment metadata: {e}")
                 raise
 
-
     # TODO(rohit): Investigate and remove this method completely.
     @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
     @override
     def create_segment(self, segment: Segment) -> None:
         with self.tx() as cur:
             self.create_segment_with_tx(cur, segment)
-
 
     @trace_method("SqlSysDB.create_collection", OpenTelemetryGranularity.ALL)
     @override
@@ -491,7 +525,9 @@ class SqlSysDB(SqlDB, SysDB):
             return collections
 
     @override
-    def get_collection_with_segments(self, collection_id: UUID) -> CollectionAndSegments:
+    def get_collection_with_segments(
+        self, collection_id: UUID
+    ) -> CollectionAndSegments:
         collections = self.get_collections(id=collection_id)
         if len(collections) == 0:
             raise InvalidCollectionException(

@@ -157,6 +157,16 @@ class SegmentAPI(ServerAPI):
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
 
+    @trace_method("SegmentAPI.list_databases", OpenTelemetryGranularity.OPERATION)
+    @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[t.Database]:
+        return self._sysdb.list_databases(limit=limit, offset=offset, tenant=tenant)
+
     @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
@@ -227,7 +237,7 @@ class SegmentAPI(ServerAPI):
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
-            segments=[], # Passing empty till backend changes are deployed.
+            segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -894,11 +904,15 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.ALL)
     def _scan(self, collection_id: UUID) -> Scan:
-        collection_and_segments = self._sysdb.get_collection_with_segments(collection_id)
+        collection_and_segments = self._sysdb.get_collection_with_segments(
+            collection_id
+        )
         # For now collection should have exactly one segment per scope:
         # - Local scopes: vector, metadata
-        # - Distributed scopes: vector, metadata, record 
-        scope_to_segment = {segment["scope"]: segment for segment in collection_and_segments["segments"]}
+        # - Distributed scopes: vector, metadata, record
+        scope_to_segment = {
+            segment["scope"]: segment for segment in collection_and_segments["segments"]
+        }
         return Scan(
             collection=collection_and_segments["collection"],
             knn=scope_to_segment[t.SegmentScope.VECTOR],
