@@ -6834,6 +6834,7 @@ dependencies = [
  "chroma-storage",
  "chroma-system",
  "chroma-types",
+ "clap",
  "criterion",
  "fastrace",
  "fastrace-opentelemetry",
