@@ -31,6 +31,7 @@ def test_get_builtins_holds() -> None:
         "SentenceTransformerEmbeddingFunction",
         "Text2VecEmbeddingFunction",
         "ChromaLangchainEmbeddingFunction",
+        "WordLlamaEmbeddingFunction",
     }
 
     assert expected_builtins == embedding_functions.get_builtins()
