@@ -29,7 +29,7 @@ pub(crate) struct Scheduler {
     disabled_collections: HashSet<CollectionUuid>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct RunTimeConfig {
     disabled_collections: Vec<String>,
 }
@@ -192,7 +192,15 @@ impl Scheduler {
     pub(crate) fn recompute_disabled_collections(&mut self) {
         let config = Figment::new()
             .merge(
-                Env::prefixed("CHROMA_COMPACTION_SERVICE__COMPACTOR__")
+                Env::prefixed("CHROMA_")
+                    .map(|k| k.as_str().replace("__", ".").into())
+                    .map(|k| {
+                        if k == "COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS" {
+                            k["COMPACTION_SERVICE.COMPACTOR.".len()..].into()
+                        } else {
+                            k.into()
+                        }
+                    })
                     .only(&["DISABLED_COLLECTIONS"]),
             )
             .extract::<RunTimeConfig>();
@@ -384,6 +392,39 @@ mod tests {
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
         assert_eq!(jobs[1].collection_id, collection_uuid_1,);
+
+        // Set disable list.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_2,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[]",
+        );
+        // Even . should work.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000002\"]",
+        );
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.IRRELEVANT",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[]",
+        );
 
         // Test filter_collections
         let member_1 = "1".to_string();
