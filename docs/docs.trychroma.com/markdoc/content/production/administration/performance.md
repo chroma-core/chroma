@@ -76,7 +76,7 @@ If you’re using multiple collections, performance looks quite similar, based o
 
 ## Concurrency
 
-Although aspects of HNSW’s algorithm are multithreaded internally, only one thread can read or write to a given index at a time. For the most part, single-node Chroma is fundamentally single threaded. If a  operation is executed while another is still in progress, it blocks until the first one is complete.
+Although aspects of HNSW’s algorithm are multithreaded internally, only one thread can read or write to a given index at a time. For the most part, single-node Chroma is fundamentally single threaded. If an operation is executed while another is still in progress, it blocks until the first one is complete.
 
 This means that under concurrent  load, the average latency of each request will increase.
 
