@@ -77,7 +77,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/service-account-key.json"
 
 ### Step 2: Install Terraform
 
-Download [Terraform](https://developer.hashicorp.com/terraform/install?product_intent=terraform) and follow the installation instructions for you OS.
+Download [Terraform](https://developer.hashicorp.com/terraform/install?product_intent=terraform) and follow the installation instructions for your OS.
 
 ### Step 3: Configure your GCP Settings
 
