@@ -85,16 +85,12 @@ from chromadb.types import Collection as CollectionModel
 logger = logging.getLogger(__name__)
 
 
-A = TypeVar("A", bound=Awaitable[Any])
-
-
-def rate_limit(func: A) -> A:
+def rate_limit(func):
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         self = args[0]
         return await self._async_rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
-
-    return wrapper  # type: ignore
+    return wrapper
 
 
 def use_route_names_as_operation_ids(app: _FastAPI) -> None:
