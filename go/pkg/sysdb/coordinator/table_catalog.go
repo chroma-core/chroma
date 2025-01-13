@@ -666,11 +666,23 @@ func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model
 
 func (tc *Catalog) createFirstVersionFile(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (string, error) {
 	collectionVersionFilePb := &coordinatorpb.CollectionVersionFile{
+		CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
+			TenantId:               createCollection.TenantID,
+			DatabaseId:             createCollection.DatabaseName,
+			CollectionId:           createCollection.ID.String(),
+			CollectionName:         createCollection.Name,
+			CollectionCreationSecs: int64(ts),
+		},
 		VersionHistory: &coordinatorpb.CollectionVersionHistory{
-			Versions: []*coordinatorpb.CollectionVersionInfo{},
+			Versions: []*coordinatorpb.CollectionVersionInfo{
+				{
+					Version:       0,
+					CreatedAtSecs: int64(ts),
+				},
+			},
 		},
 	}
-	// TODO: Construct the version file name.
+	// Construct the version file name.
 	versionFileName := "0"
 	err := tc.s3Store.PutVersionFile(createCollection.TenantID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
 	if err != nil {
@@ -683,8 +695,11 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 	var resultCollection *model.Collection
 	created := false
 
-	// TODO: Create the first Version file in S3.
+	// Create the first Version file in S3.
 	// If the transaction below fails, then there will be an orphan file in S3.
+	// This orphan file will not affect new collection creations.
+	// An alternative approach is to create this file after the transaction is committed.
+	// and let FlushCollectionCompaction do any repair work if first version file is missing.
 	versionFileName, err := tc.createFirstVersionFile(ctx, createCollection, createSegments, ts)
 	if err != nil {
 		return nil, false, err
