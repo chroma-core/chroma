@@ -47,7 +47,7 @@ func (suite *CollectionServiceTestSuite) SetupSuite() {
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain)
+	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain, nil, false)
 	suite.tenantName = "tenant_" + suite.T().Name()
 	suite.databaseName = "database_" + suite.T().Name()
 	DbId, err := dao.CreateTestTenantAndDatabase(suite.db, suite.tenantName, suite.databaseName)

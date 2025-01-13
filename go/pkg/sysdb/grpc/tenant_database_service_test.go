@@ -40,7 +40,7 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain)
+	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain, nil, false)
 }
 
 func (suite *TenantDatabaseServiceTestSuite) SetupTest() {

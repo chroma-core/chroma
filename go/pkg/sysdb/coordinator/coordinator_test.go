@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
+	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"gorm.io/gorm"
@@ -33,11 +34,15 @@ type APIsTestSuite struct {
 	databaseId        string
 	sampleCollections []*model.Collection
 	coordinator       *Coordinator
+	s3MetaStore       *s3metastore.S3MetaStore
 }
 
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
+	s3MetaStore, err := s3metastore.NewS3MetaStoreForTesting("test-bucket", "us-east-1", "")
+	suite.NoError(err)
+	suite.s3MetaStore = s3MetaStore
 }
 
 func (suite *APIsTestSuite) SetupTest() {
@@ -53,7 +58,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.db, SoftDelete)
+	c, err := NewCoordinator(ctx, suite.db, SoftDelete, suite.s3MetaStore)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -84,7 +89,7 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db, HardDelete)
+	c, err := NewCoordinator(ctx, db, HardDelete, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -137,7 +142,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db, HardDelete)
+	c, err := NewCoordinator(ctx, db, HardDelete, nil)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -1195,6 +1200,47 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.Equal(id, softDeletedResults[0].ID.String())
 	renamedCollectionNamePrefix := fmt.Sprintf("deleted_%s_", testCollection.Name)
 	suite.Contains(softDeletedResults[0].Name, renamedCollectionNamePrefix)
+}
+
+func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
+	ctx := context.Background()
+
+	// Create a new collection
+	newCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_versioning",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	// Create collection
+	createdCollection, created, err := suite.coordinator.CreateCollection(ctx, newCollection)
+	suite.NoError(err)
+	suite.True(created)
+	suite.Equal(newCollection.ID, createdCollection.ID)
+	suite.Equal(newCollection.Name, createdCollection.Name)
+
+	// Do a flush collection compaction
+	flushInfo, err := suite.coordinator.FlushCollectionCompaction(ctx, &model.FlushCollectionCompaction{
+		ID:                       newCollection.ID,
+		TenantID:                 newCollection.TenantID,
+		LogPosition:              0,
+		CurrentCollectionVersion: 0,
+		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
+			{
+				ID:        types.NewUniqueID(),
+				FilePaths: map[string][]string{"file_1": {"path_1"}},
+			},
+		},
+	})
+	suite.NoError(err)
+	suite.NotNil(flushInfo)
+
+	// Verify version file exists in S3
+	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(newCollection.TenantID, newCollection.ID.String())
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePathPrefix)
+	suite.NoError(err)
+	suite.True(exists, "Version file should exist in S3")
 }
 
 func TestAPIsTestSuite(t *testing.T) {
