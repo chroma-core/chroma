@@ -35,7 +35,7 @@ class SimpleAsyncRateLimitEnforcer(RateLimitEnforcer):
         super().__init__(system)
 
     @override
-    def rate_limit(self, func: T) -> T:
+    def rate_limit(self, func: A) -> A:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             return await func(*args, **kwargs)
