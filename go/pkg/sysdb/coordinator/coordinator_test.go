@@ -40,7 +40,7 @@ type APIsTestSuite struct {
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
-	s3MetaStore, err := s3metastore.NewS3MetaStoreForTesting("test-bucket", "us-east-1", "")
+	s3MetaStore, err := s3metastore.NewS3MetaStoreForTesting("chroma-storage", "us-east-1", "sysdb")
 	suite.NoError(err)
 	suite.s3MetaStore = s3MetaStore
 }
@@ -1205,16 +1205,26 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	ctx := context.Background()
 
+	collectionID := types.NewUniqueID()
 	// Create a new collection
 	newCollection := &model.CreateCollection{
-		ID:           types.NewUniqueID(),
+		ID:           collectionID,
 		Name:         "test_collection_versioning",
 		TenantID:     suite.tenantName,
 		DatabaseName: suite.databaseName,
 	}
 
+	segments := []*model.CreateSegment{
+		{
+			ID:           types.NewUniqueID(),
+			Type:         "test_type_a",
+			Scope:        "VECTOR",
+			CollectionID: collectionID,
+		},
+	}
+
 	// Create collection
-	createdCollection, created, err := suite.coordinator.CreateCollection(ctx, newCollection)
+	createdCollection, created, err := suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
 	suite.NoError(err)
 	suite.True(created)
 	suite.Equal(newCollection.ID, createdCollection.ID)
@@ -1237,7 +1247,7 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	suite.NotNil(flushInfo)
 
 	// Verify version file exists in S3
-	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(newCollection.TenantID, newCollection.ID.String())
+	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(newCollection.TenantID, newCollection.ID.String(), "")
 	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePathPrefix)
 	suite.NoError(err)
 	suite.True(exists, "Version file should exist in S3")
