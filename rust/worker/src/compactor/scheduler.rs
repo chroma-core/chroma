@@ -1,3 +1,12 @@
+use std::collections::HashSet;
+use std::str::FromStr;
+
+use chroma_types::CollectionUuid;
+use figment::providers::Env;
+use figment::Figment;
+use serde::Deserialize;
+use uuid::Uuid;
+
 use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
@@ -17,9 +26,16 @@ pub(crate) struct Scheduler {
     min_compaction_size: usize,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
+    disabled_collections: HashSet<CollectionUuid>,
+}
+
+#[derive(Deserialize, Debug)]
+struct RunTimeConfig {
+    disabled_collections: Vec<String>,
 }
 
 impl Scheduler {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         my_ip: String,
         log: Box<Log>,
@@ -28,6 +44,7 @@ impl Scheduler {
         max_concurrent_jobs: usize,
         min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
+        disabled_collections: HashSet<CollectionUuid>,
     ) -> Scheduler {
         Scheduler {
             my_ip,
@@ -39,6 +56,7 @@ impl Scheduler {
             max_concurrent_jobs,
             memberlist: None,
             assignment_policy,
+            disabled_collections,
         }
     }
 
@@ -63,6 +81,16 @@ impl Scheduler {
     ) -> Vec<CollectionRecord> {
         let mut collection_records = Vec::new();
         for collection_info in collections {
+            if self
+                .disabled_collections
+                .contains(&collection_info.collection_id)
+            {
+                tracing::info!(
+                    "Ignoring collection: {:?} because it disabled for compaction",
+                    collection_info.collection_id
+                );
+                continue;
+            }
             let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
@@ -161,6 +189,30 @@ impl Scheduler {
         self.job_queue.extend(jobs);
     }
 
+    pub(crate) fn recompute_disabled_collections(&mut self) {
+        let config = Figment::new()
+            .merge(
+                Env::prefixed("CHROMA_")
+                    .map(|k| k.as_str().replace("__", ".").into())
+                    .map(|k| {
+                        if k == "COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS" {
+                            k["COMPACTION_SERVICE.COMPACTOR.".len()..].into()
+                        } else {
+                            k.into()
+                        }
+                    })
+                    .only(&["DISABLED_COLLECTIONS"]),
+            )
+            .extract::<RunTimeConfig>();
+        if let Ok(config) = config {
+            self.disabled_collections = config
+                .disabled_collections
+                .iter()
+                .map(|collection| CollectionUuid(Uuid::from_str(collection).unwrap()))
+                .collect();
+        }
+    }
+
     pub(crate) async fn schedule(&mut self) {
         // For now, we clear the job queue every time, assuming we will not have any pending jobs running
         self.job_queue.clear();
@@ -168,6 +220,8 @@ impl Scheduler {
             tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
         }
+        // Recompute disabled list.
+        self.recompute_disabled_collections();
         let collections = self.get_collections_with_new_data().await;
         if collections.is_empty() {
             return;
@@ -300,6 +354,7 @@ mod tests {
             max_concurrent_jobs,
             1,
             assignment_policy,
+            HashSet::new(),
         );
         // Scheduler does nothing without memberlist
         scheduler.schedule().await;
@@ -337,6 +392,39 @@ mod tests {
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
         assert_eq!(jobs[1].collection_id, collection_uuid_1,);
+
+        // Set disable list.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_2,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[]",
+        );
+        // Even . should work.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000002\"]",
+        );
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.IRRELEVANT",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[]",
+        );
 
         // Test filter_collections
         let member_1 = "1".to_string();
@@ -477,6 +565,7 @@ mod tests {
             max_concurrent_jobs,
             1,
             assignment_policy,
+            HashSet::new(),
         );
 
         scheduler.set_memberlist(vec![my_ip.clone()]);
