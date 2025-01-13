@@ -109,6 +109,7 @@ compaction_service:
         min_compaction_size: 10
         max_compaction_size: 10000
         max_partition_size: 5000
+        disabled_collections: [] # uuids to disable compaction for
     blockfile_provider:
         Arrow:
             block_manager_config:
