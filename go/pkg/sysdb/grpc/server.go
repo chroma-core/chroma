@@ -97,7 +97,8 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		deleteMode = coordinator.HardDelete
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, db, deleteMode)
+	// TODO(rohitcp): Add S3MetaStore instead of nil in 4th arg.
+	coordinator, err := coordinator.NewCoordinator(ctx, db, deleteMode, nil)
 	if err != nil {
 		return nil, err
 	}
