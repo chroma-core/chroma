@@ -442,7 +442,8 @@ class FastAPI(Server):
         "auth_request",
         OpenTelemetryGranularity.OPERATION,
     )
-    def auth_request(
+    @rate_limit
+    async def auth_request(
         self,
         headers: Headers,
         action: AuthzAction,
@@ -450,12 +451,34 @@ class FastAPI(Server):
         database: Optional[str],
         collection: Optional[str],
     ) -> None:
-        """
-        Authenticates and authorizes the request based on the given headers
-        and other parameters. If the request cannot be authenticated or cannot
-        be authorized (with the configured providers), raises an HTTP 401.
-        """
-        if not self.authn_provider:
+        def auth_request_inner():
+            """
+            Authenticates and authorizes the request based on the given headers
+            and other parameters. If the request cannot be authenticated or cannot
+            be authorized (with the configured providers), raises an HTTP 401.
+            """
+            if not self.authn_provider:
+                add_attributes_to_current_span(
+                    {
+                        "tenant": tenant,
+                        "database": database,
+                        "collection": collection,
+                    }
+                )
+                return
+
+            user_identity = self.authn_provider.authenticate_or_raise(dict(headers))
+
+            if not self.authz_provider:
+                return
+
+            authz_resource = AuthzResource(
+                tenant=tenant,
+                database=database,
+                collection=collection,
+            )
+
+            self.authz_provider.authorize_or_raise(user_identity, action, authz_resource)
             add_attributes_to_current_span(
                 {
                     "tenant": tenant,
@@ -464,27 +487,7 @@ class FastAPI(Server):
                 }
             )
             return
-
-        user_identity = self.authn_provider.authenticate_or_raise(dict(headers))
-
-        if not self.authz_provider:
-            return
-
-        authz_resource = AuthzResource(
-            tenant=tenant,
-            database=database,
-            collection=collection,
-        )
-
-        self.authz_provider.authorize_or_raise(user_identity, action, authz_resource)
-        add_attributes_to_current_span(
-            {
-                "tenant": tenant,
-                "database": database,
-                "collection": collection,
-            }
-        )
-        return
+        return await to_thread.run_sync(auth_request_inner)
 
     @trace_method("FastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
     async def get_user_identity(
@@ -1317,7 +1320,7 @@ class FastAPI(Server):
         "auth_and_get_tenant_and_database_for_request_v1",
         OpenTelemetryGranularity.OPERATION,
     )
-    def auth_and_get_tenant_and_database_for_request(
+    async def auth_and_get_tenant_and_database_for_request(
         self,
         headers: Headers,
         action: AuthzAction,
@@ -1339,7 +1342,39 @@ class FastAPI(Server):
             (can be overwritten separately)
         - The user has access to a single tenant and/or single database.
         """
-        if not self.authn_provider:
+        def auth_and_get_tenant_and_database_for_request():
+            if not self.authn_provider:
+                add_attributes_to_current_span(
+                    {
+                        "tenant": tenant,
+                        "database": database,
+                        "collection": collection,
+                    }
+                )
+                return (tenant, database)
+
+            user_identity = self.authn_provider.authenticate_or_raise(dict(headers))
+
+            (
+                new_tenant,
+                new_database,
+            ) = self.authn_provider.singleton_tenant_database_if_applicable(user_identity)
+
+            if (not tenant or tenant == DEFAULT_TENANT) and new_tenant:
+                tenant = new_tenant
+            if (not database or database == DEFAULT_DATABASE) and new_database:
+                database = new_database
+
+            if not self.authz_provider:
+                return (tenant, database)
+
+            authz_resource = AuthzResource(
+                tenant=tenant,
+                database=database,
+                collection=collection,
+            )
+
+            self.authz_provider.authorize_or_raise(user_identity, action, authz_resource)
             add_attributes_to_current_span(
                 {
                     "tenant": tenant,
@@ -1348,37 +1383,7 @@ class FastAPI(Server):
                 }
             )
             return (tenant, database)
-
-        user_identity = self.authn_provider.authenticate_or_raise(dict(headers))
-
-        (
-            new_tenant,
-            new_database,
-        ) = self.authn_provider.singleton_tenant_database_if_applicable(user_identity)
-
-        if (not tenant or tenant == DEFAULT_TENANT) and new_tenant:
-            tenant = new_tenant
-        if (not database or database == DEFAULT_DATABASE) and new_database:
-            database = new_database
-
-        if not self.authz_provider:
-            return (tenant, database)
-
-        authz_resource = AuthzResource(
-            tenant=tenant,
-            database=database,
-            collection=collection,
-        )
-
-        self.authz_provider.authorize_or_raise(user_identity, action, authz_resource)
-        add_attributes_to_current_span(
-            {
-                "tenant": tenant,
-                "database": database,
-                "collection": collection,
-            }
-        )
-        return (tenant, database)
+        return await to_thread.run_sync(auth_and_get_tenant_and_database_for_request)
 
     @trace_method("FastAPI.create_database_v1", OpenTelemetryGranularity.OPERATION)
     async def create_database_v1(
