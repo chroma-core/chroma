@@ -63,6 +63,9 @@ func init() {
 	// Compaction service Memberlist
 	Cmd.Flags().StringVar(&conf.CompactionServiceMemberlistName, "compaction-memberlist-name", "compaction-service-memberlist", "Compaction memberlist name")
 	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
+
+	// Block store provider
+	Cmd.Flags().StringVar(&conf.BlockStoreProvider, "block-store-provider", "none", "Block store provider")
 }
 
 func exec(*cobra.Command, []string) {
