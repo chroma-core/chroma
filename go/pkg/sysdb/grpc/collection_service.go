@@ -320,7 +320,7 @@ func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.
 	if err != nil {
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, req.VersionsBefore, req.VersionsAtOrAfter)
+	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, *req.VersionsBefore, *req.VersionsAtOrAfter)
 	if err != nil {
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}

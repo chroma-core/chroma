@@ -21,16 +21,16 @@ import (
 type Catalog struct {
 	metaDomain         dbmodel.IMetaDomain
 	txImpl             dbmodel.ITransaction
-	s3Store            *s3metastore.S3MetaStore
+	s3Store            s3metastore.S3MetaStoreInterface
 	versionFileEnabled bool
 }
 
-func NewTableCatalog(txImpl dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain, s3Store *s3metastore.S3MetaStore, versionFileEnabled bool) *Catalog {
+func NewTableCatalog(tx dbmodel.ITransaction, metaDomain dbmodel.IMetaDomain, s3Store s3metastore.S3MetaStoreInterface, enableVersionFile bool) *Catalog {
 	return &Catalog{
-		txImpl:             txImpl,
+		txImpl:             tx,
 		metaDomain:         metaDomain,
 		s3Store:            s3Store,
-		versionFileEnabled: versionFileEnabled,
+		versionFileEnabled: enableVersionFile,
 	}
 }
 
@@ -253,7 +253,7 @@ func (tc *Catalog) GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*mo
 	return result, nil
 }
 
-func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
+func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection *model.CreateCollection, versionFileName string, ts types.Timestamp) (*model.Collection, bool, error) {
 	// insert collection
 	databaseName := createCollection.DatabaseName
 	tenantID := createCollection.TenantID
@@ -290,6 +290,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		DatabaseID:           databases[0].ID,
 		Ts:                   ts,
 		LogPosition:          0,
+		VersionFileName:      versionFileName,
 	}
 
 	err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
@@ -322,7 +323,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 	created := false
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
-		result, created, err = tc.createCollectionImpl(txCtx, createCollection, ts)
+		result, created, err = tc.createCollectionImpl(txCtx, createCollection, "", ts)
 		return err
 	})
 	if err != nil {
@@ -693,14 +694,36 @@ func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model
 	return result, nil
 }
 
+func (tc *Catalog) createFirstVersionFile(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (string, error) {
+	collectionVersionFilePb := &coordinatorpb.CollectionVersionFile{
+		VersionHistory: &coordinatorpb.CollectionVersionHistory{
+			Versions: []*coordinatorpb.CollectionVersionInfo{},
+		},
+	}
+	// TODO: Construct the version file name.
+	versionFileName := "0"
+	err := tc.s3Store.PutVersionFile(createCollection.TenantID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
+	if err != nil {
+		return "", err
+	}
+	return versionFileName, nil
+}
+
 func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (*model.Collection, bool, error) {
 	var resultCollection *model.Collection
 	created := false
 
-	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+	// TODO: Create the first Version file in S3.
+	// If the transaction below fails, then there will be an orphan file in S3.
+	versionFileName, err := tc.createFirstVersionFile(ctx, createCollection, createSegments, ts)
+	if err != nil {
+		return nil, false, err
+	}
+
+	err = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Create the collection using the refactored helper
 		var err error
-		resultCollection, created, err = tc.createCollectionImpl(txCtx, createCollection, ts)
+		resultCollection, created, err = tc.createCollectionImpl(txCtx, createCollection, versionFileName, ts)
 		if err != nil {
 			log.Error("error creating collection", zap.Error(err))
 			return err
@@ -880,72 +903,10 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	collectionID types.UniqueID,
 	tenantID string,
 	maxCount *int64,
-	versionsBefore *time.Time,
-	versionsAtOrAfter *time.Time,
+	versionsBefore int64,
+	versionsAtOrAfter int64,
 ) ([]*coordinatorpb.CollectionVersionInfo, error) {
-	// Get the latest version of the collection. If collection does not exist, return an error.
-	collectionIDString := collectionID.String()
-	collection, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(&collectionIDString, nil)
-	if err != nil {
-		return nil, err
-	}
-	if collection == nil {
-		return nil, common.ErrCollectionNotFound
-	}
-	currentVersion := collection.Version
-
-	// Get the version history from the version file.
-	versionHistory, err := tc.s3Store.GetLatestVersionFile(tenantID, collectionID.String(), int64(currentVersion))
-	if err != nil {
-		return nil, err
-	}
-
-	// Honor the maxCount, versionsBefore, and versionsAtOrAfter.
-	// First filter by time range if specified
-	var filteredVersions []*coordinatorpb.CollectionVersionInfo
-
-	// First filter by time range if specified
-	if versionsBefore != nil || versionsAtOrAfter != nil {
-		// Create a new slice for time-filtered versions
-		timeFilteredVersions := make([]*coordinatorpb.CollectionVersionInfo, 0)
-
-		for _, version := range versionHistory.Versions {
-			versionTime := version.CreatedAt.AsTime()
-
-			// Check if version is before the specified time
-			if versionsBefore != nil && !versionTime.Before(*versionsBefore) {
-				continue
-			}
-
-			// Check if version is at or after the specified time
-			if versionsAtOrAfter != nil && versionTime.Before(*versionsAtOrAfter) {
-				continue
-			}
-
-			timeFilteredVersions = append(timeFilteredVersions, version)
-		}
-
-		filteredVersions = timeFilteredVersions
-	} else {
-		// If no time filters, use all versions
-		filteredVersions = versionHistory.Versions
-	}
-
-	// Remove versions that are marked for deletion.
-	nonDeletedVersions := make([]*coordinatorpb.CollectionVersionInfo, 0, len(filteredVersions))
-	for _, version := range filteredVersions {
-		if !version.MarkedForDeletion {
-			nonDeletedVersions = append(nonDeletedVersions, version)
-		}
-	}
-	filteredVersions = nonDeletedVersions
-
-	// Apply maxCount limit if specified
-	if maxCount != nil && *maxCount > 0 && int64(len(filteredVersions)) > *maxCount {
-		filteredVersions = filteredVersions[:*maxCount]
-	}
-
-	return filteredVersions, nil
+	return nil, nil
 }
 
 func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction) (string, error) {
