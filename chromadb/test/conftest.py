@@ -45,7 +45,7 @@ VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
 
 if CURRENT_PRESET not in VALID_PRESETS:
-    raise ValueError(
+    raise InvalidArgumentError(
         f"Invalid property testing preset: {CURRENT_PRESET}. Must be one of {VALID_PRESETS}."
     )
 

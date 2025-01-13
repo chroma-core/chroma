@@ -12,15 +12,15 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(self, api_key: str, model_name: str = "models/embedding-gecko-001"):
         if not api_key:
-            raise ValueError("Please provide a PaLM API key.")
+            raise InvalidArgumentError("Please provide a PaLM API key.")
 
         if not model_name:
-            raise ValueError("Please provide the model name.")
+            raise InvalidArgumentError("Please provide the model name.")
 
         try:
             import google.generativeai as palm
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
             )
 
@@ -49,15 +49,15 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         task_type: str = "RETRIEVAL_DOCUMENT",
     ):
         if not api_key:
-            raise ValueError("Please provide a Google API key.")
+            raise InvalidArgumentError("Please provide a Google API key.")
 
         if not model_name:
-            raise ValueError("Please provide the model name.")
+            raise InvalidArgumentError("Please provide the model name.")
 
         try:
             import google.generativeai as genai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
             )
 

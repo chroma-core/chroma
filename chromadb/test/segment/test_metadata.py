@@ -811,7 +811,7 @@ def test_limit(
     assert len(res) == 3
 
     # if limit is negative, throw error
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         segment.get_metadata(limit=-1, request_version_context=request_version_context)
 
     # if offset is more than number of results, return empty list
@@ -998,7 +998,7 @@ def test_include_metadata(
 
 
 def test_metadata_validation_forbidden_key() -> None:
-    with pytest.raises(ValueError, match="chroma:document"):
+    with pytest.raises(InvalidArgumentError, match="chroma:document"):
         validate_metadata(
             {"chroma:document": "this is not the document you are looking for"}
         )

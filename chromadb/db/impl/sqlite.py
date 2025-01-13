@@ -147,7 +147,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     @override
     def reset_state(self) -> None:
         if not self._settings.require("allow_reset"):
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Resetting the database is not allowed. Set `allow_reset` to true in the config in tests or other non-production environments where reset should be permitted."
             )
         with self.tx() as cur:

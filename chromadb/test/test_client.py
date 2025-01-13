@@ -79,7 +79,7 @@ def test_http_client_with_inconsistent_host_settings(
 ) -> None:
     try:
         http_api_factory(settings=Settings(chroma_server_host="127.0.0.1"))
-    except ValueError as e:
+    except InvalidArgumentError as e:
         assert (
             str(e)
             == "Chroma server host provided in settings[127.0.0.1] is different to the one provided in HttpClient: [localhost]"
@@ -96,7 +96,7 @@ def test_http_client_with_inconsistent_port_settings(
                 chroma_server_http_port=8001,
             ),
         )
-    except ValueError as e:
+    except InvalidArgumentError as e:
         assert (
             str(e)
             == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"

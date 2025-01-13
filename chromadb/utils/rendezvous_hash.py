@@ -23,16 +23,16 @@ def assign(
     """
 
     if replication > len(members):
-        raise ValueError(
+        raise InvalidArgumentError(
             "Replication factor cannot be greater than the number of members"
         )
     if len(members) == 0:
-        raise ValueError("Cannot assign key to empty memberlist")
+        raise InvalidArgumentError("Cannot assign key to empty memberlist")
     if len(members) == 1:
         # Don't copy the input list for some safety
         return [members[0]]
     if key == "":
-        raise ValueError("Cannot assign empty key")
+        raise InvalidArgumentError("Cannot assign empty key")
 
     member_score_heap: List[Tuple[int, Member]] = []
     for member in members:

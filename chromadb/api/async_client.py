@@ -127,21 +127,21 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         try:
             await self._admin_client.get_tenant(name=tenant)
         except httpx.ConnectError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
         # Propagate ChromaErrors
         except ChromaError as e:
             raise e
         except Exception:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Could not connect to tenant {tenant}. Are you sure it exists?"
             )
 
         try:
             await self._admin_client.get_database(name=database, tenant=tenant)
         except httpx.ConnectError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
 

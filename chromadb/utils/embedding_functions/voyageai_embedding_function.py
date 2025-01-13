@@ -10,7 +10,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import voyageai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The voyageai python package is not installed. Please install it with `pip install voyageai`"
             )
 

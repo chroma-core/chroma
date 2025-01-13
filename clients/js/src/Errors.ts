@@ -57,8 +57,8 @@ export class ChromaNotFoundError extends Error {
   }
 }
 
-export class ChromaValueError extends Error {
-  name = "ChromaValueError";
+export class ChromaInvalidArgumentError extends Error {
+  name = "ChromaInvalidArgumentError";
   constructor(message: string, public readonly cause?: unknown) {
     super(message);
   }

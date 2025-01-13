@@ -46,14 +46,14 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         try:
             import openai
         except ImportError:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "The openai python package is not installed. Please install it with `pip install openai`"
             )
 
         self._api_key = api_key or openai.api_key
         # If the api key is still not set, raise an error
         if self._api_key is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
             )
 

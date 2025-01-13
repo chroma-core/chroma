@@ -124,7 +124,7 @@ def test_resolve_invalid(
     ssl_enabled: bool,
     default_api_path: Optional[str],
 ) -> None:
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(InvalidArgumentError) as e:
         FastAPI.resolve_url(
             chroma_server_host=hostname,
             chroma_server_http_port=port,

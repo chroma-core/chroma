@@ -14,5 +14,5 @@ def fastapi_json_response(error: ChromaError) -> JSONResponse:
 def string_to_uuid(uuid_str: str) -> UUID:
     try:
         return UUID(uuid_str)
-    except ValueError:
+    except InvalidArgumentError:
         raise InvalidUUIDError(f"Could not parse {uuid_str} as a UUID")
