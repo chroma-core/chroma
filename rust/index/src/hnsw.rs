@@ -284,7 +284,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             Err(e) => return Err(Box::new(HnswIndexInitError::InvalidPath(e.to_string()))),
         };
         unsafe {
-            load_index(ffi_ptr, path.as_ptr(), true, true);
+            load_index(ffi_ptr, path.as_ptr(), true, true, DEFAULT_MAX_ELEMENTS);
         }
         read_and_return_hnsw_error(ffi_ptr)?;
 
@@ -379,6 +379,7 @@ extern "C" {
         path: *const c_char,
         allow_replace_deleted: bool,
         is_persistent_index: bool,
+        max_elements: usize,
     );
 
     fn persist_dirty(index: *const IndexPtrFFI);
