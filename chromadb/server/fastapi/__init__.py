@@ -442,7 +442,6 @@ class FastAPI(Server):
         "auth_request",
         OpenTelemetryGranularity.OPERATION,
     )
-    @rate_limit
     async def auth_request(
         self,
         headers: Headers,
