@@ -62,12 +62,12 @@ type S3MetaStore struct {
 	BasePathSysDB string
 }
 
-func NewS3MetaStoreForTesting(bucketName, region, basePathSysDB string) (*S3MetaStore, error) {
+func NewS3MetaStoreForTesting(bucketName, region, basePathSysDB, endpoint, accessKey, secretKey string) (*S3MetaStore, error) {
 	// Configure AWS session for MinIO
-	creds := credentials.NewStaticCredentials(minioAccessKeyID, minioSecretAccessKey, "")
+	creds := credentials.NewStaticCredentials(accessKey, secretKey, "")
 	sess, err := session.NewSession(&aws.Config{
 		Credentials:      creds,
-		Endpoint:         aws.String(minioEndpoint),
+		Endpoint:         aws.String(endpoint),
 		Region:           aws.String(region),
 		DisableSSL:       aws.Bool(true),
 		S3ForcePathStyle: aws.Bool(true),

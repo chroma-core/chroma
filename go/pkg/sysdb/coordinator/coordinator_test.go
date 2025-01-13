@@ -36,14 +36,34 @@ type APIsTestSuite struct {
 	sampleCollections []*model.Collection
 	coordinator       *Coordinator
 	s3MetaStore       *s3metastore.S3MetaStore
+	minioContainer    *s3metastore.MinioContainer
 }
 
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
-	s3MetaStore, err := s3metastore.NewS3MetaStoreForTesting("chroma-storage", "us-east-1", "sysdb")
+
+	ctx := context.Background()
+	// Add timeout context
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	s3MetaStore, minioContainer, err := s3metastore.NewS3MetaStoreWithContainer(
+		ctx,
+		"chroma-storage",
+		"sysdb",
+	)
 	suite.NoError(err)
 	suite.s3MetaStore = s3MetaStore
+	suite.minioContainer = minioContainer
+}
+
+func (suite *APIsTestSuite) TearDownSuite() {
+	if suite.minioContainer != nil {
+		ctx := context.Background()
+		err := suite.minioContainer.Terminate(ctx)
+		suite.NoError(err)
+	}
 }
 
 func (suite *APIsTestSuite) SetupTest() {
