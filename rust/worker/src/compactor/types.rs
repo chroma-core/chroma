@@ -14,5 +14,5 @@ pub struct ScheduledCompactionMessage {}
 #[derive(Clone, Debug)]
 pub struct OneOffCompactionMessage {
     #[allow(dead_code)]
-    pub collection_ids: Option<Vec<CollectionUuid>>,
+    pub collection_ids: Vec<CollectionUuid>,
 }
