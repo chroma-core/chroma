@@ -219,14 +219,14 @@ func (suite *CollectionDbTestSuite) TestUpdateTotalRecordsPostCompaction() {
 	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
-	suite.Equal(int64(0), collections[0].Collection.TotalRecordsPostCompaction)
+	suite.Equal(uint64(0), collections[0].Collection.TotalRecordsPostCompaction)
 
 	// update total_records_post_compaction
-	err = suite.collectionDb.UpdateTotalRecordsPostCompaction(collectionID, int64(100))
+	err = suite.collectionDb.UpdateTotalRecordsPostCompaction(collectionID, uint64(100))
 	suite.NoError(err)
 	collections, _ = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.Len(collections, 1)
-	suite.Equal(int64(100), collections[0].Collection.TotalRecordsPostCompaction)
+	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
 
 	err = CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)

@@ -239,8 +239,8 @@ func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosit
 	return version, nil
 }
 
-func (s *collectionDb) UpdateTotalRecordsPostCompaction(collectionID string, totalRecordsPostCompaction int64) error {
-	log.Info("update total records post compaction", zap.String("collectionID", collectionID), zap.Int64("totalRecords", totalRecordsPostCompaction))
+func (s *collectionDb) UpdateTotalRecordsPostCompaction(collectionID string, totalRecordsPostCompaction uint64) error {
+	log.Info("update total records post compaction", zap.String("collectionID", collectionID), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	err := s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"total_records_post_compaction": totalRecordsPostCompaction}).Error
 	if err != nil {
 		return err

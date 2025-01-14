@@ -300,7 +300,7 @@ impl GrpcSysDb {
             log_position,
             collection_version,
             segment_compaction_info,
-            total_records_post_compaction: total_records_post_compaction as i64,
+            total_records_post_compaction: total_records_post_compaction,
         };
 
         let res = self.client.flush_collection_compaction(req).await;

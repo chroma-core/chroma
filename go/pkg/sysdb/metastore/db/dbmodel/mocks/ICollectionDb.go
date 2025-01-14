@@ -213,7 +213,7 @@ func (_m *ICollectionDb) UpdateLogPositionAndVersion(collectionID string, logPos
 }
 
 // UpdateTotalRecordsPostCompaction provides a mock function with given fields: collectionID, totalRecordsPostCompaction
-func (_m *ICollectionDb) UpdateTotalRecordsPostCompaction(collectionID string, totalRecordsPostCompaction int64) error {
+func (_m *ICollectionDb) UpdateTotalRecordsPostCompaction(collectionID string, totalRecordsPostCompaction uint64) error {
 	ret := _m.Called(collectionID, totalRecordsPostCompaction)
 
 	if len(ret) == 0 {
@@ -221,7 +221,7 @@ func (_m *ICollectionDb) UpdateTotalRecordsPostCompaction(collectionID string, t
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, int64) error); ok {
+	if rf, ok := ret.Get(0).(func(string, uint64) error); ok {
 		r0 = rf(collectionID, totalRecordsPostCompaction)
 	} else {
 		r0 = ret.Error(0)
