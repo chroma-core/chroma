@@ -34,6 +34,12 @@ from chromadb.proto.coordinator_pb2 import (
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
+from chromadb.telemetry.opentelemetry import (
+    add_attributes_to_current_span,
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import (
     Collection,
     CollectionAndSegments,
@@ -412,6 +418,7 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
+    @trace_method("SysDB.get_collection_with_segments", OpenTelemetryGranularity.OPERATION)
     @overrides
     def get_collection_with_segments(
         self, collection_id: UUID
