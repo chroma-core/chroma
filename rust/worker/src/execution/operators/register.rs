@@ -49,6 +49,7 @@ pub struct RegisterInput {
 }
 
 impl RegisterInput {
+    #[allow(clippy::too_many_arguments)]
     /// Create a new flush sysdb input.
     pub fn new(
         tenant: String,
@@ -158,7 +159,7 @@ mod tests {
         let collection_uuid_1 =
             CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
-        let total_records_post_compaction: u64 = 0;
+        let total_records_post_compaction: u64 = 5;
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
