@@ -12,9 +12,6 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
-from chromadb.segment.impl.distributed.segment_directory import RoutingMode
-
-
 in_pydantic_v2 = False
 try:
     from pydantic import BaseSettings
@@ -98,6 +95,26 @@ DEFAULT_DATABASE = "default_database"
 class APIVersion(str, Enum):
     V1 = "/api/v1"
     V2 = "/api/v2"
+
+
+# NOTE(hammadb) 1/13/2024 - This has to be in config.py instead of being localized to the module
+# that uses it because of a circular import issue. This is a temporary solution until we can
+# refactor the code to remove the circular import.
+class RoutingMode(Enum):
+    """
+    Routing mode for the segment directory
+
+    node - Assign based on the node name, used in production with multi-node settings with the assumption that
+    there is one query service pod per node. This is useful for when there is a disk based cache on the
+    node that we want to route to.
+
+    id - Assign based on the member id, used in development and testing environments where the node name is not
+    guaranteed to be unique. (I.e a local development kubernetes env). Or when there are multiple query service
+    pods per node.
+    """
+
+    NODE = "node"
+    ID = "id"
 
 
 class Settings(BaseSettings):  # type: ignore

@@ -1,4 +1,3 @@
-from enum import Enum
 import threading
 import time
 from typing import Any, Callable, Dict, Optional, cast
@@ -6,8 +5,7 @@ from typing import Any, Callable, Dict, Optional, cast
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 from overrides import EnforceOverrides, override
-
-from chromadb.config import System
+from chromadb.config import RoutingMode, System
 from chromadb.segment.distributed import (
     Member,
     Memberlist,
@@ -220,23 +218,6 @@ class CustomResourceMemberlistProvider(MemberlistProvider, EnforceOverrides):
     def _notify(self, memberlist: Memberlist) -> None:
         for callback in self.callbacks:
             callback(memberlist)
-
-
-class RoutingMode(Enum):
-    """
-    Routing mode for the segment directory
-
-    node - Assign based on the node name, used in production with multi-node settings with the assumption that
-    there is one query service pod per node. This is useful for when there is a disk based cache on the
-    node that we want to route to.
-
-    id - Assign based on the member id, used in development and testing environments where the node name is not
-    guaranteed to be unique. (I.e a local development kubernetes env). Or when there are multiple query service
-    pods per node.
-    """
-
-    NODE = "node"
-    ID = "id"
 
 
 class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
