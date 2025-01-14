@@ -117,6 +117,35 @@ class SqlSysDB(SqlDB, SysDB):
             )
 
     @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        with self.tx() as cur:
+            databases = Table("databases")
+            q = (
+                self.querybuilder()
+                .from_(databases)
+                .where(databases.name == ParameterValue(name))
+                .where(databases.tenant_id == ParameterValue(tenant))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if not result:
+                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+
+            # As of 01/09/2025, cascading deletes don't work because foreign keys are not enabled.
+            # See https://github.com/chroma-core/chroma/issues/3456.
+            collections = Table("collections")
+            q = (
+                self.querybuilder()
+                .from_(collections)
+                .where(collections.database_id == ParameterValue(result[0]))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
+    @override
     def list_databases(
         self,
         limit: Optional[int] = None,

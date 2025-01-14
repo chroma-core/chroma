@@ -168,6 +168,18 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             id=response["id"], name=response["name"], tenant=response["tenant"]
         )
 
+    @trace_method("AsyncFastAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def delete_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+    ) -> None:
+        await self._make_request(
+            "delete",
+            f"/tenants/{tenant}/databases/{name}",
+        )
+
     @trace_method("AsyncFastAPI.list_databases", OpenTelemetryGranularity.OPERATION)
     @override
     async def list_databases(

@@ -157,6 +157,11 @@ class SegmentAPI(ServerAPI):
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
 
+    @trace_method("SegmentAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self._sysdb.delete_database(name=name, tenant=tenant)
+
     @trace_method("SegmentAPI.list_databases", OpenTelemetryGranularity.OPERATION)
     @override
     def list_databases(
