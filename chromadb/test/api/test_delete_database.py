@@ -7,8 +7,8 @@ from chromadb.test.conftest import NOT_CLUSTER_ONLY, ClientFactories
 
 
 def test_deletes_database(client_factories: ClientFactories) -> None:
-    if not NOT_CLUSTER_ONLY:
-        pytest.skip("This API is not yet supported by distributed")
+    client = client_factories.create_client()
+    client.reset()
 
     admin_client = client_factories.create_admin_client_from_system()
 
@@ -30,8 +30,8 @@ def test_deletes_database(client_factories: ClientFactories) -> None:
 
 
 def test_does_not_affect_other_databases(client_factories: ClientFactories) -> None:
-    if not NOT_CLUSTER_ONLY:
-        pytest.skip("This API is not yet supported by distributed")
+    client = client_factories.create_client()
+    client.reset()
 
     admin_client = client_factories.create_admin_client_from_system()
 
@@ -73,8 +73,8 @@ def test_collection_was_removed(sqlite_persistent: System) -> None:
 
 
 def test_errors_when_database_does_not_exist(client_factories: ClientFactories) -> None:
-    if not NOT_CLUSTER_ONLY:
-        pytest.skip("This API is not yet supported by distributed")
+    client = client_factories.create_client()
+    client.reset()
 
     admin_client = client_factories.create_admin_client_from_system()
 

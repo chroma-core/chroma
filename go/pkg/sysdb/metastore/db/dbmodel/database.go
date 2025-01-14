@@ -27,4 +27,5 @@ type IDatabaseDb interface {
 	ListDatabases(limit *int32, offset *int32, tenantID string) ([]*Database, error)
 	Insert(in *Database) error
 	DeleteAll() error
+	Delete(databaseID string) error
 }
