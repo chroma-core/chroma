@@ -200,6 +200,7 @@ impl ArrowOrderedBlockfileWriter {
             blocks,
             self.root,
             self.id,
+            None, // no op
         );
 
         Ok(flusher)

@@ -211,3 +211,23 @@ func TestCollectionDbTestSuiteSuite(t *testing.T) {
 	testSuite := new(CollectionDbTestSuite)
 	suite.Run(t, testSuite)
 }
+
+func (suite *CollectionDbTestSuite) TestUpdateTotalRecordsPostCompaction() {
+	collectionName := "test_collection_update_total_records"
+	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+
+	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(int64(0), collections[0].Collection.TotalRecordsPostCompaction)
+
+	// update total_records_post_compaction
+	err = suite.collectionDb.UpdateTotalRecordsPostCompaction(collectionID, int64(100))
+	suite.NoError(err)
+	collections, _ = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
+	suite.Len(collections, 1)
+	suite.Equal(int64(100), collections[0].Collection.TotalRecordsPostCompaction)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}

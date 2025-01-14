@@ -31,4 +31,11 @@ impl BlockfileFlusher {
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
         }
     }
+
+    pub fn total_keys(&self) -> Option<u64> {
+        match self {
+            BlockfileFlusher::MemoryBlockfileFlusher(_) => None, // no op
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.total_keys(),
+        }
+    }
 }

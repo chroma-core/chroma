@@ -133,12 +133,23 @@ impl ArrowUnorderedBlockfileWriter {
                 Box::new(ArrowBlockfileError::MigrationError(e)) as Box<dyn ChromaError>
             })?;
 
+        let total_keys = self
+            .root
+            .sparse_index
+            .data
+            .lock()
+            .counts
+            .values()
+            .map(|&x| x as u64)
+            .sum::<u64>();
+
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
             self.root_manager,
             blocks,
             self.root,
             self.id,
+            Some(total_keys),
         );
 
         Ok(flusher)
