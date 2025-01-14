@@ -40,6 +40,6 @@ type ICollectionDb interface {
 	Insert(in *Collection) error
 	Update(in *Collection) error
 	DeleteAll() error
-	UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error)
+	UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 }

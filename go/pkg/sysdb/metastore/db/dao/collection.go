@@ -211,8 +211,8 @@ func (s *collectionDb) Update(in *dbmodel.Collection) error {
 	return nil
 }
 
-func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
-	log.Info("update log position and version", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion))
+func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
+	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
 	// https://patrick.engineering/posts/postgres-internals/
@@ -232,7 +232,7 @@ func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosit
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version}).Error
+	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction}).Error
 	if err != nil {
 		return 0, err
 	}

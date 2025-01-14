@@ -194,12 +194,23 @@ impl ArrowOrderedBlockfileWriter {
                 Box::new(ArrowBlockfileError::MigrationError(e)) as Box<dyn ChromaError>
             })?;
 
+        let count = self
+            .root
+            .sparse_index
+            .data
+            .lock()
+            .counts
+            .values()
+            .map(|&x| x as u64)
+            .sum::<u64>();
+
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
             self.root_manager,
             blocks,
             self.root,
             self.id,
+            count,
         );
 
         Ok(flusher)
@@ -366,7 +377,7 @@ mod tests {
     use uuid::Uuid;
 
     #[tokio::test]
-    async fn test_count() {
+    async fn test_reader_count() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -403,6 +414,79 @@ mod tests {
             Ok(c) => assert_eq!(2, c),
             Err(_) => panic!("Error getting count"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_writer_count() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+
+        // Test no keys
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        assert_eq!(0_u64, flusher.count());
+        flusher.flush::<&str, Vec<u32>>().await.unwrap();
+
+        // Test 2 keys
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+
+        let prefix_1 = "key";
+        let key1 = "zzzz";
+        let value1 = vec![1, 2, 3];
+        writer.set(prefix_1, key1, value1.clone()).await.unwrap();
+
+        let prefix_2 = "key";
+        let key2 = "aaaa";
+        let value2 = vec![4, 5, 6];
+        writer.set(prefix_2, key2, value2).await.unwrap();
+
+        let flusher1 = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        assert_eq!(2_u64, flusher1.count());
+
+        // Test add keys after commit, before flush
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+
+        let prefix_3 = "key";
+        let key3 = "yyyy";
+        let value3 = vec![7, 8, 9];
+        writer.set(prefix_3, key3, value3.clone()).await.unwrap();
+
+        let prefix_4 = "key";
+        let key4 = "bbbb";
+        let value4 = vec![10, 11, 12];
+        writer.set(prefix_4, key4, value4).await.unwrap();
+
+        let flusher2 = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        assert_eq!(2_u64, flusher2.count());
+
+        flusher1.flush::<&str, Vec<u32>>().await.unwrap();
+        flusher2.flush::<&str, Vec<u32>>().await.unwrap();
+
+        // Test count after flush
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .await
+            .unwrap();
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        assert_eq!(0_u64, flusher.count());
     }
 
     #[tokio::test]

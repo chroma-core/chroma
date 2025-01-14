@@ -184,27 +184,27 @@ func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 	return r0
 }
 
-// UpdateLogPositionAndVersion provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion
-func (_m *ICollectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
-	ret := _m.Called(collectionID, logPosition, currentCollectionVersion)
+// UpdateLogPositionVersionAndTotalRecords provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction
+func (_m *ICollectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UpdateLogPositionAndVersion")
+		panic("no return value specified for UpdateLogPositionVersionAndTotalRecords")
 	}
 
 	var r0 int32
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, int64, int32) (int32, error)); ok {
-		return rf(collectionID, logPosition, currentCollectionVersion)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64) (int32, error)); ok {
+		return rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
 	}
-	if rf, ok := ret.Get(0).(func(string, int64, int32) int32); ok {
-		r0 = rf(collectionID, logPosition, currentCollectionVersion)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64) int32); ok {
+		r0 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
 	} else {
 		r0 = ret.Get(0).(int32)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, int64, int32) error); ok {
-		r1 = rf(collectionID, logPosition, currentCollectionVersion)
+	if rf, ok := ret.Get(1).(func(string, int64, int32, uint64) error); ok {
+		r1 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
 	} else {
 		r1 = ret.Error(1)
 	}
