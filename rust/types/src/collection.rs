@@ -86,7 +86,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             database: proto_collection.database,
             log_position: proto_collection.log_position,
             version: proto_collection.version,
-            total_records_post_compaction: proto_collection.total_records_post_compaction,
+            total_records_post_compaction: proto_collection.total_records_post_compaction as u64,
         })
     }
 }

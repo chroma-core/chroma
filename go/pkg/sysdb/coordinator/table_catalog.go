@@ -880,6 +880,12 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		}
 		flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime
 
+		// update collection total records
+		err = tc.metaDomain.CollectionDb(txCtx).UpdateTotalRecordsPostCompaction(flushCollectionCompaction.ID.String(), flushCollectionCompaction.TotalRecordsPostCompaction)
+		if err != nil {
+			return err
+		}
+
 		// return nil will commit the transaction
 		return nil
 	})

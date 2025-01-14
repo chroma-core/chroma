@@ -212,6 +212,24 @@ func (_m *ICollectionDb) UpdateLogPositionAndVersion(collectionID string, logPos
 	return r0, r1
 }
 
+// UpdateTotalRecordsPostCompaction provides a mock function with given fields: collectionID, totalRecordsPostCompaction
+func (_m *ICollectionDb) UpdateTotalRecordsPostCompaction(collectionID string, totalRecordsPostCompaction int64) error {
+	ret := _m.Called(collectionID, totalRecordsPostCompaction)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateTotalRecordsPostCompaction")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, int64) error); ok {
+		r0 = rf(collectionID, totalRecordsPostCompaction)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NewICollectionDb creates a new instance of ICollectionDb. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewICollectionDb(t interface {

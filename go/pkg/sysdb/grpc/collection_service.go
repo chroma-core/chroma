@@ -325,11 +325,12 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		})
 	}
 	FlushCollectionCompaction := &model.FlushCollectionCompaction{
-		ID:                       collectionID,
-		TenantID:                 req.TenantId,
-		LogPosition:              req.LogPosition,
-		CurrentCollectionVersion: req.CollectionVersion,
-		FlushSegmentCompactions:  segmentCompactionInfo,
+		ID:                         collectionID,
+		TenantID:                   req.TenantId,
+		LogPosition:                req.LogPosition,
+		CurrentCollectionVersion:   req.CollectionVersion,
+		FlushSegmentCompactions:    segmentCompactionInfo,
+		TotalRecordsPostCompaction: req.TotalRecordsPostCompaction,
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {

@@ -632,6 +632,10 @@ impl RecordSegmentFlusher {
 
         Ok(flushed_files)
     }
+
+    pub fn total_keys(&self) -> Option<u64> {
+        return self.id_to_user_id_flusher.total_keys();
+    }
 }
 
 #[derive(Clone)]
