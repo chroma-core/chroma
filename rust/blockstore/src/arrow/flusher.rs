@@ -14,7 +14,7 @@ pub struct ArrowBlockfileFlusher {
     blocks: Vec<Block>,
     root: RootWriter,
     id: Uuid,
-    total_keys: Option<u64>,
+    count: Option<u64>,
 }
 
 impl ArrowBlockfileFlusher {
@@ -24,7 +24,7 @@ impl ArrowBlockfileFlusher {
         blocks: Vec<Block>,
         root: RootWriter,
         id: Uuid,
-        total_keys: Option<u64>,
+        count: Option<u64>,
     ) -> Self {
         Self {
             block_manager,
@@ -32,7 +32,7 @@ impl ArrowBlockfileFlusher {
             blocks,
             root,
             id,
-            total_keys,
+            count,
         }
     }
 
@@ -72,7 +72,7 @@ impl ArrowBlockfileFlusher {
         self.id
     }
 
-    pub(crate) fn total_keys(&self) -> Option<u64> {
-        self.total_keys
+    pub(crate) fn count(&self) -> Option<u64> {
+        self.count
     }
 }

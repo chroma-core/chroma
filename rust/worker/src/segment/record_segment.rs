@@ -633,8 +633,8 @@ impl RecordSegmentFlusher {
         Ok(flushed_files)
     }
 
-    pub fn total_keys(&self) -> Option<u64> {
-        self.id_to_user_id_flusher.total_keys()
+    pub(crate) fn count(&self) -> Option<u64> {
+        self.id_to_user_id_flusher.count()
     }
 }
 

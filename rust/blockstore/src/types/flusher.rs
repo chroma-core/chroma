@@ -32,10 +32,10 @@ impl BlockfileFlusher {
         }
     }
 
-    pub fn total_keys(&self) -> Option<u64> {
+    pub fn count(&self) -> Option<u64> {
         match self {
-            BlockfileFlusher::MemoryBlockfileFlusher(_) => None, // no op
-            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.total_keys(),
+            BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(), // no op
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.count(),
         }
     }
 }
