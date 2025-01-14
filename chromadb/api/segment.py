@@ -5,7 +5,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer, Action
-from chromadb.rate_limit import RateLimitEnforcer
+from chromadb.rate_limit import RateLimitEnforcer, AsyncRateLimitEnforcer
 from chromadb.segment import SegmentManager
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.operator import Scan, Filter, Limit, KNN, Projection
@@ -117,6 +117,7 @@ class SegmentAPI(ServerAPI):
     _opentelemetry_client: OpenTelemetryClient
     _tenant_id: str
     _topic_ns: str
+    _rate_limit_enforcer: RateLimitEnforcer
 
     def __init__(self, system: System):
         super().__init__(system)

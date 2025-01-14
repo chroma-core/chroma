@@ -82,6 +82,7 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.quota.QuotaEnforcer": "chroma_quota_enforcer_impl",
     "chromadb.rate_limit.RateLimitEnforcer": "chroma_rate_limit_enforcer_impl",
+    "chromadb.rate_limit.AsyncRateLimitEnforcer": "chroma_async_rate_limit_enforcer_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
@@ -255,6 +256,10 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_rate_limit_enforcer_impl: str = (
         "chromadb.rate_limit.simple_rate_limit.SimpleRateLimitEnforcer"
+    )
+
+    chroma_async_rate_limit_enforcer_impl: str = (
+        "chromadb.rate_limit.simple_rate_limit.SimpleAsyncRateLimitEnforcer"
     )
 
     # ==========
