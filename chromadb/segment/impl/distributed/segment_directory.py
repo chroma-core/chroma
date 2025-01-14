@@ -284,7 +284,9 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         # We want to route using the node name over the member id
         # because the node may have a disk cache that we want a
         # stable identifier for over deploys.
-        can_use_node_routing = all([m.node != "" for m in self._curr_memberlist])
+        can_use_node_routing = all(
+            [m.node != "" and len(m.node) != 0 for m in self._curr_memberlist]
+        )
         if can_use_node_routing and self._routing_mode == RoutingMode.NODE:
             # If we are using node routing and the segments
             assignment = assign(
