@@ -35,12 +35,14 @@ def _uri(metadata: Optional[Metadata]) -> Optional[str]:
 
 
 class DistributedExecutor(Executor):
+    _mtx: threading.Lock
     _grpc_stub_pool: Dict[str, QueryExecutorStub]
     _manager: DistributedSegmentManager
     _request_timeout_seconds: int
 
     def __init__(self, system: System):
         super().__init__(system)
+        self._mtx = threading.Lock()
         self._grpc_stub_pool = dict()
         self._manager = self.require(DistributedSegmentManager)
         self._request_timeout_seconds = system.settings.require(
@@ -49,7 +51,7 @@ class DistributedExecutor(Executor):
 
     @overrides
     def count(self, plan: CountPlan) -> int:
-        executor = self._grpc_executuor_stub(plan.scan)
+        executor = self._grpc_executor_stub(plan.scan)
         try:
             count_result = executor.Count(convert.to_proto_count_plan(plan))
         except grpc.RpcError as rpc_error:
@@ -58,7 +60,7 @@ class DistributedExecutor(Executor):
 
     @overrides
     def get(self, plan: GetPlan) -> GetResult:
-        executor = self._grpc_executuor_stub(plan.scan)
+        executor = self._grpc_executor_stub(plan.scan)
         try:
             get_result = executor.Get(convert.to_proto_get_plan(plan))
         except grpc.RpcError as rpc_error:
@@ -100,7 +102,7 @@ class DistributedExecutor(Executor):
 
     @overrides
     def knn(self, plan: KNNPlan) -> QueryResult:
-        executor = self._grpc_executuor_stub(plan.scan)
+        executor = self._grpc_executor_stub(plan.scan)
         try:
             knn_result = executor.KNN(convert.to_proto_knn_plan(plan))
         except grpc.RpcError as rpc_error:
@@ -158,14 +160,15 @@ class DistributedExecutor(Executor):
             included=plan.projection.included,
         )
 
-    def _grpc_executuor_stub(self, scan: Scan) -> QueryExecutorStub:
+    def _grpc_executor_stub(self, scan: Scan) -> QueryExecutorStub:
         # Since grpc endpoint is endpoint is determined by collection uuid,
         # the endpoint should be the same for all segments of the same collection
         grpc_url = self._manager.get_endpoint(scan.record)
-        if grpc_url not in self._grpc_stub_pool:
-            channel = grpc.insecure_channel(grpc_url)
-            interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
-            channel = grpc.intercept_channel(channel, *interceptors)
-            self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)
+        with self._mtx:
+            if grpc_url not in self._grpc_stub_pool:
+                channel = grpc.insecure_channel(grpc_url, options=[("grpc.max_concurrent_streams", 1000)])
+                interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
+                channel = grpc.intercept_channel(channel, *interceptors)
+                self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)
 
-        return self._grpc_stub_pool[grpc_url]
+            return self._grpc_stub_pool[grpc_url]
