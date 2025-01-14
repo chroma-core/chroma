@@ -149,7 +149,7 @@ impl ArrowUnorderedBlockfileWriter {
             blocks,
             self.root,
             self.id,
-            Some(count),
+            count,
         );
 
         Ok(flusher)
@@ -744,7 +744,7 @@ mod tests {
         writer.set(prefix_2, key2, value2).await.unwrap();
 
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
-        assert_eq!(Some(2_u64), flusher.count());
+        assert_eq!(2_u64, flusher.count());
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
         let reader = blockfile_provider.read::<&str, &[u32]>(&id).await.unwrap();

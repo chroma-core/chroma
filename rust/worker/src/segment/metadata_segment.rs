@@ -1388,7 +1388,7 @@ mod test {
             .await
             .expect("Commit for segment writer failed");
         let count = record_flusher.count();
-        assert_eq!(count, Some(2_u64));
+        assert_eq!(count, 2_u64);
         let metadata_flusher = metadata_writer
             .commit()
             .await

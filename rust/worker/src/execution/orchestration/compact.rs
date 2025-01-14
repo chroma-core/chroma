@@ -847,7 +847,7 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
         let flusher = message.flusher;
         // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
         if let ChromaSegmentFlusher::RecordSegment(ref record_segment_flusher) = flusher {
-            self.total_records_last_compaction = record_segment_flusher.count().unwrap();
+            self.total_records_last_compaction = record_segment_flusher.count();
         }
 
         self.dispatch_segment_flush(flusher, ctx.receiver(), ctx)
