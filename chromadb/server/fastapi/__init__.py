@@ -585,6 +585,7 @@ class FastAPI(Server):
                 None,
             )
 
+
             return self._api.create_tenant(tenant.name)
 
         await to_thread.run_sync(
