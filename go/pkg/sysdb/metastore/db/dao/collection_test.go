@@ -75,6 +75,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Len(collections[0].CollectionMetadata, 1)
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
+	suite.Equal(uint64(0), collections[0].Collection.TotalRecordsPostCompaction)
 
 	// Test when filtering by ID
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)

@@ -315,6 +315,7 @@ mod tests {
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
 
         let tenant_2 = "tenant_2".to_string();
@@ -327,6 +328,7 @@ mod tests {
             database: "database_2".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
         match *sysdb {
             SysDb::Test(ref mut sysdb) => {
@@ -539,6 +541,7 @@ mod tests {
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
 
         match *sysdb {
