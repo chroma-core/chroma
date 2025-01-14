@@ -472,6 +472,10 @@ class FastAPI(Server):
     ) -> None:
         return await to_thread.run_sync(self.sync_auth_request, *(headers, action, tenant, database, collection))
 
+    @trace_method(
+        "FastAPI.sync_auth_request",
+        OpenTelemetryGranularity.OPERATION,
+    )
     def sync_auth_request(
         self,
         headers: Headers,
@@ -1182,6 +1186,7 @@ class FastAPI(Server):
         collection_id: str,
         request: Request,
     ) -> QueryResult:
+        @trace_method("internal.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 

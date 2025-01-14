@@ -908,7 +908,7 @@ class SegmentAPI(ServerAPI):
             )
         return collections[0]
 
-    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.ALL)
+    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)
     def _scan(self, collection_id: UUID) -> Scan:
         collection_and_segments = self._sysdb.get_collection_with_segments(
             collection_id
