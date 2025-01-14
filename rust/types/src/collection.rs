@@ -41,7 +41,7 @@ pub struct Collection {
     pub database: String,
     pub log_position: i64,
     pub version: i32,
-    pub total_records_post_compaction: i64,
+    pub total_records_post_compaction: u64,
 }
 
 #[derive(Error, Debug)]

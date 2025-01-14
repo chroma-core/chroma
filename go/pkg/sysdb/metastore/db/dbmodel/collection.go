@@ -18,7 +18,7 @@ type Collection struct {
 	UpdatedAt                  time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 	LogPosition                int64           `gorm:"log_position;default:0"`
 	Version                    int32           `gorm:"version;default:0"`
-	TotalRecordsPostCompaction int64           `gorm:"total_records_post_compaction;default:0"`
+	TotalRecordsPostCompaction uint64          `gorm:"total_records_post_compaction;default:0"`
 }
 
 func (v Collection) TableName() string {

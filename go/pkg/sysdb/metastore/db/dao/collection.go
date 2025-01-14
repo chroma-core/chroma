@@ -96,7 +96,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 			collectionCreatedAt            sql.NullTime
 			databaseName                   string
 			databaseTenantID               string
-			totalRecordsPostCompaction     int64
+			totalRecordsPostCompaction     uint64
 		)
 
 		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &totalRecordsPostCompaction, &databaseName, &databaseTenantID)

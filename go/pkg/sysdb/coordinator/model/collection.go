@@ -16,7 +16,7 @@ type Collection struct {
 	LogPosition                int64
 	Version                    int32
 	UpdatedAt                  types.Timestamp
-	TotalRecordsPostCompaction int64
+	TotalRecordsPostCompaction uint64
 }
 
 type CreateCollection struct {

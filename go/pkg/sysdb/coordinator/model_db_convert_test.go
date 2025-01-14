@@ -135,7 +135,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 	collectionName := "collection_name"
 	colllectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionDimension := int32(3)
-	collectionTotalRecordsPostCompaction := int64(100)
+	collectionTotalRecordsPostCompaction := uint64(100)
 	collectionAndMetadata := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
 			ID:                         collectionID.String(),
