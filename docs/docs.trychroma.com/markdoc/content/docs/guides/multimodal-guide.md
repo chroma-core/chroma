@@ -43,7 +43,7 @@ embedding_function = OpenCLIPEmbeddingFunction()
 
 Chroma supports data loaders, for storing and querying with data stored outside Chroma itself, via URI. Chroma will not store this data, but will instead store the URI, and load the data from the URI when needed.
 
-Chroma has an data loader for loading images from a filesystem built in.
+Chroma has a data loader for loading images from a filesystem built in.
 
 ```python
 from chromadb.utils.data_loaders import ImageLoader
