@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     compactor_server::{Compactor, CompactorServer},
     CompactionRequest, CompactionResponse,
@@ -7,7 +8,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::trace_span;
 
-use crate::{compactor::OneOffCompactionMessage, system::ComponentHandle};
+use crate::compactor::OneOffCompactionMessage;
 
 use super::CompactionManager;
 
