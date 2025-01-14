@@ -132,7 +132,7 @@ pub struct CompactOrchestrator {
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
     // Total number of records in the collection after the compaction
-    num_records_last_compaction: u64,
+    total_records_last_compaction: u64,
 }
 
 #[derive(Error, Debug)]
@@ -255,7 +255,7 @@ impl CompactOrchestrator {
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             segment_spans: HashMap::new(),
-            num_records_last_compaction: 0,
+            total_records_last_compaction: 0,
         }
     }
 
@@ -474,7 +474,7 @@ impl CompactOrchestrator {
             log_position,
             self.compaction_job.collection_version,
             self.flush_results.clone().into(),
-            self.num_records_last_compaction,
+            self.total_records_last_compaction,
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -847,7 +847,7 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
         let flusher = message.flusher;
         // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
         if let ChromaSegmentFlusher::RecordSegment(ref record_segment_flusher) = flusher {
-            self.num_records_last_compaction = record_segment_flusher.total_keys().unwrap();
+            self.total_records_last_compaction = record_segment_flusher.count().unwrap();
         }
 
         self.dispatch_segment_flush(flusher, ctx.receiver(), ctx)
