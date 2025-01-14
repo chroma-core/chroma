@@ -442,7 +442,7 @@ class FastAPI(Server):
         "auth_request",
         OpenTelemetryGranularity.OPERATION,
     )
-    async def async_auth_request(
+    async def auth_request(
         self,
         headers: Headers,
         action: AuthzAction,
@@ -551,7 +551,7 @@ class FastAPI(Server):
         database_name: str,
         tenant: str,
     ) -> Database:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.GET_DATABASE,
             tenant,
@@ -601,7 +601,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
     ) -> Tenant:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.GET_TENANT,
             tenant,
@@ -626,7 +626,7 @@ class FastAPI(Server):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[Database]:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.LIST_DATABASES,
             tenant,
@@ -693,7 +693,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> int:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
             tenant,
@@ -772,7 +772,7 @@ class FastAPI(Server):
         database_name: str,
         collection_name: str,
     ) -> CollectionModel:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
             tenant,
@@ -839,7 +839,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> None:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
             tenant,
@@ -1083,7 +1083,7 @@ class FastAPI(Server):
         database_name: str,
         collection_id: str,
     ) -> int:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.COUNT,
             tenant,
@@ -1108,7 +1108,7 @@ class FastAPI(Server):
         self,
         request: Request,
     ) -> bool:
-        await self.async_auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.RESET,
             None,
