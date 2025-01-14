@@ -634,7 +634,7 @@ impl RecordSegmentFlusher {
     }
 
     pub fn total_keys(&self) -> Option<u64> {
-        return self.id_to_user_id_flusher.total_keys();
+        self.id_to_user_id_flusher.total_keys()
     }
 }
 
