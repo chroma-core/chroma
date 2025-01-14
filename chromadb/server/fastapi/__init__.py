@@ -1611,7 +1611,7 @@ class FastAPI(Server):
             (
                 maybe_tenant,
                 maybe_database,
-            ) = await self.auth_and_get_tenant_and_database_for_request(
+            ) = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_COLLECTION,
                 tenant,
