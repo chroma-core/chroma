@@ -194,13 +194,23 @@ impl ArrowOrderedBlockfileWriter {
                 Box::new(ArrowBlockfileError::MigrationError(e)) as Box<dyn ChromaError>
             })?;
 
+        let count = self
+            .root
+            .sparse_index
+            .data
+            .lock()
+            .counts
+            .values()
+            .map(|&x| x as u64)
+            .sum::<u64>();
+
         let flusher = ArrowBlockfileFlusher::new(
             self.block_manager,
             self.root_manager,
             blocks,
             self.root,
             self.id,
-            None, // no op
+            count,
         );
 
         Ok(flusher)

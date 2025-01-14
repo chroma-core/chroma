@@ -32,7 +32,7 @@ impl BlockfileFlusher {
         }
     }
 
-    pub fn count(&self) -> Option<u64> {
+    pub fn count(&self) -> u64 {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(), // no op
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.count(),
