@@ -517,7 +517,6 @@ class FastAPI(Server):
         return
 
     @trace_method("FastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def get_user_identity(
         self,
         request: Request,
@@ -535,7 +534,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def create_database(
         self,
         request: Request,
@@ -567,7 +565,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def get_database(
         self,
         request: Request,
@@ -615,7 +612,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def create_tenant(
         self,
         request: Request,
@@ -642,7 +638,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def get_tenant(
         self,
         request: Request,
@@ -666,7 +661,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.list_databases", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def list_databases(
         self,
         request: Request,
@@ -694,7 +688,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def list_collections(
         self,
         request: Request,
@@ -736,7 +729,6 @@ class FastAPI(Server):
         return api_collection_models
 
     @trace_method("FastAPI.count_collections", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def count_collections(
         self,
         request: Request,
@@ -764,7 +756,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.create_collection", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def create_collection(
         self,
         request: Request,
@@ -816,7 +807,6 @@ class FastAPI(Server):
         return api_collection_model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def get_collection(
         self,
         request: Request,
@@ -847,7 +837,6 @@ class FastAPI(Server):
         return api_collection_model
 
     @trace_method("FastAPI.update_collection", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def update_collection(
         self,
         tenant: str,
@@ -885,7 +874,6 @@ class FastAPI(Server):
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
-    @rate_limit
     async def delete_collection(
         self,
         request: Request,
