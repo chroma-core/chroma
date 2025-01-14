@@ -167,13 +167,11 @@ impl TryFrom<chroma_proto::CompactionRequest> for OneOffCompactionMessage {
         Ok(Self {
             collection_ids: value
                 .ids
-                .map(|ids| {
-                    ids.ids
-                        .into_iter()
-                        .map(|id| CollectionUuid::from_str(&id))
-                        .collect::<Result<_, _>>()
-                })
-                .transpose()
+                .ok_or(ConversionError::DecodeError)?
+                .ids
+                .into_iter()
+                .map(|id| CollectionUuid::from_str(&id))
+                .collect::<Result<_, _>>()
                 .map_err(|_| ConversionError::DecodeError)?,
         })
     }

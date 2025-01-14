@@ -7,7 +7,7 @@ message CollectionIds {
 }
 
 message CompactionRequest {
-  optional CollectionIds ids = 1;
+  CollectionIds ids = 1;
 }
 
 message CompactionResponse {
