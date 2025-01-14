@@ -449,7 +449,17 @@ class FastAPI(Server):
         "auth_request",
         OpenTelemetryGranularity.OPERATION,
     )
-    def auth_request(
+    async def auth_request(
+        self,
+        headers: Headers,
+        action: AuthzAction,
+        tenant: Optional[str],
+        database: Optional[str],
+        collection: Optional[str],
+    ) -> None:
+        return await to_thread.run_sync(self.sync_auth_request, *(headers, action, tenant, database, collection))
+
+    def sync_auth_request(
         self,
         headers: Headers,
         action: AuthzAction,
@@ -521,7 +531,7 @@ class FastAPI(Server):
         ) -> None:
             db = validate_model(CreateDatabase, orjson.loads(raw_body))
 
-            self.auth_request(
+            self.sync_auth_request(
                 headers,
                 AuthzAction.CREATE_DATABASE,
                 tenant,
@@ -548,7 +558,7 @@ class FastAPI(Server):
         database_name: str,
         tenant: str,
     ) -> Database:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.GET_DATABASE,
             tenant,
@@ -596,13 +606,14 @@ class FastAPI(Server):
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.CREATE_TENANT,
                 tenant.name,
                 None,
                 None,
             )
+
 
             return self._api.create_tenant(tenant.name)
 
@@ -619,7 +630,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
     ) -> Tenant:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.GET_TENANT,
             tenant,
@@ -644,7 +655,7 @@ class FastAPI(Server):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[Database]:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.LIST_DATABASES,
             tenant,
@@ -675,7 +686,7 @@ class FastAPI(Server):
         def process_list_collections(
             limit: Optional[int], offset: Optional[int], tenant: str, database_name: str
         ) -> Sequence[CollectionModel]:
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.LIST_COLLECTIONS,
                 tenant,
@@ -711,7 +722,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> int:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
             tenant,
@@ -748,7 +759,7 @@ class FastAPI(Server):
                 else CollectionConfigurationInternal.from_json(create.configuration)
             )
 
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.CREATE_COLLECTION,
                 tenant,
@@ -790,7 +801,7 @@ class FastAPI(Server):
         database_name: str,
         collection_name: str,
     ) -> CollectionModel:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
             tenant,
@@ -824,7 +835,7 @@ class FastAPI(Server):
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
             update = validate_model(UpdateCollection, orjson.loads(raw_body))
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
                 tenant,
@@ -857,7 +868,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> None:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
             tenant,
@@ -886,7 +897,7 @@ class FastAPI(Server):
 
             def process_add(request: Request, raw_body: bytes) -> bool:
                 add = validate_model(AddEmbedding, orjson.loads(raw_body))
-                self.auth_request(
+                self.sync_auth_request(
                     request.headers,
                     AuthzAction.ADD,
                     tenant,
@@ -934,7 +945,7 @@ class FastAPI(Server):
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
 
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.UPDATE,
                 tenant,
@@ -975,7 +986,7 @@ class FastAPI(Server):
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
 
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.UPSERT,
                 tenant,
@@ -1018,7 +1029,7 @@ class FastAPI(Server):
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.GET,
                 tenant,
@@ -1068,7 +1079,7 @@ class FastAPI(Server):
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.DELETE,
                 tenant,
@@ -1101,7 +1112,7 @@ class FastAPI(Server):
         database_name: str,
         collection_id: str,
     ) -> int:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.COUNT,
             tenant,
@@ -1126,7 +1137,7 @@ class FastAPI(Server):
         self,
         request: Request,
     ) -> bool:
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.RESET,
             None,
@@ -1153,7 +1164,7 @@ class FastAPI(Server):
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 
-            self.auth_request(
+            self.sync_auth_request(
                 request.headers,
                 AuthzAction.QUERY,
                 tenant,
@@ -1346,7 +1357,7 @@ class FastAPI(Server):
         "auth_and_get_tenant_and_database_for_request_v1",
         OpenTelemetryGranularity.OPERATION,
     )
-    def auth_and_get_tenant_and_database_for_request(
+    async def auth_and_get_tenant_and_database_for_request(
         self,
         headers: Headers,
         action: AuthzAction,
@@ -1368,6 +1379,17 @@ class FastAPI(Server):
             (can be overwritten separately)
         - The user has access to a single tenant and/or single database.
         """
+        return await to_thread.run_sync(self.auth_and_get_tenant_and_database_for_request, headers, action, tenant, database, collection)
+
+    def sync_auth_and_get_tenant_and_database_for_request(
+        self,
+        headers: Headers,
+        action: AuthzAction,
+        tenant: Optional[str],
+        database: Optional[str],
+        collection: Optional[str],
+    ) -> Tuple[Optional[str], Optional[str]]:
+
         if not self.authn_provider:
             add_attributes_to_current_span(
                 {
@@ -1423,7 +1445,7 @@ class FastAPI(Server):
             (
                 maybe_tenant,
                 maybe_database,
-            ) = self.auth_and_get_tenant_and_database_for_request(
+            ) = self.sync_auth_and_get_tenant_and_database_for_request(
                 headers,
                 AuthzAction.CREATE_DATABASE,
                 tenant,
@@ -1455,7 +1477,7 @@ class FastAPI(Server):
         (
             maybe_tenant,
             maybe_database,
-        ) = self.auth_and_get_tenant_and_database_for_request(
+        ) = await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.GET_DATABASE,
             tenant,
@@ -1485,7 +1507,7 @@ class FastAPI(Server):
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
-            maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
+            maybe_tenant, _ = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_TENANT,
                 tenant.name,
@@ -1510,7 +1532,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
     ) -> Tenant:
-        maybe_tenant, _ = self.auth_and_get_tenant_and_database_for_request(
+        maybe_tenant, _ = await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.GET_TENANT,
             tenant,
@@ -1541,7 +1563,7 @@ class FastAPI(Server):
         (
             maybe_tenant,
             maybe_database,
-        ) = self.auth_and_get_tenant_and_database_for_request(
+        ) = await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.LIST_COLLECTIONS,
             tenant,
@@ -1577,7 +1599,7 @@ class FastAPI(Server):
         (
             maybe_tenant,
             maybe_database,
-        ) = self.auth_and_get_tenant_and_database_for_request(
+        ) = await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
             tenant,
@@ -1619,7 +1641,7 @@ class FastAPI(Server):
             (
                 maybe_tenant,
                 maybe_database,
-            ) = self.auth_and_get_tenant_and_database_for_request(
+            ) = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_COLLECTION,
                 tenant,
@@ -1664,7 +1686,7 @@ class FastAPI(Server):
         (
             maybe_tenant,
             maybe_database,
-        ) = self.auth_and_get_tenant_and_database_for_request(
+        ) = await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
             tenant,
@@ -1701,7 +1723,7 @@ class FastAPI(Server):
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
             update = validate_model(UpdateCollection, orjson.loads(raw_body))
-            self.auth_and_get_tenant_and_database_for_request(
+            self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
                 None,
@@ -1733,7 +1755,7 @@ class FastAPI(Server):
         (
             maybe_tenant,
             maybe_database,
-        ) = self.auth_and_get_tenant_and_database_for_request(
+        ) = await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
             tenant,
@@ -1763,7 +1785,7 @@ class FastAPI(Server):
 
             def process_add(request: Request, raw_body: bytes) -> bool:
                 add = validate_model(AddEmbedding, orjson.loads(raw_body))
-                self.auth_and_get_tenant_and_database_for_request(
+                self.sync_auth_and_get_tenant_and_database_for_request(
                     request.headers,
                     AuthzAction.ADD,
                     None,
@@ -1805,7 +1827,7 @@ class FastAPI(Server):
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
 
-            self.auth_and_get_tenant_and_database_for_request(
+            self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE,
                 None,
@@ -1840,7 +1862,7 @@ class FastAPI(Server):
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
 
-            self.auth_and_get_tenant_and_database_for_request(
+            self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPSERT,
                 None,
@@ -1877,7 +1899,7 @@ class FastAPI(Server):
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
-            self.auth_and_get_tenant_and_database_for_request(
+            self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.GET,
                 None,
@@ -1921,7 +1943,7 @@ class FastAPI(Server):
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
-            self.auth_and_get_tenant_and_database_for_request(
+            self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.DELETE,
                 None,
@@ -1948,7 +1970,7 @@ class FastAPI(Server):
         request: Request,
         collection_id: str,
     ) -> int:
-        self.auth_and_get_tenant_and_database_for_request(
+        await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.COUNT,
             None,
@@ -1970,7 +1992,7 @@ class FastAPI(Server):
         self,
         request: Request,
     ) -> bool:
-        self.auth_and_get_tenant_and_database_for_request(
+        await self.auth_and_get_tenant_and_database_for_request(
             request.headers,
             AuthzAction.RESET,
             None,
@@ -1997,7 +2019,7 @@ class FastAPI(Server):
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 
-            self.auth_and_get_tenant_and_database_for_request(
+            self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.QUERY,
                 None,
