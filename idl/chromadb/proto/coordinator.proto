@@ -360,6 +360,22 @@ message RestoreCollectionResponse {
   int64 new_collection_version = 1;
 }
 
+message MarkVersionForDeletionRequest {
+  int64 epoch_id = 1;
+  repeated CollectionVersionTuple versions = 2;
+}
+
+message MarkVersionForDeletionResponse {
+}
+
+message DeleteCollectionVersionRequest {
+  int64 epoch_id = 1;
+  repeated CollectionVersionTuple versions = 2;
+}
+
+message DeleteCollectionVersionResponse {
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -383,4 +399,6 @@ service SysDB {
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc RestoreCollection(RestoreCollectionRequest) returns (RestoreCollectionResponse) {}
   rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
+  rpc MarkVersionForDeletion(MarkVersionForDeletionRequest) returns (MarkVersionForDeletionResponse) {}
+  rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
 }
