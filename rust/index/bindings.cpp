@@ -87,13 +87,13 @@ public:
         index_inited = true;
     }
 
-    void load_index(const std::string &path_to_index, const bool allow_replace_deleted, const bool is_persistent_index)
+    void load_index(const std::string &path_to_index, const bool allow_replace_deleted, const bool is_persistent_index, const size_t max_elements)
     {
         if (index_inited)
         {
             throw std::runtime_error("Index already inited");
         }
-        appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, 0, allow_replace_deleted, normalize, is_persistent_index);
+        appr_alg = new hnswlib::HierarchicalNSW<dist_t>(l2space, path_to_index, false, max_elements, allow_replace_deleted, normalize, is_persistent_index);
         // TODO(rescrv,sicheng): check integrity
         // appr_alg->checkIntegrity();
         index_inited = true;
@@ -278,11 +278,11 @@ extern "C"
     }
 
     // Can throw std::exception
-    void load_index(Index<float> *index, const char *path_to_index, const bool allow_replace_deleted, const bool is_persistent_index)
+    void load_index(Index<float> *index, const char *path_to_index, const bool allow_replace_deleted, const bool is_persistent_index, const size_t max_elements)
     {
         try
         {
-            index->load_index(path_to_index, allow_replace_deleted, is_persistent_index);
+            index->load_index(path_to_index, allow_replace_deleted, is_persistent_index, max_elements);
         }
         catch (std::exception &e)
         {

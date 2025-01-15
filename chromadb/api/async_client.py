@@ -446,6 +446,21 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         return await self._server.get_database(name=name, tenant=tenant)
 
     @override
+    async def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        return await self._server.delete_database(name=name, tenant=tenant)
+
+    @override
+    async def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        return await self._server.list_databases(
+            limit=limit, offset=offset, tenant=tenant
+        )
+
+    @override
     async def create_tenant(self, name: str) -> None:
         return await self._server.create_tenant(name=name)
 

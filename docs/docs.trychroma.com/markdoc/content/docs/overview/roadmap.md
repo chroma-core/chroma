@@ -19,7 +19,7 @@ The goal of this doc is to align *core* and *community* efforts for the project 
 
 ## What is the core Chroma team working on right now?
 
-- Standing up that distributed system as a managed service (aka "Hosted Chroma" - [sign up for waitlist](https://airtable.com/shrOAiDUtS2ILy5vZ)!)
+- Standing up that distributed system as a managed service (aka "Hosted Chroma" - [sign up for waitlist](https://trychroma.com/signup)!)
 
 ## What did the Chroma team just complete?
 

@@ -1,61 +1,74 @@
 update_settings(max_parallel_updates=6)
 
-docker_build(
+def format_buildx_command(dockerfile, context = None, target = None):
+  build_str = 'docker buildx build -t $EXPECTED_REF --file {}'.format(dockerfile)
+
+  if os.environ.get('CI'):
+    build_str += ' --cache-from=type=gha --cache-to=type=gha'
+
+  if target:
+    build_str += ' --target {}'.format(target)
+  if context:
+    build_str += ' {}'.format(context)
+  else:
+    build_str += ' .'
+
+  return build_str
+
+custom_build(
   'local:postgres',
-  context='./k8s/test/postgres',
-  dockerfile='./k8s/test/postgres/Dockerfile'
+  format_buildx_command(dockerfile='k8s/test/postgres/Dockerfile', context='./k8s/test/postgres'),
+  deps=[]
 )
 
-docker_build(
+custom_build(
   'local:logservice',
-  '.',
-  only=['go/', 'idl/'],
-  dockerfile='./go/Dockerfile',
-  target='logservice'
+  format_buildx_command(dockerfile='go/Dockerfile', target='logservice'),
+  tag="logservice",
+  deps=["go/", "idl/"]
 )
 
-docker_build(
+custom_build(
   'local:logservice-migration',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile.migration',
-  target="logservice-migration"
+  format_buildx_command(dockerfile='go/Dockerfile.migration', target='logservice-migration'),
+  tag="logservice-migration",
+  deps=["go/"]
 )
 
-docker_build(
+custom_build(
   'local:sysdb',
-  '.',
-  only=['go/', 'idl/'],
-  dockerfile='./go/Dockerfile',
-  target='sysdb'
+  format_buildx_command(dockerfile='go/Dockerfile', target='sysdb'),
+  tag="sysdb",
+  deps=["go/", "idl/"]
 )
 
-docker_build(
+custom_build(
   'local:sysdb-migration',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile.migration',
-  target='sysdb-migration'
+  format_buildx_command(dockerfile='go/Dockerfile.migration', target='sysdb-migration'),
+  tag="sysdb-migration",
+  deps=["go/"]
 )
 
-docker_build(
+custom_build(
   'local:frontend-service',
-  '.',
-  only=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
-  dockerfile='./Dockerfile',
+  format_buildx_command(dockerfile='Dockerfile'),
+  tag="frontend-service",
+  deps=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
   ignore=['**/*.pyc', 'chromadb/test/'],
 )
 
 custom_build(
   'local:query-service',
-  'docker buildx build --load -t $EXPECTED_REF --target query_service --cache-from=type=gha --cache-to=type=gha --file rust/worker/Dockerfile .',
-  deps=['rust/worker/Dockerfile', 'rust/worker/Cargo.toml', 'rust/worker/Cargo.lock', 'rust/worker/src/'],
+  format_buildx_command(dockerfile='rust/worker/Dockerfile', target='query_service'),
+  tag="query-service",
+  deps=['rust/', 'idl/', 'Cargo.toml', 'Cargo.lock'],
 )
 
 custom_build(
   'local:compaction-service',
-  'docker buildx build --load -t $EXPECTED_REF --target compaction_service --cache-from=type=gha --cache-to=type=gha --file rust/worker/Dockerfile .',
-  deps=['rust/worker/Dockerfile', 'rust/worker/Cargo.toml', 'rust/worker/Cargo.lock', 'rust/worker/src/'],
+  format_buildx_command(dockerfile='rust/worker/Dockerfile', target='compaction_service'),
+  tag="compaction-service",
+  deps=['rust/', 'idl/', 'Cargo.toml', 'Cargo.lock'],
 )
 
 k8s_yaml(

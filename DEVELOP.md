@@ -86,7 +86,7 @@ In brief, version numbers are generated as follows:
 
 - If the current git head is tagged, the version number is exactly the
   tag (e.g, `0.0.1`).
-- If the the current git head is a clean checkout, but is not tagged,
+- If the current git head is a clean checkout, but is not tagged,
   the version number is a patch version increment of the most recent
   tag, plus `devN` where N is the number of commits since the most
   recent tag. For example, if there have been 5 commits since the

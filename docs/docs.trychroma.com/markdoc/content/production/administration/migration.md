@@ -326,7 +326,7 @@ This version of Chroma drops `duckdb` and `clickhouse` in favor of `sqlite` for 
 
 If you upgrade to `0.4.0` and try to access data stored in the old way, you will see this error message
 
-> You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!
+> You are using a deprecated configuration of Chroma. Please pip install chroma-migrate and run `chroma-migrate` to upgrade your configuration. See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/MMeYNTmh3x for help!
 
 Here is how to install and use the CLI:
 

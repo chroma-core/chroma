@@ -5,7 +5,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer, Action
-from chromadb.rate_limit import RateLimitEnforcer
+from chromadb.rate_limit import RateLimitEnforcer, AsyncRateLimitEnforcer
 from chromadb.segment import SegmentManager
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.operator import Scan, Filter, Limit, KNN, Projection
@@ -117,6 +117,7 @@ class SegmentAPI(ServerAPI):
     _opentelemetry_client: OpenTelemetryClient
     _tenant_id: str
     _topic_ns: str
+    _rate_limit_enforcer: RateLimitEnforcer
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -156,6 +157,21 @@ class SegmentAPI(ServerAPI):
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
+
+    @trace_method("SegmentAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self._sysdb.delete_database(name=name, tenant=tenant)
+
+    @trace_method("SegmentAPI.list_databases", OpenTelemetryGranularity.OPERATION)
+    @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[t.Database]:
+        return self._sysdb.list_databases(limit=limit, offset=offset, tenant=tenant)
 
     @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
@@ -227,7 +243,7 @@ class SegmentAPI(ServerAPI):
             id=model.id,
             name=model.name,
             configuration=model.get_configuration(),
-            segments=[], # Passing empty till backend changes are deployed.
+            segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -892,13 +908,17 @@ class SegmentAPI(ServerAPI):
             )
         return collections[0]
 
-    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.ALL)
+    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)
     def _scan(self, collection_id: UUID) -> Scan:
-        collection_and_segments = self._sysdb.get_collection_with_segments(collection_id)
+        collection_and_segments = self._sysdb.get_collection_with_segments(
+            collection_id
+        )
         # For now collection should have exactly one segment per scope:
         # - Local scopes: vector, metadata
-        # - Distributed scopes: vector, metadata, record 
-        scope_to_segment = {segment["scope"]: segment for segment in collection_and_segments["segments"]}
+        # - Distributed scopes: vector, metadata, record
+        scope_to_segment = {
+            segment["scope"]: segment for segment in collection_and_segments["segments"]
+        }
         return Scan(
             collection=collection_and_segments["collection"],
             knn=scope_to_segment[t.SegmentScope.VECTOR],

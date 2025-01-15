@@ -164,6 +164,8 @@ class AuthzAction(str, Enum):
     GET_TENANT = "tenant:get_tenant"
     CREATE_DATABASE = "db:create_database"
     GET_DATABASE = "db:get_database"
+    DELETE_DATABASE = "db:delete_database"
+    LIST_DATABASES = "db:list_databases"
     LIST_COLLECTIONS = "db:list_collections"
     COUNT_COLLECTIONS = "db:count_collections"
     CREATE_COLLECTION = "db:create_collection"

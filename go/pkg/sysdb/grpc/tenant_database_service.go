@@ -55,6 +55,47 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 	return res, nil
 }
 
+func (s *Server) ListDatabases(ctx context.Context, req *coordinatorpb.ListDatabasesRequest) (*coordinatorpb.ListDatabasesResponse, error) {
+	res := &coordinatorpb.ListDatabasesResponse{}
+	listDatabases := &model.ListDatabases{
+		Limit:  req.Limit,
+		Offset: req.Offset,
+		Tenant: req.GetTenant(),
+	}
+	databases, err := s.coordinator.ListDatabases(ctx, listDatabases)
+	if err != nil {
+		log.Error("error ListDatabases", zap.String("request", req.String()), zap.Error(err))
+		if err == common.ErrTenantNotFound {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	for _, database := range databases {
+		res.Databases = append(res.Databases, &coordinatorpb.Database{
+			Id:     database.ID,
+			Name:   database.Name,
+			Tenant: database.Tenant,
+		})
+	}
+	return res, nil
+}
+
+func (s *Server) DeleteDatabase(ctx context.Context, req *coordinatorpb.DeleteDatabaseRequest) (*coordinatorpb.DeleteDatabaseResponse, error) {
+	deleteDatabase := &model.DeleteDatabase{
+		Name:   req.GetName(),
+		Tenant: req.GetTenant(),
+	}
+	err := s.coordinator.DeleteDatabase(ctx, deleteDatabase)
+	if err != nil {
+		log.Error("error DeleteDatabase", zap.String("request", req.String()), zap.Error(err))
+		if errors.Is(err, common.ErrDatabaseNotFound) {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &coordinatorpb.DeleteDatabaseResponse{}, nil
+}
+
 func (s *Server) CreateTenant(ctx context.Context, req *coordinatorpb.CreateTenantRequest) (*coordinatorpb.CreateTenantResponse, error) {
 	res := &coordinatorpb.CreateTenantResponse{}
 	createTenant := &model.CreateTenant{

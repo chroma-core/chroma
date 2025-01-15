@@ -35,6 +35,21 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database."""
+        pass
+
+    @abstractmethod
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        """List all databases for a tenant."""
+        pass
+
+    @abstractmethod
     def create_tenant(self, name: str) -> None:
         """Create a new tenant in the System database. The name must be unique.
         Raises an Error if the Tenant already exists."""
@@ -131,11 +146,10 @@ class SysDB(Component):
 
     @abstractmethod
     def get_collection_with_segments(
-        self,
-        collection_id: UUID
+        self, collection_id: UUID
     ) -> CollectionAndSegments:
         """Get a consistent snapshot of a collection by id. This will return a collection with segment
-        information that matches the collection version and log position. 
+        information that matches the collection version and log position.
         """
         pass
 

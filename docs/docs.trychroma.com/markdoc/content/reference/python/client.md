@@ -471,6 +471,33 @@ Get a database. Raises an error if the database does not exist.
 - `database` - The name of the database to get.
 - `tenant` - The tenant of the database to get.
 
+## delete_database
+
+```python
+def delete_database(name: str, tenant: str = DEFAULT_TENANT) -> None
+```
+
+Delete a database and all associated collections. Raises an error if the database does not exist.
+
+**Arguments**:
+
+- `database` - The name of the database to delete.
+- `tenant` - The tenant of the database to delete.
+
+## list_databases
+
+```python
+def list_databases(limit: Optional[int] = None, offset: Optional[int] = None, tenant: str = DEFAULT_TENANT) -> Sequence[Database]
+```
+
+List databases for a tenant.
+
+**Arguments**:
+
+- `limit` - The maximum number of entries to return. Defaults to None.
+- `offset` - The number of entries to skip before returning. Defaults to None.
+- `tenant` - The tenant to list databases for.
+
 ## create_tenant
 
 ```python

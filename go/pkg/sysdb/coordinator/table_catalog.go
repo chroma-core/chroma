@@ -148,6 +148,35 @@ func (tc *Catalog) GetDatabases(ctx context.Context, getDatabase *model.GetDatab
 	return result[0], nil
 }
 
+func (tc *Catalog) ListDatabases(ctx context.Context, listDatabases *model.ListDatabases, ts types.Timestamp) ([]*model.Database, error) {
+	databases, err := tc.metaDomain.DatabaseDb(ctx).ListDatabases(listDatabases.Limit, listDatabases.Offset, listDatabases.Tenant)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*model.Database, 0, len(databases))
+	for _, database := range databases {
+		result = append(result, convertDatabaseToModel(database))
+	}
+	return result, nil
+}
+
+func (tc *Catalog) DeleteDatabase(ctx context.Context, deleteDatabase *model.DeleteDatabase) error {
+	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(deleteDatabase.Tenant, deleteDatabase.Name)
+		if err != nil {
+			return err
+		}
+		if len(databases) == 0 {
+			return common.ErrDatabaseNotFound
+		}
+		err = tc.metaDomain.DatabaseDb(txCtx).Delete(databases[0].ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 func (tc *Catalog) GetAllDatabases(ctx context.Context, ts types.Timestamp) ([]*model.Database, error) {
 	databases, err := tc.metaDomain.DatabaseDb(ctx).GetAllDatabases()
 	if err != nil {
