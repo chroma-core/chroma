@@ -36,7 +36,7 @@ type Coordinator struct {
 	objectStore *s3metastore.S3MetaStore
 }
 
-func NewCoordinator(ctx context.Context, db *gorm.DB, deleteMode DeleteMode, objectStore *s3metastore.S3MetaStore) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, db *gorm.DB, deleteMode DeleteMode, objectStore *s3metastore.S3MetaStore, versionFileEnabled bool) (*Coordinator, error) {
 	s := &Coordinator{
 		ctx:         ctx,
 		deleteMode:  deleteMode,
@@ -46,9 +46,7 @@ func NewCoordinator(ctx context.Context, db *gorm.DB, deleteMode DeleteMode, obj
 	// catalog
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	// TODO(rohitcp): Enable version file from config.
-	// Keeping it disabled till feature is ready.
-	s.catalog = *NewTableCatalog(txnImpl, metaDomain, s.objectStore, false)
+	s.catalog = *NewTableCatalog(txnImpl, metaDomain, s.objectStore, versionFileEnabled)
 	return s, nil
 }
 

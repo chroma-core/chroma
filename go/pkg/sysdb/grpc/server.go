@@ -61,6 +61,9 @@ type Config struct {
 	// In production, this should be set to "s3".
 	// For local testing, this can be set to "minio".
 	BlockStoreProvider string
+
+	// VersionFileEnabled is used to enable/disable version file.
+	VersionFileEnabled bool
 }
 
 // Server wraps Coordinator with GRPC services.
@@ -115,7 +118,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 	if err != nil {
 		return nil, err
 	}
-	coordinator, err := coordinator.NewCoordinator(ctx, db, deleteMode, s3MetaStore)
+	coordinator, err := coordinator.NewCoordinator(ctx, db, deleteMode, s3MetaStore, config.VersionFileEnabled)
 	if err != nil {
 		return nil, err
 	}
