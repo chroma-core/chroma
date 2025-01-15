@@ -167,7 +167,9 @@ class DistributedExecutor(Executor):
         grpc_url = self._manager.get_endpoint(scan.record)
         with self._mtx:
             if grpc_url not in self._grpc_stub_pool:
-                channel = grpc.insecure_channel(grpc_url, options=[("grpc.max_concurrent_streams", 1000)])
+                channel = grpc.insecure_channel(
+                    grpc_url, options=[("grpc.max_concurrent_streams", 1000)]
+                )
                 interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
                 channel = grpc.intercept_channel(channel, *interceptors)
                 self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)

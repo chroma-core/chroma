@@ -27,6 +27,7 @@ class SegmentDirectory(Component):
 class Member:
     id: str
     ip: str
+    node: str
 
 
 Memberlist = List[Member]
