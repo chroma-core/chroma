@@ -66,6 +66,10 @@ impl Scheduler {
         self.oneoff_collections.extend(ids);
     }
 
+    pub(crate) fn get_oneoff_collections(&self) -> Vec<CollectionUuid> {
+        self.oneoff_collections.iter().cloned().collect()
+    }
+
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
         let collections = self
             .log

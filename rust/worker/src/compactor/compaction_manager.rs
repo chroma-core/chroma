@@ -333,9 +333,12 @@ impl Handler<OneOffCompactionMessage> for CompactionManager {
         message: OneOffCompactionMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
-        tracing::info!("CompactionManager: Performing one-off compaction");
         self.scheduler
             .add_oneoff_collections(message.collection_ids);
+        tracing::info!(
+            "One-off collections queued: {:?}",
+            self.scheduler.get_oneoff_collections()
+        );
     }
 }
 
