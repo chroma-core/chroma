@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package chroma;
+
+message CollectionIds {
+  repeated string ids = 1;
+}
+
+message CompactionRequest {
+  CollectionIds ids = 1;
+}
+
+message CompactionResponse {
+  // Empty
+}
+
+service Compactor {
+  rpc Compact(CompactionRequest) returns (CompactionResponse) {}
+}
