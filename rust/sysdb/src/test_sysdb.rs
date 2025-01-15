@@ -13,7 +13,7 @@ use super::sysdb::GetLastCompactionTimeError;
 use super::sysdb::GetSegmentsError;
 
 #[derive(Clone, Debug)]
-pub(crate) struct TestSysDb {
+pub struct TestSysDb {
     inner: Arc<Mutex<Inner>>,
 }
 
@@ -25,8 +25,8 @@ struct Inner {
 }
 
 impl TestSysDb {
-    #[cfg(test)]
-    pub(crate) fn new() -> Self {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         TestSysDb {
             inner: Arc::new(Mutex::new(Inner {
                 collections: HashMap::new(),
@@ -36,26 +36,19 @@ impl TestSysDb {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn add_collection(&mut self, collection: Collection) {
+    pub fn add_collection(&mut self, collection: Collection) {
         let mut inner = self.inner.lock();
         inner
             .collections
             .insert(collection.collection_id, collection);
     }
 
-    #[cfg(test)]
-    pub(crate) fn add_segment(&mut self, segment: Segment) {
+    pub fn add_segment(&mut self, segment: Segment) {
         let mut inner = self.inner.lock();
         inner.segments.insert(segment.id, segment);
     }
 
-    #[cfg(test)]
-    pub(crate) fn add_tenant_last_compaction_time(
-        &mut self,
-        tenant: String,
-        last_compaction_time: i64,
-    ) {
+    pub fn add_tenant_last_compaction_time(&mut self, tenant: String, last_compaction_time: i64) {
         let mut inner = self.inner.lock();
         inner
             .tenant_last_compaction_time

@@ -1,6 +1,6 @@
 use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
-use crate::tracing::util::client_interceptor;
+use crate::util::client_interceptor;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -20,14 +20,14 @@ use tonic::Request;
 use tonic::Status;
 
 #[derive(Debug, Clone)]
-pub(crate) enum SysDb {
+pub enum SysDb {
     Grpc(GrpcSysDb),
     #[allow(dead_code)]
     Test(TestSysDb),
 }
 
 impl SysDb {
-    pub(crate) async fn get_collections(
+    pub async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
         name: Option<String>,
@@ -46,7 +46,7 @@ impl SysDb {
         }
     }
 
-    pub(crate) async fn get_segments(
+    pub async fn get_segments(
         &mut self,
         id: Option<SegmentUuid>,
         r#type: Option<String>,
@@ -59,7 +59,7 @@ impl SysDb {
         }
     }
 
-    pub(crate) async fn get_last_compaction_time(
+    pub async fn get_last_compaction_time(
         &mut self,
         tanant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
@@ -69,7 +69,7 @@ impl SysDb {
         }
     }
 
-    pub(crate) async fn flush_compaction(
+    pub async fn flush_compaction(
         &mut self,
         tenant_id: String,
         collection_id: CollectionUuid,
@@ -105,7 +105,7 @@ impl SysDb {
 #[derive(Clone, Debug)]
 // Since this uses tonic transport channel, cloning is cheap. Each client only supports
 // one inflight request at a time, so we need to clone the client for each requester.
-pub(crate) struct GrpcSysDb {
+pub struct GrpcSysDb {
     #[allow(clippy::type_complexity)]
     client: SysDbClient<
         interceptor::InterceptedService<
@@ -356,7 +356,7 @@ impl ChromaError for GetSegmentsError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum GetLastCompactionTimeError {
+pub enum GetLastCompactionTimeError {
     #[error("Failed to fetch")]
     FailedToGetLastCompactionTime(#[from] tonic::Status),
 
@@ -374,7 +374,7 @@ impl ChromaError for GetLastCompactionTimeError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum FlushCompactionError {
+pub enum FlushCompactionError {
     #[error("Failed to flush compaction")]
     FailedToFlushCompaction(#[from] tonic::Status),
     #[error("Failed to convert segment flush info")]

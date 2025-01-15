@@ -1,8 +1,8 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct DispatcherConfig {
-    pub(crate) num_worker_threads: usize,
-    pub(crate) dispatcher_queue_size: usize,
-    pub(crate) worker_queue_size: usize,
+    pub num_worker_threads: usize,
+    pub dispatcher_queue_size: usize,
+    pub worker_queue_size: usize,
 }

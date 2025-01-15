@@ -1349,6 +1349,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-sysdb"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "chroma-types",
+ "futures",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "parking_lot",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "tracing-bunyan-formatter",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "chroma-system"
 version = "0.1.0"
 dependencies = [
@@ -2378,6 +2402,11 @@ name = "garbage_collector"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-types",
  "chrono",
  "clap",
  "figment",
@@ -6832,6 +6861,7 @@ dependencies = [
  "chroma-error",
  "chroma-index",
  "chroma-storage",
+ "chroma-sysdb",
  "chroma-system",
  "chroma-types",
  "criterion",

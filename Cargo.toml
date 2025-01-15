@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/garbage_collector", "rust/index", "rust/load", "rust/storage", "rust/system", "rust/types", "rust/worker"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/garbage_collector", "rust/index", "rust/load", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker"]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -44,6 +44,7 @@ chroma-types = { path = "rust/types" }
 chroma-index = { path = "rust/index" }
 chroma-distance = { path = "rust/distance" }
 chroma-system = { path = "rust/system" }
+chroma-sysdb = { path = "rust/sysdb" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies
