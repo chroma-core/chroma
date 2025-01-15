@@ -147,24 +147,17 @@ impl CompactionManager {
     }
 
     #[instrument(name = "CompactionManager::compact_batch")]
-    pub(crate) async fn compact_batch(
-        &mut self,
-        // The set of collection ids that are allowed to compact
-        mask: Option<HashSet<CollectionUuid>>,
-    ) -> Vec<CollectionUuid> {
+    pub(crate) async fn compact_batch(&mut self) -> Vec<CollectionUuid> {
         self.scheduler.schedule().await;
-        let job_futures = self.scheduler.get_jobs().filter_map(|job| {
-            match &mask {
-                Some(allowed_collections) if !allowed_collections.contains(&job.collection_id) => {
-                    None
-                }
-                _ => {
-                    let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
-                    instrumented_span.follows_from(Span::current());
-                    Some(self.compact(job).instrument(instrumented_span))
-                }
-            }
-        }).collect::<FuturesUnordered<_>>();
+        let job_futures = self
+            .scheduler
+            .get_jobs()
+            .map(|job| {
+                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
+                instrumented_span.follows_from(Span::current());
+                self.compact(job).instrument(instrumented_span)
+            })
+            .collect::<FuturesUnordered<_>>();
 
         tracing::info!("Running {} compaction jobs", job_futures.len());
 
@@ -319,7 +312,7 @@ impl Handler<ScheduledCompactionMessage> for CompactionManager {
         ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
-        let ids = self.compact_batch(None).await;
+        let ids = self.compact_batch().await;
         self.hnsw_index_provider.purge_by_id(&ids).await;
 
         // Compaction is done, schedule the next compaction
@@ -341,10 +334,8 @@ impl Handler<OneOffCompactionMessage> for CompactionManager {
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!("CompactionManager: Performing one-off compaction");
-        let ids = self
-            .compact_batch(message.collection_ids.map(HashSet::from_iter))
-            .await;
-        self.hnsw_index_provider.purge_by_id(&ids).await;
+        self.scheduler
+            .add_oneoff_collections(message.collection_ids);
     }
 }
 
@@ -593,7 +584,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);
-        let compacted = manager.compact_batch(None).await;
+        let compacted = manager.compact_batch().await;
         assert!(
             (compacted == vec![collection_uuid_1, collection_uuid_2])
                 || (compacted == vec![collection_uuid_2, collection_uuid_1])
