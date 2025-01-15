@@ -133,7 +133,10 @@ impl SeekScanner<'_> {
             size -= half;
         }
 
-        Ok(base)
+        // The above loop tests all midpoints. However, it does not test the very last element.
+        // We want the greatest offset such that self.join_rank(offset) <= skip, so we need to test the last element as well.
+        let cmp = self.joint_rank(base).await?.cmp(&skip);
+        Ok(base + (cmp == Ordering::Less) as u32)
     }
 
     // Seek the start in the log and record segment, then scan for the specified number of offset ids
@@ -420,5 +423,23 @@ mod tests {
                 .chain(81..=95)
                 .collect()
         );
+    }
+
+    #[tokio::test]
+    async fn test_returns_last_offset() {
+        let limit_input =
+            setup_limit_input(SignedRoaringBitmap::empty(), SignedRoaringBitmap::full()).await;
+
+        let limit_operator = LimitOperator {
+            skip: 99,
+            fetch: Some(1),
+        };
+
+        let limit_output = limit_operator
+            .run(&limit_input)
+            .await
+            .expect("LimitOperator should not fail");
+
+        assert_eq!(limit_output.offset_ids, (100..=100).collect());
     }
 }
