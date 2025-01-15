@@ -1,3 +1,4 @@
+use chroma_system::DispatcherConfig;
 use figment::providers::{Env, Format, Yaml};
 
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
@@ -8,21 +9,12 @@ const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
-    cutoff_time_hours: u32,
-    max_collections_to_gc: u32,
-    gc_interval_mins: u32,
-    disallow_collection_names: Vec<String>,
-    sysdb_connection: SysdbConnectionConfig,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, serde::Deserialize)]
-// TODO(Sanket):  Remove this dead code annotation.
-pub(super) struct SysdbConnectionConfig {
-    host: String,
-    port: u32,
-    connect_timeout_ms: u32,
-    request_timeout_ms: u32,
+    pub(super) cutoff_time_hours: u32,
+    pub(super) max_collections_to_gc: u32,
+    pub(super) gc_interval_mins: u32,
+    pub(super) disallow_collections: Vec<String>,
+    pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
+    pub(super) dispatcher_config: DispatcherConfig,
 }
 
 impl GarbageCollectorConfig {
@@ -60,10 +52,13 @@ mod tests {
         assert_eq!(config.max_collections_to_gc, 1000);
         assert_eq!(config.gc_interval_mins, 120);
         let empty_vec: Vec<String> = vec![];
-        assert_eq!(config.disallow_collection_names, empty_vec);
-        assert_eq!(config.sysdb_connection.host, "sysdb.chroma");
-        assert_eq!(config.sysdb_connection.port, 50051);
-        assert_eq!(config.sysdb_connection.connect_timeout_ms, 60000);
-        assert_eq!(config.sysdb_connection.request_timeout_ms, 60000);
+        assert_eq!(config.disallow_collections, empty_vec);
+        assert_eq!(config.sysdb_config.host, "sysdb.chroma");
+        assert_eq!(config.sysdb_config.port, 50051);
+        assert_eq!(config.sysdb_config.connect_timeout_ms, 60000);
+        assert_eq!(config.sysdb_config.request_timeout_ms, 60000);
+        assert_eq!(config.dispatcher_config.num_worker_threads, 4);
+        assert_eq!(config.dispatcher_config.dispatcher_queue_size, 100);
+        assert_eq!(config.dispatcher_config.worker_queue_size, 100);
     }
 }
