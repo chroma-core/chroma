@@ -34,9 +34,6 @@ pub enum CompactionCommand {
         /// Specify Uuids of the collections to compact. If unspecified, no compaction will occur unless --all flag is specified
         #[arg(short, long)]
         id: Vec<Uuid>,
-        /// Compact all collections available. If specified, the Uuids specified with --id will be ignored
-        #[arg(short, long)]
-        all: bool,
     },
 }
 
@@ -47,11 +44,11 @@ impl CompactionClient {
 
     pub async fn run(&self) -> Result<(), CompactionClientError> {
         match &self.command {
-            CompactionCommand::Compact { id, all } => {
+            CompactionCommand::Compact { id } => {
                 let mut client = self.grpc_client().await?;
                 let response = client
                     .compact(CompactionRequest {
-                        ids: (!all).then_some(CollectionIds {
+                        ids: Some(CollectionIds {
                             ids: id.iter().map(ToString::to_string).collect(),
                         }),
                     })
