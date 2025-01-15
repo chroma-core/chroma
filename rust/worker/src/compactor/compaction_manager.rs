@@ -7,14 +7,13 @@ use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
-use crate::sysdb;
-use crate::sysdb::sysdb::SysDb;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_storage::Storage;
+use chroma_sysdb::SysDb;
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
@@ -201,7 +200,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             }
         };
         let sysdb_config = &config.sysdb;
-        let sysdb = match sysdb::from_config(sysdb_config).await {
+        let sysdb = match chroma_sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
@@ -340,10 +339,10 @@ mod tests {
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
-    use crate::sysdb::test_sysdb::TestSysDb;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_storage::local::LocalStorage;
+    use chroma_sysdb::TestSysDb;
     use chroma_system::Dispatcher;
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};

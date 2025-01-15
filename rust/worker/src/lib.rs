@@ -2,7 +2,6 @@ mod assignment;
 mod compactor;
 mod memberlist;
 mod server;
-mod sysdb;
 mod tracing;
 mod utils;
 

@@ -5,6 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_types::{
     chroma_proto::{
@@ -28,7 +29,6 @@ use crate::{
         },
     },
     log::log::Log,
-    sysdb::sysdb::SysDb,
     tracing::util::wrap_span_with_parent_context,
     utils::convert::{from_proto_knn, to_proto_knn_batch_result},
 };
@@ -51,7 +51,7 @@ pub struct WorkerServer {
 impl Configurable<QueryServiceConfig> for WorkerServer {
     async fn try_from_config(config: &QueryServiceConfig) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = &config.sysdb;
-        let sysdb = match crate::sysdb::from_config(sysdb_config).await {
+        let sysdb = match chroma_sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 tracing::error!("Failed to create sysdb component: {:?}", err);
@@ -399,11 +399,11 @@ mod tests {
     use super::*;
     use crate::log::log::InMemoryLog;
     use crate::segment::test::TestSegment;
-    use crate::sysdb::test_sysdb::TestSysDb;
     use chroma_index::test_hnsw_index_provider;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;
+    use chroma_sysdb::TestSysDb;
     use chroma_system::dispatcher;
     use chroma_system::system;
     use uuid::Uuid;
