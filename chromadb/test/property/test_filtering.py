@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, cast
-from hypothesis import given, settings, HealthCheck
+import uuid
+from hypothesis import example, given, settings, HealthCheck
 import pytest
 from chromadb.api import ClientAPI
 from chromadb.test.property import invariants
@@ -229,6 +230,37 @@ def test_filterable_metadata_get(
     limit=st.integers(min_value=1, max_value=10),
     offset=st.integers(min_value=0, max_value=10),
     should_compact=st.booleans(),
+)
+# Repro of a former off-by-one error in distributed Chroma. Fixed in https://github.com/chroma-core/chroma/pull/3489.
+@example(
+    collection=strategies.Collection(
+        name="test",
+        metadata={"test": "test"},
+        embedding_function=None,
+        id=uuid.uuid4(),
+        dimension=2,
+        dtype="float32",
+        known_metadata_keys={},
+        known_document_keywords=[],
+    ),
+    record_set=strategies.RecordSet(
+        ids=[str(i) for i in range(11)],
+        embeddings=[np.random.rand(2).tolist() for _ in range(11)],
+        metadatas=[{"test": "test"} for _ in range(11)],
+        documents=None,
+    ),
+    filters=[
+        strategies.Filter(
+            {
+                "where_document": {"$not_contains": "foo"},
+                "ids": None,
+                "where": None,
+            }
+        )
+    ],
+    limit=10,
+    offset=10,
+    should_compact=True,
 )
 def test_filterable_metadata_get_limit_offset(
     caplog,
