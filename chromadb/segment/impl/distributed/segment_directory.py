@@ -270,10 +270,11 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         # We want to route using the node name over the member id
         # because the node may have a disk cache that we want a
         # stable identifier for over deploys.
-        can_use_node_routing = all(
-            [m.node != "" and len(m.node) != 0 for m in self._curr_memberlist]
+        can_use_node_routing = (
+            all([m.node != "" and len(m.node) != 0 for m in self._curr_memberlist])
+            and self._routing_mode == RoutingMode.NODE
         )
-        if can_use_node_routing and self._routing_mode == RoutingMode.NODE:
+        if can_use_node_routing:
             # If we are using node routing and the segments
             assignments = assign(
                 segment["collection"].hex,
@@ -289,7 +290,6 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
                 murmur3hasher,
                 n,
             )
-
         assignments_set = set(assignments)
         out_endpoints = []
         for member in self._curr_memberlist:
