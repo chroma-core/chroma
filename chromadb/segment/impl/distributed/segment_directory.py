@@ -1,7 +1,6 @@
 import threading
 import time
-from typing import Any, Callable, Dict, Optional, cast
-
+from typing import Any, Callable, Dict, List, Optional, cast
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 from overrides import EnforceOverrides, override
@@ -254,54 +253,63 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
         return super().stop()
 
     @override
-    def get_segment_endpoint(self, segment: Segment) -> str:
+    def get_segment_endpoints(self, segment: Segment, n: int) -> List[str]:
         if self._curr_memberlist is None or len(self._curr_memberlist) == 0:
             raise ValueError("Memberlist is not initialized")
 
+        # assign() will throw an error if n is greater than the number of members
+        # clamp n to the number of members to align with the contract of this method
+        # which is to return at most n endpoints
+        n = min(n, len(self._curr_memberlist))
+
         # Check if all members in the memberlist have a node set,
         # if so, route using the node
+
         # NOTE(@hammadb) 1/8/2024: This is to handle the migration between routing
         # using the member id and routing using the node name
         # We want to route using the node name over the member id
         # because the node may have a disk cache that we want a
         # stable identifier for over deploys.
-        can_use_node_routing = all(
-            [m.node != "" and len(m.node) != 0 for m in self._curr_memberlist]
+        can_use_node_routing = (
+            all([m.node != "" and len(m.node) != 0 for m in self._curr_memberlist])
+            and self._routing_mode == RoutingMode.NODE
         )
-        if can_use_node_routing and self._routing_mode == RoutingMode.NODE:
+        if can_use_node_routing:
             # If we are using node routing and the segments
-            assignment = assign(
+            assignments = assign(
                 segment["collection"].hex,
                 [m.node for m in self._curr_memberlist],
                 murmur3hasher,
-                1,
-            )[0]
+                n,
+            )
         else:
             # Query to the same collection should end up on the same endpoint
-            assignment = assign(
+            assignments = assign(
                 segment["collection"].hex,
                 [m.id for m in self._curr_memberlist],
                 murmur3hasher,
-                1,
-            )[0]
-
-        service_name = self.extract_service_name(assignment)
-        # If the memberlist has an ip, use it, otherwise use the member id with the headless service
-        # this is for backwards compatibility with the old memberlist which only had ids
+                n,
+            )
+        assignments_set = set(assignments)
+        out_endpoints = []
         for member in self._curr_memberlist:
             is_chosen_with_node_routing = (
-                can_use_node_routing and member.node == assignment
+                can_use_node_routing and member.node in assignments_set
             )
             is_chosen_with_id_routing = (
-                not can_use_node_routing and member.id == assignment
+                not can_use_node_routing and member.id in assignments_set
             )
             if is_chosen_with_node_routing or is_chosen_with_id_routing:
+                # If the memberlist has an ip, use it, otherwise use the member id with the headless service
+                # this is for backwards compatibility with the old memberlist which only had ids
                 if member.ip is not None and member.ip != "":
                     endpoint = f"{member.ip}:50051"
-                    return endpoint
-
-        endpoint = f"{assignment}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"  # TODO: make port configurable
-        return endpoint
+                    out_endpoints.append(endpoint)
+                else:
+                    service_name = self.extract_service_name(member.id)
+                    endpoint = f"{member.id}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"
+                    out_endpoints.append(endpoint)
+        return out_endpoints
 
     @override
     def register_updated_segment_callback(

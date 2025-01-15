@@ -264,6 +264,7 @@ class Settings(BaseSettings):  # type: ignore
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
     chroma_executor_impl: str = "chromadb.execution.executor.local.LocalExecutor"
+    chroma_query_replication_factor: int = 2
 
     chroma_logservice_host = "localhost"
     chroma_logservice_port = 50052
