@@ -67,6 +67,13 @@ class DistributedExecutor(Executor):
         )
 
     def _round_robin_retry(self, funcs: List[Callable[[I], O]], args: I) -> O:
+        """
+        Retry a list of functions in a round-robin fashion until one of them succeeds.
+
+        funcs: List of functions to retry
+        args: Arguments to pass to each function
+
+        """
         attempt_count = 0
         sleep_span: Optional[Span] = None
 
@@ -226,5 +233,5 @@ class DistributedExecutor(Executor):
                 )
                 interceptors = [OtelInterceptor()]
                 channel = grpc.intercept_channel(channel, *interceptors)
-                self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)  # type: ignore[no-untyped-call]
+                self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)
             return self._grpc_stub_pool[grpc_url]
