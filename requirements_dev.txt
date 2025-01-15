@@ -11,5 +11,6 @@ psutil
 pytest
 pytest-asyncio
 pytest-xdist
+pytest_httpserver>=1.0.10
 setuptools_scm
 types-protobuf
