@@ -381,6 +381,22 @@ message ListCollectionsToGcResponse {
   repeated CollectionToGcInfo collections = 1;
 }
 
+message MarkVersionForDeletionRequest {
+  int64 epoch_id = 1;
+  repeated CollectionVersionTuple versions = 2;
+}
+
+message MarkVersionForDeletionResponse {
+}
+
+message DeleteCollectionVersionRequest {
+  int64 epoch_id = 1;
+  repeated CollectionVersionTuple versions = 2;
+}
+
+message DeleteCollectionVersionResponse {
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -406,4 +422,6 @@ service SysDB {
   rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
   rpc GetCollectionSize(GetCollectionSizeRequest) returns (GetCollectionSizeResponse) {}
   rpc ListCollectionsToGc(ListCollectionsToGcRequest) returns (ListCollectionsToGcResponse) {}
+  rpc MarkVersionForDeletion(MarkVersionForDeletionRequest) returns (MarkVersionForDeletionResponse) {}
+  rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
 }
