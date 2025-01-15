@@ -43,6 +43,7 @@ def _uri(metadata: Optional[Metadata]) -> Optional[str]:
     return None
 
 
+# Type variables for input and output types of the round-robin retry function
 I = TypeVar("I")  # noqa: E741
 O = TypeVar("O")  # noqa: E741
 
