@@ -79,7 +79,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore)
+	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore, false)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -110,7 +110,7 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, HardDelete, nil)
+	c, err := NewCoordinator(ctx, HardDelete, nil, false)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -163,7 +163,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, HardDelete, nil)
+	c, err := NewCoordinator(ctx, HardDelete, nil, false)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -1277,11 +1277,12 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	suite.NoError(err)
 	suite.NotNil(flushInfo)
 
+	// TODO(rohitcp): Add these tests back once version file is enabled.
 	// Verify version file exists in S3
-	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(newCollection.TenantID, newCollection.ID.String(), "")
-	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePathPrefix)
-	suite.NoError(err)
-	suite.True(exists, "Version file should exist in S3")
+	// versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(newCollection.TenantID, newCollection.ID.String(), "")
+	// exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePathPrefix)
+	// suite.NoError(err)
+	// suite.True(exists, "Version file should exist in S3")
 }
 
 func TestAPIsTestSuite(t *testing.T) {

@@ -730,9 +730,13 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 	// This orphan file will not affect new collection creations.
 	// An alternative approach is to create this file after the transaction is committed.
 	// and let FlushCollectionCompaction do any repair work if first version file is missing.
-	versionFileName, err := tc.createFirstVersionFile(ctx, createCollection, createSegments, ts)
-	if err != nil {
-		return nil, false, err
+	versionFileName := ""
+	var err error
+	if tc.versionFileEnabled {
+		versionFileName, err = tc.createFirstVersionFile(ctx, createCollection, createSegments, ts)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	err = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {

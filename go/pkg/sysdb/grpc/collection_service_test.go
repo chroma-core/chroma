@@ -41,7 +41,9 @@ func (suite *CollectionServiceTestSuite) SetupSuite() {
 	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default)
+		Testing:               true,
+		BlockStoreProvider:    "none",
+	}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
