@@ -1,8 +1,5 @@
 name: Start Tilt services
 description: "This action starts Tilt services"
-inputs:
-  cached-image-ref:
-    description: "The image reference to use for the cached image"
 runs:
   using: "composite"
   steps:
@@ -26,8 +23,6 @@ runs:
     - name: Start Tilt
       shell: bash
       run: tilt ci
-      env:
-        CACHED_IMAGE_REF: ${{ inputs.cached-image-ref }}
     - name: Forward ports
       shell: bash
       run: |

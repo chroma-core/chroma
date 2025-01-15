@@ -42,8 +42,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/go
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
       - uses: crazy-max/ghaction-github-runtime@v3
       - uses: ./.github/actions/tilt
       - run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'
