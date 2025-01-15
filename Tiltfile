@@ -1,7 +1,7 @@
 update_settings(max_parallel_updates=6)
 
 def format_buildx_command(dockerfile, context = None, target = None):
-  build_str = 'docker buildx build -t $EXPECTED_REF --file {}'.format(dockerfile)
+  build_str = 'depot build -t $EXPECTED_REF --file {}'.format(dockerfile)
 
   if os.environ.get('CI'):
     build_str += ' --load'

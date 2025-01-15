@@ -48,10 +48,11 @@ jobs:
       - name: (temp) build rust image
         run: |
           docker login registry.depot.dev -u x-token -p $DEPOT_TOKEN
-          depot build --load --file rust/worker/Dockerfile --target query_service .
         env:
           DEPOT_TOKEN: ${{ secrets.DEPOT_PROJECT_TOKEN }}
       - uses: ./.github/actions/tilt
+        env:
+          DEPOT_TOKEN: ${{ secrets.DEPOT_PROJECT_TOKEN }}
       - run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'
       - name: Save service logs to artifact
         if: always()
