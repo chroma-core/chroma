@@ -97,7 +97,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
         let sysdb_client = chroma_sysdb::from_config(&sysdb_config).await?;
 
         let mut disabled_collections = HashSet::new();
-        for collection_id_str in config.disallow_collection_names.iter() {
+        for collection_id_str in config.disallow_collections.iter() {
             let collection_uuid = match Uuid::from_str(collection_id_str) {
                 Ok(uuid) => uuid,
                 Err(e) => {

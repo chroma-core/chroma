@@ -12,7 +12,7 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) cutoff_time_hours: u32,
     pub(super) max_collections_to_gc: u32,
     pub(super) gc_interval_mins: u32,
-    pub(super) disallow_collection_names: Vec<String>,
+    pub(super) disallow_collections: Vec<String>,
     pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
     pub(super) dispatcher_config: DispatcherConfig,
 }
@@ -52,7 +52,7 @@ mod tests {
         assert_eq!(config.max_collections_to_gc, 1000);
         assert_eq!(config.gc_interval_mins, 120);
         let empty_vec: Vec<String> = vec![];
-        assert_eq!(config.disallow_collection_names, empty_vec);
+        assert_eq!(config.disallow_collections, empty_vec);
         assert_eq!(config.sysdb_config.host, "sysdb.chroma");
         assert_eq!(config.sysdb_config.port, 50051);
         assert_eq!(config.sysdb_config.connect_timeout_ms, 60000);
