@@ -9,7 +9,6 @@ from chromadb.execution.expression.operator import Scan
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.proto import convert
 from chromadb.proto.query_executor_pb2_grpc import QueryExecutorStub
-from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.segment.impl.manager.distributed import DistributedSegmentManager
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 
@@ -167,8 +166,10 @@ class DistributedExecutor(Executor):
         grpc_url = self._manager.get_endpoint(scan.record)
         with self._mtx:
             if grpc_url not in self._grpc_stub_pool:
-                channel = grpc.insecure_channel(grpc_url, options=[("grpc.max_concurrent_streams", 1000)])
-                interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
+                channel = grpc.insecure_channel(
+                    grpc_url, options=[("grpc.max_concurrent_streams", 1000)]
+                )
+                interceptors = [OtelInterceptor()]
                 channel = grpc.intercept_channel(channel, *interceptors)
                 self._grpc_stub_pool[grpc_url] = QueryExecutorStub(channel)
 
