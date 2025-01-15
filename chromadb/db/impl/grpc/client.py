@@ -80,6 +80,7 @@ class GrpcSysDB(SysDB):
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}",
+            options=[("grpc.max_concurrent_streams", 1000)],
         )
         interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
