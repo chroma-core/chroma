@@ -4,12 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "query_service"
-path = "src/bin/query_service.rs"
+name = "compaction_client"
+path = "src/bin/compaction_client.rs"
 
 [[bin]]
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"
+
+[[bin]]
+name = "query_service"
+path = "src/bin/query_service.rs"
 
 [dependencies]
 rand = "0.8.5"
@@ -47,6 +51,7 @@ prost-types = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
 tantivy = { workspace = true }
+clap = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-error = { workspace = true }
