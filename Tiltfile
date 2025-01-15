@@ -4,7 +4,7 @@ def format_buildx_command(dockerfile, context = None, target = None):
   build_str = 'docker buildx build -t $EXPECTED_REF --file {}'.format(dockerfile)
 
   if os.environ.get('CI'):
-    build_str += ' --cache-from=type=gha --cache-to=type=gha'
+    build_str += ' --cache-from=type=gha --cache-to=type=gha --load'
 
   if target:
     build_str += ' --target {}'.format(target)
