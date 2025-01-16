@@ -261,3 +261,11 @@ func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosit
 	}
 	return version, nil
 }
+
+func (s *collectionDb) UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName string) (int64, error) {
+	result := s.db.Model(&dbmodel.Collection{}).Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).Updates(map[string]interface{}{"version_file_name": newVersionFileName})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
