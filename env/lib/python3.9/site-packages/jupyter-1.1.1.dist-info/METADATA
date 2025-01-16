@@ -1,0 +1,54 @@
+Metadata-Version: 2.1
+Name: jupyter
+Version: 1.1.1
+Summary: Jupyter metapackage. Install all the Jupyter components in one go.
+Home-page: https://jupyter.org
+Author: Jupyter Development Team
+Author-email: jupyter@googlegroups.org
+License: BSD
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: System Administrators
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: notebook
+Requires-Dist: jupyter-console
+Requires-Dist: nbconvert
+Requires-Dist: ipykernel
+Requires-Dist: ipywidgets
+Requires-Dist: jupyterlab
+
+# Jupyter metapackage
+
+Find more information on [the Jupyter homepage](https://jupyter.org).
+
+## A default installation of most common Jupyter packages
+
+`pip install jupyter` installs the Jupyter Notebook, JupyterLab, and the IPython Kernel.
+
+This is an empty metapackage for user convenience,
+only expressing dependencies on multiple Jupyter packages.
+`jupyter` should not be used as a dependency for any packages.
+
+For more efficient installation of what you need,
+all Jupyter components installed by `pip install jupyter` can be installed separately.
+For example:
+
+- `notebook` - Jupyter Notebook
+- `jupyterlab` - JupyterLab (added to metapackage v1.1)
+- `ipython` - IPython (terminal)
+- `ipykernel` - IPython Kernel for Jupyter
+- `jupyter-console` - terminal Jupyter client
+- `nbconvert` - convert notebooks between formats
+- `ipywidgets` - interactive widgets package for IPython
+
+No longer included in `pip install jupyter`, but still supported:
+
+- `qtconsole` - Qt Console (removed in metapackage v1.1)

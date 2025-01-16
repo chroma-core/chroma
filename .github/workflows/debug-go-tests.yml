@@ -1,0 +1,11 @@
+name: Debug Go Tests
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    uses: ./.github/workflows/_go-tests.yml
+

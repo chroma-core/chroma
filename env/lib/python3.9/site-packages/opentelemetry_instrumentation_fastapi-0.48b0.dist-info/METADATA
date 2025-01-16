@@ -1,0 +1,54 @@
+Metadata-Version: 2.3
+Name: opentelemetry-instrumentation-fastapi
+Version: 0.48b0
+Summary: OpenTelemetry FastAPI Instrumentation
+Project-URL: Homepage, https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-fastapi
+Author-email: OpenTelemetry Authors <cncf-opentelemetry-contributors@lists.cncf.io>
+License-Expression: Apache-2.0
+License-File: LICENSE
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.8
+Requires-Dist: opentelemetry-api~=1.12
+Requires-Dist: opentelemetry-instrumentation-asgi==0.48b0
+Requires-Dist: opentelemetry-instrumentation==0.48b0
+Requires-Dist: opentelemetry-semantic-conventions==0.48b0
+Requires-Dist: opentelemetry-util-http==0.48b0
+Provides-Extra: instruments
+Requires-Dist: fastapi~=0.58; extra == 'instruments'
+Description-Content-Type: text/x-rst
+
+OpenTelemetry FastAPI Instrumentation
+=======================================
+
+|pypi|
+
+.. |pypi| image:: https://badge.fury.io/py/opentelemetry-instrumentation-fastapi.svg
+   :target: https://pypi.org/project/opentelemetry-instrumentation-fastapi/
+
+
+This library provides automatic and manual instrumentation of FastAPI web frameworks,
+instrumenting http requests served by applications utilizing the framework.
+
+auto-instrumentation using the opentelemetry-instrumentation package is also supported.
+
+Installation
+------------
+
+::
+
+    pip install opentelemetry-instrumentation-fastapi
+
+References
+----------
+
+* `OpenTelemetry Project <https://opentelemetry.io/>`_
+* `OpenTelemetry Python Examples <https://github.com/open-telemetry/opentelemetry-python/tree/main/docs/examples>`_

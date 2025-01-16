@@ -43,4 +43,5 @@ type ICollectionDb interface {
 	UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error)
 	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFileName string, newCollectionVersion int32, newVersionFileName string) (int64, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
+	UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName string) (int64, error)
 }
