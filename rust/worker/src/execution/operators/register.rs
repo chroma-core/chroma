@@ -34,6 +34,7 @@ impl RegisterOperator {
 ///   collection version in sysdb is not the same as the current collection version, the flush
 ///   operation will fail.
 /// * `segment_flush_info` - The segment flush info.
+/// * `total_records_post_compaction` - The total number of records in the collection post compaction.
 /// * `sysdb` - The sysdb client.
 /// * `log` - The log client.
 pub struct RegisterInput {
@@ -42,11 +43,13 @@ pub struct RegisterInput {
     log_position: i64,
     collection_version: i32,
     segment_flush_info: Arc<[SegmentFlushInfo]>,
+    total_records_post_compaction: u64,
     sysdb: Box<SysDb>,
     log: Box<Log>,
 }
 
 impl RegisterInput {
+    #[allow(clippy::too_many_arguments)]
     /// Create a new flush sysdb input.
     pub fn new(
         tenant: String,
@@ -54,6 +57,7 @@ impl RegisterInput {
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
+        total_records_post_compaction: u64,
         sysdb: Box<SysDb>,
         log: Box<Log>,
     ) -> Self {
@@ -63,6 +67,7 @@ impl RegisterInput {
             log_position,
             collection_version,
             segment_flush_info,
+            total_records_post_compaction,
             sysdb,
             log,
         }
@@ -112,6 +117,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                 input.log_position,
                 input.collection_version,
                 input.segment_flush_info.clone(),
+                input.total_records_post_compaction,
             )
             .await;
 
@@ -153,6 +159,7 @@ mod tests {
         let collection_uuid_1 =
             CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
+        let total_records_post_compaction: u64 = 5;
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
@@ -162,7 +169,7 @@ mod tests {
             database: "database_1".to_string(),
             log_position: 0,
             version: collection_version,
-            total_records_post_compaction: 0,
+            total_records_post_compaction,
         };
 
         let collection_uuid_2 =
@@ -177,7 +184,7 @@ mod tests {
             database: "database_2".to_string(),
             log_position: 0,
             version: collection_version,
-            total_records_post_compaction: 0,
+            total_records_post_compaction,
         };
 
         match *sysdb {
@@ -244,6 +251,7 @@ mod tests {
             log_position,
             collection_version,
             segment_flush_info.into(),
+            total_records_post_compaction,
             sysdb.clone(),
             log.clone(),
         );
@@ -270,6 +278,10 @@ mod tests {
         assert_eq!(collection.len(), 1);
         let collection = collection[0].clone();
         assert_eq!(collection.log_position, log_position);
+        assert_eq!(
+            collection.total_records_post_compaction,
+            total_records_post_compaction
+        );
 
         let collection_1_segments = sysdb
             .get_segments(None, None, None, collection_uuid_1)

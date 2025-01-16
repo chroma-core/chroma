@@ -171,6 +171,7 @@ impl TestSysDb {
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
+        total_records_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let mut inner = self.inner.lock();
         let collection = inner.collections.get(&collection_id);
@@ -182,6 +183,7 @@ impl TestSysDb {
         collection.log_position = log_position;
         let new_collection_version = collection_version + 1;
         collection.version = new_collection_version;
+        collection.total_records_post_compaction = total_records_post_compaction;
         inner
             .collections
             .insert(collection.collection_id, collection);

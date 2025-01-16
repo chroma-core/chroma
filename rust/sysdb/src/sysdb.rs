@@ -76,6 +76,7 @@ impl SysDb {
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
+        total_records_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -85,6 +86,7 @@ impl SysDb {
                     log_position,
                     collection_version,
                     segment_flush_info,
+                    total_records_post_compaction,
                 )
                 .await
             }
@@ -95,6 +97,7 @@ impl SysDb {
                     log_position,
                     collection_version,
                     segment_flush_info,
+                    total_records_post_compaction,
                 )
                 .await
             }
@@ -273,6 +276,7 @@ impl GrpcSysDb {
         log_position: i64,
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
+        total_records_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -296,6 +300,7 @@ impl GrpcSysDb {
             log_position,
             collection_version,
             segment_compaction_info,
+            total_records_post_compaction,
         };
 
         let res = self.client.flush_collection_compaction(req).await;
