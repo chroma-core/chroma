@@ -20,7 +20,6 @@ func NewReadCoordinator(ctx context.Context, db *gorm.DB) (*ReadCoordinator, err
 		ctx: ctx,
 	}
 
-	// catalog
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
 	s.catalog = *NewReadTableCatalog(txnImpl, metaDomain)

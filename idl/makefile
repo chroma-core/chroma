@@ -9,7 +9,8 @@ proto_python:
 	    ./chromadb/proto/chroma.proto \
 	    ./chromadb/proto/coordinator.proto \
 	    ./chromadb/proto/logservice.proto \
-	    ./chromadb/proto/query_executor.proto
+	    ./chromadb/proto/query_executor.proto \
+		./chromadb/proto/read_coordinator.proto
 	@mv chromadb/proto/*.py ../chromadb/proto/
 	@mv chromadb/proto/*.pyi ../chromadb/proto/
 	@echo "Done"
@@ -25,7 +26,8 @@ proto_go:
     	--plugin protoc-gen-go-grpc="${PROTOC_GEN_GO_GRPC_BIN_PATH}" \
 			chromadb/proto/chroma.proto \
 			chromadb/proto/coordinator.proto \
-			chromadb/proto/logservice.proto
+			chromadb/proto/logservice.proto \
+			chromadb/proto/read_coordinator.proto
 	@mv ../go/pkg/proto/coordinatorpb/chromadb/proto/logservice*.go ../go/pkg/proto/logservicepb/
 	@mv ../go/pkg/proto/coordinatorpb/chromadb/proto/*.go ../go/pkg/proto/coordinatorpb/
 	@rm -rf ../go/pkg/proto/coordinatorpb/chromadb

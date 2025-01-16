@@ -3,9 +3,7 @@ syntax = "proto3";
 package chroma;
 option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
-import "chromadb/proto/chroma.proto";
 import "chromadb/proto/coordinator.proto";
-import "google/protobuf/empty.proto";
 
 message GetCollectionsReadRequest {
   optional string id = 1;
