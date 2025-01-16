@@ -60,7 +60,9 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> chroma_pb.Vecto
             or {ScalarEncoding.INT32}"
         )
 
-    return chroma_pb.Vector(dimension=vector.size, vector=as_bytes, encoding=proto_encoding)
+    return chroma_pb.Vector(
+        dimension=vector.size, vector=as_bytes, encoding=proto_encoding
+    )
 
 
 def from_proto_vector(vector: chroma_pb.Vector) -> Tuple[Embedding, ScalarEncoding]:
@@ -161,7 +163,10 @@ def from_proto_segment(segment: chroma_pb.Segment) -> Segment:
         metadata=from_proto_metadata(segment.metadata)
         if segment.HasField("metadata")
         else None,
-        file_paths={name: [path for path in paths.paths] for name, paths in segment.file_paths.items()}
+        file_paths={
+            name: [path for path in paths.paths]
+            for name, paths in segment.file_paths.items()
+        },
     )
 
 
@@ -174,7 +179,10 @@ def to_proto_segment(segment: Segment) -> chroma_pb.Segment:
         metadata=None
         if segment["metadata"] is None
         else to_proto_update_metadata(segment["metadata"]),
-        file_paths={name: chroma_pb.FilePaths(paths=paths) for name, paths in segment["file_paths"].items()}
+        file_paths={
+            name: chroma_pb.FilePaths(paths=paths)
+            for name, paths in segment["file_paths"].items()
+        },
     )
 
 
@@ -241,6 +249,7 @@ def from_proto_collection(collection: chroma_pb.Collection) -> Collection:
         tenant=collection.tenant,
         version=collection.version,
         log_position=collection.log_position,
+        total_records_post_compaction=collection.total_records_post_compaction,
     )
 
 
@@ -257,6 +266,7 @@ def to_proto_collection(collection: Collection) -> chroma_pb.Collection:
         database=collection["database"],
         log_position=collection["log_position"],
         version=collection["version"],
+        total_records_post_compaction=collection["total_records_post_compaction"],
     )
 
 
@@ -581,7 +591,9 @@ def to_proto_scan(scan: Scan) -> query_pb.ScanOperator:
 
 def to_proto_filter(filter: Filter) -> query_pb.FilterOperator:
     return query_pb.FilterOperator(
-        ids=chroma_pb.UserIds(ids=filter.user_ids) if filter.user_ids is not None else None,
+        ids=chroma_pb.UserIds(ids=filter.user_ids)
+        if filter.user_ids is not None
+        else None,
         where=to_proto_where(filter.where) if filter.where else None,
         where_document=to_proto_where_document(filter.where_document)
         if filter.where_document

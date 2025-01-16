@@ -73,6 +73,7 @@ class Collection(
     # in single-node chroma, this field is always 0
     version: int
     log_position: int
+    total_records_post_compaction: int
 
     def __init__(
         self,
@@ -85,6 +86,7 @@ class Collection(
         database: str,
         version: int = 0,
         log_position: int = 0,
+        total_records_post_compaction: int = 0,
     ):
         super().__init__(
             id=id,
@@ -96,6 +98,7 @@ class Collection(
             database=database,
             version=version,
             log_position=log_position,
+            total_records_post_compaction=total_records_post_compaction,
         )
 
     # TODO: This throws away type information.
@@ -178,9 +181,11 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
     file_paths: Mapping[str, Sequence[str]]
 
+
 class CollectionAndSegments(TypedDict):
     collection: Collection
     segments: Sequence[Segment]
+
 
 # SeqID can be one of three types of value in our current and future plans:
 # 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
