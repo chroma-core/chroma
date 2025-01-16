@@ -304,17 +304,16 @@ export class ChromaClient {
    * ```
    */
   async listCollections({ limit, offset }: ListCollectionsParams = {}): Promise<
-    string[]
+    Collection[]
   > {
     await this.init();
-    const collections = (await this.api.listCollections(
+    return (await this.api.listCollections(
       this.tenant,
       this.database,
       limit,
       offset,
       this.api.options,
     )) as Collection[];
-    return collections.map((collection: Collection) => collection.name);
   }
 
   /**
