@@ -31,6 +31,7 @@ type DBConfig struct {
 	Username     string
 	Password     string
 	Address      string
+	ReadAddress  string
 	Port         int
 	DBName       string
 	MaxIdleConns int
@@ -225,6 +226,7 @@ func GetDBConfigForTesting() DBConfig {
 		MaxIdleConns: 10,
 		MaxOpenConns: 100,
 		SslMode:      "disable",
+		ReadAddress:  "localhost",
 	}
 }
 
