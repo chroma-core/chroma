@@ -4,7 +4,7 @@ pub(super) mod count_records;
 pub mod flush_segment_writer;
 pub mod materialize_logs;
 pub(super) mod partition;
-pub mod prefetch_for_metadata_writer;
+pub mod prefetch_keys;
 pub(super) mod register;
 pub mod spann_bf_pl;
 pub(super) mod spann_centers_search;
