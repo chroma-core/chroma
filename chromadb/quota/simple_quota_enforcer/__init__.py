@@ -1,5 +1,6 @@
 from overrides import override
 from typing import Any, Callable, TypeVar, Dict, Optional
+from uuid import UUID
 
 from chromadb.api.types import (
     Embeddings,
@@ -48,5 +49,6 @@ class SimpleQuotaEnforcer(QuotaEnforcer):
         where_document: Optional[WhereDocument] = None,
         n_results: Optional[int] = None,
         query_embeddings: Optional[Embeddings] = None,
+        collection_id: Optional[UUID] = None,
     ) -> None:
         pass
