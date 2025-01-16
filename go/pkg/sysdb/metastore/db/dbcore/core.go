@@ -39,10 +39,17 @@ type DBConfig struct {
 	SslMode      string
 }
 
-func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
-	log.Info("ConnectPostgres", zap.String("host", cfg.Address), zap.String("database", cfg.DBName), zap.Int("port", cfg.Port))
+func ConnectPostgres(cfg DBConfig, read bool) (*gorm.DB, error) {
+	var address string
+	if read {
+		address = cfg.ReadAddress
+	} else {
+		address = cfg.Address
+	}
+
+	log.Info("ConnectPostgres", zap.String("host", address), zap.String("database", cfg.DBName), zap.Int("port", cfg.Port))
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=%s",
-		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port, cfg.SslMode)
+		address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port, cfg.SslMode)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
@@ -52,7 +59,7 @@ func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 	})
 	if err != nil {
 		log.Error("fail to connect db",
-			zap.String("host", cfg.Address),
+			zap.String("host", address),
 			zap.String("database", cfg.DBName),
 			zap.Error(err))
 		return nil, err
@@ -66,7 +73,7 @@ func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 	idb, err := db.DB()
 	if err != nil {
 		log.Error("fail to create db instance",
-			zap.String("host", cfg.Address),
+			zap.String("host", address),
 			zap.String("database", cfg.DBName),
 			zap.Error(err))
 		return nil, err
@@ -77,7 +84,7 @@ func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 	globalDB = db
 
 	log.Info("Postgres connected success",
-		zap.String("host", cfg.Address),
+		zap.String("host", address),
 		zap.String("database", cfg.DBName),
 		zap.Error(err))
 
@@ -231,7 +238,7 @@ func GetDBConfigForTesting() DBConfig {
 }
 
 func ConfigDatabaseForTesting() *gorm.DB {
-	db, err := ConnectPostgres(GetDBConfigForTesting())
+	db, err := ConnectPostgres(GetDBConfigForTesting(), false)
 	if err != nil {
 		panic("failed to connect database")
 	}

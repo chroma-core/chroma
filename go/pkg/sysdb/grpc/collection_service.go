@@ -148,6 +148,33 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	return res, nil
 }
 
+func (s *Server) GetCollectionsRead(ctx context.Context, req *coordinatorpb.GetCollectionsReadRequest) (*coordinatorpb.GetCollectionsResponse, error) {
+	collectionID := req.Id
+	collectionName := req.Name
+	tenantID := req.Tenant
+	databaseName := req.Database
+
+	res := &coordinatorpb.GetCollectionsResponse{}
+
+	parsedCollectionID, err := types.ToUniqueID(collectionID)
+	if err != nil {
+		log.Error("GetCollectionsRead failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	collections, err := s.readCoordinator.GetCollectionsRead(ctx, parsedCollectionID, collectionName, tenantID, databaseName)
+	if err != nil {
+		log.Error("GetCollectionsRead failed. ", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res.Collections = make([]*coordinatorpb.Collection, 0, len(collections))
+	for _, collection := range collections {
+		collectionpb := convertCollectionToProto(collection)
+		res.Collections = append(res.Collections, collectionpb)
+	}
+	return res, nil
+}
+
 func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckCollectionsRequest) (*coordinatorpb.CheckCollectionsResponse, error) {
 	res := &coordinatorpb.CheckCollectionsResponse{}
 	res.Deleted = make([]bool, len(req.CollectionIds))

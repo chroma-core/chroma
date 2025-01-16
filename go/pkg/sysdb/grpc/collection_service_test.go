@@ -40,7 +40,7 @@ func (suite *CollectionServiceTestSuite) SetupSuite() {
 	suite.db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default, suite.db)
+		Testing:               true}, grpcutils.Default, suite.db, nil)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
@@ -73,7 +73,7 @@ func testCollection(t *rapid.T) {
 	db := dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "memory",
-		Testing:               true}, grpcutils.Default, db)
+		Testing:               true}, grpcutils.Default, db, nil)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
@@ -304,6 +304,15 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 	suite.Len(getResp.Collections, 1)
 	suite.Equal(collectionID.String(), getResp.Collections[0].Id)
 	suite.Equal(collectionName, getResp.Collections[0].Name)
+
+	getReadReq := &coordinatorpb.GetCollectionsReadRequest{
+		Id: &collectionIDStr,
+	}
+	getReadResp, err := suite.s.GetCollectionsRead(context.Background(), getReadReq)
+	suite.NoError(err)
+	suite.Len(getReadResp.Collections, 1)
+	suite.Equal(collectionID.String(), getReadResp.Collections[0].Id)
+	suite.Equal(collectionName, getReadResp.Collections[0].Name)
 
 	// Verify the segments exist
 	getSegmentsResp, err := suite.s.GetSegments(context.Background(), &coordinatorpb.GetSegmentsRequest{

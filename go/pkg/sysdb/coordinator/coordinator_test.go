@@ -33,6 +33,7 @@ type APIsTestSuite struct {
 	databaseId        string
 	sampleCollections []*model.Collection
 	coordinator       *Coordinator
+	readCoordinator   *ReadCoordinator
 }
 
 func (suite *APIsTestSuite) SetupSuite() {
@@ -57,7 +58,12 @@ func (suite *APIsTestSuite) SetupTest() {
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
+	read_c, err := NewReadCoordinator(ctx, suite.db)
+	if err != nil {
+		suite.T().Fatalf("error creating read coordinator: %v", err)
+	}
 	suite.coordinator = c
+	suite.readCoordinator = read_c
 	for _, collection := range suite.sampleCollections {
 		_, _, errCollectionCreation := c.CreateCollection(ctx, &model.CreateCollection{
 			ID:           collection.ID,

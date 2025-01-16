@@ -36,7 +36,7 @@ func (suite *CleanupTestSuite) SetupSuite() {
 		SoftDeleteCleanupInterval:  1 * time.Second,
 		SoftDeleteMaxAge:           0,
 		SoftDeleteCleanupBatchSize: 10,
-		Testing:                    true}, grpcutils.Default, suite.db)
+		Testing:                    true}, grpcutils.Default, suite.db, nil)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
