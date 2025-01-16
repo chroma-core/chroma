@@ -1,6 +1,5 @@
 from typing import (
     Any,
-    Awaitable,
     Callable,
     cast,
     Dict,
@@ -26,6 +25,7 @@ from functools import wraps
 
 from chromadb.api.configuration import CollectionConfigurationInternal
 from pydantic import BaseModel
+from chromadb import __version__ as chromadb_version
 from chromadb.api.types import (
     Embedding,
     GetResult,
@@ -65,7 +65,6 @@ from chromadb.server.fastapi.types import (
 )
 from starlette.datastructures import Headers
 import logging
-import importlib.metadata
 
 from chromadb.telemetry.product.events import ServerStartEvent
 from chromadb.utils.fastapi import fastapi_json_response, string_to_uuid as _uuid
@@ -90,6 +89,7 @@ def rate_limit(func):
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         self = args[0]
         return await self._async_rate_limit_enforcer.rate_limit(func)(*args, **kwargs)
+
     return wrapper
 
 
@@ -243,7 +243,7 @@ class FastAPI(Server):
         schema: Dict[str, Any] = get_openapi(
             title="Chroma",
             routes=self._app.routes,
-            version=importlib.metadata.version("chromadb"),
+            version=chromadb_version,
         )
 
         for key, value in self._extra_openapi_schemas.items():
@@ -470,7 +470,9 @@ class FastAPI(Server):
         database: Optional[str],
         collection: Optional[str],
     ) -> None:
-        return await to_thread.run_sync(self.sync_auth_request, *(headers, action, tenant, database, collection))
+        return await to_thread.run_sync(
+            self.sync_auth_request, *(headers, action, tenant, database, collection)
+        )
 
     @trace_method(
         "FastAPI.sync_auth_request",
@@ -630,7 +632,6 @@ class FastAPI(Server):
                 None,
                 None,
             )
-
 
             return self._api.create_tenant(tenant.name)
 
@@ -1186,7 +1187,9 @@ class FastAPI(Server):
         collection_id: str,
         request: Request,
     ) -> QueryResult:
-        @trace_method("internal.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION)
+        @trace_method(
+            "internal.get_nearest_neighbors", OpenTelemetryGranularity.OPERATION
+        )
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 
@@ -1406,7 +1409,14 @@ class FastAPI(Server):
             (can be overwritten separately)
         - The user has access to a single tenant and/or single database.
         """
-        return await to_thread.run_sync(self.auth_and_get_tenant_and_database_for_request, headers, action, tenant, database, collection)
+        return await to_thread.run_sync(
+            self.auth_and_get_tenant_and_database_for_request,
+            headers,
+            action,
+            tenant,
+            database,
+            collection,
+        )
 
     def sync_auth_and_get_tenant_and_database_for_request(
         self,
@@ -1416,7 +1426,6 @@ class FastAPI(Server):
         database: Optional[str],
         collection: Optional[str],
     ) -> Tuple[Optional[str], Optional[str]]:
-
         if not self.authn_provider:
             add_attributes_to_current_span(
                 {
