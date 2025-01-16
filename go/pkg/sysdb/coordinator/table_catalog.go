@@ -13,6 +13,7 @@ import (
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/chroma-core/chroma/go/shared/otel"
+	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
@@ -906,8 +907,9 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFil
 	})
 
 	// Write the new version file to S3.
-	// TODO: Create the new version file name.
-	newVersionFileName := ""
+	// Format of version file name: <version>_<uuid>_flush
+	// The version should be left padded with 0s upto 6 digits.
+	newVersionFileName := fmt.Sprintf("%06d_%s_flush", flushCollectionCompaction.CurrentCollectionVersion+1, uuid.New().String())
 	err := tc.s3Store.PutVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
 	if err != nil {
 		return "", err
