@@ -374,7 +374,7 @@ func (tc *Catalog) GetCollectionSize(ctx context.Context, collectionID types.Uni
 		defer span.End()
 	}
 
-	total_records_post_compaction, err := tc.metaDomain.CollectionDb(ctx).GetCollectionSize(*types.FromUniqueID(collectionID))
+	total_records_post_compaction, err := tc.metaDomain.CollectionDb(ctx).GetCollectionSize(collectionID.String())
 	if err != nil {
 		return 0, err
 	}
