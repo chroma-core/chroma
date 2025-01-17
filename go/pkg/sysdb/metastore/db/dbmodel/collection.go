@@ -42,4 +42,5 @@ type ICollectionDb interface {
 	DeleteAll() error
 	UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
+	GetCollectionSize(collectionID string) (uint64, error)
 }

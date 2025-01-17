@@ -88,6 +88,34 @@ func (_m *ICollectionDb) GetCollectionEntry(collectionID *string, databaseName *
 	return r0, r1
 }
 
+// GetCollectionSize provides a mock function with given fields: collectionID
+func (_m *ICollectionDb) GetCollectionSize(collectionID string) (uint64, error) {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionSize")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (uint64, error)); ok {
+		return rf(collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(string) uint64); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetCollections provides a mock function with given fields: collectionID, collectionName, tenantID, databaseName, limit, offset
 func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	ret := _m.Called(collectionID, collectionName, tenantID, databaseName, limit, offset)

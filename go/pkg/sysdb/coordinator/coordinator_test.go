@@ -53,7 +53,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.db, SoftDelete)
+	c, err := NewCoordinator(ctx, SoftDelete)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -82,9 +82,9 @@ func (suite *APIsTestSuite) TearDownTest() {
 // TODO: This is not complete yet. We need to add more tests for the other APIs.
 // We will deprecate the example based tests once we have enough tests here.
 func testCollection(t *rapid.T) {
-	db := dbcore.ConfigDatabaseForTesting()
+	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db, HardDelete)
+	c, err := NewCoordinator(ctx, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -135,9 +135,9 @@ func testCollection(t *rapid.T) {
 }
 
 func testSegment(t *rapid.T) {
-	db := dbcore.ConfigDatabaseForTesting()
+	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db, HardDelete)
+	c, err := NewCoordinator(ctx, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}

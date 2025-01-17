@@ -33,7 +33,7 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	suite.db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default, suite.db)
+		Testing:               true}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
