@@ -1,9 +1,4 @@
-import {
-  expect,
-  test,
-  beforeEach,
-  describe,
-} from "@jest/globals";
+import { expect, test, beforeEach, describe } from "@jest/globals";
 import { DefaultEmbeddingFunction } from "../src";
 import { ChromaClient } from "../src";
 
@@ -38,7 +33,7 @@ describe("collection operations", () => {
 
     const [returnedCollection] = collections;
 
-    expect(returnedCollection).toEqual("test")
+    expect(returnedCollection.name).toEqual("test");
 
     expect([{ name: "test2", metadata: null }]).not.toEqual(
       expect.arrayContaining(collections),
@@ -59,7 +54,7 @@ describe("collection operations", () => {
     const collections2 = await client.listCollections();
     expect(collections2).toHaveLength(1);
     const [returnedCollection2] = collections2;
-    expect(returnedCollection2).toEqual("test2");
+    expect(returnedCollection2.name).toEqual("test2");
   });
 
   test("it should get a collection", async () => {
