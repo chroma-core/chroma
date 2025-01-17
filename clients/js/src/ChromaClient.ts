@@ -6,6 +6,7 @@ import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction"
 import { Configuration, ApiApi as DefaultApi } from "./generated";
 import type {
   ChromaClientParams,
+  CollectionMetadata,
   CollectionParams,
   ConfigOptions,
   CreateCollectionParams,
@@ -288,7 +289,7 @@ export class ChromaClient {
   }
 
   /**
-   * Lists all collections.
+   * Get all collection names.
    *
    * @returns {Promise<string[]>} A promise that resolves to a list of collection names.
    * @param {PositiveInteger} [params.limit] - Optional limit on the number of items to get.
@@ -304,7 +305,43 @@ export class ChromaClient {
    * ```
    */
   async listCollections({ limit, offset }: ListCollectionsParams = {}): Promise<
-    Collection[]
+    string[]
+  > {
+    await this.init();
+    const collections = (await this.api.listCollections(
+      this.tenant,
+      this.database,
+      limit,
+      offset,
+      this.api.options,
+    )) as Collection[];
+    return collections.map((collection) => collection.name);
+  }
+
+  /**
+   * List collection names, IDs, and metadata.
+   *
+   * @param {PositiveInteger} [params.limit] - Optional limit on the number of items to get.
+   * @param {PositiveInteger} [params.offset] - Optional offset on the items to get.
+   * @throws {Error} If there is an issue listing the collections.
+   * @returns {Promise<{ name: string, id: string, metadata?: CollectionMetadata }[]>} A promise that resolves to a list of collection names, IDs, and metadata.
+   *
+   * @example
+   * ```typescript
+   * const collections = await client.listCollectionsAndMetadata({
+   *    limit: 10,
+   *    offset: 0,
+   * });
+   */
+  async listCollectionsAndMetadata({
+    limit,
+    offset,
+  }: ListCollectionsParams = {}): Promise<
+    {
+      name: string;
+      id: string;
+      metadata?: CollectionMetadata;
+    }[]
   > {
     await this.init();
     return (await this.api.listCollections(
@@ -313,7 +350,7 @@ export class ChromaClient {
       limit,
       offset,
       this.api.options,
-    )) as Collection[];
+    )) as CollectionParams[];
   }
 
   /**

@@ -22,6 +22,16 @@ describe("collection operations", () => {
     expect(collections).toHaveLength(1);
   });
 
+  test("it should list collections with metadata", async () => {
+    await client.createCollection({ name: "test", metadata: { test: "test" } });
+    const collections = await client.listCollectionsAndMetadata();
+    expect(collections).toHaveLength(1);
+    const [collection] = collections;
+    expect(collection).toHaveProperty("metadata");
+    expect(collection.metadata).toHaveProperty("test");
+    expect(collection.metadata).toEqual({ test: "test" });
+  });
+
   test("it should create a collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     expect(collection).toBeDefined();
@@ -33,7 +43,7 @@ describe("collection operations", () => {
 
     const [returnedCollection] = collections;
 
-    expect(returnedCollection.name).toEqual("test");
+    expect(returnedCollection).toEqual("test");
 
     expect([{ name: "test2", metadata: null }]).not.toEqual(
       expect.arrayContaining(collections),
@@ -54,7 +64,7 @@ describe("collection operations", () => {
     const collections2 = await client.listCollections();
     expect(collections2).toHaveLength(1);
     const [returnedCollection2] = collections2;
-    expect(returnedCollection2.name).toEqual("test2");
+    expect(returnedCollection2).toEqual("test2");
   });
 
   test("it should get a collection", async () => {
