@@ -25,8 +25,7 @@ type CollectionDbTestSuite struct {
 
 func (suite *CollectionDbTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
-	suite.read_db = dbcore.ConfigReadDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	suite.collectionDb = &collectionDb{
 		db:      suite.db,
 		read_db: suite.read_db,

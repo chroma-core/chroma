@@ -30,7 +30,7 @@ type TenantDatabaseServiceTestSuite struct {
 
 func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, _ = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
 		Testing:               true}, grpcutils.Default)

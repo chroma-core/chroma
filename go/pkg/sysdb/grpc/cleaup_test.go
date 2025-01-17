@@ -30,8 +30,7 @@ type CleanupTestSuite struct {
 
 func (suite *CleanupTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
-	suite.read_db = dbcore.ConfigReadDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider:      "database",
 		SoftDeleteEnabled:          true,

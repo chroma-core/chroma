@@ -38,8 +38,7 @@ type APIsTestSuite struct {
 
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
-	suite.read_db = dbcore.ConfigReadDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 }
 
 func (suite *APIsTestSuite) SetupTest() {

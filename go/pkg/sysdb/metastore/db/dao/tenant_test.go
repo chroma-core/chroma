@@ -21,7 +21,7 @@ type TenantDbTestSuite struct {
 
 func (suite *TenantDbTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, _ = dbcore.ConfigDatabaseForTesting()
 	suite.Db = &tenantDb{
 		db: suite.db,
 	}

@@ -99,15 +99,6 @@ func ConnectPostgres(address string, username string, password string, port int,
 	return db, nil
 }
 
-// SetGlobalDB Only for test
-func SetGlobalDB(db *gorm.DB) {
-	globalDB = db
-}
-
-func SetGlobalReadDB(db *gorm.DB) {
-	globalReadDB = db
-}
-
 type ctxTransactionKey struct{}
 
 func CtxWithTransaction(ctx context.Context, tx *gorm.DB) context.Context {
@@ -265,18 +256,15 @@ func GetDBConfigForTesting() DBConfig {
 	}
 }
 
-func ConfigDatabaseForTesting() *gorm.DB {
+func ConfigDatabaseForTesting() (*gorm.DB, *gorm.DB) {
 	cfg := GetDBConfigForTesting()
 	db, err := ConnectPostgres(cfg.Address, cfg.Username, cfg.Password, cfg.Port, cfg.DBName, cfg.SslMode, cfg.MaxIdleConns, cfg.MaxOpenConns)
 	if err != nil {
 		panic("failed to connect database")
 	}
-	SetGlobalDB(db)
+	globalDB = db
+	// For testing, we set the read_db to be the same as the db
+	globalReadDB = db
 	CreateTestTables(db)
-	return db
-}
-
-func ConfigReadDatabaseForTesting() *gorm.DB {
-	globalReadDB = globalDB
-	return globalReadDB
+	return globalDB, globalReadDB
 }
