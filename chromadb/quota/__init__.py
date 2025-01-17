@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from enum import Enum
 from typing import Dict, Any, Optional
+from uuid import UUID
 
 from chromadb.api.types import (
     Embeddings,
@@ -62,6 +63,7 @@ class QuotaEnforcer(Component):
         where_document: Optional[WhereDocument] = None,
         n_results: Optional[int] = None,
         query_embeddings: Optional[Embeddings] = None,
+        collection_id: Optional[UUID] = None,
     ) -> None:
         """
         Enforces a quota.
