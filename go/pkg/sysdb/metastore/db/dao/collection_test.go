@@ -220,7 +220,6 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionSize() {
 	suite.NoError(err)
 	suite.Equal(uint64(100), total_records_post_compaction)
 
-	// clean up
 	err = CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)
 }

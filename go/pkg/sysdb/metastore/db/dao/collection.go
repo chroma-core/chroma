@@ -153,9 +153,7 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 		return 0, err
 	}
 
-	var (
-		totalRecordsPostCompaction uint64
-	)
+	var totalRecordsPostCompaction uint64
 
 	for rows.Next() {
 		err := rows.Scan(&totalRecordsPostCompaction)

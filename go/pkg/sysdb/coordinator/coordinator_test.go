@@ -25,6 +25,7 @@ import (
 type APIsTestSuite struct {
 	suite.Suite
 	db                *gorm.DB
+	read_db           *gorm.DB
 	collectionId1     types.UniqueID
 	collectionId2     types.UniqueID
 	records           [][]byte
@@ -38,6 +39,7 @@ type APIsTestSuite struct {
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.read_db = dbcore.ConfigReadDatabaseForTesting()
 }
 
 func (suite *APIsTestSuite) SetupTest() {
