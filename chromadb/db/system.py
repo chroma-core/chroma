@@ -165,3 +165,8 @@ class SysDB(Component):
         keys with None values will be removed and keys not present in the UpdateMetadata
         dict will be left unchanged."""
         pass
+
+    @abstractmethod
+    def get_collection_size(self, id: UUID) -> int:
+        """Returns the number of records in a collection."""
+        pass

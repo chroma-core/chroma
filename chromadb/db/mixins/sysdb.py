@@ -961,3 +961,7 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             cur.execute(sql, params)
         return configuration
+
+    @override
+    def get_collection_size(self, id: UUID) -> int:
+        raise NotImplementedError

@@ -421,6 +421,7 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
+    @overrides
     def get_collection_size(self, id: UUID) -> int:
         try:
             request = GetCollectionSizeRequest(id=id.hex)
