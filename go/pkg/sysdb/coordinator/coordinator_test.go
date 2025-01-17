@@ -495,6 +495,16 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	suite.Empty(segments)
 }
 
+func (suite *APIsTestSuite) TestCollectionSize() {
+	ctx := context.Background()
+
+	for _, collection := range suite.sampleCollections {
+		result, err := suite.coordinator.GetCollectionSize(ctx, collection.ID)
+		suite.NoError(err)
+		suite.Equal(uint64(0), result)
+	}
+}
+
 func (suite *APIsTestSuite) TestUpdateCollections() {
 	ctx := context.Background()
 	coll := &model.Collection{

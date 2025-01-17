@@ -137,3 +137,17 @@ func TestCatalog_GetCollections(t *testing.T) {
 	// assert that the mock methods were called as expected
 	mockMetaDomain.AssertExpectations(t)
 }
+
+func TestCatalog_GetCollectionSize(t *testing.T) {
+	mockMetaDomain := &mocks.IMetaDomain{}
+	catalog := NewTableCatalog(nil, mockMetaDomain)
+	collectionID := types.MustParse("00000000-0000-0000-0000-000000000001")
+	mockMetaDomain.On("CollectionDb", context.Background()).Return(&mocks.ICollectionDb{})
+	var total_records_post_compaction uint64 = uint64(100)
+	mockMetaDomain.CollectionDb(context.Background()).(*mocks.ICollectionDb).On("GetCollectionSize", *types.FromUniqueID(collectionID)).Return(total_records_post_compaction, nil)
+	collection_size, err := catalog.GetCollectionSize(context.Background(), collectionID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, total_records_post_compaction, collection_size)
+	mockMetaDomain.AssertExpectations(t)
+}
