@@ -361,6 +361,14 @@ message RestoreCollectionResponse {
   int64 new_collection_version = 1;
 }
 
+message GetCollectionSizeRequest {
+  string id = 1;
+}
+
+message GetCollectionSizeResponse {
+  uint64 total_records_post_compaction = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -384,4 +392,5 @@ service SysDB {
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc RestoreCollection(RestoreCollectionRequest) returns (RestoreCollectionResponse) {}
   rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
+  rpc GetCollectionSize(GetCollectionSizeRequest) returns (GetCollectionSizeResponse) {}
 }

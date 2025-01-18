@@ -118,12 +118,13 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 
 	defaultConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	err := collectionDb.Insert(&dbmodel.Collection{
-		ID:                   collectionId,
-		Name:                 &collectionName,
-		ConfigurationJsonStr: &defaultConfigurationJsonStr,
-		Dimension:            &dimension,
-		DatabaseID:           databaseID,
-		CreatedAt:            time.Now(),
+		ID:                         collectionId,
+		Name:                       &collectionName,
+		ConfigurationJsonStr:       &defaultConfigurationJsonStr,
+		Dimension:                  &dimension,
+		DatabaseID:                 databaseID,
+		CreatedAt:                  time.Now(),
+		TotalRecordsPostCompaction: uint64(100),
 	})
 	if err != nil {
 		return "", err

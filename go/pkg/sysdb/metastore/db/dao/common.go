@@ -22,7 +22,7 @@ func (*MetaDomain) TenantDb(ctx context.Context) dbmodel.ITenantDb {
 }
 
 func (*MetaDomain) CollectionDb(ctx context.Context) dbmodel.ICollectionDb {
-	return &collectionDb{dbcore.GetDB(ctx)}
+	return &collectionDb{dbcore.GetDB(ctx), dbcore.GetReadDB(ctx)}
 }
 
 func (*MetaDomain) CollectionMetadataDb(ctx context.Context) dbmodel.ICollectionMetadataDb {

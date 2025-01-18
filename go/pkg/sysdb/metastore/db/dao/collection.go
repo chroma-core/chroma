@@ -16,7 +16,8 @@ import (
 )
 
 type collectionDb struct {
-	db *gorm.DB
+	db      *gorm.DB
+	read_db *gorm.DB
 }
 
 var _ dbmodel.ICollectionDb = &collectionDb{}
@@ -140,6 +141,29 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	return
+}
+
+func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
+	query := s.read_db.Table("collections").
+		Select("collections.total_records_post_compaction").
+		Where("collections.id = ?", id)
+
+	rows, err := query.Rows()
+	if err != nil {
+		return 0, err
+	}
+
+	var totalRecordsPostCompaction uint64
+
+	for rows.Next() {
+		err := rows.Scan(&totalRecordsPostCompaction)
+		if err != nil {
+			log.Error("scan collection failed", zap.Error(err))
+			return 0, err
+		}
+	}
+	rows.Close()
+	return totalRecordsPostCompaction, nil
 }
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {

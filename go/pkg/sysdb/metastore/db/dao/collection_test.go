@@ -16,6 +16,7 @@ import (
 type CollectionDbTestSuite struct {
 	suite.Suite
 	db           *gorm.DB
+	read_db      *gorm.DB
 	collectionDb *collectionDb
 	tenantName   string
 	databaseName string
@@ -24,9 +25,10 @@ type CollectionDbTestSuite struct {
 
 func (suite *CollectionDbTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	suite.collectionDb = &collectionDb{
-		db: suite.db,
+		db:      suite.db,
+		read_db: suite.read_db,
 	}
 	suite.tenantName = "test_collection_tenant"
 	suite.databaseName = "test_collection_database"
@@ -75,7 +77,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Len(collections[0].CollectionMetadata, 1)
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
-	suite.Equal(uint64(0), collections[0].Collection.TotalRecordsPostCompaction)
+	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
 
 	// Test when filtering by ID
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -205,6 +207,19 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	err = CleanUpTestCollection(suite.db, collectionID1)
 	suite.NoError(err)
 	err = CleanUpTestCollection(suite.db, collectionID2)
+	suite.NoError(err)
+}
+
+func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionSize() {
+	collectionName := "test_collection_get_collection_size"
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	suite.NoError(err)
+
+	total_records_post_compaction, err := suite.collectionDb.GetCollectionSize(collectionID)
+	suite.NoError(err)
+	suite.Equal(uint64(100), total_records_post_compaction)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)
 }
 

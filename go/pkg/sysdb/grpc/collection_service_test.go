@@ -29,6 +29,7 @@ type CollectionServiceTestSuite struct {
 	suite.Suite
 	catalog      *coordinator.Catalog
 	db           *gorm.DB
+	read_db      *gorm.DB
 	s            *Server
 	tenantName   string
 	databaseName string
@@ -37,10 +38,10 @@ type CollectionServiceTestSuite struct {
 
 func (suite *CollectionServiceTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default, suite.db)
+		Testing:               true}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
@@ -70,10 +71,10 @@ func (suite *CollectionServiceTestSuite) TearDownSuite() {
 // Collection created should have the right ID
 // Collection created should have the right timestamp
 func testCollection(t *rapid.T) {
-	db := dbcore.ConfigDatabaseForTesting()
+	dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "memory",
-		Testing:               true}, grpcutils.Default, db)
+		Testing:               true}, grpcutils.Default)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
@@ -472,6 +473,22 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	validateDatabase(suite, collectionID, collection, filePaths)
 
 	// clean up
+	err = dao.CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
+	collectionName := "collection_service_test_get_collection_size"
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	suite.NoError(err)
+
+	req := coordinatorpb.GetCollectionSizeRequest{
+		Id: collectionID,
+	}
+	res, err := suite.s.GetCollectionSize(context.Background(), &req)
+	suite.NoError(err)
+	suite.Equal(uint64(100), res.TotalRecordsPostCompaction)
+
 	err = dao.CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)
 }
