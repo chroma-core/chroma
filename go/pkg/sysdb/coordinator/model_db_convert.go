@@ -33,6 +33,27 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 	return collections
 }
 
+func convertCollectionToGcToModel(collectionToGc []*dbmodel.CollectionToGc) []*model.CollectionToGc {
+	if collectionToGc == nil {
+		return nil
+	}
+	collections := make([]*model.CollectionToGc, 0, len(collectionToGc))
+	// TODO(Sanket): Set version file path.
+	for _, collectionInfo := range collectionToGc {
+		// Skip collections that haven't been compacted even once.
+		if collectionInfo.Version == 0 {
+			continue
+		}
+		collection := model.CollectionToGc{
+			ID:              types.MustParse(collectionInfo.ID),
+			Name:            collectionInfo.Name,
+			VersionFilePath: "",
+		}
+		collections = append(collections, &collection)
+	}
+	return collections
+}
+
 func convertCollectionMetadataToModel(collectionMetadataList []*dbmodel.CollectionMetadata) *model.CollectionMetadata[model.CollectionMetadataValueType] {
 	metadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	if collectionMetadataList == nil {

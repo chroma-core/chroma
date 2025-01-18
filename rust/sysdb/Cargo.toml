@@ -21,6 +21,7 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
+uuid = { workspace = true }
 parking_lot = { workspace = true }
 
 chroma-config = { workspace = true }

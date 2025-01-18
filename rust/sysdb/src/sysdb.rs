@@ -18,6 +18,7 @@ use tonic::service::interceptor;
 use tonic::transport::Endpoint;
 use tonic::Request;
 use tonic::Status;
+use uuid::{Error, Uuid};
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -43,6 +44,15 @@ impl SysDb {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
             }
+        }
+    }
+
+    pub async fn get_collections_to_gc(
+        &mut self,
+    ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc().await,
+            SysDb::Test(_) => todo!(),
         }
     }
 
@@ -170,6 +180,47 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
     }
 }
 
+#[allow(dead_code)]
+pub struct CollectionToGcInfo {
+    id: CollectionUuid,
+    name: String,
+    version_file_path: String,
+}
+
+#[derive(Debug, Error)]
+pub enum GetCollectionsToGcError {
+    #[error("Failed to parse uuid")]
+    ParsingError(#[from] Error),
+    #[error("Grpc request failed")]
+    RequestFailed(#[from] tonic::Status),
+}
+
+impl ChromaError for GetCollectionsToGcError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionsToGcError::ParsingError(_) => ErrorCodes::Internal,
+            GetCollectionsToGcError::RequestFailed(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
+    type Error = GetCollectionsToGcError;
+
+    fn try_from(value: chroma_proto::CollectionToGcInfo) -> Result<Self, Self::Error> {
+        let collection_uuid = match Uuid::try_parse(&value.id) {
+            Ok(uuid) => uuid,
+            Err(e) => return Err(GetCollectionsToGcError::ParsingError(e)),
+        };
+        let collection_id = CollectionUuid(collection_uuid);
+        Ok(CollectionToGcInfo {
+            id: collection_id,
+            name: value.name,
+            version_file_path: value.version_file_path,
+        })
+    }
+}
+
 impl GrpcSysDb {
     async fn get_collections(
         &mut self,
@@ -207,6 +258,25 @@ impl GrpcSysDb {
                 }
             }
             Err(e) => Err(GetCollectionsError::FailedToGetCollections(e)),
+        }
+    }
+
+    pub async fn get_collections_to_gc(
+        &mut self,
+    ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
+        let res = self
+            .client
+            .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {})
+            .await;
+
+        match res {
+            Ok(collections) => collections
+                .into_inner()
+                .collections
+                .into_iter()
+                .map(|collection| collection.try_into())
+                .collect::<Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError>>(),
+            Err(e) => Err(GetCollectionsToGcError::RequestFailed(e)),
         }
     }
 

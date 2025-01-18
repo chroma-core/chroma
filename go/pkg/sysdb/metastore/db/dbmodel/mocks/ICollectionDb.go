@@ -194,6 +194,36 @@ func (_m *ICollectionDb) Insert(in *dbmodel.Collection) error {
 	return r0
 }
 
+// ListCollectionsToGc provides a mock function with given fields:
+func (_m *ICollectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCollectionsToGc")
+	}
+
+	var r0 []*dbmodel.CollectionToGc
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]*dbmodel.CollectionToGc, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []*dbmodel.CollectionToGc); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.CollectionToGc)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Update provides a mock function with given fields: in
 func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 	ret := _m.Called(in)
