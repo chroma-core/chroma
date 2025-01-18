@@ -83,8 +83,13 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         _message: GarbageCollectMessage,
         _ctx: &ComponentContext<Self>,
     ) -> Self::Result {
-        // TODO(Sanket): Implement the garbage collection logic.
-        todo!()
+        // Get all collections to gc and create gc orchestrator for each.
+        let _ = self
+            .sysdb_client
+            .get_collections_to_gc()
+            .await
+            .expect("Failed to get collections to gc");
+        // TODO(Sanket):  Implement the logic to create gc orchestrator for each collection.
     }
 }
 

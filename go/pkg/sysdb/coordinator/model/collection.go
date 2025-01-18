@@ -18,6 +18,12 @@ type Collection struct {
 	UpdatedAt            types.Timestamp
 }
 
+type CollectionToGc struct {
+	ID              types.UniqueID
+	Name            string
+	VersionFilePath string
+}
+
 type CreateCollection struct {
 	ID                   types.UniqueID
 	Name                 string

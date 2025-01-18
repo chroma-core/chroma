@@ -20,6 +20,12 @@ type Collection struct {
 	Version              int32           `gorm:"version;default:0"`
 }
 
+type CollectionToGc struct {
+	ID      string `gorm:"id;primaryKey"`
+	Name    string `gorm:"name;not null;index:idx_name,unique;"`
+	Version int32  `gorm:"version;default:0"`
+}
+
 func (v Collection) TableName() string {
 	return "collections"
 }
@@ -41,4 +47,5 @@ type ICollectionDb interface {
 	DeleteAll() error
 	UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
+	ListCollectionsToGc() ([]*CollectionToGc, error)
 }

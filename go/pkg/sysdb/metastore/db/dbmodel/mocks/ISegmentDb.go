@@ -82,6 +82,36 @@ func (_m *ISegmentDb) GetSegments(id types.UniqueID, segmentType *string, scope 
 	return r0, r1
 }
 
+// GetSegmentsByCollectionID provides a mock function with given fields: collectionID
+func (_m *ISegmentDb) GetSegmentsByCollectionID(collectionID string) ([]*dbmodel.Segment, error) {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSegmentsByCollectionID")
+	}
+
+	var r0 []*dbmodel.Segment
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]*dbmodel.Segment, error)); ok {
+		return rf(collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(string) []*dbmodel.Segment); ok {
+		r0 = rf(collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.Segment)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Insert provides a mock function with given fields: _a0
 func (_m *ISegmentDb) Insert(_a0 *dbmodel.Segment) error {
 	ret := _m.Called(_a0)
