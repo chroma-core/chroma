@@ -28,6 +28,8 @@ from chromadb.proto.coordinator_pb2 import (
     DeleteSegmentResponse,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetCollectionSizeRequest,
+    GetCollectionSizeResponse,
     GetCollectionWithSegmentsRequest,
     GetCollectionWithSegmentsResponse,
     GetDatabaseRequest,
@@ -370,6 +372,12 @@ class GrpcMockSysDB(SysDBServicer, Component):
             collections=[
                 to_proto_collection(collection) for collection in found_collections
             ]
+        )
+    
+    @overrides(check_signature=False)
+    def GetCollectionSize(self, request: GetCollectionSizeRequest, context: grpc.ServicerContext) -> GetCollectionSizeResponse:        
+        return GetCollectionSizeResponse(
+            total_records_post_compaction = 0,
         )
 
     @overrides(check_signature=False)

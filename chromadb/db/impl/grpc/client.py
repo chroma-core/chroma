@@ -22,6 +22,8 @@ from chromadb.proto.coordinator_pb2 import (
     DeleteSegmentRequest,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetCollectionSizeRequest,
+    GetCollectionSizeResponse,
     GetCollectionWithSegmentsRequest,
     GetCollectionWithSegmentsResponse,
     GetDatabaseRequest,
@@ -419,7 +421,21 @@ class GrpcSysDB(SysDB):
             )
             raise InternalError()
 
-    @trace_method("SysDB.get_collection_with_segments", OpenTelemetryGranularity.OPERATION)
+    @overrides
+    def get_collection_size(self, id: UUID) -> int:
+        try:
+            request = GetCollectionSizeRequest(id=id.hex)
+            response: GetCollectionSizeResponse = self._sys_db_stub.GetCollectionSize(
+                request
+            )
+            return response.total_records_post_compaction
+        except grpc.RpcError as e:
+            logger.error(f"Failed to get collection {id} size due to error: {e}")
+            raise InternalError()
+
+    @trace_method(
+        "SysDB.get_collection_with_segments", OpenTelemetryGranularity.OPERATION
+    )
     @overrides
     def get_collection_with_segments(
         self, collection_id: UUID
