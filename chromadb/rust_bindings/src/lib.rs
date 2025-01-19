@@ -1,8 +1,11 @@
 use async_trait::async_trait;
 use chroma_sysdb::sqlite_sysdb::SqliteSysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
+use chroma_types::UserIdentity;
 use pyo3::{exceptions::PyOSError, prelude::*, types::PyType};
 use std::time::SystemTime;
+
+// TODO: Add modules to pyclass macro
 
 /////////////////////////////// ServerAPI ///////////////////////////////
 
@@ -24,9 +27,12 @@ impl ServerAPI {
         name: &str,
         tenant: Option<&str>,
     ) -> Result<(), String> {
-        // TODO: copy validation from python
-        println!("Creating database: {} for tenant: {:?}", name, tenant);
+        // TODO: copy validation from python (validation should be shoved into sysdb ideally)
         self.sysdb.create_database(id, name, tenant).await
+    }
+
+    fn get_user_identity(&self) -> UserIdentity {
+        UserIdentity::default()
     }
 }
 
@@ -62,6 +68,20 @@ impl Handler<CreateDatabaseMessage> for ServerAPI {
     }
 }
 
+#[derive(Debug)]
+struct GetUserIdentityMessage;
+#[async_trait]
+impl Handler<GetUserIdentityMessage> for ServerAPI {
+    type Result = UserIdentity;
+    async fn handle(
+        &mut self,
+        _message: GetUserIdentityMessage,
+        _ctx: &ComponentContext<Self>,
+    ) -> Self::Result {
+        self.get_user_identity()
+    }
+}
+
 ///////////////////////////// Python Bindings ///////////////////////////////
 
 #[pyclass]
@@ -80,11 +100,10 @@ impl Bindings {
     #[new]
     fn new() -> Self {
         // TODO: runtime config
-        println!("Creating new runtime");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
 
-        // TODO: user should share a directory
+        // TODO: user should provide a directory not a path
         // TODO: do we create dir if not exists?
         // TODO: bootstrapping client to create this
         let hack_path = "/Users/hammad/Documents/chroma/chroma/chroma_rust_bindings.sqlite3";
@@ -96,6 +115,16 @@ impl Bindings {
             server_api_handle,
             runtime,
         }
+    }
+
+    /// Returns the current eopch time in ns
+    fn heartbeat(&self) -> PyResult<u128> {
+        let duration_since_epoch =
+            match std::time::SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                Ok(duration) => duration,
+                Err(_) => return Err(PyOSError::new_err("Failed to get system time")),
+            };
+        Ok(duration_since_epoch.as_nanos())
     }
 
     fn create_database(&self, id: String, name: String, tenant: String) -> PyResult<()> {
@@ -118,24 +147,22 @@ impl Bindings {
             Err(e) => Err(PyOSError::new_err(e.to_string())),
         }
     }
-}
 
-/// Returns the current eopch time in ns
-#[pyfunction]
-fn heartbeat() -> PyResult<u128> {
-    let duration_since_epoch =
-        match std::time::SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-            Ok(duration) => duration,
-            Err(_) => return Err(PyOSError::new_err("Failed to get system time")),
-        };
-    Ok(duration_since_epoch.as_nanos())
+    fn get_user_identity(&self) -> PyResult<UserIdentity> {
+        let result = self
+            .runtime
+            .block_on(self.server_api_handle.request(GetUserIdentityMessage, None));
+        match result {
+            Ok(user_identity) => Ok(user_identity),
+            Err(e) => Err(PyOSError::new_err(e.to_string())),
+        }
+    }
 }
 
 /// A Python module implemented in Rust.
 /// TODO: reason about GIL
 #[pymodule]
 fn rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(heartbeat, m)?)?;
     m.add_class::<Bindings>()?;
     Ok(())
 }

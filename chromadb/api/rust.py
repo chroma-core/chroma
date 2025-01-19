@@ -1,18 +1,19 @@
 from chromadb.api import ServerAPI
 from chromadb.config import DEFAULT_TENANT, System
 from overrides import override
-import rust_bindings
+from rust_bindings import Bindings
 
 
 class RustBindingsAPI(ServerAPI):
     def __init__(self, system: System):
         super().__init__(system)
+        self.bindings = Bindings()
 
     @override
     def heartbeat(self) -> int:
         # TODO: add pyi file for types
-        return rust_bindings.heartbeat(1)  # type: ignore
+        return self.bindings.heartbeat()  # type: ignore
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        rust_bindings.create_database(name, tenant)
+        self.bindings.create_database(name, tenant)
