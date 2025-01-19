@@ -99,6 +99,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     def start(self) -> None:
         super().start()
         with self.tx() as cur:
+            # NOTE(hammadb) foreign_keys on is a no-op in a transaction
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()

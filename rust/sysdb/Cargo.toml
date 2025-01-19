@@ -27,3 +27,9 @@ chroma-config = { workspace = true }
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
 sqlx = { version = "0.8.3", features = [ "runtime-tokio",  "sqlite"] }
+regex = "1.11.1"
+sha2 = "0.10.8"
+md5 = "0.7.0"
+
+[dev-dependencies]
+tempfile = { workspace = true }
