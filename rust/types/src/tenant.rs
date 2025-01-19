@@ -1,6 +1,10 @@
 use crate::chroma_proto::TenantLastCompactionTime;
+use pyo3::pyclass;
 
+#[derive(Debug, PartialEq)]
+#[pyclass]
 pub struct Tenant {
+    #[pyo3(get)]
     pub id: String,
     pub last_compaction_time: i64,
 }

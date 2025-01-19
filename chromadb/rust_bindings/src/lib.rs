@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chroma_sysdb::sqlite_sysdb::SqliteSysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
-use chroma_types::UserIdentity;
+use chroma_types::{Database, Tenant, UserIdentity};
 use pyo3::{exceptions::PyOSError, prelude::*, types::PyType};
 use std::time::SystemTime;
 
@@ -31,6 +31,18 @@ impl ServerAPI {
         self.sysdb.create_database(id, name, tenant).await
     }
 
+    async fn get_database(&self, name: &str, tenant: &str) -> Result<Database, String> {
+        self.sysdb.get_database(name, Some(tenant)).await
+    }
+
+    async fn create_tenant(&self, name: &str) -> Result<Tenant, String> {
+        self.sysdb.create_tenant(name).await
+    }
+
+    async fn get_tenant(&self, name: &str) -> Result<Tenant, String> {
+        self.sysdb.get_tenant(name).await
+    }
+
     fn get_user_identity(&self) -> UserIdentity {
         UserIdentity::default()
     }
@@ -54,7 +66,6 @@ struct CreateDatabaseMessage {
     name: String,
     tenant: Option<String>,
 }
-
 #[async_trait]
 impl Handler<CreateDatabaseMessage> for ServerAPI {
     type Result = Result<(), String>;
@@ -65,6 +76,56 @@ impl Handler<CreateDatabaseMessage> for ServerAPI {
     ) -> Self::Result {
         self.create_database(message.id, &message.name, message.tenant.as_deref())
             .await
+    }
+}
+
+#[derive(Debug)]
+struct GetDatabaseMessage {
+    name: String,
+    tenant: String,
+}
+#[async_trait]
+impl Handler<GetDatabaseMessage> for ServerAPI {
+    type Result = Result<Database, String>;
+    async fn handle(
+        &mut self,
+        message: GetDatabaseMessage,
+        _ctx: &ComponentContext<Self>,
+    ) -> Self::Result {
+        self.get_database(&message.name, &message.tenant).await
+    }
+}
+
+#[derive(Debug)]
+struct CreateTenantMessage {
+    name: String,
+}
+
+#[async_trait]
+impl Handler<CreateTenantMessage> for ServerAPI {
+    type Result = Result<Tenant, String>;
+    async fn handle(
+        &mut self,
+        message: CreateTenantMessage,
+        _ctx: &ComponentContext<Self>,
+    ) -> Self::Result {
+        self.create_tenant(&message.name).await
+    }
+}
+
+#[derive(Debug)]
+struct GetTenantMessage {
+    name: String,
+}
+#[async_trait]
+impl Handler<GetTenantMessage> for ServerAPI {
+    type Result = Result<Tenant, String>;
+    async fn handle(
+        &mut self,
+        _message: GetTenantMessage,
+        _ctx: &ComponentContext<Self>,
+    ) -> Self::Result {
+        self.get_tenant(&_message.name).await
     }
 }
 
@@ -142,6 +203,52 @@ impl Bindings {
         match result {
             Ok(inner) => match inner {
                 Ok(_) => Ok(()),
+                Err(e) => Err(PyOSError::new_err(e)),
+            },
+            Err(e) => Err(PyOSError::new_err(e.to_string())),
+        }
+    }
+
+    fn get_database(&self, name: String, tenant: String) -> PyResult<Database> {
+        let result = self.runtime.block_on(
+            self.server_api_handle
+                .request(GetDatabaseMessage { name, tenant }, None),
+        );
+
+        // TODO: error handling
+        match result {
+            Ok(database) => match database {
+                Ok(database) => Ok(database),
+                Err(e) => Err(PyOSError::new_err(e)),
+            },
+            Err(e) => Err(PyOSError::new_err(e.to_string())),
+        }
+    }
+
+    fn create_tenant(&self, name: String) -> PyResult<Tenant> {
+        let result = self.runtime.block_on(
+            self.server_api_handle
+                .request(CreateTenantMessage { name }, None),
+        );
+
+        // TODO: error handling
+        match result {
+            Ok(tenant) => match tenant {
+                Ok(tenant) => Ok(tenant),
+                Err(e) => Err(PyOSError::new_err(e)),
+            },
+            Err(e) => Err(PyOSError::new_err(e.to_string())),
+        }
+    }
+
+    fn get_tenant(&self, name: String) -> PyResult<Tenant> {
+        let result = self.runtime.block_on(
+            self.server_api_handle
+                .request(GetTenantMessage { name }, None),
+        );
+        match result {
+            Ok(tenant) => match tenant {
+                Ok(tenant) => Ok(tenant),
                 Err(e) => Err(PyOSError::new_err(e)),
             },
             Err(e) => Err(PyOSError::new_err(e.to_string())),

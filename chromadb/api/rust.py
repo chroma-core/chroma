@@ -40,7 +40,8 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
-        raise NotImplementedError()
+        # TODO: type
+        return self.bindings.get_database(name, tenant)  # type: ignore
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -57,11 +58,13 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def create_tenant(self, name: str) -> None:
-        raise NotImplementedError()
+        # TODO: type
+        self.bindings.create_tenant(name)
 
     @override
     def get_tenant(self, name: str) -> Tenant:
-        raise NotImplementedError()
+        # TODO: type
+        return self.bindings.get_tenant(name)  # type: ignore
 
     # ////////////////////////////// Base API //////////////////////////////
 
