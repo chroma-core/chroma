@@ -1,4 +1,5 @@
 pub mod config;
+mod sqlite;
 #[allow(clippy::module_inception)]
 pub mod sysdb;
 pub mod test_sysdb;

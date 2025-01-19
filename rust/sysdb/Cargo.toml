@@ -26,3 +26,4 @@ parking_lot = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
+sqlx = { version = "0.8.3", features = [ "runtime-tokio",  "sqlite"] }
