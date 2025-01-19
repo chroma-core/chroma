@@ -124,7 +124,7 @@ class Settings(BaseSettings):  # type: ignore
 
     environment: str = ""
 
-    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
+    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
     chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
 
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)

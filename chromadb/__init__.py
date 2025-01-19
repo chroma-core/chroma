@@ -14,8 +14,11 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     IDs,
+    URI,
+    URIs,
     Include,
     Metadata,
+    Metadatas,
     Where,
     QueryResult,
     GetResult,
@@ -27,10 +30,13 @@ from chromadb.api.types import (
 __all__ = [
     "Collection",
     "Metadata",
+    "Metadatas",
     "Where",
     "WhereDocument",
     "Documents",
     "IDs",
+    "URI",
+    "URIs",
     "Embeddings",
     "EmbeddingFunction",
     "Include",
@@ -46,6 +52,7 @@ logger = logging.getLogger(__name__)
 __settings = Settings()
 
 __version__ = "0.6.3"
+
 
 # Workaround to deal with Colab's old sqlite3 version
 def is_in_colab() -> bool:
@@ -146,6 +153,25 @@ def PersistentClient(
     settings.is_persistent = True
 
     # Make sure paramaters are the correct types -- users can pass anything.
+    tenant = str(tenant)
+    database = str(database)
+
+    return ClientCreator(tenant=tenant, database=database, settings=settings)
+
+
+def RustClient(
+    path: str = "./chroma",
+    settings: Optional[Settings] = None,
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
+) -> ClientAPI:
+    if settings is None:
+        settings = Settings()
+    settings.chroma_api_impl = "chromadb.api.rust.RustBindingsAPI"
+    settings.is_persistent = True
+
+    # Make sure paramaters are the correct types -- users can pass anything.
+    # TODO: This should be done differently
     tenant = str(tenant)
     database = str(database)
 

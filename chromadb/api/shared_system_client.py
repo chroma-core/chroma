@@ -61,6 +61,16 @@ class SharedSystemClient:
         ]:
             # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
             identifier = str(uuid.uuid4())
+        elif api_impl == "chromadb.api.rust.RustBindingsAPI":
+            # The rust bindings are the same for this purpose as the SegmentAPI
+            # they must have a unique system per path so that the underlying database can be shared
+            # TODO: unify this with the first branch, its identical and only broken out for hacking
+            if settings.is_persistent:
+                identifier = settings.persist_directory
+            else:
+                identifier = (
+                    "ephemeral"  # TODO: support pathing and multiple ephemeral clients
+                )
         else:
             raise ValueError(f"Unsupported Chroma API implementation {api_impl}")
 
