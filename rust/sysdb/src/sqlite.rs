@@ -28,7 +28,7 @@ enum MigrationMode {
 
 // TODO:
 // - support memory mode, add concurrency tests
-struct SqliteDb {
+pub(crate) struct SqliteDb {
     conn: SqlitePool,
     config: SqliteDBConfig,
     filename_regex: regex::Regex,
@@ -104,6 +104,12 @@ impl SqliteDb {
         Ok(db)
     }
 
+    //////////////////////// Public API ////////////////////////
+
+    pub(crate) fn get_conn(&self) -> &SqlitePool {
+        &self.conn
+    }
+
     //////////////////////// Migrations ////////////////////////
 
     // TODO: Real error
@@ -113,15 +119,10 @@ impl SqliteDb {
     async fn apply_migrations(&self, migrations: Vec<Migration>) -> Result<(), String> {
         let mut tx = self.conn.begin().await.map_err(|e| e.to_string())?;
         for migration in migrations {
-            println!("Applying migration: {}", migration.filename);
             // Apply the migration
-            tx.execute("PRAGMA foreign_keys = ON")
-                .await
-                .map_err(|e| e.to_string())?;
             tx.execute(sqlx::query(&migration.sql))
                 .await
                 .map_err(|e| e.to_string())?;
-            println!("Applied migration: {}", migration.filename);
 
             // Bookkeeping
             let query = r#"
@@ -390,23 +391,10 @@ enum MigrationHash {
     MD5,
 }
 
-//////////////////////// SqliteSysDb ////////////////////////
-
-struct SqliteSysDb {
-    conn: SqlitePool,
-}
-
-impl SqliteSysDb {
-    pub fn new(conn: SqlitePool) -> Self {
-        Self { conn }
-    }
-}
-
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use sqlx::Row;
-    use tempfile::tempdir;
 
     //////////////////////// Test Helpers ////////////////////////
 
@@ -430,20 +418,23 @@ mod tests {
         path
     }
 
-    //////////////////////// SqliteDb ////////////////////////
-
-    #[tokio::test]
-    async fn test_sqlite_db() {
+    pub(crate) async fn get_new_sqlite_db() -> SqliteDb {
         let config = SqliteDBConfig {
-            url: "sqlite::memory:".to_string(),
+            url: new_test_db_path(),
             migrations_root_dir: test_migration_dir(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let db = SqliteDb::try_from_config(&config)
+        SqliteDb::try_from_config(&config)
             .await
-            .expect("Expect it to be created");
+            .expect("Expect it to be created")
+    }
 
+    //////////////////////// SqliteDb ////////////////////////
+
+    #[tokio::test]
+    async fn test_sqlite_db() {
+        let db = get_new_sqlite_db().await;
         // Check if migrations table exists
         let query = r#"
             SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'
@@ -506,14 +497,4 @@ mod tests {
     // - tamper with one and test
     // - add new migration and test
     // - reorder migrations
-
-    //////////////////////// SqliteSysDb ////////////////////////
-
-    #[tokio::test]
-    async fn test_sqlite_sysdb() {
-        let conn = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("Expect it to be connected");
-        let sysdb = SqliteSysDb::new(conn);
-    }
 }
