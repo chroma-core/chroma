@@ -256,8 +256,7 @@ impl<C: Component> ComponentHandle<C> {
         self.sender.wrap_and_send(message, tracing_context).await
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn request<M>(
+    pub async fn request<M>(
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,

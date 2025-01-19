@@ -9,4 +9,9 @@ name = "rust_bindings"
 crate-type = ["cdylib"]
 
 [dependencies]
+tokio = { version = "1.10.0", features = ["rt-multi-thread"] }
+chroma-sysdb = { workspace = true }
+chroma-system = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
 pyo3 = "0.23.3"

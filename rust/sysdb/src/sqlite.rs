@@ -5,29 +5,30 @@ use std::path::PathBuf;
 
 //////////////////////// SqliteDb ////////////////////////////
 
-#[derive(Clone)]
-struct SqliteDBConfig {
+#[derive(Clone, Debug)]
+pub struct SqliteDBConfig {
     // The SQLite database URL
-    url: String,
+    pub url: String,
     // TODO: change this to something bundled with binary
     // The root directory where all migration files are stored
     // The migration files are stored in subdirectories of this directory
-    migrations_root_dir: PathBuf,
-    hash_type: MigrationHash,
-    migration_mode: MigrationMode,
+    pub migrations_root_dir: PathBuf,
+    pub hash_type: MigrationHash,
+    pub migration_mode: MigrationMode,
 }
 
 /// Migration mode for the database
 /// - Apply: Apply the migrations
 /// - Validate: Validate the applied migrations and ensure none are unappliued
-#[derive(Clone, PartialEq)]
-enum MigrationMode {
+#[derive(Clone, PartialEq, Debug)]
+pub enum MigrationMode {
     Apply,
     Validate,
 }
 
 // TODO:
 // - support memory mode, add concurrency tests
+#[derive(Debug)]
 pub(crate) struct SqliteDb {
     conn: SqlitePool,
     config: SqliteDBConfig,
@@ -385,8 +386,8 @@ impl MigrationDir {
     }
 }
 
-#[derive(Clone)]
-enum MigrationHash {
+#[derive(Clone, Debug)]
+pub enum MigrationHash {
     SHA256,
     MD5,
 }

@@ -5141,7 +5141,12 @@ dependencies = [
 name = "rust_bindings"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chroma-sysdb",
+ "chroma-system",
  "pyo3",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
