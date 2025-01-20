@@ -16,8 +16,9 @@ interface Tenant {
   name: string;
 }
 
-// interface for tenant
 interface Database {
+  id: string;
+  tenant: string;
   name: string;
 }
 
@@ -203,7 +204,7 @@ export class AdminClient {
   }: {
     name: string;
     tenantName: string;
-  }): Promise<Database> {
+  }): Promise<{ name: string }> {
     await this.api.createDatabase(tenantName, { name }, this.api.options);
 
     return { name };
@@ -234,13 +235,13 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<Database> {
-    const getDatabase = (await this.api.getDatabase(
+    const result = (await this.api.getDatabase(
       name,
       tenantName,
       this.api.options,
     )) as Database;
 
-    return { name: getDatabase.name } as Database;
+    return result;
   }
 
   /**
@@ -282,13 +283,11 @@ export class AdminClient {
     offset?: number;
     tenantName: string;
   }): Promise<Database[]> {
-    const listDatabases = (await this.api.listDatabases(
+    return (await this.api.listDatabases(
       tenantName,
       limit,
       offset,
       this.api.options,
     )) as Database[];
-
-    return listDatabases.map((db) => ({ name: db.name }));
   }
 }

@@ -43,3 +43,5 @@ export type {
   DeleteParams,
   CollectionParams,
 } from "./types";
+
+export * from "./Errors";
