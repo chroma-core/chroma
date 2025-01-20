@@ -41,7 +41,7 @@ npm install --save chromadb chromadb-default-embed
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install chromadb chromadb-default-embed 
+pnpm add chromadb chromadb-default-embed 
 ```
 {% /Tab %}
 
