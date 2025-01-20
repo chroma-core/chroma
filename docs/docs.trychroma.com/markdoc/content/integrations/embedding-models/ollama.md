@@ -35,7 +35,7 @@ embeddings = ollama_ef(["This is my first text to embed",
 ```typescript
 import { OllamaEmbeddingFunction } from "chromadb";
 const embedder = new OllamaEmbeddingFunction({
-    url: "http://127.0.0.1:11434/api/embeddings",
+    url: "http://127.0.0.1:11434/",
     model: "llama2"
 })
 
