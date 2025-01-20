@@ -6,3 +6,8 @@ description = "Placeholder for trychroma.com"
 license = "Apache-2.0"
 
 [dependencies]
+sqlx = { workspace = true }
+sha2 = { workspace = true }
+md5 = { workspace = true }
+regex = { workspace = true }
+tokio = { workspace = true }

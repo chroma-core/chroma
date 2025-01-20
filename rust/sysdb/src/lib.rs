@@ -1,5 +1,4 @@
 pub mod config;
-mod sqlite;
 // TODO: make this private, hide behind the enum
 pub mod sqlite_sysdb;
 #[allow(clippy::module_inception)]

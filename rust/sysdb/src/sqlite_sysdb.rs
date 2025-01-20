@@ -1,4 +1,4 @@
-use crate::sqlite::{MigrationHash, MigrationMode, SqliteDb};
+use chroma::sqlite::{MigrationHash, MigrationMode, SqliteDb};
 use chroma_types::{
     Collection, CollectionUuid, Database, Metadata, MetadataValue, Segment, Tenant,
 };
@@ -26,7 +26,7 @@ impl SqliteSysDb {
     // TODO: THIS IS JUST FOR TESTING
     // REMOVE IN FAVOR OF CONFIG PARSING
     pub async fn new_hack_test(path: &str) -> Self {
-        let sqlite_db_config = crate::sqlite::SqliteDBConfig {
+        let sqlite_db_config = chroma::sqlite::SqliteDBConfig {
             url: path.to_string(),
             migrations_root_dir: PathBuf::from(
                 "/Users/hammad/Documents/chroma/chromadb/migrations",
@@ -365,11 +365,9 @@ impl SqliteSysDb {
 
 #[cfg(test)]
 mod tests {
-    use chroma_types::{SegmentScope, SegmentType, SegmentUuid};
-
-    use crate::sqlite::tests::get_new_sqlite_db;
-
     use super::*;
+    use chroma::sqlite::test_utils::get_new_sqlite_db;
+    use chroma_types::{SegmentScope, SegmentType, SegmentUuid};
 
     #[tokio::test]
     async fn test_create_database() {

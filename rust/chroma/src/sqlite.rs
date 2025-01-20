@@ -29,7 +29,7 @@ pub enum MigrationMode {
 // TODO:
 // - support memory mode, add concurrency tests
 #[derive(Debug)]
-pub(crate) struct SqliteDb {
+pub struct SqliteDb {
     conn: SqlitePool,
     config: SqliteDBConfig,
     filename_regex: regex::Regex,
@@ -107,7 +107,7 @@ impl SqliteDb {
 
     //////////////////////// Public API ////////////////////////
 
-    pub(crate) fn get_conn(&self) -> &SqlitePool {
+    pub fn get_conn(&self) -> &SqlitePool {
         &self.conn
     }
 
@@ -392,24 +392,23 @@ pub enum MigrationHash {
     MD5,
 }
 
-#[cfg(test)]
-pub(super) mod tests {
+//////////////////////// Test Helpers ////////////////////////
+
+pub mod test_utils {
     use super::*;
-    use sqlx::Row;
+    use std::path::PathBuf;
 
-    //////////////////////// Test Helpers ////////////////////////
-
-    fn test_migration_dir() -> PathBuf {
+    pub(crate) fn test_migration_dir() -> PathBuf {
         let migration_dir = "/Users/hammad/Documents/chroma/chromadb/migrations";
         PathBuf::from(migration_dir)
     }
 
-    fn existing_test_db_path() -> String {
+    pub(crate) fn existing_test_db_path() -> String {
         // TODO: return bundled path
         "/Users/hammad/Documents/chroma/chroma/chroma.sqlite3".to_string()
     }
 
-    fn new_test_db_path() -> String {
+    pub(crate) fn new_test_db_path() -> String {
         // TODO: Make tmpfile work
         // let dir = tempdir().expect("Expect it to be created");
         // let path = dir.path().join("chroma.sqlite3");
@@ -419,7 +418,7 @@ pub(super) mod tests {
         path
     }
 
-    pub(crate) async fn get_new_sqlite_db() -> SqliteDb {
+    pub async fn get_new_sqlite_db() -> SqliteDb {
         let config = SqliteDBConfig {
             url: new_test_db_path(),
             migrations_root_dir: test_migration_dir(),
@@ -430,6 +429,15 @@ pub(super) mod tests {
             .await
             .expect("Expect it to be created")
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Row;
+    use test_utils::{
+        existing_test_db_path, get_new_sqlite_db, new_test_db_path, test_migration_dir,
+    };
 
     //////////////////////// SqliteDb ////////////////////////
 
