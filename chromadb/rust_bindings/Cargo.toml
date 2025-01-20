@@ -16,3 +16,4 @@ chroma-types = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 pyo3 = { workspace = true }
+numpy = { workspace = true }

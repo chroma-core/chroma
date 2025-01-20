@@ -38,6 +38,7 @@ sqlx = { version = "0.8.3", features = [ "runtime-tokio",  "sqlite"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"
 regex = "1.11.1"
+numpy = "0.23.0"
 
 chroma = { path = "rust/chroma" }
 chroma-benchmark = { path = "rust/benchmark" }

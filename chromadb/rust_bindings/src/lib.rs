@@ -5,6 +5,7 @@ use chroma_types::{
     Collection, CollectionUuid, Database, Metadata, Segment, SegmentScope, SegmentType,
     SegmentUuid, Tenant, UserIdentity,
 };
+use numpy::PyReadonlyArray2;
 use pyo3::{exceptions::PyOSError, prelude::*};
 use std::{collections::HashMap, time::SystemTime};
 
@@ -24,6 +25,8 @@ impl ServerAPI {
         ServerAPI { sysdb }
     }
 
+    //////////////////////////// Database Methods ////////////////////////////
+
     async fn create_database(
         &self,
         id: uuid::Uuid,
@@ -38,6 +41,8 @@ impl ServerAPI {
         self.sysdb.get_database(name, Some(tenant)).await
     }
 
+    //////////////////////////// Tenant Methods ////////////////////////////
+
     async fn create_tenant(&self, name: &str) -> Result<Tenant, String> {
         self.sysdb.create_tenant(name).await
     }
@@ -45,6 +50,8 @@ impl ServerAPI {
     async fn get_tenant(&self, name: &str) -> Result<Tenant, String> {
         self.sysdb.get_tenant(name).await
     }
+
+    //////////////////////////// Collection Methods ////////////////////////////
 
     #[allow(clippy::too_many_arguments)]
     async fn create_collection(
@@ -93,6 +100,34 @@ impl ServerAPI {
             )
             .await
             .map(|(collection, _)| collection)
+    }
+
+    //////////////////////////// Record Methods ////////////////////////////
+
+    //def _add(
+    //     self,
+    //     ids: IDs,
+    //     collection_id: UUID,
+    //     embeddings: Embeddings,
+    //     metadatas: Optional[Metadatas] = None,
+    //     documents: Optional[Documents] = None,
+    //     uris: Optional[URIs] = None,
+    //     tenant: str = DEFAULT_TENANT,
+    //     database: str = DEFAULT_DATABASE,
+    // ) -> bool:
+
+    async fn add(
+        &self,
+        ids: Vec<String>,
+        collection_id: CollectionUuid,
+        embeddings: Vec<Vec<f32>>,
+        metadatas: Option<Vec<Metadata>>,
+        documents: Option<Vec<String>>,
+        uris: Option<Vec<String>>,
+        tenant: Option<&str>,
+        database: Option<&str>,
+    ) -> Result<bool, String> {
+        unimplemented!();
     }
 
     fn get_user_identity(&self) -> UserIdentity {
@@ -366,6 +401,44 @@ impl Bindings {
             },
             Err(e) => Err(PyOSError::new_err(e.to_string())),
         }
+    }
+
+    #[pyo3(
+        signature = (ids, collection_id, embeddings, metadatas = None, documents = None, uris = None, tenant = "default_tenant".to_string(), database = "default_database".to_string())
+    )]
+    fn add(
+        &self,
+        ids: Vec<String>,
+        collection_id: String,
+        embeddings: PyReadonlyArray2<f32>,
+        metadatas: Option<Vec<Metadata>>,
+        documents: Option<Vec<String>>,
+        uris: Option<Vec<String>>,
+        tenant: String,
+        database: String,
+    ) -> PyResult<bool> {
+        println!("embeddings: {:?}", embeddings);
+        // let collection_id =
+        //     uuid::Uuid::parse_str(&collection_id).map_err(|e| PyOSError::new_err(e.to_string()))?;
+        // let collection_id = CollectionUuid(collection_id);
+        // let result = self.runtime.block_on(self.server_api_handle.request(
+        //     AddMessage {
+        //         ids,
+        //         collection_id,
+        //         embeddings,
+        //         metadatas,
+        //         documents,
+        //         uris,
+        //         tenant,
+        //         database,
+        //     },
+        //     None,
+        // ));
+        // match result {
+        //     Ok(success) => Ok(success),
+        //     Err(e) => Err(PyOSError::new_err(e.to_string())),
+        // }
+        return Ok(true);
     }
 
     fn get_user_identity(&self) -> PyResult<UserIdentity> {

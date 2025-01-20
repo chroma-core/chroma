@@ -190,7 +190,8 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError()
+        # TODO: does this actually return bool?
+        return self.bindings.add(ids, collection_id, embeddings, metadatas, documents, uris, tenant, database)  # type: ignore
 
     @override
     def _update(
