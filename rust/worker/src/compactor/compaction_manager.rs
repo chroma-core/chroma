@@ -1,7 +1,8 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
+use super::OneOffCompactionMessage;
 use crate::compactor::types::CompactionJob;
-use crate::compactor::types::ScheduleMessage;
+use crate::compactor::types::ScheduledCompactionMessage;
 use crate::config::CompactionServiceConfig;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
@@ -107,7 +108,7 @@ impl CompactionManager {
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
             None => {
-                println!("No dispatcher found");
+                tracing::error!("No dispatcher found");
                 return Err(Box::new(CompactionError::FailedToCompact));
             }
         };
@@ -139,7 +140,7 @@ impl CompactionManager {
                 }
             }
             None => {
-                println!("No system found");
+                tracing::error!("No system found");
                 return Err(Box::new(CompactionError::FailedToCompact));
             }
         };
@@ -158,19 +159,18 @@ impl CompactionManager {
             instrumented_span.follows_from(Span::current());
             jobs.push(self.compact(job).instrument(instrumented_span));
         }
-        println!("Compacting {} jobs", jobs.len());
         tracing::info!("Compacting {} jobs", jobs.len());
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
         while let Some(job) = jobs.next().await {
             match job {
                 Ok(result) => {
-                    println!("Compaction completed: {:?}", result);
+                    tracing::info!("Compaction completed: {:?}", result);
                     compacted.push(result.compaction_job.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
-                    println!("Compaction failed: {:?}", e);
+                    tracing::info!("Compaction failed {}", e);
                     num_failed_jobs += 1;
                 }
             }
@@ -285,11 +285,13 @@ impl Component for CompactionManager {
     }
 
     async fn start(&mut self, ctx: &ComponentContext<Self>) -> () {
-        println!("Starting CompactionManager");
-        ctx.scheduler
-            .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
-                Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction"))
-            });
+        tracing::info!("Starting CompactionManager");
+        ctx.scheduler.schedule(
+            ScheduledCompactionMessage {},
+            self.compaction_interval,
+            ctx,
+            || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
+        );
     }
 }
 
@@ -301,25 +303,40 @@ impl Debug for CompactionManager {
 
 // ============== Handlers ==============
 #[async_trait]
-impl Handler<ScheduleMessage> for CompactionManager {
+impl Handler<ScheduledCompactionMessage> for CompactionManager {
     type Result = ();
 
     async fn handle(
         &mut self,
-        _message: ScheduleMessage,
+        _message: ScheduledCompactionMessage,
         ctx: &ComponentContext<CompactionManager>,
     ) {
-        println!("CompactionManager: Performing compaction");
+        tracing::info!("CompactionManager: Performing compaction");
         let mut ids = Vec::new();
         self.compact_batch(&mut ids).await;
 
         self.hnsw_index_provider.purge_by_id(&ids).await;
 
         // Compaction is done, schedule the next compaction
-        ctx.scheduler
-            .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
-                Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction"))
-            });
+        ctx.scheduler.schedule(
+            ScheduledCompactionMessage {},
+            self.compaction_interval,
+            ctx,
+            || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
+        );
+    }
+}
+
+#[async_trait]
+impl Handler<OneOffCompactionMessage> for CompactionManager {
+    type Result = ();
+    async fn handle(
+        &mut self,
+        _message: OneOffCompactionMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        tracing::info!("CompactionManager: Performing compaction");
+        todo!("To be implemented in next PR in the stack");
     }
 }
 

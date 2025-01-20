@@ -6,6 +6,7 @@ mod tracing;
 mod utils;
 
 use chroma_config::Configurable;
+use compactor::compaction_server::CompactionServer;
 use memberlist::MemberlistProvider;
 
 use tokio::select;
@@ -131,6 +132,15 @@ pub async fn compaction_service_entrypoint() {
 
     let mut memberlist_handle = system.start_component(memberlist);
 
+    let compaction_server = CompactionServer {
+        manager: compaction_manager_handle.clone(),
+        port: config.my_port,
+    };
+
+    let server_join_handle = tokio::spawn(async move {
+        let _ = CompactionServer::run(compaction_server).await;
+    });
+
     let mut sigterm = match signal(SignalKind::terminate()) {
         Ok(sigterm) => sigterm,
         Err(e) => {
@@ -151,6 +161,7 @@ pub async fn compaction_service_entrypoint() {
             let _ = compaction_manager_handle.join().await;
             system.stop().await;
             system.join().await;
+            let _ = server_join_handle.await;
         },
     };
     println!("Server stopped");

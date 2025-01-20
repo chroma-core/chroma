@@ -6,3 +6,5 @@ mod types;
 
 pub(crate) use compaction_manager::*;
 pub(crate) use types::*;
+
+pub mod compaction_server;
