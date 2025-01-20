@@ -9,7 +9,7 @@
 
 # Getting Started
 
-Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A [hosted version](https://airtable.com/shrOAiDUtS2ILy5vZ) is coming soon!
+Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A [hosted version](https://trychroma.com/signup) is now available for early access!
 
 ### 1. Install
 
