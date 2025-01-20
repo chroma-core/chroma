@@ -234,6 +234,8 @@ impl SqliteSysDb {
                 .bind(segment.id.to_string())
                 .bind(segment.r#type.to_string())
                 .bind(segment.scope.to_string())
+                // Note that we ignore the collection_id on the segment and use the one passed in
+                // HACK(hammadb) this is copied over from the python code and due to the clunkiness in our types
                 .bind(collection_id);
             tx.execute(query).await.map_err(|e| e.to_string())?;
             if let Some(segment_metadata) = &segment.metadata {

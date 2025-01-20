@@ -1,9 +1,12 @@
 use async_trait::async_trait;
 use chroma_sysdb::sqlite_sysdb::SqliteSysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
-use chroma_types::{Collection, CollectionUuid, Database, Metadata, Tenant, UserIdentity};
+use chroma_types::{
+    Collection, CollectionUuid, Database, Metadata, Segment, SegmentScope, SegmentType,
+    SegmentUuid, Tenant, UserIdentity,
+};
 use pyo3::{exceptions::PyOSError, prelude::*};
-use std::time::SystemTime;
+use std::{collections::HashMap, time::SystemTime};
 
 // TODO: Add modules to pyclass macro
 
@@ -53,12 +56,35 @@ impl ServerAPI {
         tenant: Option<&str>,
         database: Option<&str>,
     ) -> Result<Collection, String> {
+        // NOTE(hammadb) This replicates the behavior of the python segment manager
+        // to create the segment information data. We will need to abstract this to support
+        // local vs distributed segment creation
+
+        // TODO HACK collectionid could be optional, probably prepare a CreateSegment type
+        let metadata_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::Sqlite,
+            scope: SegmentScope::METADATA,
+            collection: CollectionUuid::new(),
+            metadata: metadata.clone(),
+            file_path: HashMap::new(),
+        };
+        let vector_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::Sqlite,
+            scope: SegmentScope::VECTOR,
+            collection: CollectionUuid::new(),
+            metadata: metadata.clone(),
+            file_path: HashMap::new(),
+        };
+        let segments = vec![metadata_segment, vector_segment];
+
         self.sysdb
             .create_collection(
                 Some(CollectionUuid::new()),
                 name,
                 // TODO: implement segment prep
-                Vec::new(),
+                segments,
                 metadata.as_ref(),
                 None,
                 get_or_create,

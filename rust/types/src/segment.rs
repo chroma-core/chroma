@@ -40,6 +40,8 @@ impl std::fmt::Display for SegmentUuid {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SegmentType {
     HnswDistributed,
+    HnswLocalPersistent,
+    HnswLocalMemory,
     BlockfileMetadata,
     BlockfileRecord,
     Sqlite,
@@ -51,6 +53,12 @@ impl From<SegmentType> for String {
         match segment_type {
             SegmentType::HnswDistributed => {
                 "urn:chroma:segment/vector/hnsw-distributed".to_string()
+            }
+            SegmentType::HnswLocalMemory => {
+                "urn:chroma:segment/vector/hnsw-local-memory".to_string()
+            }
+            SegmentType::HnswLocalPersistent => {
+                "urn:chroma:segment/vector/hnsw-local-persistent".to_string()
             }
             SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
@@ -66,6 +74,10 @@ impl TryFrom<&str> for SegmentType {
     fn try_from(segment_type: &str) -> Result<Self, Self::Error> {
         match segment_type {
             "urn:chroma:segment/vector/hnsw-distributed" => Ok(SegmentType::HnswDistributed),
+            "urn:chroma:segment/vector/hnsw-local-memory" => Ok(SegmentType::HnswLocalMemory),
+            "urn:chroma:segment/vector/hnsw-local-persistent" => {
+                Ok(SegmentType::HnswLocalPersistent)
+            }
             "urn:chroma:segment/record/blockfile" => Ok(SegmentType::BlockfileRecord),
             "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
             "urn:chroma:segment/metadata/blockfile" => Ok(SegmentType::BlockfileMetadata),
@@ -79,6 +91,8 @@ impl Display for SegmentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let segment_type = match self {
             SegmentType::HnswDistributed => "urn:chroma:segment/vector/hnsw-distributed",
+            SegmentType::HnswLocalMemory => "urn:chroma:segment/vector/hnsw-local-memory",
+            SegmentType::HnswLocalPersistent => "urn:chroma:segment/vector/hnsw-local-persistent",
             SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile",
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite",
             SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile",
