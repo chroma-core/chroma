@@ -39,7 +39,7 @@ docker run -p 8000:8000 chromadb/chroma
 You can also build the Docker image yourself from the Dockerfile in the [Chroma GitHub repository](https://github.com/chroma-core/chroma)
 
 ```terminal
-git clone git@github.com:chroma-core/chroma.git
+git clone https://github.com/chroma-core/chroma.git
 cd chroma
 docker-compose up -d --build
 ```
