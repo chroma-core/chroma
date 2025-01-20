@@ -1,7 +1,11 @@
 use super::{Metadata, MetadataValueConversionError};
 use crate::{chroma_proto, ConversionError, Segment};
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::pyclass;
+use pyo3::{
+    pyclass, pymethods,
+    types::{PyAnyMethods, PyModule},
+    Bound, PyAny, PyResult, Python,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -36,14 +40,30 @@ impl std::fmt::Display for CollectionUuid {
 #[pyclass]
 pub struct Collection {
     pub collection_id: CollectionUuid,
+    #[pyo3(get)]
     pub name: String,
+    #[pyo3(get)]
     pub metadata: Option<Metadata>,
+    #[pyo3(get)]
     pub dimension: Option<i32>,
+    #[pyo3(get)]
     pub tenant: String,
+    #[pyo3(get)]
     pub database: String,
     pub log_position: i64,
     pub version: i32,
     pub total_records_post_compaction: u64,
+}
+
+#[pymethods]
+impl Collection {
+    #[getter]
+    fn id<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let res = PyModule::import(py, "uuid")?
+            .getattr("UUID")?
+            .call1((self.collection_id.to_string(),))?;
+        Ok(res)
+    }
 }
 
 #[derive(Error, Debug)]

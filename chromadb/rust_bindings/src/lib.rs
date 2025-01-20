@@ -52,7 +52,7 @@ impl ServerAPI {
         get_or_create: bool,
         tenant: Option<&str>,
         database: Option<&str>,
-    ) -> Result<(Collection, bool), String> {
+    ) -> Result<Collection, String> {
         self.sysdb
             .create_collection(
                 Some(CollectionUuid::new()),
@@ -66,6 +66,7 @@ impl ServerAPI {
                 database,
             )
             .await
+            .map(|(collection, _)| collection)
     }
 
     fn get_user_identity(&self) -> UserIdentity {
@@ -178,7 +179,7 @@ struct CreateCollectionMessage {
 }
 #[async_trait]
 impl Handler<CreateCollectionMessage> for ServerAPI {
-    type Result = Result<(Collection, bool), String>;
+    type Result = Result<Collection, String>;
     async fn handle(
         &mut self,
         message: CreateCollectionMessage,
@@ -318,7 +319,7 @@ impl Bindings {
         get_or_create: bool,
         tenant: String,
         database: String,
-    ) -> PyResult<(Collection, bool)> {
+    ) -> PyResult<Collection> {
         let message = CreateCollectionMessage {
             name,
             metadata,
