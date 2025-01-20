@@ -14,6 +14,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
+import chromadb.test.property.invariants as invariants
 from typing import Any, Dict, Mapping, Optional
 import numpy
 from chromadb.test.property.strategies import hashing_embedding_function
@@ -75,8 +76,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
     @rule(coll=consumes(collections))
     def delete_coll(self, coll: strategies.ExternalCollection) -> None:
         if coll.name in self.model:
-            self.client.delete_collection(name=coll.name)
-            self.delete_from_model(coll.name)
+            with invariants.collection_deleted(self.client, coll.name):
+                self.client.delete_collection(name=coll.name)
+                self.delete_from_model(coll.name)
         else:
             with pytest.raises(Exception):
                 self.client.delete_collection(name=coll.name)
