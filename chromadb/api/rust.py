@@ -191,7 +191,7 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> bool:
         # TODO: does this actually return bool?
-        return self.bindings.add(ids, collection_id, embeddings, metadatas, documents, uris, tenant, database)  # type: ignore
+        return self.bindings.add(ids, str(collection_id), embeddings, metadatas, documents, uris, tenant, database)  # type: ignore
 
     @override
     def _update(

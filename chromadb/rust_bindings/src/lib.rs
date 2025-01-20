@@ -5,8 +5,8 @@ use chroma_types::{
     Collection, CollectionUuid, Database, Metadata, Segment, SegmentScope, SegmentType,
     SegmentUuid, Tenant, UserIdentity,
 };
-use numpy::PyReadonlyArray2;
-use pyo3::{exceptions::PyOSError, prelude::*};
+use numpy::{PyReadonlyArray, PyReadonlyArray1, PyReadonlyArray2};
+use pyo3::{exceptions::PyOSError, prelude::*, types::PyList};
 use std::{collections::HashMap, time::SystemTime};
 
 // TODO: Add modules to pyclass macro
@@ -406,11 +406,12 @@ impl Bindings {
     #[pyo3(
         signature = (ids, collection_id, embeddings, metadatas = None, documents = None, uris = None, tenant = "default_tenant".to_string(), database = "default_database".to_string())
     )]
+    #[allow(clippy::too_many_arguments)]
     fn add(
         &self,
         ids: Vec<String>,
         collection_id: String,
-        embeddings: PyReadonlyArray2<f32>,
+        embeddings: Vec<PyReadonlyArray1<f32>>,
         metadatas: Option<Vec<Metadata>>,
         documents: Option<Vec<String>>,
         uris: Option<Vec<String>>,
