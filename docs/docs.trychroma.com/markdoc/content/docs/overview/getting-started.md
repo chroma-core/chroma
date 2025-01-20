@@ -29,7 +29,7 @@ pip install chromadb
 
 {% Tab label="yarn" %}
 ```terminal
-yarn install chromadb chromadb-default-embed 
+yarn add chromadb chromadb-default-embed 
 ```
 {% /Tab %}
 
@@ -41,7 +41,7 @@ npm install --save chromadb chromadb-default-embed
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install chromadb chromadb-default-embed 
+pnpm add chromadb chromadb-default-embed 
 ```
 {% /Tab %}
 
