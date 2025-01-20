@@ -856,15 +856,15 @@ impl RecordSegmentReader<'_> {
     }
 
     pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) {
-        let prefixes = vec![""; keys.len()];
-        self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
+        self.id_to_data
+            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
+            .await
     }
 
     #[allow(dead_code)]
     pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) {
-        let prefixes = vec![""; keys.len()];
         self.user_id_to_id
-            .load_blocks_for_keys(&prefixes, &keys)
+            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
             .await
     }
 }

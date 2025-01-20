@@ -18,6 +18,7 @@ use chroma_error::ErrorCodes;
 use itertools::Itertools;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -45,6 +46,9 @@ pub struct ArrowOrderedBlockfileWriter {
     root_manager: RootManager,
     root: RootWriter,
     inner: Arc<Mutex<Inner>>,
+    num_block_cache_hits: Arc<AtomicUsize>,
+    num_block_cache_misses: Arc<AtomicUsize>,
+    forked_from_id: Option<Uuid>,
     id: Uuid,
 }
 
@@ -77,15 +81,19 @@ impl ArrowOrderedBlockfileWriter {
             root_manager,
             root: root_writer,
             id,
+            forked_from_id: None,
             inner: Arc::new(Mutex::new(Inner {
                 current_block_delta: Some((initial_block, None)),
                 completed_block_deltas: Vec::new(),
                 remaining_block_stack: VecDeque::new(),
             })),
+            num_block_cache_hits: Arc::new(AtomicUsize::new(0)),
+            num_block_cache_misses: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     pub(super) fn from_root(
+        forked_from_id: Uuid,
         id: Uuid,
         block_manager: BlockManager,
         root_manager: RootManager,
@@ -118,11 +126,14 @@ impl ArrowOrderedBlockfileWriter {
             root_manager,
             root: new_root,
             id,
+            forked_from_id: Some(forked_from_id),
             inner: Arc::new(Mutex::new(Inner {
                 current_block_delta: None,
                 completed_block_deltas: Vec::new(),
                 remaining_block_stack,
             })),
+            num_block_cache_hits: Arc::new(AtomicUsize::new(0)),
+            num_block_cache_misses: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -132,6 +143,25 @@ impl ArrowOrderedBlockfileWriter {
         let mut inner = std::mem::take(&mut *self.inner.lock().await);
 
         Self::complete_current_delta::<K, V>(&mut inner);
+
+        let num_block_cache_hits = self
+            .num_block_cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let num_block_cache_misses = self
+            .num_block_cache_misses
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let block_cache_hit_rate = 100.0 * num_block_cache_hits as f64
+            / (num_block_cache_hits + num_block_cache_misses) as f64;
+        if block_cache_hit_rate.is_nan() {
+            // This can happen if there are no cache hits or misses
+            tracing::debug!("Block cache hit rate: N/A");
+        } else {
+            tracing::debug!(
+                block_cache_hit_rate = block_cache_hit_rate,
+                "Block cache hit rate: {:.2}%",
+                block_cache_hit_rate,
+            );
+        }
 
         let mut split_block_deltas = Vec::new();
         for delta in inner.completed_block_deltas.drain(..) {
@@ -230,6 +260,14 @@ impl ArrowOrderedBlockfileWriter {
         new_delta_end_key: Option<CompositeKey>,
     ) -> Result<(), Box<dyn ChromaError>> {
         Self::complete_current_delta::<K, V>(inner);
+
+        if self.block_manager.cached(new_delta_block_id).await {
+            self.num_block_cache_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            self.num_block_cache_misses
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
 
         let new_delta = self
             .block_manager
@@ -351,11 +389,16 @@ impl ArrowOrderedBlockfileWriter {
     pub(crate) fn id(&self) -> Uuid {
         self.id
     }
+
+    pub(crate) fn forked_from_id(&self) -> Option<Uuid> {
+        self.forked_from_id
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
     use crate::arrow::block::delta::types::Delta;
@@ -867,11 +910,14 @@ mod tests {
             root_manager: root_manager.clone(),
             root: root_writer,
             id: Uuid::new_v4(),
+            forked_from_id: None,
             inner: Arc::new(Mutex::new(Inner {
                 remaining_block_stack: VecDeque::new(),
                 current_block_delta: Some((initial_block, None)),
                 completed_block_deltas: Vec::new(),
             })),
+            num_block_cache_hits: Arc::new(AtomicUsize::new(0)),
+            num_block_cache_misses: Arc::new(AtomicUsize::new(0)),
         };
 
         let n = 2000;
