@@ -4,7 +4,8 @@ use super::{
 };
 use crate::chroma_proto;
 use chroma_error::{ChromaError, ErrorCodes};
-use std::{collections::HashMap, str::FromStr};
+use pyo3::pyclass;
+use std::{collections::HashMap, fmt::Display, str::FromStr};
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
@@ -74,7 +75,21 @@ impl TryFrom<&str> for SegmentType {
     }
 }
 
+impl Display for SegmentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let segment_type = match self {
+            SegmentType::HnswDistributed => "urn:chroma:segment/vector/hnsw-distributed",
+            SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile",
+            SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite",
+            SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile",
+            SegmentType::Spann => "urn:chroma:segment/vector/spann",
+        };
+        write!(f, "{}", segment_type)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
+#[pyclass]
 pub struct Segment {
     pub id: SegmentUuid,
     pub r#type: SegmentType,

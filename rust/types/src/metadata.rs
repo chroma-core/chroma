@@ -1,4 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use pyo3::pyclass;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -98,6 +99,7 @@ MetadataValue
 */
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[pyclass]
 pub enum MetadataValue {
     Bool(bool),
     Int(i64),
@@ -312,7 +314,6 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
         Ok(metadata)
     }
 }
-
 #[derive(Debug, Default)]
 pub struct MetadataDelta<'referred_data> {
     pub metadata_to_update: HashMap<

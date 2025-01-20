@@ -94,7 +94,12 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError()
+        # TODO: configuration
+        collection = self.bindings.create_collection(
+            name, metadata, get_or_create, tenant, database
+        )
+        # TODO: how to handle this type?
+        return collection  # type: ignore
 
     @override
     def get_collection(

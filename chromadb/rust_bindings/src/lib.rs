@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use chroma_sysdb::sqlite_sysdb::SqliteSysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
-use chroma_types::{Database, Tenant, UserIdentity};
-use pyo3::{exceptions::PyOSError, prelude::*, types::PyType};
+use chroma_types::{Collection, CollectionUuid, Database, Metadata, Tenant, UserIdentity};
+use pyo3::{exceptions::PyOSError, prelude::*};
 use std::time::SystemTime;
 
 // TODO: Add modules to pyclass macro
@@ -41,6 +41,31 @@ impl ServerAPI {
 
     async fn get_tenant(&self, name: &str) -> Result<Tenant, String> {
         self.sysdb.get_tenant(name).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_collection(
+        &self,
+        name: &str,
+        // TODO: collection config
+        metadata: Option<Metadata>,
+        get_or_create: bool,
+        tenant: Option<&str>,
+        database: Option<&str>,
+    ) -> Result<(Collection, bool), String> {
+        self.sysdb
+            .create_collection(
+                Some(CollectionUuid::new()),
+                name,
+                // TODO: implement segment prep
+                Vec::new(),
+                metadata.as_ref(),
+                None,
+                get_or_create,
+                tenant,
+                database,
+            )
+            .await
     }
 
     fn get_user_identity(&self) -> UserIdentity {
@@ -140,6 +165,33 @@ impl Handler<GetUserIdentityMessage> for ServerAPI {
         _ctx: &ComponentContext<Self>,
     ) -> Self::Result {
         self.get_user_identity()
+    }
+}
+
+#[derive(Debug)]
+struct CreateCollectionMessage {
+    name: String,
+    metadata: Option<Metadata>,
+    get_or_create: bool,
+    tenant: Option<String>,
+    database: Option<String>,
+}
+#[async_trait]
+impl Handler<CreateCollectionMessage> for ServerAPI {
+    type Result = Result<(Collection, bool), String>;
+    async fn handle(
+        &mut self,
+        message: CreateCollectionMessage,
+        _ctx: &ComponentContext<Self>,
+    ) -> Self::Result {
+        self.create_collection(
+            &message.name,
+            message.metadata,
+            message.get_or_create,
+            message.tenant.as_deref(),
+            message.database.as_deref(),
+        )
+        .await
     }
 }
 
@@ -249,6 +301,40 @@ impl Bindings {
         match result {
             Ok(tenant) => match tenant {
                 Ok(tenant) => Ok(tenant),
+                Err(e) => Err(PyOSError::new_err(e)),
+            },
+            Err(e) => Err(PyOSError::new_err(e.to_string())),
+        }
+    }
+
+    #[pyo3(
+        signature = (name, metadata = None, get_or_create = false, tenant = "default_tenant".to_string(), database = "default_database".to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn create_collection(
+        &self,
+        name: String,
+        metadata: Option<Metadata>,
+        get_or_create: bool,
+        tenant: String,
+        database: String,
+    ) -> PyResult<(Collection, bool)> {
+        let message = CreateCollectionMessage {
+            name,
+            metadata,
+            get_or_create,
+            // TODO: maybe get rid of the optionality downstream and push defaults up to application layer
+            tenant: Some(tenant),
+            database: Some(database),
+        };
+        let result = self
+            .runtime
+            .block_on(self.server_api_handle.request(message, None));
+
+        // TODO: error handling
+        match result {
+            Ok(collection) => match collection {
+                Ok(collection) => Ok(collection),
                 Err(e) => Err(PyOSError::new_err(e)),
             },
             Err(e) => Err(PyOSError::new_err(e.to_string())),

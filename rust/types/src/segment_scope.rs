@@ -1,7 +1,7 @@
 use super::ConversionError;
 use crate::chroma_proto;
 use chroma_error::{ChromaError, ErrorCodes};
-
+use std::fmt::Display;
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -10,6 +10,17 @@ pub enum SegmentScope {
     METADATA,
     RECORD,
     SQLITE,
+}
+
+impl Display for SegmentScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SegmentScope::VECTOR => write!(f, "VECTOR"),
+            SegmentScope::METADATA => write!(f, "METADATA"),
+            SegmentScope::RECORD => write!(f, "RECORD"),
+            SegmentScope::SQLITE => write!(f, "SQLITE"),
+        }
+    }
 }
 
 #[derive(Error, Debug)]

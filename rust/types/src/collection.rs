@@ -1,6 +1,7 @@
 use super::{Metadata, MetadataValueConversionError};
 use crate::{chroma_proto, ConversionError, Segment};
 use chroma_error::{ChromaError, ErrorCodes};
+use pyo3::pyclass;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -32,6 +33,7 @@ impl std::fmt::Display for CollectionUuid {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[pyclass]
 pub struct Collection {
     pub collection_id: CollectionUuid,
     pub name: String,
