@@ -40,10 +40,6 @@ func convertCollectionToGcToModel(collectionToGc []*dbmodel.CollectionToGc) []*m
 	collections := make([]*model.CollectionToGc, 0, len(collectionToGc))
 	// TODO(Sanket): Set version file path.
 	for _, collectionInfo := range collectionToGc {
-		// Skip collections that haven't been compacted even once.
-		if collectionInfo.Version == 0 {
-			continue
-		}
 		collection := model.CollectionToGc{
 			ID:              types.MustParse(collectionInfo.ID),
 			Name:            collectionInfo.Name,
