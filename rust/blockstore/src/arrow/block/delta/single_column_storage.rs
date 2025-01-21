@@ -352,7 +352,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             )
             .into_inner();
 
-        let mut value_builder = V::get_arrow_builder(inner.size_tracker.clone());
+        let mut value_builder = V::get_arrow_builder(inner.size_tracker);
 
         let storage = inner.storage;
         for (key, value) in storage.into_iter() {

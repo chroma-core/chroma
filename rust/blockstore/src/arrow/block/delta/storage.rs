@@ -253,6 +253,10 @@ impl BlockStorage {
                 let (split_key, storage) = builder.split_after_size::<K>(split_size);
                 (split_key, BlockStorage::RoaringBitmap(storage))
             }
+            BlockStorage::SpannPostingListDelta(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::SpannPostingListDelta(storage))
+            }
         }
     }
 
@@ -279,6 +283,9 @@ impl BlockStorage {
             BlockStorage::RoaringBitmap(builder) => {
                 let (key, storage) = builder.split_off_last_key()?;
                 Some((key, BlockStorage::RoaringBitmap(storage)))
+            }
+            BlockStorage::SpannPostingListDelta(_) => {
+                unimplemented!()
             }
         }
     }
