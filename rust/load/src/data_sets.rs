@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use chromadb::collection::{GetOptions, QueryOptions};
@@ -265,6 +266,71 @@ const TINY_STORIES_DATA_SETS: &[TinyStoriesDataSet] = &[
     TinyStoriesDataSet::new("stories9", PARAPHRASE_ALBERT_SMALL_V2, 50_000),
 ];
 
+//////////////////////////////////////////// RoundRobin ////////////////////////////////////////////
+
+/// A data set that round-robins between other data sets.
+#[derive(Debug)]
+pub struct RoundRobinDataSet {
+    name: String,
+    description: String,
+    data_sets: Vec<Arc<dyn DataSet>>,
+    index: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl DataSet for RoundRobinDataSet {
+    fn name(&self) -> String {
+        format!("round-robin-{}", self.name)
+    }
+
+    fn description(&self) -> String {
+        format!("round robin between other data sets; {}", self.description)
+    }
+
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!("round-robin")
+    }
+
+    async fn get(
+        &self,
+        client: &ChromaClient,
+        gq: GetQuery,
+        guac: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let index = self
+            .index
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            % self.data_sets.len();
+        self.data_sets[index].get(client, gq, guac).await
+    }
+
+    async fn query(
+        &self,
+        client: &ChromaClient,
+        qq: QueryQuery,
+        guac: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let index = self
+            .index
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            % self.data_sets.len();
+        self.data_sets[index].query(client, qq, guac).await
+    }
+
+    async fn upsert(
+        &self,
+        client: &ChromaClient,
+        uq: UpsertQuery,
+        guac: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let index = self
+            .index
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            % self.data_sets.len();
+        self.data_sets[index].upsert(client, uq, guac).await
+    }
+}
+
 /////////////////////////////////////////// All Data Sets //////////////////////////////////////////
 
 /// Get all data sets.
@@ -273,6 +339,15 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
     for data_set in TINY_STORIES_DATA_SETS {
         data_sets.push(Arc::new(data_set.clone()) as _);
     }
+    data_sets.push(Arc::new(RoundRobinDataSet {
+        name: "tiny-stories".to_string(),
+        description: "tiny stories data sets".to_string(),
+        data_sets: TINY_STORIES_DATA_SETS
+            .iter()
+            .map(|ds| Arc::new(ds.clone()) as _)
+            .collect(),
+        index: AtomicUsize::new(0),
+    }) as _);
     for num_clusters in [10_000, 100_000] {
         for (seed_idx, seed_clusters) in [
             0xab1cd5b6a5173d40usize,
