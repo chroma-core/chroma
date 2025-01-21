@@ -146,36 +146,36 @@ impl CompactionManager {
         };
     }
 
-    // TODO: make the return type more informative
     #[instrument(name = "CompactionManager::compact_batch")]
-    pub(crate) async fn compact_batch(
-        &mut self,
-        compacted: &mut Vec<CollectionUuid>,
-    ) -> (u32, u32) {
+    pub(crate) async fn compact_batch(&mut self) -> Vec<CollectionUuid> {
         self.scheduler.schedule().await;
-        let mut jobs = FuturesUnordered::new();
-        for job in self.scheduler.get_jobs() {
-            let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
-            instrumented_span.follows_from(Span::current());
-            jobs.push(self.compact(job).instrument(instrumented_span));
-        }
-        tracing::info!("Compacting {} jobs", jobs.len());
-        let mut num_completed_jobs = 0;
-        let mut num_failed_jobs = 0;
-        while let Some(job) = jobs.next().await {
-            match job {
-                Ok(result) => {
-                    tracing::info!("Compaction completed: {:?}", result);
-                    compacted.push(result.compaction_job.collection_id);
-                    num_completed_jobs += 1;
+        let job_futures = self
+            .scheduler
+            .get_jobs()
+            .map(|job| {
+                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
+                instrumented_span.follows_from(Span::current());
+                self.compact(job).instrument(instrumented_span)
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        tracing::info!("Running {} compaction jobs", job_futures.len());
+
+        job_futures
+            .filter_map(|result| async move {
+                match result {
+                    Ok(response) => {
+                        tracing::info!("Compaction completed: {response:?}");
+                        Some(response.compaction_job.collection_id)
+                    }
+                    Err(err) => {
+                        tracing::error!("Compaction failed {err}");
+                        None
+                    }
                 }
-                Err(e) => {
-                    tracing::info!("Compaction failed {}", e);
-                    num_failed_jobs += 1;
-                }
-            }
-        }
-        (num_completed_jobs, num_failed_jobs)
+            })
+            .collect()
+            .await
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
@@ -311,10 +311,8 @@ impl Handler<ScheduledCompactionMessage> for CompactionManager {
         _message: ScheduledCompactionMessage,
         ctx: &ComponentContext<CompactionManager>,
     ) {
-        tracing::info!("CompactionManager: Performing compaction");
-        let mut ids = Vec::new();
-        self.compact_batch(&mut ids).await;
-
+        tracing::info!("CompactionManager: Performing scheduled compaction");
+        let ids = self.compact_batch().await;
         self.hnsw_index_provider.purge_by_id(&ids).await;
 
         // Compaction is done, schedule the next compaction
@@ -332,11 +330,15 @@ impl Handler<OneOffCompactionMessage> for CompactionManager {
     type Result = ();
     async fn handle(
         &mut self,
-        _message: OneOffCompactionMessage,
+        message: OneOffCompactionMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
-        tracing::info!("CompactionManager: Performing compaction");
-        todo!("To be implemented in next PR in the stack");
+        self.scheduler
+            .add_oneoff_collections(message.collection_ids);
+        tracing::info!(
+            "One-off collections queued: {:?}",
+            self.scheduler.get_oneoff_collections()
+        );
     }
 }
 
@@ -585,10 +587,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);
-        let mut compacted = vec![];
-        let (num_completed, number_failed) = manager.compact_batch(&mut compacted).await;
-        assert_eq!(num_completed, 2);
-        assert_eq!(number_failed, 0);
+        let compacted = manager.compact_batch().await;
         assert!(
             (compacted == vec![collection_uuid_1, collection_uuid_2])
                 || (compacted == vec![collection_uuid_2, collection_uuid_1])

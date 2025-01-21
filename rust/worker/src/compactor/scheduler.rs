@@ -26,6 +26,7 @@ pub(crate) struct Scheduler {
     min_compaction_size: usize,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
+    oneoff_collections: HashSet<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
 }
 
@@ -56,8 +57,17 @@ impl Scheduler {
             max_concurrent_jobs,
             memberlist: None,
             assignment_policy,
+            oneoff_collections: HashSet::new(),
             disabled_collections,
         }
+    }
+
+    pub(crate) fn add_oneoff_collections(&mut self, ids: Vec<CollectionUuid>) {
+        self.oneoff_collections.extend(ids);
+    }
+
+    pub(crate) fn get_oneoff_collections(&self) -> Vec<CollectionUuid> {
+        self.oneoff_collections.iter().cloned().collect()
     }
 
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
@@ -154,7 +164,7 @@ impl Scheduler {
                 }
             }
         }
-        self.filter_collections(collection_records)
+        collection_records
     }
 
     fn filter_collections(&mut self, collections: Vec<CollectionRecord>) -> Vec<CollectionRecord> {
@@ -182,11 +192,35 @@ impl Scheduler {
     }
 
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
-        let jobs = self
-            .policy
-            .determine(collection_records, self.max_concurrent_jobs as i32);
         self.job_queue.clear();
-        self.job_queue.extend(jobs);
+        let mut scheduled_collections = Vec::new();
+        for record in collection_records {
+            if self.oneoff_collections.contains(&record.collection_id) {
+                tracing::info!(
+                    "Creating one-off compaction job for collection: {}",
+                    record.collection_version
+                );
+                self.job_queue.push(CompactionJob {
+                    collection_id: record.collection_id,
+                    tenant_id: record.tenant_id,
+                    offset: record.offset,
+                    collection_version: record.collection_version,
+                });
+                self.oneoff_collections.remove(&record.collection_id);
+                if self.job_queue.len() == self.max_concurrent_jobs {
+                    return;
+                }
+            } else {
+                scheduled_collections.push(record);
+            }
+        }
+
+        let filtered_collections = self.filter_collections(scheduled_collections);
+        self.job_queue.extend(
+            self.policy
+                .determine(filtered_collections, self.max_concurrent_jobs as i32),
+        );
+        self.job_queue.truncate(self.max_concurrent_jobs);
     }
 
     pub(crate) fn recompute_disabled_collections(&mut self) {
