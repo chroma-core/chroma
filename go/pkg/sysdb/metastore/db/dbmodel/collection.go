@@ -21,6 +21,12 @@ type Collection struct {
 	TotalRecordsPostCompaction uint64          `gorm:"total_records_post_compaction;default:0"`
 }
 
+type CollectionToGc struct {
+	ID      string `gorm:"id;primaryKey"`
+	Name    string `gorm:"name;not null;index:idx_name,unique;"`
+	Version int32  `gorm:"version;default:0"`
+}
+
 func (v Collection) TableName() string {
 	return "collections"
 }
@@ -43,4 +49,5 @@ type ICollectionDb interface {
 	UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
+	ListCollectionsToGc() ([]*CollectionToGc, error)
 }

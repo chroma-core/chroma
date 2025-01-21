@@ -19,6 +19,12 @@ type Collection struct {
 	TotalRecordsPostCompaction uint64
 }
 
+type CollectionToGc struct {
+	ID              types.UniqueID
+	Name            string
+	VersionFilePath string
+}
+
 type CreateCollection struct {
 	ID                   types.UniqueID
 	Name                 string

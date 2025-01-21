@@ -226,3 +226,7 @@ func (s *Coordinator) GetTenantsLastCompactionTime(ctx context.Context, tenantID
 func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }
+
+func (s *Coordinator) ListCollectionsToGc(ctx context.Context) ([]*model.CollectionToGc, error) {
+	return s.catalog.ListCollectionsToGc(ctx)
+}

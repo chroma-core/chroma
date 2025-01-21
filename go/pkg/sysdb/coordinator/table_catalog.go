@@ -381,6 +381,22 @@ func (tc *Catalog) GetCollectionSize(ctx context.Context, collectionID types.Uni
 	return total_records_post_compaction, nil
 }
 
+func (tc *Catalog) ListCollectionsToGc(ctx context.Context) ([]*model.CollectionToGc, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.ListCollectionsToGc")
+		defer span.End()
+	}
+
+	collectionsToGc, err := tc.metaDomain.CollectionDb(ctx).ListCollectionsToGc()
+
+	if err != nil {
+		return nil, err
+	}
+	collections := convertCollectionToGcToModel(collectionsToGc)
+	return collections, nil
+}
+
 func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
 	tracer := otel.Tracer
 	if tracer != nil {

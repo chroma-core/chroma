@@ -51,6 +51,18 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
 }
 
+func (s *collectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) {
+	// TODO(Sanket): Read version file path.
+	var collections []*dbmodel.CollectionToGc
+	// Use the read replica for this so as to not overwhelm the writer.
+	// Skip collections that have not been compacted even once.
+	err := s.read_db.Table("collections").Select("id, name, version").Find(&collections).Where("version > 0").Error
+	if err != nil {
+		return nil, err
+	}
+	return collections, nil
+}
+
 func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
