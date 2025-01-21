@@ -42,6 +42,46 @@ describe("AdminClient", () => {
     expect(getDatabase.name).toBe("test");
   });
 
+  test("it should delete a database", async () => {
+    await adminClient.createTenant({ name: "test4" });
+    await adminClient.createDatabase({
+      name: "test",
+      tenantName: "test4",
+    });
+    await adminClient.deleteDatabase({ name: "test", tenantName: "test4" });
+
+    await expect(
+      adminClient.getDatabase({ name: "test", tenantName: "test4" }),
+    ).rejects.toThrow();
+  });
+
+  test("it should list databases for a tenant", async () => {
+    await adminClient.createTenant({ name: "test2" });
+
+    for (let i = 0; i < 5; i++) {
+      await adminClient.createDatabase({
+        name: `test${i}`,
+        tenantName: "test2",
+      });
+    }
+
+    const firstTwoDatabases = await adminClient.listDatabases({
+      tenantName: "test2",
+      limit: 2,
+    });
+    expect(firstTwoDatabases.map((d) => d.name)).toEqual(["test0", "test1"]);
+
+    const lastThreeDatabases = await adminClient.listDatabases({
+      tenantName: "test2",
+      offset: 2,
+    });
+    expect(lastThreeDatabases.map((d) => d.name)).toEqual([
+      "test2",
+      "test3",
+      "test4",
+    ]);
+  });
+
   // test that it can set the tenant and database
   test("it should set the tenant and database", async () => {
     // doesnt exist so should throw

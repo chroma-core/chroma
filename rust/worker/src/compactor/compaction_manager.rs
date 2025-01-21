@@ -3,32 +3,34 @@ use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduleMessage;
 use crate::config::CompactionServiceConfig;
-use crate::execution::dispatcher::Dispatcher;
-use crate::execution::orchestration::orchestrator::Orchestrator;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
-use crate::sysdb;
-use crate::sysdb::sysdb::SysDb;
-use crate::system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_storage::Storage;
+use chroma_sysdb::SysDb;
+use chroma_system::Dispatcher;
+use chroma_system::Orchestrator;
+use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
 use tracing::Span;
+use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
     system: Option<System>,
@@ -198,7 +200,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             }
         };
         let sysdb_config = &config.sysdb;
-        let sysdb = match sysdb::from_config(sysdb_config).await {
+        let sysdb = match chroma_sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
@@ -220,6 +222,11 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         let min_compaction_size = config.compactor.min_compaction_size;
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
+        let mut disabled_collections =
+            HashSet::with_capacity(config.compactor.disabled_collections.len());
+        for collection_id_str in &config.compactor.disabled_collections {
+            disabled_collections.insert(CollectionUuid(Uuid::from_str(collection_id_str).unwrap()));
+        }
 
         let assignment_policy_config = &config.assignment_policy;
         let assignment_policy = match crate::assignment::from_config(assignment_policy_config).await
@@ -237,6 +244,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             max_concurrent_jobs,
             min_compaction_size,
             assignment_policy,
+            disabled_collections,
         );
 
         let blockfile_provider = BlockfileProvider::try_from_config(&(
@@ -276,7 +284,7 @@ impl Component for CompactionManager {
         self.compaction_manager_queue_size
     }
 
-    async fn start(&mut self, ctx: &crate::system::ComponentContext<Self>) -> () {
+    async fn start(&mut self, ctx: &ComponentContext<Self>) -> () {
         println!("Starting CompactionManager");
         ctx.scheduler
             .schedule(ScheduleMessage {}, self.compaction_interval, ctx, || {
@@ -329,13 +337,13 @@ mod tests {
     use super::*;
     use crate::assignment::assignment_policy::AssignmentPolicy;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
-    use crate::execution::dispatcher::Dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
-    use crate::sysdb::test_sysdb::TestSysDb;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_storage::local::LocalStorage;
+    use chroma_sysdb::TestSysDb;
+    use chroma_system::Dispatcher;
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
@@ -408,6 +416,7 @@ mod tests {
             database: "database_1".to_string(),
             log_position: -1,
             version: 0,
+            total_records_post_compaction: 0,
         };
 
         let tenant_2 = "tenant_2".to_string();
@@ -420,6 +429,7 @@ mod tests {
             database: "database_2".to_string(),
             log_position: -1,
             version: 0,
+            total_records_post_compaction: 0,
         };
         match *sysdb {
             SysDb::Test(ref mut sysdb) => {
@@ -519,6 +529,7 @@ mod tests {
             max_concurrent_jobs,
             min_compaction_size,
             assignment_policy,
+            HashSet::new(),
         );
         // Set memberlist
         scheduler.set_memberlist(vec![my_member_id.clone()]);

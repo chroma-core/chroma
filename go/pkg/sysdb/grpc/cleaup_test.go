@@ -21,6 +21,7 @@ import (
 type CleanupTestSuite struct {
 	suite.Suite
 	db           *gorm.DB
+	read_db      *gorm.DB
 	s            *Server
 	tenantName   string
 	databaseName string
@@ -29,14 +30,14 @@ type CleanupTestSuite struct {
 
 func (suite *CleanupTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider:      "database",
 		SoftDeleteEnabled:          true,
 		SoftDeleteCleanupInterval:  1 * time.Second,
 		SoftDeleteMaxAge:           0,
 		SoftDeleteCleanupBatchSize: 10,
-		Testing:                    true}, grpcutils.Default, suite.db)
+		Testing:                    true}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}

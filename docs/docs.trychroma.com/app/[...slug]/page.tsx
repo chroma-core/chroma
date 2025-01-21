@@ -2,6 +2,8 @@ import React from "react";
 import MarkdocRenderer from "@/components/markdoc/markdoc-renderer";
 import sidebarConfig from "@/markdoc/content/sidebar-config";
 import { AppSection } from "@/lib/content";
+import { Metadata } from "next";
+import { capitalize } from "@/lib/utils";
 
 export const generateStaticParams = async () => {
   const slugs: string[][] = [];
@@ -28,6 +30,20 @@ export const generateStaticParams = async () => {
     slug,
   }));
 };
+
+export async function generateMetadata({
+  params,
+}: {
+  params: { slug: string[] };
+}): Promise<Metadata> {
+  const title = `${params.slug[params.slug.length - 1]
+    .split("-")
+    .map((s) => capitalize(s))
+    .join(" ")} - Chroma Docs`;
+  return {
+    title,
+  };
+}
 
 const Page: React.FC<{ params: { slug: string[] } }> = ({ params }) => {
   const { slug } = params;

@@ -1,4 +1,3 @@
-import logging
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
@@ -19,20 +18,30 @@ from chromadb.proto.coordinator_pb2 import (
     CreateSegmentRequest,
     CreateTenantRequest,
     DeleteCollectionRequest,
+    DeleteDatabaseRequest,
     DeleteSegmentRequest,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetCollectionSizeRequest,
+    GetCollectionSizeResponse,
     GetCollectionWithSegmentsRequest,
     GetCollectionWithSegmentsResponse,
     GetDatabaseRequest,
     GetSegmentsRequest,
     GetTenantRequest,
+    ListDatabasesRequest,
     UpdateCollectionRequest,
     UpdateSegmentRequest,
 )
 from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
+from chromadb.telemetry.opentelemetry import (
+    add_attributes_to_current_span,
+    OpenTelemetryClient,
+    OpenTelemetryGranularity,
+    trace_method,
+)
 from chromadb.types import (
     Collection,
     CollectionAndSegments,
@@ -73,6 +82,7 @@ class GrpcSysDB(SysDB):
     def start(self) -> None:
         self._channel = grpc.insecure_channel(
             f"{self._coordinator_url}:{self._coordinator_port}",
+            options=[("grpc.max_concurrent_streams", 1000)],
         )
         interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
@@ -124,6 +134,49 @@ class GrpcSysDB(SysDB):
             )
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 raise NotFoundError()
+            raise InternalError()
+
+    @overrides
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        try:
+            request = DeleteDatabaseRequest(name=name, tenant=tenant)
+            self._sys_db_stub.DeleteDatabase(
+                request, timeout=self._request_timeout_seconds
+            )
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to delete database {name} for tenant {tenant} due to error: {e}"
+            )
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                raise NotFoundError()
+            raise InternalError
+
+    @overrides
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        try:
+            request = ListDatabasesRequest(limit=limit, offset=offset, tenant=tenant)
+            response = self._sys_db_stub.ListDatabases(
+                request, timeout=self._request_timeout_seconds
+            )
+            results: List[Database] = []
+            for proto_database in response.databases:
+                results.append(
+                    Database(
+                        id=UUID(hex=proto_database.id),
+                        name=proto_database.name,
+                        tenant=proto_database.tenant,
+                    )
+                )
+            return results
+        except grpc.RpcError as e:
+            logger.info(
+                f"Failed to list databases for tenant {tenant} due to error: {e}"
+            )
             raise InternalError()
 
     @overrides
@@ -310,7 +363,9 @@ class GrpcSysDB(SysDB):
                 f"Failed to delete collection id {id} for database {database} and tenant {tenant} due to error: {e}"
             )
             e = cast(grpc.Call, e)
-            logger.error(f"Error code: {e.code()}, NotFoundError: {grpc.StatusCode.NOT_FOUND}")
+            logger.error(
+                f"Error code: {e.code()}, NotFoundError: {grpc.StatusCode.NOT_FOUND}"
+            )
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 raise NotFoundError()
             raise InternalError()
@@ -367,13 +422,32 @@ class GrpcSysDB(SysDB):
             raise InternalError()
 
     @overrides
-    def get_collection_with_segments(self, collection_id: UUID) -> CollectionAndSegments:
+    def get_collection_size(self, id: UUID) -> int:
+        try:
+            request = GetCollectionSizeRequest(id=id.hex)
+            response: GetCollectionSizeResponse = self._sys_db_stub.GetCollectionSize(
+                request
+            )
+            return response.total_records_post_compaction
+        except grpc.RpcError as e:
+            logger.error(f"Failed to get collection {id} size due to error: {e}")
+            raise InternalError()
+
+    @trace_method(
+        "SysDB.get_collection_with_segments", OpenTelemetryGranularity.OPERATION
+    )
+    @overrides
+    def get_collection_with_segments(
+        self, collection_id: UUID
+    ) -> CollectionAndSegments:
         try:
             request = GetCollectionWithSegmentsRequest(id=collection_id.hex)
-            response: GetCollectionWithSegmentsResponse = self._sys_db_stub.GetCollectionWithSegments(request)
+            response: GetCollectionWithSegmentsResponse = (
+                self._sys_db_stub.GetCollectionWithSegments(request)
+            )
             return CollectionAndSegments(
                 collection=from_proto_collection(response.collection),
-                segments=[from_proto_segment(segment) for segment in response.segments]
+                segments=[from_proto_segment(segment) for segment in response.segments],
             )
         except grpc.RpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:

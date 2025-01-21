@@ -3,6 +3,7 @@ mod load;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_config::Configurable;
+use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use criterion::{criterion_group, criterion_main, Criterion};
 use load::{
     all_projection, always_false_filter_for_modulo_metadata,
@@ -10,13 +11,7 @@ use load::{
     trivial_filter, trivial_limit, trivial_projection,
 };
 use worker::{
-    config::RootConfig,
-    execution::{
-        dispatcher::Dispatcher,
-        orchestration::{get::GetOrchestrator, orchestrator::Orchestrator},
-    },
-    segment::test::TestSegment,
-    system::{ComponentHandle, System},
+    config::RootConfig, execution::orchestration::get::GetOrchestrator, segment::test::TestSegment,
 };
 
 fn trivial_get(

@@ -1,4 +1,3 @@
-use crate::execution::operator::Operator;
 use crate::segment::metadata_segment::MetadataSegmentError;
 use crate::segment::record_segment::ApplyMaterializedLogError;
 use crate::segment::record_segment::RecordSegmentReader;
@@ -9,6 +8,7 @@ use crate::segment::MaterializeLogsResult;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_system::Operator;
 use chroma_types::SegmentUuid;
 use thiserror::Error;
 use tracing::Instrument;

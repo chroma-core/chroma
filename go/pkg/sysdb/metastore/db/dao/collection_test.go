@@ -16,6 +16,7 @@ import (
 type CollectionDbTestSuite struct {
 	suite.Suite
 	db           *gorm.DB
+	read_db      *gorm.DB
 	collectionDb *collectionDb
 	tenantName   string
 	databaseName string
@@ -24,9 +25,10 @@ type CollectionDbTestSuite struct {
 
 func (suite *CollectionDbTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	suite.collectionDb = &collectionDb{
-		db: suite.db,
+		db:      suite.db,
+		read_db: suite.read_db,
 	}
 	suite.tenantName = "test_collection_tenant"
 	suite.databaseName = "test_collection_database"
@@ -75,6 +77,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Len(collections[0].CollectionMetadata, 1)
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
+	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
 
 	// Test when filtering by ID
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
@@ -120,7 +123,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.NoError(err)
 }
 
-func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion() {
+func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionAndTotalRecords() {
 	collectionName := "test_collection_get_collections"
 	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 	// verify default values
@@ -131,22 +134,23 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionAndVersion
 	suite.Equal(int32(0), collections[0].Collection.Version)
 
 	// update log position and version
-	version, err := suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(10), 0)
+	version, err := suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(10), 0, uint64(100))
 	suite.NoError(err)
 	suite.Equal(int32(1), version)
 	collections, _ = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.Len(collections, 1)
 	suite.Equal(int64(10), collections[0].Collection.LogPosition)
 	suite.Equal(int32(1), collections[0].Collection.Version)
+	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
 
 	// invalid log position
-	_, err = suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(5), 0)
+	_, err = suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(5), 0, uint64(100))
 	suite.Error(err, "collection log position Stale")
 
 	// invalid version
-	_, err = suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(20), 0)
+	_, err = suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(20), 0, uint64(100))
 	suite.Error(err, "collection version invalid")
-	_, err = suite.collectionDb.UpdateLogPositionAndVersion(collectionID, int64(20), 3)
+	_, err = suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(20), 3, uint64(100))
 	suite.Error(err, "collection version invalid")
 
 	//clean up
@@ -203,6 +207,19 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	err = CleanUpTestCollection(suite.db, collectionID1)
 	suite.NoError(err)
 	err = CleanUpTestCollection(suite.db, collectionID2)
+	suite.NoError(err)
+}
+
+func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionSize() {
+	collectionName := "test_collection_get_collection_size"
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	suite.NoError(err)
+
+	total_records_post_compaction, err := suite.collectionDb.GetCollectionSize(collectionID)
+	suite.NoError(err)
+	suite.Equal(uint64(100), total_records_post_compaction)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)
 }
 

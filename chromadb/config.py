@@ -12,7 +12,6 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
-
 in_pydantic_v2 = False
 try:
     from pydantic import BaseSettings
@@ -44,7 +43,7 @@ migrate your data to the new Chroma architecture.
 Please `pip install chroma-migrate` and run `chroma-migrate` to migrate your data and then
 change how you construct your Chroma client.
 
-See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!\033[0m"""
+See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/MMeYNTmh3x for help!\033[0m"""
 
 _legacy_config_keys = {
     "chroma_db_impl",
@@ -82,6 +81,7 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.ingest.Producer": "chroma_producer_impl",
     "chromadb.quota.QuotaEnforcer": "chroma_quota_enforcer_impl",
     "chromadb.rate_limit.RateLimitEnforcer": "chroma_rate_limit_enforcer_impl",
+    "chromadb.rate_limit.AsyncRateLimitEnforcer": "chroma_async_rate_limit_enforcer_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
@@ -95,6 +95,26 @@ DEFAULT_DATABASE = "default_database"
 class APIVersion(str, Enum):
     V1 = "/api/v1"
     V2 = "/api/v2"
+
+
+# NOTE(hammadb) 1/13/2024 - This has to be in config.py instead of being localized to the module
+# that uses it because of a circular import issue. This is a temporary solution until we can
+# refactor the code to remove the circular import.
+class RoutingMode(Enum):
+    """
+    Routing mode for the segment directory
+
+    node - Assign based on the node name, used in production with multi-node settings with the assumption that
+    there is one query service pod per node. This is useful for when there is a disk based cache on the
+    node that we want to route to.
+
+    id - Assign based on the member id, used in development and testing environments where the node name is not
+    guaranteed to be unique. (I.e a local development kubernetes env). Or when there are multiple query service
+    pods per node.
+    """
+
+    NODE = "node"
+    ID = "id"
 
 
 class Settings(BaseSettings):  # type: ignore
@@ -227,6 +247,8 @@ class Settings(BaseSettings):  # type: ignore
     # ==================
 
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
+    chroma_segment_directory_routing_mode: RoutingMode = RoutingMode.ID
+
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
     worker_memberlist_name: str = "query-service-memberlist"
 
@@ -242,6 +264,7 @@ class Settings(BaseSettings):  # type: ignore
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
     chroma_executor_impl: str = "chromadb.execution.executor.local.LocalExecutor"
+    chroma_query_replication_factor: int = 2
 
     chroma_logservice_host = "localhost"
     chroma_logservice_port = 50052
@@ -255,6 +278,10 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_rate_limit_enforcer_impl: str = (
         "chromadb.rate_limit.simple_rate_limit.SimpleRateLimitEnforcer"
+    )
+
+    chroma_async_rate_limit_enforcer_impl: str = (
+        "chromadb.rate_limit.simple_rate_limit.SimpleAsyncRateLimitEnforcer"
     )
 
     # ==========

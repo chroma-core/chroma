@@ -24,13 +24,15 @@ import (
 )
 
 var (
-	globalDB *gorm.DB
+	globalDB     *gorm.DB
+	globalReadDB *gorm.DB
 )
 
 type DBConfig struct {
 	Username     string
 	Password     string
 	Address      string
+	ReadAddress  string
 	Port         int
 	DBName       string
 	MaxIdleConns int
@@ -38,10 +40,26 @@ type DBConfig struct {
 	SslMode      string
 }
 
-func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
-	log.Info("ConnectPostgres", zap.String("host", cfg.Address), zap.String("database", cfg.DBName), zap.Int("port", cfg.Port))
+func ConnectDB(cfg DBConfig) error {
+	db, err := ConnectPostgres(cfg.Address, cfg.Username, cfg.Password, cfg.Port, cfg.DBName, cfg.SslMode, cfg.MaxIdleConns, cfg.MaxOpenConns)
+	if err != nil {
+		return err
+	}
+	read_db, err := ConnectPostgres(cfg.ReadAddress, cfg.Username, cfg.Password, cfg.Port, cfg.DBName, cfg.SslMode, cfg.MaxIdleConns, cfg.MaxOpenConns)
+	if err != nil {
+		return err
+	}
+
+	globalDB = db
+	globalReadDB = read_db
+
+	return nil
+}
+
+func ConnectPostgres(address string, username string, password string, port int, dbName string, sslMode string, maxIdleConns int, maxOpenConns int) (*gorm.DB, error) {
+	log.Info("ConnectPostgres", zap.String("host", address), zap.String("database", dbName), zap.Int("port", port))
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=%s",
-		cfg.Address, cfg.Username, cfg.Password, cfg.DBName, cfg.Port, cfg.SslMode)
+		address, username, password, dbName, port, sslMode)
 
 	ormLogger := logger.Default
 	ormLogger.LogMode(logger.Info)
@@ -51,8 +69,8 @@ func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 	})
 	if err != nil {
 		log.Error("fail to connect db",
-			zap.String("host", cfg.Address),
-			zap.String("database", cfg.DBName),
+			zap.String("host", address),
+			zap.String("database", dbName),
 			zap.Error(err))
 		return nil, err
 	}
@@ -65,27 +83,20 @@ func ConnectPostgres(cfg DBConfig) (*gorm.DB, error) {
 	idb, err := db.DB()
 	if err != nil {
 		log.Error("fail to create db instance",
-			zap.String("host", cfg.Address),
-			zap.String("database", cfg.DBName),
+			zap.String("host", address),
+			zap.String("database", dbName),
 			zap.Error(err))
 		return nil, err
 	}
-	idb.SetMaxIdleConns(cfg.MaxIdleConns)
-	idb.SetMaxOpenConns(cfg.MaxOpenConns)
-
-	globalDB = db
+	idb.SetMaxIdleConns(maxIdleConns)
+	idb.SetMaxOpenConns(maxOpenConns)
 
 	log.Info("Postgres connected success",
-		zap.String("host", cfg.Address),
-		zap.String("database", cfg.DBName),
+		zap.String("host", address),
+		zap.String("database", dbName),
 		zap.Error(err))
 
 	return db, nil
-}
-
-// SetGlobalDB Only for test
-func SetGlobalDB(db *gorm.DB) {
-	globalDB = db
 }
 
 type ctxTransactionKey struct{}
@@ -126,6 +137,22 @@ func GetDB(ctx context.Context) *gorm.DB {
 	}
 
 	return globalDB.WithContext(ctx)
+}
+
+func GetReadDB(ctx context.Context) *gorm.DB {
+	iface := ctx.Value(ctxTransactionKey{})
+
+	if iface != nil {
+		tx, ok := iface.(*gorm.DB)
+		if !ok {
+			log.Error("unexpected context value type", zap.Any("type", reflect.TypeOf(tx)))
+			return nil
+		}
+
+		return tx
+	}
+
+	return globalReadDB.WithContext(ctx)
 }
 
 func CreateDefaultTenantAndDatabase(db *gorm.DB) string {
@@ -225,15 +252,19 @@ func GetDBConfigForTesting() DBConfig {
 		MaxIdleConns: 10,
 		MaxOpenConns: 100,
 		SslMode:      "disable",
+		ReadAddress:  "localhost",
 	}
 }
 
-func ConfigDatabaseForTesting() *gorm.DB {
-	db, err := ConnectPostgres(GetDBConfigForTesting())
+func ConfigDatabaseForTesting() (*gorm.DB, *gorm.DB) {
+	cfg := GetDBConfigForTesting()
+	db, err := ConnectPostgres(cfg.Address, cfg.Username, cfg.Password, cfg.Port, cfg.DBName, cfg.SslMode, cfg.MaxIdleConns, cfg.MaxOpenConns)
 	if err != nil {
 		panic("failed to connect database")
 	}
-	SetGlobalDB(db)
+	globalDB = db
+	// For testing, we set the read_db to be the same as the db
+	globalReadDB = db
 	CreateTestTables(db)
-	return db
+	return globalDB, globalReadDB
 }

@@ -7,7 +7,7 @@ use chroma_index::spann::types::SpannPosting;
 use chroma_types::SignedRoaringBitmap;
 use thiserror::Error;
 
-use crate::execution::operator::Operator;
+use chroma_system::Operator;
 
 use super::knn::RecordDistance;
 
@@ -93,13 +93,11 @@ impl Operator<SpannBfPlInput, SpannBfPlOutput> for SpannBfPlOperator {
 mod test {
     use chroma_distance::DistanceFunction;
     use chroma_index::spann::types::SpannPosting;
+    use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
     use roaring::RoaringBitmap;
 
-    use crate::execution::{
-        operator::Operator,
-        operators::spann_bf_pl::{SpannBfPlInput, SpannBfPlOperator},
-    };
+    use crate::execution::operators::spann_bf_pl::{SpannBfPlInput, SpannBfPlOperator};
 
     // Basic operator test.
     #[tokio::test]

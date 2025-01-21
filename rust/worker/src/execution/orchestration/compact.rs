@@ -1,10 +1,4 @@
-use super::super::operator::wrap;
-use super::orchestrator::Orchestrator;
 use crate::compactor::CompactionJob;
-use crate::execution::dispatcher::Dispatcher;
-use crate::execution::operator::TaskError;
-use crate::execution::operator::TaskMessage;
-use crate::execution::operator::TaskResult;
 use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterInput;
 use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOperator;
 use crate::execution::operators::apply_log_to_segment_writer::ApplyLogToSegmentWriterOperatorError;
@@ -40,20 +34,26 @@ use crate::segment::record_segment::RecordSegmentWriter;
 use crate::segment::ChromaSegmentFlusher;
 use crate::segment::ChromaSegmentWriter;
 use crate::segment::MaterializeLogsResult;
-use crate::sysdb::sysdb::GetCollectionsError;
-use crate::sysdb::sysdb::GetSegmentsError;
-use crate::sysdb::sysdb::SysDb;
-use crate::system::ChannelError;
-use crate::system::ComponentContext;
-use crate::system::ComponentHandle;
-use crate::system::Handler;
-use crate::system::ReceiverForMessage;
-use crate::utils::PanicError;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_sysdb::GetCollectionsError;
+use chroma_sysdb::GetSegmentsError;
+use chroma_sysdb::SysDb;
+use chroma_system::wrap;
+use chroma_system::ChannelError;
+use chroma_system::ComponentContext;
+use chroma_system::ComponentHandle;
+use chroma_system::Dispatcher;
+use chroma_system::Handler;
+use chroma_system::Orchestrator;
+use chroma_system::PanicError;
+use chroma_system::ReceiverForMessage;
+use chroma_system::TaskError;
+use chroma_system::TaskMessage;
+use chroma_system::TaskResult;
 use chroma_types::Chunk;
 use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
@@ -131,6 +131,8 @@ pub struct CompactOrchestrator {
     flush_results: Vec<SegmentFlushInfo>,
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
+    // Total number of records in the collection after the compaction
+    total_records_last_compaction: u64,
 }
 
 #[derive(Error, Debug)]
@@ -253,13 +255,14 @@ impl CompactOrchestrator {
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             segment_spans: HashMap::new(),
+            total_records_last_compaction: 0,
         }
     }
 
     async fn partition(
         &mut self,
         records: Chunk<LogRecord>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
@@ -276,7 +279,7 @@ impl CompactOrchestrator {
         self_address: Box<
             dyn ReceiverForMessage<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>,
         >,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
 
@@ -330,7 +333,7 @@ impl CompactOrchestrator {
                 TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
             >,
         >,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let writers = self.get_segment_writers().await;
         let writers = match self.ok_or_terminate(writers, ctx) {
@@ -434,7 +437,7 @@ impl CompactOrchestrator {
                 TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
             >,
         >,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let span = self.get_segment_writer_span(&segment_writer);
         let operator = CommitSegmentWriterOperator::new();
@@ -452,7 +455,7 @@ impl CompactOrchestrator {
                 TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
             >,
         >,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let span = self.get_segment_flusher_span(&segment_flusher);
         let operator = FlushSegmentWriterOperator::new();
@@ -462,11 +465,7 @@ impl CompactOrchestrator {
         self.ok_or_terminate(res, ctx);
     }
 
-    async fn register(
-        &mut self,
-        log_position: i64,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
-    ) {
+    async fn register(&mut self, log_position: i64, ctx: &ComponentContext<CompactOrchestrator>) {
         self.state = ExecutionState::Register;
         let operator = RegisterOperator::new();
         let input = RegisterInput::new(
@@ -475,6 +474,7 @@ impl CompactOrchestrator {
             log_position,
             self.compaction_job.collection_version,
             self.flush_results.clone().into(),
+            self.total_records_last_compaction,
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -701,7 +701,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
     async fn handle(
         &mut self,
         message: TaskResult<FetchLogOutput, FetchLogError>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let records = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs,
@@ -732,7 +732,7 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
     async fn handle(
         &mut self,
         message: TaskResult<PartitionOutput, PartitionError>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let records = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs.records,
@@ -751,7 +751,7 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
     async fn handle(
         &mut self,
         message: TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let materialized_result = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(result) => result,
@@ -788,7 +788,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
     async fn handle(
         &mut self,
         message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let message = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(message) => message,
@@ -837,14 +837,20 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
     async fn handle(
         &mut self,
         message: TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let message = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(message) => message,
             None => return,
         };
 
-        self.dispatch_segment_flush(message.flusher, ctx.receiver(), ctx)
+        let flusher = message.flusher;
+        // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
+        if let ChromaSegmentFlusher::RecordSegment(ref record_segment_flusher) = flusher {
+            self.total_records_last_compaction = record_segment_flusher.count();
+        }
+
+        self.dispatch_segment_flush(flusher, ctx.receiver(), ctx)
             .await;
     }
 }
@@ -858,7 +864,7 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
     async fn handle(
         &mut self,
         message: TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let message = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(message) => message,
@@ -887,7 +893,7 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
     async fn handle(
         &mut self,
         message: TaskResult<RegisterOutput, RegisterError>,
-        ctx: &crate::system::ComponentContext<CompactOrchestrator>,
+        ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         self.terminate_with_result(
             message

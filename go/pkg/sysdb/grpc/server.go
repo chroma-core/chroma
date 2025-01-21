@@ -16,7 +16,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
-	"gorm.io/gorm"
 )
 
 type Config struct {
@@ -71,20 +70,20 @@ type Server struct {
 
 func New(config Config) (*Server, error) {
 	if config.SystemCatalogProvider == "memory" {
-		return NewWithGrpcProvider(config, grpcutils.Default, nil)
+		return NewWithGrpcProvider(config, grpcutils.Default)
 	} else if config.SystemCatalogProvider == "database" {
 		dBConfig := config.DBConfig
-		db, err := dbcore.ConnectPostgres(dBConfig)
+		err := dbcore.ConnectDB(dBConfig)
 		if err != nil {
 			return nil, err
 		}
-		return NewWithGrpcProvider(config, grpcutils.Default, db)
+		return NewWithGrpcProvider(config, grpcutils.Default)
 	} else {
 		return nil, errors.New("invalid system catalog provider, only memory and database are supported")
 	}
 }
 
-func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gorm.DB) (*Server, error) {
+func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Server, error) {
 	ctx := context.Background()
 	s := &Server{
 		healthServer: health.NewServer(),
@@ -97,7 +96,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider, db *gor
 		deleteMode = coordinator.HardDelete
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, db, deleteMode)
+	coordinator, err := coordinator.NewCoordinator(ctx, deleteMode)
 	if err != nil {
 		return nil, err
 	}

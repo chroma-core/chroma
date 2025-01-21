@@ -19,7 +19,7 @@ The goal of this doc is to align *core* and *community* efforts for the project 
 
 ## What is the core Chroma team working on right now?
 
-- Standing up that distributed system as a managed service (aka "Hosted Chroma" - [sign up for waitlist](https://airtable.com/shrOAiDUtS2ILy5vZ)!)
+- Standing up that distributed system as a managed service (aka "Hosted Chroma" - [sign up for waitlist](https://trychroma.com/signup)!)
 
 ## What did the Chroma team just complete?
 
@@ -59,7 +59,7 @@ Other great starting points for Chroma (please send PRs for more [here](https://
 - [Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
 - [Replit Template](https://replit.com/@swyx/BasicChromaStarter?v=1)
 
-For those integrations we do have, like LangChain and LlamaIndex, we do always want more tutorials, demos, workshops, videos, and podcasts (we've done some pods [on our blog](https://trychroma.com/blog)).
+For those integrations we do have, like LangChain and LlamaIndex, we do always want more tutorials, demos, workshops, videos, and podcasts (we've done some pods [on our blog](https://trychroma.com/interviews)).
 
 ### Example Datasets
 

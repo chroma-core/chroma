@@ -1,0 +1,41 @@
+[package]
+name = "garbage_collector"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "garbage_collector_library"
+path = "src/lib.rs"
+
+[[bin]]
+name = "garbage_collector_service"
+path = "src/bin/garbage_collector_service.rs"
+
+[[bin]]
+name = "garbage_collector_tool"
+path = "src/bin/garbage_collector_tool.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+figment = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+tracing = { workspace = true }
+tracing-bunyan-formatter = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry-http = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-system = { workspace = true }
+chroma-types = { workspace = true }
+chroma-sysdb = { workspace = true }

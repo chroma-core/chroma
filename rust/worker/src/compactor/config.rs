@@ -8,4 +8,5 @@ pub(crate) struct CompactorConfig {
     pub(crate) min_compaction_size: usize,
     pub(crate) max_compaction_size: usize,
     pub(crate) max_partition_size: usize,
+    pub(crate) disabled_collections: Vec<String>,
 }

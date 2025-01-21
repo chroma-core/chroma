@@ -23,7 +23,7 @@ type SegmentDbTestSuite struct {
 
 func (suite *SegmentDbTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, _ = dbcore.ConfigDatabaseForTesting()
 	suite.segmentDb = &segmentDb{
 		db: suite.db,
 	}

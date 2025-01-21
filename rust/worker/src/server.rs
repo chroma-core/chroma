@@ -5,6 +5,8 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_sysdb::SysDb;
+use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_types::{
     chroma_proto::{
         self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
@@ -20,16 +22,13 @@ use tracing::{trace_span, Instrument};
 use crate::{
     config::QueryServiceConfig,
     execution::{
-        dispatcher::Dispatcher,
         operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
         orchestration::{
             get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
-            orchestrator::Orchestrator, CountOrchestrator,
+            CountOrchestrator,
         },
     },
     log::log::Log,
-    sysdb::sysdb::SysDb,
-    system::{ComponentHandle, System},
     tracing::util::wrap_span_with_parent_context,
     utils::convert::{from_proto_knn, to_proto_knn_batch_result},
 };
@@ -52,7 +51,7 @@ pub struct WorkerServer {
 impl Configurable<QueryServiceConfig> for WorkerServer {
     async fn try_from_config(config: &QueryServiceConfig) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = &config.sysdb;
-        let sysdb = match crate::sysdb::from_config(sysdb_config).await {
+        let sysdb = match chroma_sysdb::from_config(sysdb_config).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 tracing::error!("Failed to create sysdb component: {:?}", err);
@@ -398,15 +397,15 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::execution::dispatcher;
     use crate::log::log::InMemoryLog;
     use crate::segment::test::TestSegment;
-    use crate::sysdb::test_sysdb::TestSysDb;
-    use crate::system;
     use chroma_index::test_hnsw_index_provider;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;
+    use chroma_sysdb::TestSysDb;
+    use chroma_system::dispatcher;
+    use chroma_system::system;
     use uuid::Uuid;
 
     fn run_server() -> String {
@@ -452,6 +451,7 @@ mod tests {
                 database: "test-database".to_string(),
                 log_position: 0,
                 version: 0,
+                total_records_post_compaction: 0,
             }),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
@@ -554,6 +554,7 @@ mod tests {
             database: "test-database".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         });
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),

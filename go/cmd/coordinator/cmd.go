@@ -29,12 +29,15 @@ func init() {
 
 	// GRPC
 	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
+	Cmd.Flags().Uint32Var(&conf.GrpcConfig.MaxConcurrentStreams, "max-concurrent-streams", 100, "Max concurrent streams")
+	Cmd.Flags().Uint32Var(&conf.GrpcConfig.NumStreamWorkers, "num-stream-workers", 100, "Number of stream workers")
 
 	// System Catalog
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "database", "System catalog provider")
 	Cmd.Flags().StringVar(&conf.DBConfig.Username, "username", "chroma", "MetaTable username")
 	Cmd.Flags().StringVar(&conf.DBConfig.Password, "password", "chroma", "MetaTable password")
 	Cmd.Flags().StringVar(&conf.DBConfig.Address, "db-address", "postgres", "MetaTable db address")
+	Cmd.Flags().StringVar(&conf.DBConfig.ReadAddress, "read-db-address", "postgres", "MetaTable db read only address")
 	Cmd.Flags().IntVar(&conf.DBConfig.Port, "db-port", 5432, "MetaTable db port")
 	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "db-name", "sysdb", "MetaTable db name")
 	Cmd.Flags().IntVar(&conf.DBConfig.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")

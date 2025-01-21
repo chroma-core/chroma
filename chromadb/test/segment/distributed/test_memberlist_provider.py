@@ -1,9 +1,10 @@
 # Tests the CustomResourceMemberlist provider
+from dataclasses import asdict
 import threading
 from chromadb.test.conftest import skip_if_not_cluster
 from kubernetes import client, config
 from chromadb.config import System, Settings
-from chromadb.segment.distributed import Memberlist
+from chromadb.segment.distributed import Memberlist, Member
 from chromadb.segment.impl.distributed.segment_directory import (
     CustomResourceMemberlistProvider,
     KUBERNETES_GROUP,
@@ -17,12 +18,20 @@ def update_memberlist(n: int, memberlist_name: str = "test-memberlist") -> Membe
     config.load_config()
     api_instance = client.CustomObjectsApi()
 
-    members = [{"member_id": f"test-{i}"} for i in range(1, n + 1)]
+    members = [
+        Member(id=f"test-{i}", ip=f"10.0.0.{i}", node="node-{i}")
+        for i in range(1, n + 1)
+    ]
 
     body = {
         "kind": "MemberList",
         "metadata": {"name": memberlist_name},
-        "spec": {"members": members},
+        "spec": {
+            "members": [
+                {"member_id": m.id, "member_ip": m.ip, "member_node_name": m.node}
+                for m in members
+            ]
+        },
     }
 
     _ = api_instance.patch_namespaced_custom_object(
@@ -34,11 +43,13 @@ def update_memberlist(n: int, memberlist_name: str = "test-memberlist") -> Membe
         body=body,
     )
 
-    return [m["member_id"] for m in members]
+    return members
 
 
 def compare_memberlists(m1: Memberlist, m2: Memberlist) -> bool:
-    return sorted(m1) == sorted(m2)
+    m1_as_dict = sorted([asdict(m) for m in m1], key=lambda x: x["id"])
+    m2_as_dict = sorted([asdict(m) for m in m2], key=lambda x: x["id"])
+    return m1_as_dict == m2_as_dict
 
 
 @skip_if_not_cluster()

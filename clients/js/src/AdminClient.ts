@@ -16,8 +16,9 @@ interface Tenant {
   name: string;
 }
 
-// interface for tenant
 interface Database {
+  id: string;
+  tenant: string;
   name: string;
 }
 
@@ -203,7 +204,7 @@ export class AdminClient {
   }: {
     name: string;
     tenantName: string;
-  }): Promise<Database> {
+  }): Promise<{ name: string }> {
     await this.api.createDatabase(tenantName, { name }, this.api.options);
 
     return { name };
@@ -234,12 +235,59 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<Database> {
-    const getDatabase = (await this.api.getDatabase(
+    const result = (await this.api.getDatabase(
       name,
       tenantName,
       this.api.options,
     )) as Database;
 
-    return { name: getDatabase.name } as Database;
+    return result;
+  }
+
+  /**
+   * Deletes a database.
+   *
+   * @param {Object} params - The parameters for deleting a database.
+   * @param {string} params.name - The name of the database.
+   * @param {string} params.tenantName - The name of the tenant.
+   *
+   * @returns {Promise<void>} A promise that returns nothing.
+   * @throws {Error} If there is an issue deleting the database.
+   */
+  public async deleteDatabase({
+    name,
+    tenantName,
+  }: {
+    name: string;
+    tenantName: string;
+  }): Promise<void> {
+    await this.api.deleteDatabase(name, tenantName, this.api.options);
+  }
+
+  /**
+   * Lists database for a specific tenant.
+   *
+   * @param {Object} params - The parameters for listing databases.
+   * @param {number} [params.limit] - The maximum number of databases to return.
+   * @param {number} [params.offset] - The number of databases to skip.
+   *
+   * @returns {Promise<Database[]>} A promise that resolves to a list of databases.
+   * @throws {Error} If there is an issue listing the databases.
+   */
+  public async listDatabases({
+    limit,
+    offset,
+    tenantName,
+  }: {
+    limit?: number;
+    offset?: number;
+    tenantName: string;
+  }): Promise<Database[]> {
+    return (await this.api.listDatabases(
+      tenantName,
+      limit,
+      offset,
+      this.api.options,
+    )) as Database[];
   }
 }

@@ -239,7 +239,7 @@ class HNSWConfigurationInternal(ConfigurationInternal):
             name="ef_search",
             validator=lambda value: isinstance(value, int) and value >= 1,
             is_static=False,
-            default_value=10,
+            default_value=100,
         ),
         "num_threads": ConfigurationDefinition(
             name="num_threads",
@@ -328,7 +328,7 @@ class HNSWConfigurationInterface(HNSWConfigurationInternal):
         self,
         space: str = "l2",
         ef_construction: int = 100,
-        ef_search: int = 10,
+        ef_search: int = 100,
         num_threads: int = cpu_count(),
         M: int = 16,
         resize_factor: float = 1.2,

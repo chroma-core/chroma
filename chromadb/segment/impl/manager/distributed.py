@@ -1,5 +1,5 @@
 from threading import Lock
-from typing import Dict, Sequence
+from typing import Dict, List, Sequence
 from uuid import UUID, uuid4
 
 from overrides import override
@@ -14,28 +14,29 @@ from chromadb.segment import (
 from chromadb.segment.distributed import SegmentDirectory
 from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 from chromadb.telemetry.opentelemetry import (
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
-from chromadb.types import Collection, CollectionAndSegments, Operation, Segment, SegmentScope
+from chromadb.types import (
+    Collection,
+    Operation,
+    Segment,
+    SegmentScope,
+)
 
 
 class DistributedSegmentManager(SegmentManager):
     _sysdb: SysDB
     _system: System
-    _opentelemetry_client: OpenTelemetryClient
     _instances: Dict[UUID, SegmentImplementation]
     _segment_directory: SegmentDirectory
     _lock: Lock
-    # _segment_server_stubs: Dict[str, SegmentServerStub]  # grpc_url -> grpc stub
 
     def __init__(self, system: System):
         super().__init__(system)
         self._sysdb = self.require(SysDB)
         self._segment_directory = self.require(SegmentDirectory)
         self._system = system
-        self._opentelemetry_client = system.require(OpenTelemetryClient)
         self._instances = {}
         self._lock = Lock()
 
@@ -77,6 +78,8 @@ class DistributedSegmentManager(SegmentManager):
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
+        # TODO: this should be a pass, delete_collection is expected to delete segments in
+        # distributed
         segments = self._sysdb.get_segments(collection=collection_id)
         return [s["id"] for s in segments]
 
@@ -84,8 +87,8 @@ class DistributedSegmentManager(SegmentManager):
         "DistributedSegmentManager.get_endpoint",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def get_endpoint(self, segment: Segment) -> str:
-        return self._segment_directory.get_segment_endpoint(segment)
+    def get_endpoints(self, segment: Segment, n: int) -> List[str]:
+        return self._segment_directory.get_segment_endpoints(segment, n)
 
     @trace_method(
         "DistributedSegmentManager.hint_use_collection",

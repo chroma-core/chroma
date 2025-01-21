@@ -509,6 +509,32 @@ class AsyncAdminAPI(ABC):
         pass
 
     @abstractmethod
+    async def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database. Raises an error if the database does not exist.
+
+        Args:
+            database: The name of the database to delete.
+            tenant: The tenant of the database to delete.
+
+        """
+        pass
+
+    @abstractmethod
+    async def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        """List all databases for a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            tenant: The tenant to list databases for.
+
+        """
+        pass
+
+    @abstractmethod
     async def create_tenant(self, name: str) -> None:
         """Create a new tenant. Raises an error if the tenant already exists.
 

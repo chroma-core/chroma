@@ -1,4 +1,4 @@
-use crate::execution::operator::Operator;
+use chroma_system::Operator;
 use crate::segment::record_segment::RecordSegmentReaderCreationError;
 use crate::segment::{materialize_logs, record_segment::RecordSegmentReader};
 use crate::segment::{LogMaterializerError, MaterializeLogsResult};

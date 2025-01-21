@@ -1,4 +1,5 @@
 from chromadb.api import ClientAPI
+from chromadb.errors import UniqueConstraintError
 
 
 def test_duplicate_collection_create(
@@ -21,7 +22,7 @@ def test_duplicate_collection_create(
         assert False, "Expected exception"
     except Exception as e:
         print("Collection creation failed as expected with error ", e)
-        assert "already exists" in e.args[0] or "UniqueConstraintError" in e.args[0]
+        assert "already exists" in e.args[0] or isinstance(e, UniqueConstraintError)
 
 
 def test_not_existing_collection_delete(

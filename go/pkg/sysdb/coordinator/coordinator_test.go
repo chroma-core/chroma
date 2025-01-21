@@ -25,6 +25,7 @@ import (
 type APIsTestSuite struct {
 	suite.Suite
 	db                *gorm.DB
+	read_db           *gorm.DB
 	collectionId1     types.UniqueID
 	collectionId2     types.UniqueID
 	records           [][]byte
@@ -37,7 +38,7 @@ type APIsTestSuite struct {
 
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 }
 
 func (suite *APIsTestSuite) SetupTest() {
@@ -53,7 +54,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.db, SoftDelete)
+	c, err := NewCoordinator(ctx, SoftDelete)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -82,9 +83,9 @@ func (suite *APIsTestSuite) TearDownTest() {
 // TODO: This is not complete yet. We need to add more tests for the other APIs.
 // We will deprecate the example based tests once we have enough tests here.
 func testCollection(t *rapid.T) {
-	db := dbcore.ConfigDatabaseForTesting()
+	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db, HardDelete)
+	c, err := NewCoordinator(ctx, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -135,9 +136,9 @@ func testCollection(t *rapid.T) {
 }
 
 func testSegment(t *rapid.T) {
-	db := dbcore.ConfigDatabaseForTesting()
+	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, db, HardDelete)
+	c, err := NewCoordinator(ctx, HardDelete)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -491,6 +492,16 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
 	suite.NoError(err)
 	suite.Empty(segments)
+}
+
+func (suite *APIsTestSuite) TestCollectionSize() {
+	ctx := context.Background()
+
+	for _, collection := range suite.sampleCollections {
+		result, err := suite.coordinator.GetCollectionSize(ctx, collection.ID)
+		suite.NoError(err)
+		suite.Equal(uint64(0), result)
+	}
 }
 
 func (suite *APIsTestSuite) TestUpdateCollections() {

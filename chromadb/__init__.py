@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.6.1"
+__version__ = "0.6.3"
 
 # Workaround to deal with Colab's old sqlite3 version
 def is_in_colab() -> bool:

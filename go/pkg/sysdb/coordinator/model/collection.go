@@ -5,17 +5,18 @@ import (
 )
 
 type Collection struct {
-	ID                   types.UniqueID
-	Name                 string
-	ConfigurationJsonStr string
-	Dimension            *int32
-	Metadata             *CollectionMetadata[CollectionMetadataValueType]
-	TenantID             string
-	DatabaseName         string
-	Ts                   types.Timestamp
-	LogPosition          int64
-	Version              int32
-	UpdatedAt            types.Timestamp
+	ID                         types.UniqueID
+	Name                       string
+	ConfigurationJsonStr       string
+	Dimension                  *int32
+	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
+	TenantID                   string
+	DatabaseName               string
+	Ts                         types.Timestamp
+	LogPosition                int64
+	Version                    int32
+	UpdatedAt                  types.Timestamp
+	TotalRecordsPostCompaction uint64
 }
 
 type CreateCollection struct {
@@ -49,11 +50,12 @@ type UpdateCollection struct {
 }
 
 type FlushCollectionCompaction struct {
-	ID                       types.UniqueID
-	TenantID                 string
-	LogPosition              int64
-	CurrentCollectionVersion int32
-	FlushSegmentCompactions  []*FlushSegmentCompaction
+	ID                         types.UniqueID
+	TenantID                   string
+	LogPosition                int64
+	CurrentCollectionVersion   int32
+	FlushSegmentCompactions    []*FlushSegmentCompaction
+	TotalRecordsPostCompaction uint64
 }
 
 type FlushCollectionInfo struct {

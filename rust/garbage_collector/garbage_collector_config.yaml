@@ -1,0 +1,15 @@
+service_name: "garbage-collector"
+otel_endpoint: "http://otel-collector:4317"
+cutoff_time_hours: 12 # GC all versions created at time < now() - cutoff_time_hours
+max_collections_to_gc: 1000 # Maximum number of collections to GC in one run
+gc_interval_mins: 120 # Run GC every x mins
+disallow_collections: [] # collection ids to disable GC on
+sysdb_config:
+  host: "sysdb.chroma"
+  port: 50051
+  connect_timeout_ms: 60000
+  request_timeout_ms: 60000
+dispatcher_config:
+  num_worker_threads: 4
+  dispatcher_queue_size: 100
+  worker_queue_size: 100

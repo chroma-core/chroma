@@ -632,6 +632,10 @@ impl RecordSegmentFlusher {
 
         Ok(flushed_files)
     }
+
+    pub(crate) fn count(&self) -> u64 {
+        self.id_to_user_id_flusher.count()
+    }
 }
 
 #[derive(Clone)]

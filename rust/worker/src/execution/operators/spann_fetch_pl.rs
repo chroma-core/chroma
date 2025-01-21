@@ -1,12 +1,9 @@
+use crate::segment::spann_segment::{SpannSegmentReader, SpannSegmentReaderContext};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::SpannPosting;
+use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
-
-use crate::{
-    execution::operator::{Operator, OperatorType},
-    segment::spann_segment::{SpannSegmentReader, SpannSegmentReaderContext},
-};
 
 #[derive(Debug)]
 pub(crate) struct SpannFetchPlInput {

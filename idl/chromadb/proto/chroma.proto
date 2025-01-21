@@ -53,6 +53,7 @@ message Collection {
   string database = 7;
   int64 log_position = 8;
   int32 version = 9;
+  uint64 total_records_post_compaction = 10;
 }
 
 message Database {

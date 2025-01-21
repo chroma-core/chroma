@@ -3,10 +3,17 @@ use std::{
     ops::{BitAnd, BitOr, Bound},
 };
 
+use crate::segment::{
+    materialize_logs,
+    metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
+    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    LogMaterializerError, MaterializeLogsResult,
+};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
+use chroma_system::Operator;
 use chroma_types::{
     BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
     LogRecord, MaterializedLogOperation, MetadataSetValue, MetadataValue, PrimitiveOperator,
@@ -15,16 +22,6 @@ use chroma_types::{
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{trace, Instrument, Span};
-
-use crate::{
-    execution::operator::Operator,
-    segment::{
-        materialize_logs,
-        metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
-        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializerError, MaterializeLogsResult,
-    },
-};
 
 /// The `FilterOperator` filters the collection with specified criteria
 ///
@@ -504,6 +501,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_system::Operator;
     use chroma_types::{
         BooleanOperator, DirectDocumentComparison, DirectWhereComparison, MetadataSetValue,
         MetadataValue, PrimitiveOperator, SetOperator, SignedRoaringBitmap, Where, WhereChildren,
@@ -511,7 +509,7 @@ mod tests {
     };
 
     use crate::{
-        execution::{operator::Operator, operators::filter::FilterOperator},
+        execution::operators::filter::FilterOperator,
         log::test::{add_delete_generator, int_as_id, LogGenerator},
         segment::test::TestSegment,
     };

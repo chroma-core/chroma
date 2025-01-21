@@ -1,22 +1,19 @@
 use std::{cmp::Ordering, num::TryFromIntError};
 
+use crate::segment::{
+    materialize_logs,
+    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    LogMaterializerError,
+};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use futures::StreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{trace, Instrument, Span};
-
-use crate::{
-    execution::operator::Operator,
-    segment::{
-        materialize_logs,
-        record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-        LogMaterializerError,
-    },
-};
 
 /// The `LimitOperator` selects a range or records sorted by their offset ids
 ///
@@ -87,7 +84,7 @@ struct SeekScanner<'me> {
     mask: &'me RoaringBitmap,
 }
 
-impl<'me> SeekScanner<'me> {
+impl SeekScanner<'_> {
     // Find the rank of the target offset id in the imaginary segment
     //
     // The rank of a target is the number of elements strictly less than it
@@ -136,7 +133,10 @@ impl<'me> SeekScanner<'me> {
             size -= half;
         }
 
-        Ok(base)
+        // The above loop tests all midpoints. However, it does not test the very last element.
+        // We want the greatest offset such that self.join_rank(offset) <= skip, so we need to test the last element as well.
+        let cmp = self.joint_rank(base).await?.cmp(&skip);
+        Ok(base + (cmp == Ordering::Less) as u32)
     }
 
     // Seek the start in the log and record segment, then scan for the specified number of offset ids
@@ -280,11 +280,12 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
     use roaring::RoaringBitmap;
 
     use crate::{
-        execution::{operator::Operator, operators::limit::LimitOperator},
+        execution::operators::limit::LimitOperator,
         log::test::{upsert_generator, LogGenerator},
         segment::test::TestSegment,
     };
@@ -422,5 +423,23 @@ mod tests {
                 .chain(81..=95)
                 .collect()
         );
+    }
+
+    #[tokio::test]
+    async fn test_returns_last_offset() {
+        let limit_input =
+            setup_limit_input(SignedRoaringBitmap::empty(), SignedRoaringBitmap::full()).await;
+
+        let limit_operator = LimitOperator {
+            skip: 99,
+            fetch: Some(1),
+        };
+
+        let limit_output = limit_operator
+            .run(&limit_input)
+            .await
+            .expect("LimitOperator should not fail");
+
+        assert_eq!(limit_output.offset_ids, (100..=100).collect());
     }
 }

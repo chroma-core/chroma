@@ -1,3 +1,4 @@
+use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
 
@@ -105,10 +106,10 @@ pub struct QueryServiceConfig {
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
     #[allow(dead_code)]
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
-    pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
+    pub(crate) sysdb: SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
-    pub dispatcher: crate::execution::config::DispatcherConfig,
+    pub dispatcher: chroma_system::DispatcherConfig,
     pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
@@ -132,10 +133,10 @@ pub struct CompactionServiceConfig {
     pub(crate) my_port: u16,
     pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
     pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
-    pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
+    pub(crate) sysdb: SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: crate::log::config::LogConfig,
-    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
+    pub(crate) dispatcher: chroma_system::DispatcherConfig,
     pub(crate) compactor: crate::compactor::config::CompactorConfig,
     pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
@@ -146,6 +147,7 @@ mod tests {
     use super::*;
     use figment::Jail;
     use serial_test::serial;
+    use uuid::Uuid;
 
     #[test]
     #[serial]
@@ -261,6 +263,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        disabled_collections: ["74b3240e-a2b0-43d7-8adb-f55a394964a1", "496db4aa-fbe1-498a-b60b-81ec0fe59792"]
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -289,6 +292,24 @@ mod tests {
                 "compaction-service-0"
             );
             assert_eq!(config.compaction_service.my_port, 50051);
+            assert_eq!(
+                config
+                    .compaction_service
+                    .compactor
+                    .disabled_collections
+                    .len(),
+                2
+            );
+            assert_eq!(
+                Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[0])
+                    .unwrap(),
+                Uuid::parse_str("74b3240e-a2b0-43d7-8adb-f55a394964a1").unwrap()
+            );
+            assert_eq!(
+                Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[1])
+                    .unwrap(),
+                Uuid::parse_str("496db4aa-fbe1-498a-b60b-81ec0fe59792").unwrap()
+            );
             Ok(())
         });
     }
@@ -407,6 +428,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        disabled_collections: []
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -571,6 +593,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        disabled_collections: []
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -628,6 +651,10 @@ mod tests {
             jail.set_env(
                 "CHROMA_COMPACTION_SERVICE__STORAGE__S3__REQUEST_TIMEOUT_MS",
                 1000,
+            );
+            jail.set_env(
+                "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+                "[\"74b3240e-a2b0-43d7-8adb-f55a394964a1\",\"496db4aa-fbe1-498a-b60b-81ec0fe59792\"]",
             );
             let _ = jail.create_file(
                 "chroma_config.yaml",
@@ -722,6 +749,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        disabled_collections: ["c92e4d75-eb25-4295-82d8-7c53dbd33258"]
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -763,6 +791,24 @@ mod tests {
                 }
                 _ => panic!("Invalid storage config"),
             }
+            assert_eq!(
+                config
+                    .compaction_service
+                    .compactor
+                    .disabled_collections
+                    .len(),
+                2
+            );
+            assert_eq!(
+                Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[0])
+                    .unwrap(),
+                Uuid::parse_str("74b3240e-a2b0-43d7-8adb-f55a394964a1").unwrap()
+            );
+            assert_eq!(
+                Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[1])
+                    .unwrap(),
+                Uuid::parse_str("496db4aa-fbe1-498a-b60b-81ec0fe59792").unwrap()
+            );
             Ok(())
         });
     }
@@ -884,6 +930,7 @@ mod tests {
                         min_compaction_size: 10
                         max_compaction_size: 10000
                         max_partition_size: 5000
+                        disabled_collections: []
                     blockfile_provider:
                         Arrow:
                             block_manager_config:

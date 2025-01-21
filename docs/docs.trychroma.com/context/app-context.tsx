@@ -1,10 +1,4 @@
-import React, {
-  createContext,
-  useState,
-  ReactNode,
-  useContext,
-  useEffect,
-} from "react";
+import React, { createContext, useState, ReactNode, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 export interface AppContextValue {
@@ -28,12 +22,15 @@ export const AppContextProvider = ({ children }: { children: ReactNode }) => {
   const pathname = usePathname();
 
   useEffect(() => {
+    const anchor =
+      pathname === window.location.pathname ? window.location.hash : "";
+
     if (language === "typescript") {
-      router.replace(`${pathname}?lang=typescript`);
+      router.replace(pathname + "?lang=typescript" + anchor);
     } else {
-      router.replace(pathname);
+      router.replace(pathname + anchor);
     }
-  }, [language]);
+  }, [language, pathname]);
 
   return (
     <AppContext.Provider value={{ language, setLanguage }}>

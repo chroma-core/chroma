@@ -24,6 +24,8 @@ func (v Database) TableName() string {
 type IDatabaseDb interface {
 	GetAllDatabases() ([]*Database, error)
 	GetDatabases(tenantID string, databaseName string) ([]*Database, error)
+	ListDatabases(limit *int32, offset *int32, tenantID string) ([]*Database, error)
 	Insert(in *Database) error
 	DeleteAll() error
+	Delete(databaseID string) error
 }

@@ -269,7 +269,11 @@ impl BlockManager {
     }
 
     pub(super) async fn cached(&self, id: &Uuid) -> bool {
-        self.block_cache.get(id).await.ok().is_some()
+        self.block_cache
+            .get(id)
+            .await
+            .map(|b| b.is_some())
+            .unwrap_or(false)
     }
 
     pub(super) async fn get(&self, id: &Uuid) -> Result<Option<Block>, GetError> {
@@ -487,5 +491,23 @@ impl RootManager {
             }
             None => Err(RootManagerError::NotFound),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arrow::block::delta::UnorderedBlockDelta;
+    use chroma_cache::new_cache_for_test;
+    use chroma_storage::test_storage;
+
+    #[tokio::test]
+    async fn test_cached() {
+        let manager = BlockManager::new(test_storage(), 100, new_cache_for_test());
+        assert!(!manager.cached(&Uuid::new_v4()).await);
+
+        let delta = manager.create::<&str, String, UnorderedBlockDelta>();
+        let block = manager.commit::<&str, String>(delta).await;
+        assert!(manager.cached(&block.id).await, "should be write-through");
     }
 }

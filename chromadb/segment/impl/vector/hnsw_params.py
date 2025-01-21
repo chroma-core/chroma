@@ -55,7 +55,7 @@ class HnswParams(Params):
         metadata = metadata or {}
         self.space = str(metadata.get("hnsw:space", "l2"))
         self.construction_ef = int(metadata.get("hnsw:construction_ef", 100))
-        self.search_ef = int(metadata.get("hnsw:search_ef", 10))
+        self.search_ef = int(metadata.get("hnsw:search_ef", 100))
         self.M = int(metadata.get("hnsw:M", 16))
         self.num_threads = int(
             metadata.get("hnsw:num_threads", multiprocessing.cpu_count())

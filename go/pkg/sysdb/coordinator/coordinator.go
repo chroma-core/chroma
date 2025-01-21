@@ -11,7 +11,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 // DeleteMode represents whether to perform a soft or hard delete
@@ -33,7 +32,7 @@ type Coordinator struct {
 	deleteMode DeleteMode
 }
 
-func NewCoordinator(ctx context.Context, db *gorm.DB, deleteMode DeleteMode) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, deleteMode DeleteMode) (*Coordinator, error) {
 	s := &Coordinator{
 		ctx:        ctx,
 		deleteMode: deleteMode,
@@ -64,6 +63,18 @@ func (s *Coordinator) GetDatabase(ctx context.Context, getDatabase *model.GetDat
 		return nil, err
 	}
 	return database, nil
+}
+
+func (s *Coordinator) ListDatabases(ctx context.Context, listDatabases *model.ListDatabases) ([]*model.Database, error) {
+	databases, err := s.catalog.ListDatabases(ctx, listDatabases, listDatabases.Ts)
+	if err != nil {
+		return nil, err
+	}
+	return databases, nil
+}
+
+func (s *Coordinator) DeleteDatabase(ctx context.Context, deleteDatabase *model.DeleteDatabase) error {
+	return s.catalog.DeleteDatabase(ctx, deleteDatabase)
 }
 
 func (s *Coordinator) CreateTenant(ctx context.Context, createTenant *model.CreateTenant) (*model.Tenant, error) {
@@ -101,6 +112,10 @@ func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *mo
 
 func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
 	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
+}
+
+func (s *Coordinator) GetCollectionSize(ctx context.Context, collectionID types.UniqueID) (uint64, error) {
+	return s.catalog.GetCollectionSize(ctx, collectionID)
 }
 
 func (s *Coordinator) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
