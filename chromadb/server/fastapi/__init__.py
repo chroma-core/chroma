@@ -101,7 +101,6 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
     """
     for route in app.routes:
         if isinstance(route, APIRoute):
-            print(route)
             route.operation_id = route.name + ("-v2" if "v2" in route.path else "-v1")
 
 
