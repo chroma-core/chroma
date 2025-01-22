@@ -5,7 +5,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
 from chromadb.quota import QuotaEnforcer, Action
-from chromadb.rate_limit import RateLimitEnforcer, AsyncRateLimitEnforcer
+from chromadb.rate_limit import RateLimitEnforcer
 from chromadb.segment import SegmentManager
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.operator import Scan, Filter, Limit, KNN, Projection
@@ -447,6 +447,7 @@ class SegmentAPI(ServerAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            collection_id=collection_id,
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -559,6 +560,7 @@ class SegmentAPI(ServerAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            collection_id=collection_id,
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
