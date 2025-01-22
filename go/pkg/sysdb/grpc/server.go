@@ -78,6 +78,9 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
+	if config.VersionFileEnabled == true && config.BlockStoreProvider == "none" {
+		return nil, errors.New("version file enabled is true but block store provider is none")
+	}
 	if config.SystemCatalogProvider == "memory" {
 		return NewWithGrpcProvider(config, grpcutils.Default)
 	} else if config.SystemCatalogProvider == "database" {

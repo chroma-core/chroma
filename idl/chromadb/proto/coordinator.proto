@@ -300,7 +300,7 @@ message CollectionInfoMutable {
 message CollectionSegmentInfo {
     // Information about segments that are part of this version.
     // Contains file paths for each segment.
-    repeated FlushSegmentCompactionInfo segments = 2;
+    repeated FlushSegmentCompactionInfo segment_compaction_info = 1;
     // TODO(rohitcp): Add additional information from Compaction about the
     // number of files creates, and other helpful information that can help with
     // GC's {collection,version} selection policy.

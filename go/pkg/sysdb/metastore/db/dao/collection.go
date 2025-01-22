@@ -255,6 +255,9 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	newCollectionVersion int32,
 	newVersionFileName string,
 ) (int64, error) {
+	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
+	// strength, or if we can use "SELECT FOR UPDATE" or some other less
+	// expensive locking mechanism. Taking the lock as a caution for now.
 	result := s.db.Model(&dbmodel.Collection{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ? AND version = ? AND version_file_name = ?",

@@ -209,6 +209,22 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 	currentVersion := int32(1)
 	logPosition := int64(100)
 
+	// Set up initial version file that would have been created by CreateCollection
+	initialVersionFile := &coordinatorpb.CollectionVersionFile{
+		CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
+			CollectionId: collectionID.String(),
+		},
+		VersionHistory: &coordinatorpb.CollectionVersionHistory{
+			Versions: []*coordinatorpb.CollectionVersionInfo{
+				{
+					Version: 1,
+				},
+			},
+		},
+	}
+	err := mockS3Store.PutVersionFile(tenantID, collectionID.String(), "version_1.pb", initialVersionFile)
+	assert.NoError(t, err)
+
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
 		ID:              collectionID.String(),
