@@ -1,7 +1,6 @@
 use super::super::execution::operators::filter::MetadataProvider;
 use super::record_segment::ApplyMaterializedLogError;
 use crate::execution::operators::filter::RoaringMetadataFilter;
-use crate::execution::operators::prefetch_keys::PrefetchKeysInput;
 use crate::segment::record_segment::RecordSegmentReader;
 use crate::segment::MaterializeLogsResult;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
@@ -646,24 +645,6 @@ impl<'me> MetadataSegmentWriter<'me> {
         }
         tracing::info!("Applied {} records to metadata segment", count,);
         Ok(())
-    }
-
-    /// Prefetching these keys improves the performance of `Self::finish()`.
-    ///
-    /// This should be called and dispatched after `Self::apply_materialized_log_chunk()`, but before (or in parallel with) `Self::finish()`.
-    pub fn get_prefetch_keys_operator_input(
-        &self,
-        blockfile_provider: BlockfileProvider,
-    ) -> Option<PrefetchKeysInput> {
-        self.full_text_index_writer.as_ref().and_then(|w| {
-            w.get_forked_from_blockfile_id().map(|id| {
-                PrefetchKeysInput::new::<u32, &[u32]>(
-                    blockfile_provider,
-                    id,
-                    w.get_keys_to_prefetch_before_finish(),
-                )
-            })
-        })
     }
 
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {

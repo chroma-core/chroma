@@ -21,9 +21,10 @@ use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionOutput;
-use crate::execution::operators::prefetch_keys::PrefetchKeysError;
-use crate::execution::operators::prefetch_keys::PrefetchKeysOperator;
-use crate::execution::operators::prefetch_keys::PrefetchKeysOutput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentError;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentInput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOperator;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOutput;
 use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
@@ -176,8 +177,8 @@ pub enum CompactionError {
     MaterializeLogs(#[from] MaterializeLogOperatorError),
     #[error("Apply logs to segment writer error: {0}")]
     ApplyLogToSegmentWriter(#[from] ApplyLogToSegmentWriterOperatorError),
-    #[error("Prefetch for metadata writer error: {0}")]
-    PrefetchForMetadataWriter(#[from] PrefetchKeysError),
+    #[error("Prefetch segment error: {0}")]
+    PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Commit segment writer error: {0}")]
     CommitSegmentWriter(#[from] CommitSegmentWriterOperatorError),
     #[error("Flush segment writer error: {0}")]
@@ -276,6 +277,21 @@ impl CompactOrchestrator {
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;
+
+        let segments = self.get_all_segments().await.unwrap();
+        for segment in segments {
+            if segment.r#type == SegmentType::BlockfileMetadata
+                || segment.r#type == SegmentType::BlockfileRecord
+            {
+                let prefetch_task = wrap(
+                    Box::new(PrefetchSegmentOperator::new()),
+                    PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
+                    ctx.receiver(),
+                );
+
+                self.send(prefetch_task, ctx).await;
+            }
+        }
     }
 
     async fn materialize_log(
@@ -731,6 +747,22 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
 }
 
 #[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(_) => (),
+            None => return,
+        }
+    }
+}
+
+#[async_trait]
 impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrator {
     type Result = ();
 
@@ -821,30 +853,6 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         };
 
         if num_tasks_left == 0 {
-            let writers = self.get_segment_writers().await;
-            let writers = match self.ok_or_terminate(writers, ctx) {
-                Some(writers) => writers,
-                None => return,
-            };
-
-            if message.segment_id == writers.metadata.id {
-                if let Some(input) = writers
-                    .metadata
-                    .get_prefetch_keys_operator_input(self.blockfile_provider.clone())
-                {
-                    let span = self.get_segment_writer_span(&ChromaSegmentWriter::MetadataSegment(
-                        writers.metadata.clone(),
-                    ));
-                    let operator = PrefetchKeysOperator::new();
-
-                    let task = wrap(Box::new(operator), input, ctx.receiver());
-                    let res = self.dispatcher().send(task, Some(span)).await;
-                    self.ok_or_terminate(res, ctx);
-                } else {
-                    tracing::info!("No keys to prefetch for metadata segment writer");
-                }
-            }
-
             let segment_writer = self.get_segment_writer_by_id(message.segment_id).await;
             let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
                 Some(writer) => writer,
@@ -854,22 +862,6 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             self.dispatch_segment_writer_commit(segment_writer, ctx.receiver(), ctx)
                 .await;
         }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PrefetchKeysOutput, PrefetchKeysError>> for CompactOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<PrefetchKeysOutput, PrefetchKeysError>,
-        ctx: &ComponentContext<CompactOrchestrator>,
-    ) {
-        match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(message) => message,
-            None => return,
-        };
     }
 }
 

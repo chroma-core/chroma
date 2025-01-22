@@ -100,6 +100,15 @@ impl BlockfileProvider {
         };
         Ok(())
     }
+
+    pub async fn prefetch(&self, id: &uuid::Uuid) -> Result<usize, Box<dyn ChromaError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(_) => unimplemented!(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider.prefetch(id).await.map_err(|e| Box::new(e) as _)
+            }
+        }
+    }
 }
 
 // =================== Configurable ===================

@@ -161,30 +161,6 @@ impl FullTextIndexWriter {
         Ok(())
     }
 
-    pub fn get_keys_to_prefetch_before_finish(&self) -> Vec<(String, u32)> {
-        // `token_instances` can be millions of items. Imagine there are 10k documents, each with 1000 tokens. There are then ~10000*1000*3=30M token instances.
-        // In comparison, the number of blocks required to store these is much, much smaller. Say (worst case) each token instance consumes 12 bytes of a block (trigram, offset ID, position) and a block is 8MB. Then a single block can store ~660k token instances.
-        // Given this, and assuming that token instances are relatively uniformly distributed across blocks, we can prefetch a very small percentage of the key space and the block cache hit rate will still be at or near 100%.
-        const PERCENT_TO_PREFETCH: f32 = 0.0005;
-
-        let mut keys = vec![];
-        let token_instances = self.token_instances.lock();
-        for group in token_instances.iter() {
-            let num_samples = (group.len() as f32 * PERCENT_TO_PREFETCH) as usize;
-            for i in 0..num_samples {
-                let idx = (i as f64 * (group.len() - 1) as f64 / (num_samples - 1).max(1) as f64)
-                    .round() as usize;
-                keys.push((group[idx].get_token(), group[idx].get_offset_id()));
-            }
-        }
-
-        keys
-    }
-
-    pub fn get_forked_from_blockfile_id(&self) -> Option<Uuid> {
-        self.posting_lists_blockfile_writer.forked_from_id()
-    }
-
     pub async fn write_to_blockfiles(&mut self) -> Result<(), FullTextIndexError> {
         let mut last_key = TokenInstance::MAX;
         let mut posting_list: Vec<u32> = vec![];
