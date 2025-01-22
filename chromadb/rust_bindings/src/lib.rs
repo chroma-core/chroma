@@ -86,6 +86,12 @@ impl ServerAPI {
         };
         let segments = vec![metadata_segment, vector_segment];
 
+        let _ = Python::with_gil(|py| -> PyResult<()> {
+            let ffi_cstr = std::ffi::CString::new("print('Hello, World!')").unwrap();
+            let _ = py.eval(&ffi_cstr, None, None).unwrap();
+            Ok(())
+        });
+
         self.sysdb
             .create_collection(
                 Some(CollectionUuid::new()),
@@ -380,20 +386,35 @@ impl Bindings {
         get_or_create: bool,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> PyResult<Collection> {
-        let message = CreateCollectionMessage {
-            name,
-            metadata,
-            get_or_create,
-            // TODO: maybe get rid of the optionality downstream and push defaults up to application layer
-            tenant: Some(tenant),
-            database: Some(database),
-        };
-        let result = self
-            .runtime
-            .block_on(self.server_api_handle.request(message, None));
+        let result = py.allow_threads(|| {
+            let message = CreateCollectionMessage {
+                name,
+                metadata,
+                get_or_create,
+                tenant: Some(tenant),
+                database: Some(database),
+            };
+            let result = self
+                .runtime
+                .block_on(self.server_api_handle.request(message, None));
+            result
+        });
 
-        // TODO: error handling
+        // let message = CreateCollectionMessage {
+        //     name,
+        //     metadata,
+        //     get_or_create,
+        //     // TODO: maybe get rid of the optionality downstream and push defaults up to application layer
+        //     tenant: Some(tenant),
+        //     database: Some(database),
+        // };
+        // let result = self
+        //     .runtime
+        //     .block_on(self.server_api_handle.request(message, None));
+
+        // // TODO: error handling
         match result {
             Ok(collection) => match collection {
                 Ok(collection) => Ok(collection),
@@ -419,6 +440,10 @@ impl Bindings {
         database: String,
     ) -> PyResult<bool> {
         println!("embeddings: {:?}", embeddings);
+        for embedding in embeddings {
+            let e_minor = embedding.as_slice().unwrap();
+            let as_vec = e_minor.to_vec();
+        }
         // let collection_id =
         //     uuid::Uuid::parse_str(&collection_id).map_err(|e| PyOSError::new_err(e.to_string()))?;
         // let collection_id = CollectionUuid(collection_id);
