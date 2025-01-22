@@ -20,7 +20,7 @@ pub struct CompactionServer {
 impl CompactionServer {
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", self.port).parse().unwrap();
-        tracing::info!("Compaction server listing at {addr}");
+        tracing::info!("Compaction server listening at {addr}");
         let server = Server::builder().add_service(CompactorServer::new(self));
         server
             .serve_with_shutdown(addr, async {
