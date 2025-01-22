@@ -5,21 +5,39 @@ on:
     tags:
       - 'js_release_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_X.Y.Z
       - 'js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_alpha_X.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
 
 jobs:
   release:
     strategy:
+      fail-fast: false
       matrix:
         registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
     runs-on: ubuntu-latest
     permissions: write-all
     steps:
+    - name: Resolve tag
+      id: tag
+      shell: bash
+      run: |
+        # If the workflow was triggered by a push on a tag, use github.ref_name.
+        # If manually dispatched, use the tag value supplied in the workflow input.
+        if [[ "${{ github.event_name }}" == "push" ]]; then
+          echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+        fi
+
     - name: Check if tag matches the pattern
       run: |
-        if [[ "${{ github.ref }}" =~ ^refs/tags/js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if [[ "${{ steps.tag.outputs.tag }}" =~ ^js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
           echo "Tag matches the pattern js_release_alpha_X.Y.Z"
           echo "NPM_SCRIPT=release_alpha" >> "$GITHUB_ENV"
-        elif [[ "${{ github.ref }}" =~ ^refs/tags/js_release_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        elif [[ "${{ steps.tag.outputs.tag }}" =~ ^js_release_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
           echo "Tag matches the pattern js_release_X.Y.Z"
           echo "NPM_SCRIPT=release" >> "$GITHUB_ENV"
         else
