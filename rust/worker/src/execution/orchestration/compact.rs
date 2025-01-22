@@ -14,6 +14,10 @@ use crate::execution::operators::flush_segment_writer::FlushSegmentWriterInput;
 use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOperator;
 use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOperatorError;
 use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOutput;
+use crate::execution::operators::get_segments::GetSegmentsError;
+use crate::execution::operators::get_segments::GetSegmentsInput;
+use crate::execution::operators::get_segments::GetSegmentsOperator;
+use crate::execution::operators::get_segments::GetSegmentsOutput;
 use crate::execution::operators::materialize_logs::MaterializeLogInput;
 use crate::execution::operators::materialize_logs::MaterializeLogOperator;
 use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
@@ -40,7 +44,6 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_sysdb::GetCollectionsError;
-use chroma_sysdb::GetSegmentsError;
 use chroma_sysdb::SysDb;
 use chroma_system::wrap;
 use chroma_system::ChannelError;
@@ -126,7 +129,7 @@ pub struct CompactOrchestrator {
     max_compaction_size: usize,
     max_partition_size: usize,
     // Populated during the compaction process
-    cached_segments: Option<Vec<Segment>>,
+    segments: Vec<Segment>,
     writers: OnceCell<CompactWriters>,
     flush_results: Vec<SegmentFlushInfo>,
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
@@ -167,6 +170,8 @@ pub enum CompactionError {
     Panic(#[from] PanicError),
     #[error("FetchLog error: {0}")]
     FetchLog(#[from] FetchLogError),
+    #[error("GetSegment error: {0}")]
+    GetSegment(#[from] GetSegmentsError),
     #[error("Partition error: {0}")]
     Partition(#[from] PartitionError),
     #[error("MaterializeLogs error: {0}")]
@@ -251,7 +256,7 @@ impl CompactOrchestrator {
             result_channel,
             max_compaction_size,
             max_partition_size,
-            cached_segments: None,
+            segments: Vec::new(),
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             segment_spans: HashMap::new(),
@@ -283,7 +288,7 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
 
-        let record_segment_result = self.get_segment(SegmentType::BlockfileRecord).await;
+        let record_segment_result = self.get_segment(SegmentType::BlockfileRecord);
         let record_segment = match self.ok_or_terminate(record_segment_result, ctx) {
             Some(segment) => segment,
             None => return,
@@ -341,7 +346,7 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        let record_segment = self.get_segment(SegmentType::BlockfileRecord).await;
+        let record_segment = self.get_segment(SegmentType::BlockfileRecord);
         let record_segment = match self.ok_or_terminate(record_segment, ctx) {
             Some(segment) => segment,
             None => return,
@@ -483,36 +488,12 @@ impl CompactOrchestrator {
         self.send(task, ctx).await;
     }
 
-    async fn get_all_segments(&mut self) -> Result<Vec<Segment>, GetSegmentsError> {
-        if let Some(segments) = &self.cached_segments {
-            return Ok(segments.clone());
-        }
-
-        let segments = self
-            .sysdb
-            .get_segments(None, None, None, self.collection_id)
-            .await?;
-
-        self.cached_segments = Some(segments.clone());
-        Ok(segments)
-    }
-
-    async fn get_segment(
-        &mut self,
-        segment_type: SegmentType,
-    ) -> Result<Segment, GetSegmentWritersError> {
-        let segments = self.get_all_segments().await?;
-        let segment = segments
+    fn get_segment(&self, segment_type: SegmentType) -> Result<Segment, GetSegmentsError> {
+        self.segments
             .iter()
             .find(|segment| segment.r#type == segment_type)
-            .cloned();
-
-        tracing::debug!("Found {:?} segment: {:?}", segment_type, segment);
-
-        match segment {
-            Some(segment) => Ok(segment),
-            None => Err(GetSegmentWritersError::NoSegmentsFound),
-        }
+            .cloned()
+            .ok_or(GetSegmentsError::SegmentTypeNotFound)
     }
 
     async fn get_segment_writers(&mut self) -> Result<CompactWriters, GetSegmentWritersError> {
@@ -524,9 +505,9 @@ impl CompactOrchestrator {
         let hnsw_provider = self.hnsw_index_provider.clone();
         let mut sysdb = self.sysdb.clone();
 
-        let record_segment = self.get_segment(SegmentType::BlockfileRecord).await?;
-        let mt_segment = self.get_segment(SegmentType::BlockfileMetadata).await?;
-        let hnsw_segment = self.get_segment(SegmentType::HnswDistributed).await?;
+        let record_segment = self.get_segment(SegmentType::BlockfileRecord)?;
+        let mt_segment = self.get_segment(SegmentType::BlockfileMetadata)?;
+        let hnsw_segment = self.get_segment(SegmentType::HnswDistributed)?;
 
         let borrowed_writers = self
             .writers
@@ -668,16 +649,8 @@ impl Orchestrator for CompactOrchestrator {
 
     fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         vec![wrap(
-            Box::new(FetchLogOperator {
-                log_client: self.log.clone(),
-                batch_size: 100,
-                // Here we do not need to be inclusive since the compaction job
-                // offset is the one after the last compaction offset
-                start_log_offset_id: self.compaction_job.offset as u32,
-                maximum_fetch_count: Some(self.max_compaction_size as u32),
-                collection_uuid: self.collection_id,
-            }),
-            (),
+            Box::new(GetSegmentsOperator::new()),
+            GetSegmentsInput::new(*self.sysdb.clone(), self.collection_id),
             ctx.receiver(),
         )]
     }
@@ -694,6 +667,43 @@ impl Orchestrator for CompactOrchestrator {
 }
 
 // ============== Handlers ==============
+#[async_trait]
+impl Handler<TaskResult<GetSegmentsOutput, GetSegmentsError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<GetSegmentsOutput, GetSegmentsError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        let segments = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output.segments,
+            None => return,
+        };
+        for segment in segments {
+            self.segments.push(segment);
+        }
+
+        self.send(
+            wrap(
+                Box::new(FetchLogOperator {
+                    log_client: self.log.clone(),
+                    batch_size: 100,
+                    // Here we do not need to be inclusive since the compaction job
+                    // offset is the one after the last compaction offset
+                    start_log_offset_id: self.compaction_job.offset as u32,
+                    maximum_fetch_count: Some(self.max_compaction_size as u32),
+                    collection_uuid: self.collection_id,
+                }),
+                (),
+                ctx.receiver(),
+            ),
+            ctx,
+        )
+        .await;
+    }
+}
+
 #[async_trait]
 impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator {
     type Result = ();
