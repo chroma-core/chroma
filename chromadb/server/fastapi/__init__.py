@@ -64,6 +64,8 @@ from chromadb.server.fastapi.types import (
     UpdateEmbedding,
 )
 from starlette.datastructures import Headers
+from starlette.types import Receive, Send, Scope
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 import logging
 
 from chromadb.telemetry.product.events import ServerStartEvent
@@ -104,45 +106,45 @@ def use_route_names_as_operation_ids(app: _FastAPI) -> None:
             route.operation_id = route.name
 
 
-async def add_trace_id_to_response_middleware(
-    request: Request, call_next: Callable[[Request], Any]
-) -> Response:
-    trace_id = trace.get_current_span().get_span_context().trace_id
-    response = await call_next(request)
-    response.headers["Chroma-Trace-Id"] = format(trace_id, "x")
-    return response
+class AddTraceIdInResponseHeaderMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        trace_id = trace.get_current_span().get_span_context().trace_id
+        response = await call_next(request)
+        response.headers["Chroma-Trace-Id"] = format(trace_id, "x")
+        return response
 
 
-async def catch_exceptions_middleware(
-    request: Request, call_next: Callable[[Request], Any]
-) -> Response:
-    try:
-        return await call_next(request)
-    except ChromaError as e:
-        return fastapi_json_response(e)
-    except ValueError as e:
-        return ORJSONResponse(
-            content={"error": "InvalidArgumentError", "message": str(e)},
-            status_code=400,
-        )
-    except TypeError as e:
-        return ORJSONResponse(
-            content={"error": "InvalidArgumentError", "message": str(e)},
-            status_code=400,
-        )
-    except Exception as e:
-        logger.exception(e)
-        return ORJSONResponse(content={"error": repr(e)}, status_code=500)
+class CatchExceptionsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        try:
+            return await call_next(request)
+        except ChromaError as e:
+            return fastapi_json_response(e)
+        except ValueError as e:
+            return ORJSONResponse(
+                content={"error": "InvalidArgumentError", "message": str(e)},
+                status_code=400,
+            )
+        except TypeError as e:
+            return ORJSONResponse(
+                content={"error": "InvalidArgumentError", "message": str(e)},
+                status_code=400,
+            )
+        except Exception as e:
+            logger.exception(e)
+            return ORJSONResponse(content={"error": repr(e)}, status_code=500)
 
 
-async def check_http_version_middleware(
-    request: Request, call_next: Callable[[Request], Any]
-) -> Response:
-    http_version = request.scope.get("http_version")
-    if http_version not in ["1.1", "2"]:
-        raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
-    return await call_next(request)
+class CheckHttpVersionMiddleware:
+    def __init__(self, app: fastapi.FastAPI):
+        self._app = app
 
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        http_version = scope.get("http_version")
+        if http_version not in ["1.1", "2"]:
+            raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
+        await self._app(scope, receive, send)
+    
 
 D = TypeVar("D", bound=BaseModel, contravariant=True)
 
@@ -201,9 +203,9 @@ class FastAPI(Server):
         self._quota_enforcer = self._system.require(QuotaEnforcer)
         self._system.start()
 
-        self._app.middleware("http")(check_http_version_middleware)
-        self._app.middleware("http")(catch_exceptions_middleware)
-        self._app.middleware("http")(add_trace_id_to_response_middleware)
+        self._app.add_middleware(CheckHttpVersionMiddleware)
+        self._app.add_middleware(CatchExceptionsMiddleware)
+        self._app.add_middleware(AddTraceIdInResponseHeaderMiddleware)
         self._app.add_middleware(
             CORSMiddleware,
             allow_headers=["*"],
