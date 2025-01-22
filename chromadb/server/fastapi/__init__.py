@@ -135,16 +135,13 @@ class CatchExceptionsMiddleware(BaseHTTPMiddleware):
             return ORJSONResponse(content={"error": repr(e)}, status_code=500)
 
 
-class CheckHttpVersionMiddleware:
-    def __init__(self, app: fastapi.FastAPI):
-        self._app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        http_version = scope.get("http_version")
+class CheckHttpVersionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        http_version = request.scope.get("http_version")
         if http_version not in ["1.1", "2"]:
             raise InvalidHTTPVersion(f"HTTP version {http_version} is not supported")
-        await self._app(scope, receive, send)
-    
+        return await call_next(request)
+
 
 D = TypeVar("D", bound=BaseModel, contravariant=True)
 
