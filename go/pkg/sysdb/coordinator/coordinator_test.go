@@ -41,7 +41,7 @@ type APIsTestSuite struct {
 
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 
 	ctx := context.Background()
 	// Add timeout context

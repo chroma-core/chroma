@@ -142,7 +142,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 
 func TestCatalog_GetCollectionSize(t *testing.T) {
 	mockMetaDomain := &mocks.IMetaDomain{}
-	catalog := NewTableCatalog(nil, mockMetaDomain)
+	catalog := NewTableCatalog(nil, mockMetaDomain, nil, false)
 	collectionID := types.MustParse("00000000-0000-0000-0000-000000000001")
 	mockMetaDomain.On("CollectionDb", context.Background()).Return(&mocks.ICollectionDb{})
 	var total_records_post_compaction uint64 = uint64(100)

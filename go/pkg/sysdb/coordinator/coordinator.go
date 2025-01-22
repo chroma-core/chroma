@@ -231,15 +231,10 @@ func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollec
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 func (s *Coordinator) ListCollectionsToGc(ctx context.Context) ([]*model.CollectionToGc, error) {
 	return s.catalog.ListCollectionsToGc(ctx)
-=======
-func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *time.Time, versionsAtOrAfter *time.Time) ([]*coordinatorpb.CollectionVersionInfo, error) {
-=======
+}
+
 func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore int64, versionsAtOrAfter int64) ([]*coordinatorpb.CollectionVersionInfo, error) {
->>>>>>> b2e9d2884 (Add more tests, and logic for create collection.)
 	return s.catalog.ListCollectionVersions(ctx, collectionID, tenantID, maxCount, versionsBefore, versionsAtOrAfter)
->>>>>>> a1075ad11 ([ENH] Create VersionFiles in S3 from Sysdb.)
 }
