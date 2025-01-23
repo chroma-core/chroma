@@ -68,10 +68,10 @@ mod tests {
             StorageConfig::S3(storage_config) => {
                 assert_eq!(storage_config.bucket, "chroma-storage");
                 if let S3CredentialsConfig::Minio = storage_config.credentials {
-                    assert_eq!(storage_config.connect_timeout_ms, 60000);
-                    assert_eq!(storage_config.request_timeout_ms, 60000);
-                    assert_eq!(storage_config.upload_part_size_bytes, 5 * 1024 * 1024);
-                    assert_eq!(storage_config.download_part_size_bytes, 5 * 1024 * 1024);
+                    assert_eq!(storage_config.connect_timeout_ms, 5000);
+                    assert_eq!(storage_config.request_timeout_ms, 30000);
+                    assert_eq!(storage_config.upload_part_size_bytes, 536870912);
+                    assert_eq!(storage_config.download_part_size_bytes, 8388608);
                 } else {
                     panic!("Expected Minio credentials");
                 }
