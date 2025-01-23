@@ -18,10 +18,28 @@ use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
+use futures::{stream::FuturesUnordered, StreamExt};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
+
+#[derive(Error, Debug)]
+pub enum ArrowBlockfileProviderPrefetchError {
+    #[error("Error reading root for blockfile: {0}")]
+    RootManager(#[from] Box<dyn ChromaError>),
+    #[error("Error fetching block: {0}")]
+    BlockManager(#[from] GetError),
+}
+
+impl ChromaError for ArrowBlockfileProviderPrefetchError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ArrowBlockfileProviderPrefetchError::RootManager(e) => e.code(),
+            ArrowBlockfileProviderPrefetchError::BlockManager(e) => e.code(),
+        }
+    }
+}
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
 /// For now, it keeps a simple local cache of blockfiles.
@@ -60,6 +78,30 @@ impl ArrowBlockfileProvider {
             Ok(None) => Err(Box::new(OpenError::NotFound)),
             Err(e) => Err(Box::new(OpenError::Other(Box::new(e)))),
         }
+    }
+
+    pub async fn prefetch(&self, id: &Uuid) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
+        // We call .get_all_block_ids() here instead of just reading the root because reading the root requires a concrete Key type.
+        let block_ids = self
+            .root_manager
+            .get_all_block_ids(id)
+            .await
+            .map_err(|e| ArrowBlockfileProviderPrefetchError::RootManager(Box::new(e)))?;
+
+        let mut futures = FuturesUnordered::new();
+        for block_id in block_ids.iter() {
+            // Don't prefetch if already cached.
+            if !self.block_manager.cached(block_id).await {
+                futures.push(self.block_manager.get(block_id));
+            }
+        }
+        let count = futures.len();
+
+        while let Some(result) = futures.next().await {
+            result?;
+        }
+
+        Ok(count)
     }
 
     pub async fn write<
@@ -427,10 +469,7 @@ impl RootManager {
             Some(index) => Ok(Some(index)),
             None => {
                 tracing::info!("Cache miss - fetching root from storage");
-                // TODO(hammadb): For legacy and temporary development purposes, we are reading the file
-                // from a fixed location. The path is sparse_index/ for legacy reasons.
-                // This will be replaced with a full prefix-based storage shortly
-                let key = format!("sparse_index/{}", id);
+                let key = Self::get_storage_key(id);
                 tracing::debug!("Reading root from storage with key: {}", key);
                 match self.storage.get(&key).await {
                     Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, *id) {
@@ -448,6 +487,19 @@ impl RootManager {
                         Err(RootManagerError::StorageGetError(e))
                     }
                 }
+            }
+        }
+    }
+
+    pub async fn get_all_block_ids(&self, id: &Uuid) -> Result<Vec<Uuid>, RootManagerError> {
+        let key = Self::get_storage_key(id);
+        tracing::debug!("Reading root from storage with key: {}", key);
+        match self.storage.get(&key).await {
+            Ok(bytes) => RootReader::get_all_block_ids_from_bytes(&bytes, *id)
+                .map_err(RootManagerError::FromBytesError),
+            Err(e) => {
+                tracing::error!("Error reading root from storage: {}", e);
+                Err(RootManagerError::StorageGetError(e))
             }
         }
     }
@@ -491,6 +543,13 @@ impl RootManager {
             }
             None => Err(RootManagerError::NotFound),
         }
+    }
+
+    fn get_storage_key(id: &Uuid) -> String {
+        // TODO(hammadb): For legacy and temporary development purposes, we are reading the file
+        // from a fixed location. The path is sparse_index/ for legacy reasons.
+        // This will be replaced with a full prefix-based storage shortly
+        format!("sparse_index/{}", id)
     }
 }
 

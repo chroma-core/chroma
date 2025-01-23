@@ -29,6 +29,10 @@ use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionOutput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentError;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentInput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOperator;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOutput;
 use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
@@ -148,6 +152,8 @@ pub enum CompactionError {
     GetSegmentWriter(#[from] GetSegmentWriterError),
     #[error("Apply logs to segment writer error: {0}")]
     ApplyLogToSegmentWriter(#[from] ApplyLogToSegmentWriterOperatorError),
+    #[error("Prefetch segment error: {0}")]
+    PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Commit segment writer error: {0}")]
     CommitSegmentWriter(#[from] CommitSegmentWriterOperatorError),
     #[error("Flush segment writer error: {0}")]
@@ -245,6 +251,21 @@ impl CompactOrchestrator {
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;
+
+        let segments = self.segments.clone();
+        for segment in segments {
+            if segment.r#type == SegmentType::BlockfileMetadata
+                || segment.r#type == SegmentType::BlockfileRecord
+            {
+                let prefetch_task = wrap(
+                    Box::new(PrefetchSegmentOperator::new()),
+                    PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
+                    ctx.receiver(),
+                );
+
+                self.send(prefetch_task, ctx).await;
+            }
+        }
     }
 
     async fn materialize_log(
@@ -579,6 +600,22 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 );
                 panic!("No records pulled by compaction, this is a system invariant violation");
             }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(_) => (),
+            None => return,
         }
     }
 }

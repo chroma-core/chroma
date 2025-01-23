@@ -52,7 +52,7 @@ use tracing::{trace_span, Instrument, Span};
 */
 #[derive(Debug)]
 pub struct Dispatcher {
-    task_queue: Vec<TaskMessage>,
+    task_queue: Vec<(TaskMessage, Span)>,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,
     queue_size: usize,
@@ -105,10 +105,7 @@ impl Dispatcher {
                 // If a worker is waiting for a task, send it to the worker in FIFO order
                 // Otherwise, add it to the task queue
                 match self.waiters.pop() {
-                    Some(channel) => match channel
-                        .reply_to
-                        .send(task, Some(Span::current().clone()))
-                        .await
+                    Some(channel) => match channel.reply_to.send(task, Some(Span::current())).await
                     {
                         Ok(_) => {}
                         Err(e) => {
@@ -116,7 +113,7 @@ impl Dispatcher {
                         }
                     },
                     None => {
-                        self.task_queue.push(task);
+                        self.task_queue.push((task, Span::current()));
                     }
                 }
             }
@@ -130,11 +127,7 @@ impl Dispatcher {
     ///   it when one is available
     async fn handle_work_request(&mut self, request: TaskRequestMessage) {
         match self.task_queue.pop() {
-            Some(task) => match request
-                .reply_to
-                .send(task, Some(Span::current().clone()))
-                .await
-            {
+            Some((task, span)) => match request.reply_to.send(task, Some(span)).await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error sending task to worker: {:?}", e);

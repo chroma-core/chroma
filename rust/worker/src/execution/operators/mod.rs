@@ -6,6 +6,7 @@ pub mod get_segment_writer;
 pub mod get_segments;
 pub mod materialize_logs;
 pub(super) mod partition;
+pub mod prefetch_segment;
 pub(super) mod register;
 pub mod spann_bf_pl;
 pub(super) mod spann_centers_search;

@@ -1,0 +1,12 @@
+[package]
+name = "frontend"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "frontend_service"
+path = "src/bin/frontend_service.rs"
+
+[dependencies]
+tokio = { workspace = true }
+axum = { workspace = true }
