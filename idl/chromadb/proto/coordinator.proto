@@ -283,6 +283,8 @@ message CollectionVersionInfo {
     VERSION_CHANGE_REASON_DATA_COMPACTION = 0;
   }
   VersionChangeReason version_change_reason = 5;
+  string version_file_name = 6;
+  bool marked_for_deletion = 7;
 }
 
 // This is metadata about the Collection that is mutable.
@@ -311,6 +313,13 @@ message CollectionVersionTuple {
     string collection_id = 1;
     string tenant_id = 2;
     int64 version = 3;
+}
+
+message VersionListForCollection {
+  string tenant_id = 1;
+  string database_id = 2;
+  string collection_id = 3;
+  repeated int64 versions = 4;
 }
 
 // Contains information about the lineage of a collection.
@@ -383,18 +392,20 @@ message ListCollectionsToGcResponse {
 
 message MarkVersionForDeletionRequest {
   int64 epoch_id = 1;
-  repeated CollectionVersionTuple versions = 2;
+  repeated VersionListForCollection versions = 2;
 }
 
 message MarkVersionForDeletionResponse {
+  map<string, bool> collection_id_to_success = 1;
 }
 
 message DeleteCollectionVersionRequest {
   int64 epoch_id = 1;
-  repeated CollectionVersionTuple versions = 2;
+  repeated VersionListForCollection versions = 2;
 }
 
 message DeleteCollectionVersionResponse {
+  map<string, bool> collection_id_to_success = 1;
 }
 
 service SysDB {

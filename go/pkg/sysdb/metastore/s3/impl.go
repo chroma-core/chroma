@@ -52,6 +52,7 @@ type S3MetaStoreInterface interface {
 	GetVersionFile(tenantID, collectionID string, version int64, fileName string) (*coordinatorpb.CollectionVersionFile, error)
 	PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) error
 	HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error)
+	DeleteVersionFile(tenantID, collectionID, fileName string) error
 }
 
 // S3MetaStore wraps the S3 connection and related parameters for the metadata store.
@@ -180,6 +181,21 @@ func (store *S3MetaStore) GetVersionFilePath(tenantID, collectionID, versionFile
 func (store *S3MetaStore) DeleteOldVersionFiles(tenantID, collectionID string, olderThanVersion int64) error {
 	// TODO: Implement this
 	return errors.New("not implemented")
+}
+
+func (store *S3MetaStore) DeleteVersionFile(tenantID, collectionID, fileName string) error {
+	path := store.GetVersionFilePath(tenantID, collectionID, fileName)
+
+	input := &s3.DeleteObjectInput{
+		Bucket: aws.String(store.BucketName),
+		Key:    aws.String(path),
+	}
+
+	_, err := store.S3.DeleteObject(input)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (store *S3MetaStore) HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error) {

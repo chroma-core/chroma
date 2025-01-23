@@ -396,3 +396,22 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 	}
 	return res, nil
 }
+
+// Mark the versions for deletion.
+// GC minics a 2PC protocol.
+// 1. Mark the versions for deletion by calling MarkVersionForDeletion.
+// 2. Compute the diffs and delete the files from S3.
+// 3. Delete the versions from the version file by calling DeleteCollectionVersion.
+//
+// NOTE about concurrency:
+// This method updates the version file which can concurrently with FlushCollectionCompaction.
+func (s *Server) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.MarkVersionForDeletionRequest) (*coordinatorpb.MarkVersionForDeletionResponse, error) {
+	return nil, nil
+}
+
+// Delete the versions from the version file. Refer to comments in MarkVersionForDeletion.
+// NOTE about concurrency:
+// This method updates the version file which can concurrently with FlushCollectionCompaction.
+func (s *Server) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
+	return nil, nil
+}
