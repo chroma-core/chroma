@@ -43,7 +43,12 @@ pub trait Hasher {
         }
 
         member_vec.sort_by_key(|(s, _)| *s);
-        Ok(member_vec.into_iter().take(k).map(|(_, m)| m).collect())
+        Ok(member_vec
+            .into_iter()
+            .rev()
+            .take(k)
+            .map(|(_, m)| m)
+            .collect())
     }
 
     fn assign_one(
