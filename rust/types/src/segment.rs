@@ -36,7 +36,7 @@ impl std::fmt::Display for SegmentUuid {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SegmentType {
     HnswDistributed,
     BlockfileMetadata,

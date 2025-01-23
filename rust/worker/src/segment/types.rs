@@ -1,8 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
-    MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, SegmentUuid,
-    UpdateMetadata, UpdateMetadataValue,
+    MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, SegmentType,
+    SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
@@ -876,6 +876,14 @@ impl ChromaSegmentWriter<'_> {
         }
     }
 
+    pub fn get_segment_type(&self) -> SegmentType {
+        match self {
+            ChromaSegmentWriter::RecordSegment(_) => SegmentType::BlockfileRecord,
+            ChromaSegmentWriter::MetadataSegment(_) => SegmentType::BlockfileMetadata,
+            ChromaSegmentWriter::DistributedHNSWSegment(_) => SegmentType::HnswDistributed,
+        }
+    }
+
     pub fn get_name(&self) -> &'static str {
         match self {
             ChromaSegmentWriter::RecordSegment(_) => "RecordSegmentWriter",
@@ -947,6 +955,14 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => flusher.id,
+        }
+    }
+
+    pub fn get_segment_type(&self) -> SegmentType {
+        match self {
+            ChromaSegmentFlusher::RecordSegment(_) => SegmentType::BlockfileRecord,
+            ChromaSegmentFlusher::MetadataSegment(_) => SegmentType::BlockfileMetadata,
+            ChromaSegmentFlusher::DistributedHNSWSegment(_) => SegmentType::HnswDistributed,
         }
     }
 

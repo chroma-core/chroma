@@ -2,7 +2,7 @@ pub mod apply_log_to_segment_writer;
 pub mod commit_segment_writer;
 pub(super) mod count_records;
 pub mod flush_segment_writer;
-pub mod get_segment_writers;
+pub mod get_segment_writer;
 pub mod get_segments;
 pub mod materialize_logs;
 pub(super) mod partition;
