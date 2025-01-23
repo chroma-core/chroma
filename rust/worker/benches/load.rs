@@ -1,4 +1,5 @@
 use chroma_benchmark::datasets::sift::Sift1MData;
+use chroma_segment::test::TestSegment;
 use chroma_types::{
     Chunk, CollectionUuid, DirectWhereComparison, LogRecord, MetadataSetValue, Operation,
     OperationRecord, SetOperator, Where, WhereComparison,
@@ -13,7 +14,6 @@ use worker::{
         log::{InMemoryLog, Log},
         test::modulo_metadata,
     },
-    segment::test::TestSegment,
 };
 
 const DATA_CHUNK_SIZE: usize = 10000;

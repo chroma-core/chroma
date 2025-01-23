@@ -1,8 +1,8 @@
-use crate::segment::spann_segment::{SpannSegmentReader, SpannSegmentReaderContext};
 use async_trait::async_trait;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::utils::rng_query;
+use chroma_segment::spann_segment::{SpannSegmentReader, SpannSegmentReaderContext};
 use chroma_system::Operator;
 use thiserror::Error;
 

@@ -1,13 +1,12 @@
 use std::{cmp::Ordering, num::TryFromIntError};
 
-use crate::segment::{
-    materialize_logs,
-    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    LogMaterializerError,
-};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::{
+    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    types::{materialize_logs, LogMaterializerError},
+};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use futures::StreamExt;
@@ -280,14 +279,14 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
     use roaring::RoaringBitmap;
 
     use crate::{
         execution::operators::limit::LimitOperator,
-        log::test::{upsert_generator, LogGenerator},
-        segment::test::TestSegment,
+        log::test::{upsert_generator, LoadFromGenerator, LogGenerator},
     };
 
     use super::LimitInput;

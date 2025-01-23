@@ -1,7 +1,7 @@
-use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
@@ -197,13 +197,14 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 
 #[cfg(test)]
 mod tests {
-    use crate::segment::materialize_logs;
-    use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
-    use crate::{
-        execution::operators::count_records::{CountRecordsInput, CountRecordsOperator},
-        segment::record_segment::RecordSegmentWriter,
-    };
+    use crate::execution::operators::count_records::{CountRecordsInput, CountRecordsOperator};
     use chroma_blockstore::provider::BlockfileProvider;
+    use chroma_segment::{
+        record_segment::{
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+        },
+        types::materialize_logs,
+    };
     use chroma_system::Operator;
     use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
     use std::{collections::HashMap, str::FromStr};

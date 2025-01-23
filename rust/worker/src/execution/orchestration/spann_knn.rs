@@ -2,32 +2,33 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_system::{wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage, TaskResult};
+use chroma_segment::spann_segment::SpannSegmentReaderContext;
+use chroma_system::{
+    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
+    TaskResult,
+};
 use tokio::sync::oneshot::Sender;
 
-use crate::{
-    execution::operators::{
-        knn::{KnnOperator, RecordDistance},
-        knn_log::{KnnLogError, KnnLogInput, KnnLogOutput},
-        knn_projection::{
-            KnnProjectionError, KnnProjectionInput, KnnProjectionOperator, KnnProjectionOutput,
-        },
-        prefetch_record::{
-            PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator, PrefetchRecordOutput,
-        },
-        spann_bf_pl::{SpannBfPlError, SpannBfPlInput, SpannBfPlOperator, SpannBfPlOutput},
-        spann_centers_search::{
-            SpannCentersSearchError, SpannCentersSearchInput, SpannCentersSearchOperator,
-            SpannCentersSearchOutput,
-        },
-        spann_fetch_pl::{
-            SpannFetchPlError, SpannFetchPlInput, SpannFetchPlOperator, SpannFetchPlOutput,
-        },
-        spann_knn_merge::{
-            SpannKnnMergeError, SpannKnnMergeInput, SpannKnnMergeOperator, SpannKnnMergeOutput,
-        },
+use crate::execution::operators::{
+    knn::{KnnOperator, RecordDistance},
+    knn_log::{KnnLogError, KnnLogInput, KnnLogOutput},
+    knn_projection::{
+        KnnProjectionError, KnnProjectionInput, KnnProjectionOperator, KnnProjectionOutput,
     },
-    segment::spann_segment::SpannSegmentReaderContext,
+    prefetch_record::{
+        PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator, PrefetchRecordOutput,
+    },
+    spann_bf_pl::{SpannBfPlError, SpannBfPlInput, SpannBfPlOperator, SpannBfPlOutput},
+    spann_centers_search::{
+        SpannCentersSearchError, SpannCentersSearchInput, SpannCentersSearchOperator,
+        SpannCentersSearchOutput,
+    },
+    spann_fetch_pl::{
+        SpannFetchPlError, SpannFetchPlInput, SpannFetchPlOperator, SpannFetchPlOutput,
+    },
+    spann_knn_merge::{
+        SpannKnnMergeError, SpannKnnMergeInput, SpannKnnMergeOperator, SpannKnnMergeOutput,
+    },
 };
 
 use super::knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult};

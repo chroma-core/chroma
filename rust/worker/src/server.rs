@@ -398,11 +398,11 @@ mod tests {
 
     use super::*;
     use crate::log::log::InMemoryLog;
-    use crate::segment::test::TestSegment;
     use chroma_index::test_hnsw_index_provider;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;
+    use chroma_segment::test::TestSegment;
     use chroma_sysdb::TestSysDb;
     use chroma_system::dispatcher;
     use chroma_system::system;

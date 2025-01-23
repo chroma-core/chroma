@@ -18,7 +18,6 @@ use tokio::signal::unix::{signal, SignalKind};
 pub mod config;
 pub mod execution;
 pub mod log;
-pub mod segment;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 

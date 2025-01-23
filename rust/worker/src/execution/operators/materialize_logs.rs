@@ -1,10 +1,9 @@
-use chroma_system::Operator;
-use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::{materialize_logs, record_segment::RecordSegmentReader};
-use crate::segment::{LogMaterializerError, MaterializeLogsResult};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
+use chroma_segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
+use chroma_segment::types::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
+use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Segment};
 use futures::TryFutureExt;
 use std::sync::atomic::AtomicU32;

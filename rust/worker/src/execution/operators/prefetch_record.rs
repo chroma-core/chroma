@@ -1,12 +1,11 @@
 use std::collections::HashSet;
 
-use crate::segment::{
-    materialize_logs,
-    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    LogMaterializerError,
-};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::{
+    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    types::{materialize_logs, LogMaterializerError},
+};
 use chroma_system::Operator;
 use thiserror::Error;
 use tracing::{trace, Instrument, Span};
