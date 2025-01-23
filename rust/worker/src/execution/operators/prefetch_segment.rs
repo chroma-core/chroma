@@ -111,9 +111,9 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::segment::materialize_logs;
-    use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentWriter};
     use chroma_cache::new_cache_for_test;
+    use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentWriter};
+    use chroma_segment::types::materialize_logs;
     use chroma_storage::test_storage;
     use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
     use std::collections::HashMap;
