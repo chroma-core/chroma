@@ -1325,6 +1325,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-segment"
+version = "0.1.0"
+dependencies = [
+ "chroma-blockstore",
+ "chroma-cache",
+ "chroma-distance",
+ "chroma-error",
+ "chroma-index",
+ "chroma-storage",
+ "chroma-types",
+ "futures",
+ "roaring",
+ "serde",
+ "shuttle",
+ "tantivy",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "chroma-storage"
 version = "0.1.0"
 dependencies = [
@@ -6861,6 +6884,7 @@ dependencies = [
  "chroma-distance",
  "chroma-error",
  "chroma-index",
+ "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
