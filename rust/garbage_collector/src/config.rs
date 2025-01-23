@@ -1,3 +1,4 @@
+use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
 use figment::providers::{Env, Format, Yaml};
 
@@ -15,6 +16,7 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) disallow_collections: Vec<String>,
     pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
     pub(super) dispatcher_config: DispatcherConfig,
+    pub(super) storage_config: StorageConfig,
 }
 
 impl GarbageCollectorConfig {
@@ -41,6 +43,8 @@ impl GarbageCollectorConfig {
 
 #[cfg(test)]
 mod tests {
+    use chroma_storage::config::S3CredentialsConfig;
+
     use super::*;
 
     #[test]
@@ -60,5 +64,19 @@ mod tests {
         assert_eq!(config.dispatcher_config.num_worker_threads, 4);
         assert_eq!(config.dispatcher_config.dispatcher_queue_size, 100);
         assert_eq!(config.dispatcher_config.worker_queue_size, 100);
+        match config.storage_config {
+            StorageConfig::S3(storage_config) => {
+                assert_eq!(storage_config.bucket, "chroma-storage");
+                if let S3CredentialsConfig::Minio = storage_config.credentials {
+                    assert_eq!(storage_config.connect_timeout_ms, 60000);
+                    assert_eq!(storage_config.request_timeout_ms, 60000);
+                    assert_eq!(storage_config.upload_part_size_bytes, 5 * 1024 * 1024);
+                    assert_eq!(storage_config.download_part_size_bytes, 5 * 1024 * 1024);
+                } else {
+                    panic!("Expected Minio credentials");
+                }
+            }
+            _ => panic!("Expected S3 storage config"),
+        }
     }
 }
