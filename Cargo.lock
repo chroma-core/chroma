@@ -6915,6 +6915,7 @@ dependencies = [
  "chroma-distance",
  "chroma-error",
  "chroma-index",
+ "chroma-log",
  "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",

@@ -331,10 +331,10 @@ impl ChromaError for UpdateCollectionLogOffsetError {
 // internal to a mock log implementation
 #[derive(Clone)]
 pub struct InternalLogRecord {
-    pub(crate) collection_id: CollectionUuid,
-    pub(crate) log_offset: i64,
-    pub(crate) log_ts: i64,
-    pub(crate) record: LogRecord,
+    pub collection_id: CollectionUuid,
+    pub log_offset: i64,
+    pub log_ts: i64,
+    pub record: LogRecord,
 }
 
 impl Debug for InternalLogRecord {
@@ -363,7 +363,6 @@ impl InMemoryLog {
         }
     }
 
-    #[cfg(test)]
     pub fn add_log(&mut self, collection_id: CollectionUuid, log: InternalLogRecord) {
         let logs = self.collection_to_log.entry(collection_id).or_default();
         // Ensure that the log offset is correct. Since we only use the InMemoryLog for testing,

@@ -127,14 +127,14 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
 #[cfg(test)]
 mod tests {
     use chroma_distance::{normalize, DistanceFunction};
+    use chroma_log::test::{
+        random_embedding, upsert_generator, LogGenerator, TEST_EMBEDDING_DIMENSION,
+    };
     use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
 
-    use crate::{
-        execution::operators::knn::KnnOperator,
-        log::test::{random_embedding, upsert_generator, LogGenerator, TEST_EMBEDDING_DIMENSION},
-    };
+    use crate::execution::operators::knn::KnnOperator;
 
     use super::KnnLogInput;
 

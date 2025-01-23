@@ -1,5 +1,5 @@
 // Interceptor copies from worker::tracing::util
-// TODO: Resolve impl duplication
+// TODO: A seperate tracing crate
 
 use std::str::FromStr;
 

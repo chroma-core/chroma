@@ -5,6 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_log::log::Log;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_types::{
@@ -28,7 +29,6 @@ use crate::{
             CountOrchestrator,
         },
     },
-    log::log::Log,
     tracing::util::wrap_span_with_parent_context,
     utils::convert::{from_proto_knn, to_proto_knn_batch_result},
 };
@@ -59,7 +59,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             }
         };
         let log_config = &config.log;
-        let log = match crate::log::from_config(log_config).await {
+        let log = match chroma_log::from_config(log_config).await {
             Ok(log) => log,
             Err(err) => {
                 tracing::error!("Failed to create log component: {:?}", err);
@@ -397,8 +397,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::log::log::InMemoryLog;
     use chroma_index::test_hnsw_index_provider;
+    use chroma_log::log::InMemoryLog;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;
