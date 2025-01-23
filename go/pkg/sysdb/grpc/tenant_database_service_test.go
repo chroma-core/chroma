@@ -33,14 +33,16 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	suite.db, _ = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default)
+		Testing:               true,
+		BlockStoreProvider:    "none",
+	}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain)
+	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain, nil, false)
 }
 
 func (suite *TenantDatabaseServiceTestSuite) SetupTest() {

@@ -182,9 +182,9 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
 
 #[allow(dead_code)]
 pub struct CollectionToGcInfo {
-    id: CollectionUuid,
-    name: String,
-    version_file_path: String,
+    pub id: CollectionUuid,
+    pub name: String,
+    pub version_file_path: String,
 }
 
 #[derive(Debug, Error)]

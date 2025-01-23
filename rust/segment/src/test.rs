@@ -7,11 +7,9 @@ use chroma_types::{
     SegmentScope,
 };
 
-use crate::log::test::{LogGenerator, TEST_EMBEDDING_DIMENSION};
-
 use super::{
-    distributed_hnsw_segment::DistributedHNSWSegmentWriter, materialize_logs,
-    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter,
+    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
+    distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
 };
 
 #[derive(Clone)]
@@ -115,29 +113,6 @@ impl TestSegment {
             .await
             .expect("Should be able to flush vector.");
     }
-
-    pub async fn populate_with_generator<G>(&mut self, size: usize, generator: G)
-    where
-        G: LogGenerator,
-    {
-        let ids: Vec<_> = (1..=size).collect();
-        for chunk in ids.chunks(100) {
-            self.compact_log(
-                generator.generate_chunk(chunk.iter().copied()),
-                chunk
-                    .first()
-                    .copied()
-                    .expect("The chunk of offset ids to generate should not be empty."),
-            )
-            .await;
-        }
-    }
-}
-
-impl Default for TestSegment {
-    fn default() -> Self {
-        Self::new_with_dimension(TEST_EMBEDDING_DIMENSION)
-    }
 }
 
 impl From<TestSegment> for CollectionAndSegments {
@@ -148,5 +123,11 @@ impl From<TestSegment> for CollectionAndSegments {
             record_segment: value.record_segment,
             vector_segment: value.vector_segment,
         }
+    }
+}
+
+impl Default for TestSegment {
+    fn default() -> Self {
+        Self::new_with_dimension(128)
     }
 }

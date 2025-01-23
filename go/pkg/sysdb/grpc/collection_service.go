@@ -315,6 +315,20 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	return res, nil
 }
 
+func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.ListCollectionVersionsRequest) (*coordinatorpb.ListCollectionVersionsResponse, error) {
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, *req.VersionsBefore, *req.VersionsAtOrAfter)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &coordinatorpb.ListCollectionVersionsResponse{
+		Versions: versions,
+	}, nil
+}
+
 func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
 	_, err := json.Marshal(req)
 	if err != nil {

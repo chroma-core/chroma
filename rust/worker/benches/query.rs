@@ -6,6 +6,7 @@ use chroma_benchmark::{
     datasets::sift::Sift1MData,
 };
 use chroma_config::Configurable;
+use chroma_segment::test::TestSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{stream, StreamExt, TryStreamExt};
@@ -23,7 +24,6 @@ use worker::{
             knn_filter::{KnnFilterOrchestrator, KnnFilterOutput},
         },
     },
-    segment::test::TestSegment,
 };
 
 fn trivial_knn_filter(

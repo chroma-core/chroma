@@ -10,9 +10,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-use super::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
-use super::metadata_segment::{MetadataSegmentFlusher, MetadataSegmentWriter};
-use super::record_segment::{
+use super::distributed_hnsw::DistributedHNSWSegmentWriter;
+use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
+use super::blockfile_record::{
     ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader,
     RecordSegmentReaderCreationError, RecordSegmentWriter,
 };
@@ -969,12 +969,10 @@ impl ChromaSegmentFlusher {
 
 #[cfg(test)]
 mod tests {
-    #![allow(deprecated)]
-
     use super::*;
-    use crate::segment::{
-        metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-        record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+    use crate::{
+        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
+        blockfile_record::{RecordSegmentReaderCreationError, RecordSegmentWriter},
     };
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
@@ -982,10 +980,7 @@ mod tests {
     };
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{
-        CollectionUuid, DirectDocumentComparison, DirectWhereComparison, OperationRecord,
-        PrimitiveOperator, SegmentUuid, Where, WhereComparison,
-    };
+    use chroma_types::{CollectionUuid, OperationRecord, SegmentUuid};
     use std::{collections::HashMap, str::FromStr};
 
     #[tokio::test]
@@ -1216,67 +1211,46 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("new_world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"new_world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
+        assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("bye"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("bye", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("number"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("number")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("doc"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
+        assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("doc")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
     }
@@ -1500,68 +1474,47 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("new_world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"new_world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
+        assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("bye"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("bye", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("doc1"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
+        assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("doc1")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("number"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
+        assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("number")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
     }
@@ -1805,67 +1758,46 @@ mod tests {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("new_world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"new_world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
+        assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("bye"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("bye", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("number"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("number")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("doc1"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
+        assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("doc1")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
     }

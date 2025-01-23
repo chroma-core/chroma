@@ -1325,6 +1325,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-segment"
+version = "0.1.0"
+dependencies = [
+ "chroma-blockstore",
+ "chroma-cache",
+ "chroma-distance",
+ "chroma-error",
+ "chroma-index",
+ "chroma-storage",
+ "chroma-types",
+ "futures",
+ "roaring",
+ "serde",
+ "shuttle",
+ "tantivy",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "chroma-storage"
 version = "0.1.0"
 dependencies = [
@@ -2284,6 +2307,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "frontend"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
+
+[[package]]
 name = "fs4"
 version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2405,18 +2436,21 @@ dependencies = [
  "async-trait",
  "chroma-config",
  "chroma-error",
+ "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
  "chrono",
  "clap",
  "figment",
+ "futures",
  "opentelemetry",
  "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-bunyan-formatter",
@@ -6861,6 +6895,7 @@ dependencies = [
  "chroma-distance",
  "chroma-error",
  "chroma-index",
+ "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",
  "chroma-system",

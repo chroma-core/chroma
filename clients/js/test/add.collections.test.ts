@@ -214,30 +214,4 @@ describe("add collections", () => {
       expect(e.message).toMatch("got empty embedding at pos");
     }
   });
-
-  if (!process.env.OLLAMA_SERVER_URL) {
-    test.skip("it should use ollama EF, OLLAMA_SERVER_URL not defined", async () => {});
-  } else {
-    test("it should use ollama EF", async () => {
-      const embedder = new OllamaEmbeddingFunction({
-        url:
-          process.env.OLLAMA_SERVER_URL ||
-          "http://127.0.0.1:11434/api/embeddings",
-        model: "nomic-embed-text",
-      });
-      const collection = await client.createCollection({
-        name: "test",
-        embeddingFunction: embedder,
-      });
-      const embeddings = await embedder.generate(DOCUMENTS);
-      await collection.add({ ids: IDS, embeddings: embeddings });
-      const count = await collection.count();
-      expect(count).toBe(3);
-      var res = await collection.get({
-        ids: IDS,
-        include: [IncludeEnum.Embeddings],
-      });
-      expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
-    });
-  }
 });
