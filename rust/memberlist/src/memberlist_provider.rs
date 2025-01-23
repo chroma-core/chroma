@@ -44,7 +44,7 @@ pub(crate) struct Member {
 }
 
 /* =========== CR Provider ============== */
-pub(crate) struct CustomResourceMemberlistProvider {
+pub struct CustomResourceMemberlistProvider {
     memberlist_name: String,
     kube_client: Client,
     kube_ns: String,

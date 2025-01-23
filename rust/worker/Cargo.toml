@@ -16,11 +16,6 @@ name = "query_service"
 path = "src/bin/query_service.rs"
 
 [dependencies]
-rand = "0.8.5"
-murmur3 = "0.5.2"
-schemars = "0.8.21"
-kube = { version = "0.87.2", features = ["runtime", "derive"] }
-k8s-openapi = { version = "0.20.0", features = ["latest"] }
 tracing-bunyan-formatter = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -60,6 +55,7 @@ chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
 chroma-index = { workspace = true }
 chroma-log = { workspace = true }
+chroma-memberlist = { workspace = true }
 chroma-segment = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-system = { workspace = true }

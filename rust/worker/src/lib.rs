@@ -1,15 +1,15 @@
-mod assignment;
 mod compactor;
-mod memberlist;
 mod server;
 mod tracing;
 mod utils;
 
 use chroma_config::Configurable;
+use chroma_memberlist::memberlist_provider::{
+    CustomResourceMemberlistProvider, MemberlistProvider,
+};
 use clap::Parser;
 use compactor::compaction_client::CompactionClient;
 use compactor::compaction_server::CompactionServer;
-use memberlist::MemberlistProvider;
 
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
@@ -96,7 +96,7 @@ pub async fn compaction_service_entrypoint() {
 
     let system = chroma_system::System::new();
 
-    let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
+    let mut memberlist = match CustomResourceMemberlistProvider::try_from_config(
         &config.memberlist_provider,
     )
     .await

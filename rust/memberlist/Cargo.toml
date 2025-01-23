@@ -1,5 +1,5 @@
 [package]
-name = "memberlist"
+name = "chroma-memberlist"
 version = "0.1.0"
 edition = "2021"
 
