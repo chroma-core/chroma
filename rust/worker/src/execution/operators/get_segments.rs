@@ -1,7 +1,6 @@
-use crate::segment::metadata_segment::MetadataSegmentError;
 use chroma_sysdb::{sysdb, SysDb};
 use chroma_system::Operator;
-use chroma_types::{CollectionUuid, Segment, SegmentType};
+use chroma_types::{CollectionUuid, Segment};
 use thiserror::Error;
 use tonic::async_trait;
 
@@ -38,12 +37,6 @@ pub struct GetSegmentsOutput {
 pub enum GetSegmentsError {
     #[error("Failed to get segments from SysDb: {0}")]
     SysDb(#[from] sysdb::GetSegmentsError),
-    #[error("Segment type not found")]
-    SegmentTypeNotFound,
-    #[error("Writer unimplemented for segment type {:?}", 0)]
-    WriterUnimplemented(SegmentType),
-    #[error("Failed to create writer for metadata segment: {0}")]
-    MetadataSegmentWriter(#[from] MetadataSegmentError),
 }
 
 #[async_trait]

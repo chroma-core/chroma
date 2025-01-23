@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::segment::{
-    materialize_logs,
-    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    LogMaterializerError,
-};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::{
+    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    types::{materialize_logs, LogMaterializerError},
+};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Metadata, Segment};
 use thiserror::Error;
@@ -178,9 +177,9 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 mod tests {
     use crate::{
         execution::operators::projection::ProjectionOperator,
-        log::test::{int_as_id, upsert_generator, LogGenerator},
-        segment::test::TestSegment,
+        log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator},
     };
+    use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
 
     use super::ProjectionInput;

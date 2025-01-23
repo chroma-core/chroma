@@ -1,7 +1,7 @@
-use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::types::MaterializeLogsResult;
+use super::utils::distance_function_from_segment;
 use super::utils::hnsw_params_from_segment;
-use super::MaterializeLogsResult;
-use crate::segment::utils::distance_function_from_segment;
 use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
@@ -28,7 +28,7 @@ pub struct HnswIndexParamsFromSegment {
 pub struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for DistributedHNSWSegmentWriter {
@@ -292,7 +292,7 @@ impl DistributedHNSWSegmentReader {
         DistributedHNSWSegmentReader { index, id }
     }
 
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
@@ -375,7 +375,7 @@ impl DistributedHNSWSegmentReader {
         }
     }
 
-    pub(crate) fn query(
+    pub fn query(
         &self,
         vector: &[f32],
         k: usize,
@@ -399,7 +399,7 @@ pub mod test {
     use tempfile::tempdir;
     use uuid::Uuid;
 
-    use crate::segment::distributed_hnsw_segment::hnsw_params_from_segment;
+    use crate::distributed_hnsw::hnsw_params_from_segment;
 
     #[test]
     fn parameter_defaults() {

@@ -1,5 +1,5 @@
-use super::spann_segment::SpannSegmentWriterError;
-use super::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
+use super::distributed_spann::SpannSegmentWriterError;
+use super::types::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
@@ -31,7 +31,7 @@ pub struct RecordSegmentWriter {
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
     max_new_offset_id: Arc<AtomicU32>,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for RecordSegmentWriter {
@@ -633,7 +633,7 @@ impl RecordSegmentFlusher {
         Ok(flushed_files)
     }
 
-    pub(crate) fn count(&self) -> u64 {
+    pub fn count(&self) -> u64 {
         self.id_to_user_id_flusher.count()
     }
 }
@@ -681,7 +681,7 @@ impl ChromaError for RecordSegmentReaderCreationError {
 }
 
 impl RecordSegmentReader<'_> {
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, Box<RecordSegmentReaderCreationError>> {
@@ -781,25 +781,25 @@ impl RecordSegmentReader<'_> {
         })
     }
 
-    pub(crate) fn get_max_offset_id(&self) -> u32 {
+    pub fn get_max_offset_id(&self) -> u32 {
         self.max_offset_id
     }
 
-    pub(crate) async fn get_offset_id_for_user_id(
+    pub async fn get_offset_id_for_user_id(
         &self,
         user_id: &str,
     ) -> Result<Option<u32>, Box<dyn ChromaError>> {
         self.user_id_to_id.get("", user_id).await
     }
 
-    pub(crate) async fn get_data_for_offset_id(
+    pub async fn get_data_for_offset_id(
         &self,
         offset_id: u32,
     ) -> Result<Option<DataRecord>, Box<dyn ChromaError>> {
         self.id_to_data.get("", offset_id).await
     }
 
-    pub(crate) async fn data_exists_for_user_id(
+    pub async fn data_exists_for_user_id(
         &self,
         user_id: &str,
     ) -> Result<bool, Box<dyn ChromaError>> {
@@ -820,7 +820,7 @@ impl RecordSegmentReader<'_> {
 
     /// Returns all data in the record segment, sorted by their offset ids
     #[allow(dead_code)]
-    pub(crate) async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
+    pub async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
         self.id_to_data
             .get_range(""..="", ..)
             .await
@@ -828,7 +828,7 @@ impl RecordSegmentReader<'_> {
     }
 
     /// Get a stream of offset ids from the smallest to the largest in the given range
-    pub(crate) fn get_offset_stream<'me>(
+    pub fn get_offset_stream<'me>(
         &'me self,
         offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
     ) -> impl Stream<Item = Result<u32, Box<dyn ChromaError>>> + 'me {
@@ -840,14 +840,11 @@ impl RecordSegmentReader<'_> {
     /// Find the rank of the given offset id in the record segment
     /// The rank of an offset id is the number of offset ids strictly smaller than it
     /// In other words, it is the position where the given offset id can be inserted without breaking the order
-    pub(crate) async fn get_offset_id_rank(
-        &self,
-        target_oid: u32,
-    ) -> Result<usize, Box<dyn ChromaError>> {
+    pub async fn get_offset_id_rank(&self, target_oid: u32) -> Result<usize, Box<dyn ChromaError>> {
         self.id_to_user_id.rank("", target_oid).await
     }
 
-    pub(crate) async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
+    pub async fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
         // We query using the id_to_user_id blockfile since it is likely to be the smallest
         // and count loads all the data
         // In the future, we can optimize this by making the underlying blockfile
@@ -855,7 +852,7 @@ impl RecordSegmentReader<'_> {
         self.id_to_user_id.count().await
     }
 
-    pub(crate) async fn prefetch_id_to_data(&self, keys: &[u32]) {
+    pub async fn prefetch_id_to_data(&self, keys: &[u32]) {
         let prefixes = vec![""; keys.len()];
         self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
     }
@@ -871,108 +868,109 @@ impl RecordSegmentReader<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicU32, Arc};
+    // use std::sync::{atomic::AtomicU32, Arc};
 
-    use chroma_blockstore::BlockfileWriter;
-    use chroma_types::Chunk;
-    use shuttle::{future, thread};
+    // use chroma_blockstore::BlockfileWriter;
+    // use chroma_types::Chunk;
+    // use shuttle::{future, thread};
 
-    use crate::{
-        log::test::{upsert_generator, LogGenerator},
-        segment::{materialize_logs, record_segment::MAX_OFFSET_ID, test::TestSegment},
-    };
+    // use crate::{
+    //     log::test::{upsert_generator, LogGenerator},
+    //     segment::{materialize_logs, record_segment::MAX_OFFSET_ID, test::TestSegment},
+    // };
 
-    use super::RecordSegmentWriter;
+    // use super::RecordSegmentWriter;
 
     // The same record segment writer should be able to run concurrently on different threads without conflict
-    #[test]
-    fn test_max_offset_id_shuttle() {
-        let test_segment = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Runtime creation should not fail")
-            .block_on(async { TestSegment::default() });
-        shuttle::check_random(
-            move || {
-                let log_partition_size = 100;
-                let stack_size = 1 << 22;
-                let thread_count = 4;
-                let max_log_offset = thread_count * log_partition_size;
-                let logs = upsert_generator.generate_vec(1..=max_log_offset);
+    // TODO: Enable this test when the log crate is seperated from the worker crate
+    // #[test]
+    // fn test_max_offset_id_shuttle() {
+    //     let test_segment = tokio::runtime::Builder::new_multi_thread()
+    //         .enable_all()
+    //         .build()
+    //         .expect("Runtime creation should not fail")
+    //         .block_on(async { TestSegment::default() });
+    //     shuttle::check_random(
+    //         move || {
+    //             let log_partition_size = 100;
+    //             let stack_size = 1 << 22;
+    //             let thread_count = 4;
+    //             let max_log_offset = thread_count * log_partition_size;
+    //             let logs = upsert_generator.generate_vec(1..=max_log_offset);
 
-                let batches = logs
-                    .chunks(log_partition_size)
-                    .map(|chunk| chunk.to_vec())
-                    .collect::<Vec<_>>();
+    //             let batches = logs
+    //                 .chunks(log_partition_size)
+    //                 .map(|chunk| chunk.to_vec())
+    //                 .collect::<Vec<_>>();
 
-                let offset_id = Arc::new(AtomicU32::new(1));
+    //             let offset_id = Arc::new(AtomicU32::new(1));
 
-                let record_segment_writer = future::block_on(RecordSegmentWriter::from_segment(
-                    &test_segment.record_segment,
-                    &test_segment.blockfile_provider,
-                ))
-                .expect("Should be able to initialize record segment writer");
+    //             let record_segment_writer = future::block_on(RecordSegmentWriter::from_segment(
+    //                 &test_segment.record_segment,
+    //                 &test_segment.blockfile_provider,
+    //             ))
+    //             .expect("Should be able to initialize record segment writer");
 
-                let mut handles = Vec::new();
+    //             let mut handles = Vec::new();
 
-                for batch in batches {
-                    let curr_offset_id = offset_id.clone();
-                    let record_writer = record_segment_writer.clone();
+    //             for batch in batches {
+    //                 let curr_offset_id = offset_id.clone();
+    //                 let record_writer = record_segment_writer.clone();
 
-                    let handle = thread::Builder::new()
-                        .stack_size(stack_size)
-                        .spawn(move || {
-                            let log_chunk = Chunk::new(batch.into());
-                            let materialized_logs = future::block_on(materialize_logs(
-                                &None,
-                                log_chunk,
-                                Some(curr_offset_id),
-                            ))
-                            .expect("Should be able to materialize log");
-                            future::block_on(
-                                record_writer
-                                    .apply_materialized_log_chunk(&None, &materialized_logs),
-                            )
-                            .expect("Should be able to apply materialized log")
-                        })
-                        .expect("Should be able to spawn thread");
+    //                 let handle = thread::Builder::new()
+    //                     .stack_size(stack_size)
+    //                     .spawn(move || {
+    //                         let log_chunk = Chunk::new(batch.into());
+    //                         let materialized_logs = future::block_on(materialize_logs(
+    //                             &None,
+    //                             log_chunk,
+    //                             Some(curr_offset_id),
+    //                         ))
+    //                         .expect("Should be able to materialize log");
+    //                         future::block_on(
+    //                             record_writer
+    //                                 .apply_materialized_log_chunk(&None, &materialized_logs),
+    //                         )
+    //                         .expect("Should be able to apply materialized log")
+    //                     })
+    //                     .expect("Should be able to spawn thread");
 
-                    handles.push(handle);
-                }
+    //                 handles.push(handle);
+    //             }
 
-                handles
-                    .into_iter()
-                    .for_each(|handle| handle.join().expect("Writer should not fail"));
+    //             handles
+    //                 .into_iter()
+    //                 .for_each(|handle| handle.join().expect("Writer should not fail"));
 
-                let max_offset_id_writer =
-                    if let Some(BlockfileWriter::ArrowUnorderedBlockfileWriter(writer)) =
-                        &record_segment_writer.max_offset_id
-                    {
-                        writer.clone()
-                    } else {
-                        unreachable!(
-                        "Please adjust how max offset id is extracted from record segment writer"
-                    );
-                    };
+    //             let max_offset_id_writer =
+    //                 if let Some(BlockfileWriter::ArrowUnorderedBlockfileWriter(writer)) =
+    //                     &record_segment_writer.max_offset_id
+    //                 {
+    //                     writer.clone()
+    //                 } else {
+    //                     unreachable!(
+    //                     "Please adjust how max offset id is extracted from record segment writer"
+    //                 );
+    //                 };
 
-                thread::Builder::new()
-                    .stack_size(stack_size)
-                    .spawn(move || {
-                        future::block_on(record_segment_writer.commit())
-                            .expect("Should be able to commit applied logs")
-                    })
-                    .expect("Should be able to spawn thread")
-                    .join()
-                    .expect("Should be able to commit applied logs");
-                let max_offset_id = future::block_on(
-                    max_offset_id_writer.get_owned::<&str, u32>("", MAX_OFFSET_ID),
-                )
-                .expect("Get owned should not fail")
-                .expect("Max offset id should exist");
+    //             thread::Builder::new()
+    //                 .stack_size(stack_size)
+    //                 .spawn(move || {
+    //                     future::block_on(record_segment_writer.commit())
+    //                         .expect("Should be able to commit applied logs")
+    //                 })
+    //                 .expect("Should be able to spawn thread")
+    //                 .join()
+    //                 .expect("Should be able to commit applied logs");
+    //             let max_offset_id = future::block_on(
+    //                 max_offset_id_writer.get_owned::<&str, u32>("", MAX_OFFSET_ID),
+    //             )
+    //             .expect("Get owned should not fail")
+    //             .expect("Max offset id should exist");
 
-                assert_eq!(max_offset_id, max_log_offset as u32);
-            },
-            60,
-        );
-    }
+    //             assert_eq!(max_offset_id, max_log_offset as u32);
+    //         },
+    //         60,
+    //     );
+    // }
 }

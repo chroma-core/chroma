@@ -34,16 +34,16 @@ use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
 use crate::execution::operators::register::RegisterOutput;
 use crate::log::log::Log;
-use crate::segment::record_segment::RecordSegmentReader;
-use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::ChromaSegmentFlusher;
-use crate::segment::ChromaSegmentWriter;
-use crate::segment::MaterializeLogsResult;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderCreationError;
+use chroma_segment::types::ChromaSegmentFlusher;
+use chroma_segment::types::ChromaSegmentWriter;
+use chroma_segment::types::MaterializeLogsResult;
 use chroma_sysdb::SysDb;
 use chroma_system::wrap;
 use chroma_system::ChannelError;
@@ -258,10 +258,11 @@ impl CompactOrchestrator {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
 
         let record_segment_result = self.get_segment(SegmentType::BlockfileRecord);
-        let record_segment = match self.ok_or_terminate(record_segment_result, ctx) {
-            Some(segment) => segment,
-            None => return,
-        };
+        let record_segment = record_segment_result.unwrap(); // todo
+                                                             // let record_segment = match self.ok_or_terminate(record_segment_result, ctx) {
+                                                             //     Some(segment) => segment,
+                                                             //     None => return,
+                                                             // };
 
         let next_max_offset_id = match self.ok_or_terminate(
             match RecordSegmentReader::from_segment(&record_segment, &self.blockfile_provider).await
@@ -331,11 +332,11 @@ impl CompactOrchestrator {
         >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let record_segment = self.get_segment(SegmentType::BlockfileRecord);
-        let record_segment = match self.ok_or_terminate(record_segment, ctx) {
-            Some(segment) => segment,
-            None => return,
-        };
+        let record_segment = self.get_segment(SegmentType::BlockfileRecord).unwrap(); // todo
+                                                                                      // let record_segment = match self.ok_or_terminate(record_segment, ctx) {
+                                                                                      //     Some(segment) => segment,
+                                                                                      //     None => return,
+                                                                                      // };
 
         let record_segment_reader: Option<RecordSegmentReader<'_>> = match self.ok_or_terminate(
             match RecordSegmentReader::from_segment(&record_segment, &self.blockfile_provider).await
@@ -439,12 +440,11 @@ impl CompactOrchestrator {
         self.send(task, ctx).await;
     }
 
-    fn get_segment(&self, segment_type: SegmentType) -> Result<Segment, GetSegmentsError> {
+    fn get_segment(&self, segment_type: SegmentType) -> Option<Segment> {
         self.segments
             .iter()
             .find(|segment| segment.r#type == segment_type)
             .cloned()
-            .ok_or(GetSegmentsError::SegmentTypeNotFound)
     }
 
     fn get_segment_writer_by_id(

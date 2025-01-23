@@ -1,14 +1,12 @@
-use crate::segment::{
-    distributed_hnsw_segment::{
-        DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter,
-    },
-    metadata_segment::{MetadataSegmentError, MetadataSegmentWriter},
-    record_segment::{RecordSegmentWriter, RecordSegmentWriterCreationError},
-    ChromaSegmentWriter,
-};
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_segment::{
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
+    blockfile_record::{RecordSegmentWriter, RecordSegmentWriterCreationError},
+    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
+    types::ChromaSegmentWriter,
+};
 use chroma_sysdb::{GetCollectionsError, SysDb};
 use chroma_system::Operator;
 use chroma_types::{Segment, SegmentType};
