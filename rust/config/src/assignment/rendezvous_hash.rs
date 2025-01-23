@@ -12,6 +12,51 @@ use murmur3::murmur3_x64_128;
 /// A trait for hashing a member and a key to a score.
 pub trait Hasher {
     fn hash(&self, member: &str, key: &str) -> Result<u64, AssignmentError>;
+    /// Assign a key to a collection of members using the rendezvous hash algorithm
+    /// # Arguments
+    /// - key: The key to assign.
+    /// - members: The members to assign to.
+    /// # Returns
+    /// The members that the key were assigned to.
+    /// # Errors
+    /// - If the key is empty.
+    /// - If there are insufficient members to assign to.
+    /// - If there is an error hashing a member.
+    /// # Notes
+    /// This implementation mirrors the rendezvous hash implementation
+    /// in the go and python services.
+    fn assign(
+        &self,
+        members: impl IntoIterator<Item = impl AsRef<str>>,
+        key: &str,
+        k: usize,
+    ) -> Result<Vec<String>, AssignmentError> {
+        let mut member_vec = members
+            .into_iter()
+            .map(|m| {
+                self.hash(m.as_ref(), key)
+                    .map(|s| (s, m.as_ref().to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if member_vec.len() < k {
+            return Err(AssignmentError::InsufficientMember(k, member_vec.len()));
+        }
+
+        member_vec.sort_by_key(|(s, _)| *s);
+        Ok(member_vec.into_iter().take(k).map(|(_, m)| m).collect())
+    }
+
+    fn assign_one(
+        &self,
+        members: impl IntoIterator<Item = impl AsRef<str>>,
+        key: &str,
+    ) -> Result<String, AssignmentError> {
+        self.assign(members, key, 1).map(|mut members| {
+            members
+                .pop()
+                .expect("The key should be assigned to exactly one member")
+        })
+    }
 }
 
 /// Error codes for assignment
@@ -19,8 +64,8 @@ pub trait Hasher {
 pub enum AssignmentError {
     #[error("Cannot assign empty key")]
     EmptyKey,
-    #[error("No members to assign to")]
-    NoMembers,
+    #[error("Insufficient members: requested {0}, available {1}")]
+    InsufficientMember(usize, usize),
     #[error("Error hashing member")]
     HashError,
 }
@@ -29,61 +74,9 @@ impl ChromaError for AssignmentError {
     fn code(&self) -> ErrorCodes {
         match self {
             AssignmentError::EmptyKey => ErrorCodes::InvalidArgument,
-            AssignmentError::NoMembers => ErrorCodes::InvalidArgument,
+            AssignmentError::InsufficientMember(_, _) => ErrorCodes::InvalidArgument,
             AssignmentError::HashError => ErrorCodes::Internal,
         }
-    }
-}
-
-/// Assign a key to a member using the rendezvous hash algorithm.
-/// # Arguments
-/// - key: The key to assign.
-/// - members: The members to assign to.
-/// - hasher: The hasher to use.
-/// # Returns
-/// The member that the key was assigned to.
-/// # Errors
-/// - If the key is empty.
-/// - If there are no members to assign to.
-/// - If there is an error hashing a member.
-/// # Notes
-/// This implementation mirrors the rendezvous hash implementation
-/// in the go and python services.
-pub fn assign<H: Hasher>(
-    key: &str,
-    members: impl IntoIterator<Item = impl AsRef<str>>,
-    hasher: &H,
-) -> Result<String, AssignmentError> {
-    if key.is_empty() {
-        return Err(AssignmentError::EmptyKey);
-    }
-
-    let mut iterated = false;
-    let mut max_score = u64::MIN;
-    let mut max_member = None;
-
-    for member in members {
-        if !iterated {
-            iterated = true;
-        }
-        let score = hasher.hash(member.as_ref(), key);
-        let score = match score {
-            Ok(score) => score,
-            Err(_err) => return Err(AssignmentError::HashError),
-        };
-        if score > max_score {
-            max_score = score;
-            max_member = Some(member);
-        }
-    }
-
-    if !iterated {
-        return Err(AssignmentError::NoMembers);
-    }
-
-    match max_member {
-        Some(max_member) => Ok(max_member.as_ref().to_string()),
-        None => Err(AssignmentError::NoMembers),
     }
 }
 
@@ -138,7 +131,7 @@ mod tests {
         let members = vec!["a", "b", "c"];
         let hasher = MockHasher {};
         let key = "key";
-        let member = assign(key, members, &hasher).unwrap();
+        let member = hasher.assign_one(&members, &key).unwrap();
         assert_eq!(member, "c".to_string());
     }
 
@@ -158,7 +151,7 @@ mod tests {
         let num_keys = 1000;
         for i in 0..num_keys {
             let key = format!("key_{}", i);
-            let member = assign(&key, &nodes, &hasher).unwrap();
+            let member = hasher.assign_one(&nodes, &key).unwrap();
             let index = nodes.iter().position(|x| *x == member).unwrap();
             counts[index] += 1;
         }

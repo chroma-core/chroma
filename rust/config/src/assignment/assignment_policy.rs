@@ -2,7 +2,7 @@ use crate::Configurable;
 
 use super::{
     config::{AssignmentPolicyConfig, HasherType},
-    rendezvous_hash::{assign, AssignmentError, Murmur3Hasher},
+    rendezvous_hash::{AssignmentError, Hasher, Murmur3Hasher},
 };
 use async_trait::async_trait;
 use chroma_error::ChromaError;
@@ -66,7 +66,7 @@ impl Configurable<AssignmentPolicyConfig> for RendezvousHashingAssignmentPolicy 
 impl AssignmentPolicy for RendezvousHashingAssignmentPolicy {
     fn assign(&self, key: &str) -> Result<String, AssignmentError> {
         let members = self.get_members();
-        assign(key, members, &self.hasher)
+        self.hasher.assign_one(members, key)
     }
 
     fn get_members(&self) -> Vec<String> {
