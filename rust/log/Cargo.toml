@@ -1,0 +1,23 @@
+[package]
+name = "chroma-log"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+# Used by tracing
+opentelemetry = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+# Used by tracing
+tracing-opentelemetry = { workspace = true }
+uuid = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-segment = { workspace = true }
+chroma-types = { workspace = true }
+
