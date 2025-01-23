@@ -1242,6 +1242,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-error",
+ "murmur3",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3648,6 +3651,26 @@ checksum = "dbefd235b0aadd181626f281e1d684e116972988c14c264e42069d5e8a5775cc"
 dependencies = [
  "instant",
  "log",
+]
+
+[[package]]
+name = "memberlist"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "chroma-system",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "parking_lot",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

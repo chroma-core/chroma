@@ -1,3 +1,5 @@
+pub mod assignment;
+
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 
