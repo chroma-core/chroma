@@ -3,16 +3,15 @@ use std::{
     ops::{BitAnd, BitOr, Bound},
 };
 
-use crate::segment::{
-    materialize_logs,
-    metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
-    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    LogMaterializerError, MaterializeLogsResult,
-};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
+use chroma_segment::{
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
+    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
+};
 use chroma_system::Operator;
 use chroma_types::{
     BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
@@ -501,6 +500,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
     use chroma_types::{
         BooleanOperator, DirectDocumentComparison, DirectWhereComparison, MetadataSetValue,
@@ -510,8 +510,7 @@ mod tests {
 
     use crate::{
         execution::operators::filter::FilterOperator,
-        log::test::{add_delete_generator, int_as_id, LogGenerator},
-        segment::test::TestSegment,
+        log::test::{add_delete_generator, int_as_id, LoadFromGenerator, LogGenerator},
     };
 
     use super::FilterInput;

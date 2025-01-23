@@ -1,4 +1,4 @@
-use super::record_segment::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReader};
 use super::types::MaterializeLogsResult;
 use super::utils::distance_function_from_segment;
 use super::utils::hnsw_params_from_segment;
@@ -399,7 +399,7 @@ pub mod test {
     use tempfile::tempdir;
     use uuid::Uuid;
 
-    use crate::distributed_hnsw_segment::hnsw_params_from_segment;
+    use crate::distributed_hnsw::hnsw_params_from_segment;
 
     #[test]
     fn parameter_defaults() {

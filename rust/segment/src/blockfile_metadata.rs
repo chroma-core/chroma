@@ -1,8 +1,6 @@
-use super::super::execution::operators::filter::MetadataProvider;
-use super::record_segment::ApplyMaterializedLogError;
-use crate::execution::operators::filter::RoaringMetadataFilter;
-use crate::segment::record_segment::RecordSegmentReader;
-use crate::segment::MaterializeLogsResult;
+use super::blockfile_record::ApplyMaterializedLogError;
+use super::blockfile_record::RecordSegmentReader;
+use super::types::MaterializeLogsResult;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::BlockfileWriterOptions;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -13,12 +11,9 @@ use chroma_index::fulltext::types::{
 use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
-use chroma_index::utils::merge_sorted_vecs_conjunction;
-use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentUuid, Where};
-use chroma_types::{SegmentType, SignedRoaringBitmap};
+use chroma_types::SegmentType;
+use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentUuid};
 use core::panic;
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -39,7 +34,7 @@ pub struct MetadataSegmentWriter<'me> {
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for MetadataSegmentWriter<'_> {
@@ -828,16 +823,16 @@ impl MetadataSegmentFlusher {
     }
 }
 
-pub(crate) struct MetadataSegmentReader<'me> {
-    pub(crate) full_text_index_reader: Option<FullTextIndexReader<'me>>,
-    pub(crate) string_metadata_index_reader: Option<MetadataIndexReader<'me>>,
-    pub(crate) bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
-    pub(crate) f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
-    pub(crate) u32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+pub struct MetadataSegmentReader<'me> {
+    pub full_text_index_reader: Option<FullTextIndexReader<'me>>,
+    pub string_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub u32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
 }
 
 impl MetadataSegmentReader<'_> {
-    pub(crate) async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, MetadataSegmentError> {
@@ -977,132 +972,17 @@ impl MetadataSegmentReader<'_> {
             u32_metadata_index_reader,
         })
     }
-
-    // DEPRECATED: This exists only for the legacy testing. Please checkout `MetadataFilteringOperator` for the up to date implementation.
-    #[deprecated(
-        note = "This function is only used for legacy testing. Please use `MetadataFilteringOperator` for the up to date implementation."
-    )]
-    #[allow(dead_code)]
-    pub async fn query(
-        &self,
-        where_clause: Option<&Where>,
-        where_document_clause: Option<&Where>,
-        _allowed_ids: Option<&Vec<usize>>,
-        limit: usize,
-        offset: usize,
-    ) -> Result<Option<Vec<usize>>, MetadataSegmentError> {
-        if limit != 0 || offset != 0 {
-            return Err(MetadataSegmentError::LimitOffsetNotSupported);
-        }
-        // TODO we can do lots of clever query planning here. For now, just
-        // run through the Where and WhereDocument clauses sequentially.
-        let where_results = match where_clause {
-            #[allow(deprecated)]
-            Some(where_clause) => match self.process_where_clause(where_clause).await {
-                Ok(results) => {
-                    tracing::info!(
-                        "Filtered {} records from metadata segment based on where clause",
-                        results.len()
-                    );
-                    Some(results)
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Error fetching results from metadata segment based on where clause {:?}",
-                        e
-                    );
-                    return Err(MetadataSegmentError::MetadataIndexQueryError(e));
-                }
-            },
-            None => {
-                tracing::info!("No where clause to filter anything from metadata segment");
-                None
-            }
-        };
-        // Where and WhereDocument are implicitly ANDed, so if we have nothing
-        // for the Where query we can just return.
-        if let Some(results) = &where_results {
-            if results.is_empty() {
-                return Ok(where_results);
-            }
-        }
-        let where_document_results = match where_document_clause {
-            Some(where_document_clause) => {
-                #[allow(deprecated)]
-                match self.process_where_clause(where_document_clause).await {
-                    Ok(results) => {
-                        tracing::info!(
-                            "Filtered {} records from metadata segment based on where document",
-                            results.len()
-                        );
-                        Some(results)
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Error fetching results from metadata segment based on where clause {:?}",
-                            e
-                        );
-                        return Err(MetadataSegmentError::MetadataIndexQueryError(e));
-                    }
-                }
-            }
-            None => {
-                tracing::info!("No where document to filter anything from metadata segment");
-                None
-            }
-        };
-        if let Some(results) = &where_document_results {
-            if results.is_empty() {
-                return Ok(where_document_results);
-            }
-        }
-        Ok(match (where_results, where_document_results) {
-            (Some(where_ids), Some(where_doc_ids)) => {
-                Some(merge_sorted_vecs_conjunction(&where_ids, &where_doc_ids))
-            }
-            (Some(ids), None) | (None, Some(ids)) => Some(ids),
-            (None, None) => None,
-        })
-    }
-
-    // DEPRECATED: This exists only for the legacy testing. Please checkout `MetadataFilteringOperator` for the up to date implementation.
-    #[deprecated(
-        note = "This function is only used for legacy testing. Please use `MetadataFilteringOperator` for the up to date implementation."
-    )]
-    #[allow(dead_code)]
-    fn process_where_clause<'me>(
-        &'me self,
-        where_clause: &'me Where,
-    ) -> BoxFuture<'me, Result<Vec<usize>, MetadataIndexError>> {
-        async move {
-            let provider = MetadataProvider::from_metadata_segment_reader(self);
-            let result = where_clause
-                .eval(&provider)
-                .await
-                // It is not clear how to downcast the error back, but since it is only used in tests, any error should suffice.
-                .map_err(|_| MetadataIndexError::InvalidKeyType)?;
-            match result {
-                SignedRoaringBitmap::Include(rbm) => {
-                    Ok(rbm.into_iter().map(|u| u as usize).collect())
-                }
-                // This should never be the case for existing tests, where negation (such as NotEqual or NotIn) are not involved.
-                SignedRoaringBitmap::Exclude(_) => Err(MetadataIndexError::InvalidKeyType),
-            }
-        }
-        .boxed()
-    }
 }
 
 #[cfg(test)]
 mod test {
-    #![allow(deprecated)]
 
-    use crate::segment::{
-        materialize_logs,
-        metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-        record_segment::{
+    use crate::{
+        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
+        blockfile_record::{
             RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
+        types::materialize_logs,
     };
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
@@ -1111,9 +991,8 @@ mod test {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, CollectionUuid, DirectDocumentComparison, DirectWhereComparison, LogRecord,
-        MetadataValue, Operation, OperationRecord, PrimitiveOperator, SegmentUuid,
-        UpdateMetadataValue, Where, WhereComparison,
+        Chunk, CollectionUuid, LogRecord, MetadataValue, Operation, OperationRecord, SegmentUuid,
+        UpdateMetadataValue,
     };
     use std::{collections::HashMap, str::FromStr};
 
@@ -1622,34 +1501,24 @@ mod test {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Float(1.0),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .f32_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &1.0.into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(2_usize)));
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("new world")),
-            ),
-        });
+        assert_eq!(res.min(), Some(2));
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"new world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -1854,33 +1723,23 @@ mod test {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("hello"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("hello", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
-            key: String::from("bye"),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(String::from("world")),
-            ),
-        });
         let res = metadata_segment_reader
-            .query(Some(&where_clause), None, None, 0, 0)
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .get("bye", &"world".into())
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
@@ -2071,30 +1930,24 @@ mod test {
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
                 .await
                 .expect("Metadata segment reader construction failed");
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("hello"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("hello")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 0);
         // FTS for bye should return the lone document.
-        let where_document_clause =
-            Where::DirectWhereDocumentComparison(DirectDocumentComparison {
-                document: String::from("bye"),
-                operator: chroma_types::DocumentOperator::Contains,
-            });
         let res = metadata_segment_reader
-            .query(None, Some(&where_document_clause), None, 0, 0)
+            .full_text_index_reader
+            .as_ref()
+            .expect("The float reader should be initialized")
+            .search("bye")
             .await
-            .expect("Metadata segment query failed")
             .unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(res.first(), Some(&(1_usize)));
+        assert_eq!(res.min(), Some(1));
         // Record segment should also have the updated values.
         let record_segment_reader =
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)

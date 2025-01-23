@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use async_trait::async_trait;
+use chroma_segment::test::TestSegment;
 use chroma_types::{Chunk, LogRecord, Operation, OperationRecord, UpdateMetadataValue};
 use rand::{
     distributions::{Alphanumeric, Open01},
@@ -109,6 +111,28 @@ pub fn add_delete_generator(offset: usize) -> OperationRecord {
             metadata: Some(modulo_metadata(int_id)),
             document: Some(modulo_document(int_id)),
             operation: Operation::Add,
+        }
+    }
+}
+
+#[async_trait]
+pub trait LoadFromGenerator<L: LogGenerator> {
+    async fn populate_with_generator(&mut self, log_count: usize, generator: L);
+}
+
+#[async_trait]
+impl<L: LogGenerator + Send + 'static> LoadFromGenerator<L> for TestSegment {
+    async fn populate_with_generator(&mut self, log_count: usize, generator: L) {
+        let ids: Vec<_> = (1..=log_count).collect();
+        for chunk in ids.chunks(100) {
+            self.compact_log(
+                generator.generate_chunk(chunk.iter().copied()),
+                chunk
+                    .first()
+                    .copied()
+                    .expect("The chunk of offset ids to generate should not be empty."),
+            )
+            .await;
         }
     }
 }

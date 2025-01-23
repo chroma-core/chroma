@@ -10,9 +10,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-use super::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
-use super::metadata_segment::{MetadataSegmentFlusher, MetadataSegmentWriter};
-use super::record_segment::{
+use super::distributed_hnsw::DistributedHNSWSegmentWriter;
+use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
+use super::blockfile_record::{
     ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader,
     RecordSegmentReaderCreationError, RecordSegmentWriter,
 };
@@ -971,8 +971,8 @@ impl ChromaSegmentFlusher {
 mod tests {
     use super::*;
     use crate::{
-        metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-        record_segment::{RecordSegmentReaderCreationError, RecordSegmentWriter},
+        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
+        blockfile_record::{RecordSegmentReaderCreationError, RecordSegmentWriter},
     };
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},

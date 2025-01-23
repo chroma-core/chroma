@@ -1,9 +1,11 @@
-use super::record_segment::RecordSegmentReader;
+use super::blockfile_record::RecordSegmentReader;
+use super::types::{
+    BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult,
+};
 use super::{
-    record_segment::ApplyMaterializedLogError,
+    blockfile_record::ApplyMaterializedLogError,
     utils::{distance_function_from_segment, hnsw_params_from_segment},
 };
-use super::{BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult};
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -372,7 +374,7 @@ pub struct SpannSegmentReaderContext {
 
 #[derive(Clone)]
 #[allow(dead_code)]
-pub(crate) struct SpannSegmentReader<'me> {
+pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     id: SegmentUuid,
 }
@@ -503,9 +505,9 @@ mod test {
         SegmentUuid, SpannPostingList,
     };
 
-    use crate::segment::{
-        materialize_logs,
-        spann_segment::{SpannSegmentReader, SpannSegmentWriter},
+    use crate::{
+        distributed_spann::{SpannSegmentReader, SpannSegmentWriter},
+        types::materialize_logs,
     };
 
     #[tokio::test]

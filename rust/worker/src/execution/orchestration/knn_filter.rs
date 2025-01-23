@@ -3,28 +3,29 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_system::{wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, PanicError, TaskError, TaskMessage, TaskResult};
+use chroma_segment::{
+    distributed_hnsw::{
+        DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
+    },
+    utils::distance_function_from_segment,
+};
+use chroma_system::{
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    PanicError, TaskError, TaskMessage, TaskResult,
+};
 use chroma_types::{CollectionAndSegments, Segment};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
-use crate::{
-    execution::operators::{
-        fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-        filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
-        knn_hnsw::KnnHnswError,
-        knn_log::KnnLogError,
-        knn_projection::{KnnProjectionError, KnnProjectionOutput},
-        spann_bf_pl::SpannBfPlError,
-        spann_centers_search::SpannCentersSearchError,
-        spann_fetch_pl::SpannFetchPlError,
-    },
-    segment::{
-        distributed_hnsw_segment::{
-            DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
-        },
-        utils::distance_function_from_segment,
-    },
+use crate::execution::operators::{
+    fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+    filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
+    knn_hnsw::KnnHnswError,
+    knn_log::KnnLogError,
+    knn_projection::{KnnProjectionError, KnnProjectionOutput},
+    spann_bf_pl::SpannBfPlError,
+    spann_centers_search::SpannCentersSearchError,
+    spann_fetch_pl::SpannFetchPlError,
 };
 
 #[derive(Error, Debug)]

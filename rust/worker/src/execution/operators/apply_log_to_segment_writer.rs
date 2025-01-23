@@ -1,13 +1,12 @@
-use crate::segment::metadata_segment::MetadataSegmentError;
-use crate::segment::record_segment::ApplyMaterializedLogError;
-use crate::segment::record_segment::RecordSegmentReader;
-use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::ChromaSegmentWriter;
-use crate::segment::LogMaterializerError;
-use crate::segment::MaterializeLogsResult;
 use async_trait::async_trait;
-use chroma_error::ChromaError;
-use chroma_error::ErrorCodes;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::{
+    blockfile_metadata::MetadataSegmentError,
+    blockfile_record::{
+        ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
+    },
+    types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
+};
 use chroma_system::Operator;
 use chroma_types::SegmentUuid;
 use thiserror::Error;
