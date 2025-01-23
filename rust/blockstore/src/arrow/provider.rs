@@ -81,6 +81,7 @@ impl ArrowBlockfileProvider {
     }
 
     pub async fn prefetch(&self, id: &Uuid) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
+        // We call .get_all_block_ids() here instead of just reading the root because reading the root requires a concrete Key type.
         let block_ids = self
             .root_manager
             .get_all_block_ids(id)
