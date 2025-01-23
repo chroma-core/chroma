@@ -374,7 +374,7 @@ pub struct SpannSegmentReaderContext {
 
 #[derive(Clone)]
 #[allow(dead_code)]
-pub(crate) struct SpannSegmentReader<'me> {
+pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     id: SegmentUuid,
 }

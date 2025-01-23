@@ -126,3 +126,9 @@ impl From<TestSegment> for CollectionAndSegments {
         }
     }
 }
+
+impl Default for TestSegment {
+    fn default() -> Self {
+        Self::new_with_dimension(128)
+    }
+}

@@ -28,7 +28,7 @@ pub struct HnswIndexParamsFromSegment {
 pub struct DistributedHNSWSegmentWriter {
     index: HnswIndexRef,
     hnsw_index_provider: HnswIndexProvider,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for DistributedHNSWSegmentWriter {

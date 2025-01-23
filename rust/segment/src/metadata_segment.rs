@@ -34,7 +34,7 @@ pub struct MetadataSegmentWriter<'me> {
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for MetadataSegmentWriter<'_> {

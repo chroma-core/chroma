@@ -31,7 +31,7 @@ pub struct RecordSegmentWriter {
     // we should store it in metadata of one of the blockfiles
     max_offset_id: Option<BlockfileWriter>,
     max_new_offset_id: Arc<AtomicU32>,
-    pub(crate) id: SegmentUuid,
+    pub id: SegmentUuid,
 }
 
 impl Debug for RecordSegmentWriter {

@@ -36,7 +36,7 @@ pub(super) fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParamsFrom
     }
 }
 
-pub(crate) fn distance_function_from_segment(
+pub fn distance_function_from_segment(
     segment: &Segment,
 ) -> Result<DistanceFunction, Box<DistanceFunctionError>> {
     let space = match segment.metadata {
