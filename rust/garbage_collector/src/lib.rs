@@ -5,7 +5,9 @@ use garbage_collector_component::GarbageCollector;
 use opentelemetry_config::init_otel_tracing;
 
 mod config;
+mod fetch_version_file;
 mod garbage_collector_component;
+mod garbage_collector_orchestrator;
 mod opentelemetry_config;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
