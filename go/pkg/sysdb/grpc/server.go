@@ -11,6 +11,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
+	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/utils"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -54,6 +55,14 @@ type Config struct {
 
 	// Config for testing
 	Testing bool
+
+	// Block store provider
+	// In production, this should be set to "s3".
+	// For local testing, this can be set to "minio".
+	BlockStoreProvider string
+
+	// VersionFileEnabled is used to enable/disable version file.
+	VersionFileEnabled bool
 }
 
 // Server wraps Coordinator with GRPC services.
@@ -69,6 +78,9 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
+	if config.VersionFileEnabled == true && config.BlockStoreProvider == "none" {
+		return nil, errors.New("version file enabled is true but block store provider is none")
+	}
 	if config.SystemCatalogProvider == "memory" {
 		return NewWithGrpcProvider(config, grpcutils.Default)
 	} else if config.SystemCatalogProvider == "database" {
@@ -96,7 +108,19 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		deleteMode = coordinator.HardDelete
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, deleteMode)
+	blockStoreProvider := s3metastore.BlockStoreProviderType(config.BlockStoreProvider)
+	if !blockStoreProvider.IsValid() {
+		log.Error("invalid block store provider", zap.String("provider", string(blockStoreProvider)))
+		return nil, errors.New("invalid block store provider")
+	}
+
+	s3MetaStore, err := s3metastore.NewS3MetaStore(s3metastore.S3MetaStoreConfig{
+		BlockStoreProvider: blockStoreProvider,
+	})
+	if err != nil {
+		return nil, err
+	}
+	coordinator, err := coordinator.NewCoordinator(ctx, deleteMode, s3MetaStore, config.VersionFileEnabled)
 	if err != nil {
 		return nil, err
 	}

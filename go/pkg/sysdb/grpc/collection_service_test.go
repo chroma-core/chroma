@@ -41,14 +41,16 @@ func (suite *CollectionServiceTestSuite) SetupSuite() {
 	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default)
+		Testing:               true,
+		BlockStoreProvider:    "none",
+	}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain)
+	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain, nil, false)
 	suite.tenantName = "tenant_" + suite.T().Name()
 	suite.databaseName = "database_" + suite.T().Name()
 	DbId, err := dao.CreateTestTenantAndDatabase(suite.db, suite.tenantName, suite.databaseName)
