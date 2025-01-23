@@ -1352,6 +1352,7 @@ dependencies = [
  "chroma-distance",
  "chroma-error",
  "chroma-index",
+ "chroma-log",
  "chroma-storage",
  "chroma-types",
  "futures",
