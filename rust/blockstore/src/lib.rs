@@ -10,10 +10,10 @@ use chroma_storage::test_storage;
 use provider::BlockfileProvider;
 pub use types::*;
 
-pub fn test_arrow_blockfile_provider(size: usize) -> BlockfileProvider {
+pub fn test_arrow_blockfile_provider(max_block_size_bytes: usize) -> BlockfileProvider {
     BlockfileProvider::new_arrow(
         test_storage(),
-        size,
+        max_block_size_bytes,
         new_cache_for_test(),
         new_cache_for_test(),
     )
