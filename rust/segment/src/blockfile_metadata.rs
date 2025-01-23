@@ -1,5 +1,5 @@
-use super::record_segment::ApplyMaterializedLogError;
-use super::record_segment::RecordSegmentReader;
+use super::blockfile_record::ApplyMaterializedLogError;
+use super::blockfile_record::RecordSegmentReader;
 use super::types::MaterializeLogsResult;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::BlockfileWriterOptions;
@@ -978,8 +978,8 @@ impl MetadataSegmentReader<'_> {
 mod test {
 
     use crate::{
-        metadata_segment::{MetadataSegmentReader, MetadataSegmentWriter},
-        record_segment::{
+        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
+        blockfile_record::{
             RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
         types::materialize_logs,

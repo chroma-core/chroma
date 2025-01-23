@@ -2,7 +2,7 @@ use chroma_distance::{DistanceFunction, DistanceFunctionError};
 use chroma_index::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
 use chroma_types::{get_metadata_value_as, MetadataValue, Segment};
 
-use super::distributed_hnsw_segment::HnswIndexParamsFromSegment;
+use super::distributed_hnsw::HnswIndexParamsFromSegment;
 
 pub(super) fn hnsw_params_from_segment(segment: &Segment) -> HnswIndexParamsFromSegment {
     let metadata = match &segment.metadata {

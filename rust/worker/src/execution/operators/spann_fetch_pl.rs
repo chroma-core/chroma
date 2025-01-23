@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::SpannPosting;
-use chroma_segment::spann_segment::{SpannSegmentReader, SpannSegmentReaderContext};
+use chroma_segment::distributed_spann::{SpannSegmentReader, SpannSegmentReaderContext};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
 

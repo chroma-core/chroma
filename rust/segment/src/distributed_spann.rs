@@ -1,9 +1,9 @@
-use super::record_segment::RecordSegmentReader;
+use super::blockfile_record::RecordSegmentReader;
 use super::types::{
     BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult,
 };
 use super::{
-    record_segment::ApplyMaterializedLogError,
+    blockfile_record::ApplyMaterializedLogError,
     utils::{distance_function_from_segment, hnsw_params_from_segment},
 };
 use chroma_blockstore::provider::BlockfileProvider;
@@ -506,7 +506,7 @@ mod test {
     };
 
     use crate::{
-        spann_segment::{SpannSegmentReader, SpannSegmentWriter},
+        distributed_spann::{SpannSegmentReader, SpannSegmentWriter},
         types::materialize_logs,
     };
 

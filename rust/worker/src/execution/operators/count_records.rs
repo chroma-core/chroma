@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
+use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
@@ -200,7 +200,7 @@ mod tests {
     use crate::execution::operators::count_records::{CountRecordsInput, CountRecordsOperator};
     use chroma_blockstore::provider::BlockfileProvider;
     use chroma_segment::{
-        record_segment::{
+        blockfile_record::{
             RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
         types::materialize_logs,

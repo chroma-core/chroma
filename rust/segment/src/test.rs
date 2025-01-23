@@ -8,9 +8,8 @@ use chroma_types::{
 };
 
 use super::{
-    distributed_hnsw_segment::DistributedHNSWSegmentWriter,
-    metadata_segment::MetadataSegmentWriter, record_segment::RecordSegmentWriter,
-    types::materialize_logs,
+    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
+    distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
 };
 
 #[derive(Clone)]

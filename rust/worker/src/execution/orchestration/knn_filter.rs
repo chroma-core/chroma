@@ -4,7 +4,7 @@ use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_segment::{
-    distributed_hnsw_segment::{
+    distributed_hnsw::{
         DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
     },
     utils::distance_function_from_segment,

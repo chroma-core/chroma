@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_segment::spann_segment::SpannSegmentReaderContext;
+use chroma_segment::distributed_spann::SpannSegmentReaderContext;
 use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
     TaskResult,

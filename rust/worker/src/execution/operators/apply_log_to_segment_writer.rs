@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    metadata_segment::MetadataSegmentError,
-    record_segment::{
+    blockfile_metadata::MetadataSegmentError,
+    blockfile_record::{
         ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
     },
     types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},

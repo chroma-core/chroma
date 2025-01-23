@@ -8,8 +8,8 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
-    metadata_segment::{MetadataSegmentError, MetadataSegmentReader},
-    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
+    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;

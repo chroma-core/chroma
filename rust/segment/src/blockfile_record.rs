@@ -1,4 +1,4 @@
-use super::spann_segment::SpannSegmentWriterError;
+use super::distributed_spann::SpannSegmentWriterError;
 use super::types::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::{
