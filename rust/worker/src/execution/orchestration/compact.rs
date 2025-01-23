@@ -258,11 +258,15 @@ impl CompactOrchestrator {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
 
         let record_segment_result = self.get_segment(SegmentType::BlockfileRecord);
-        let record_segment = record_segment_result.unwrap(); // todo
-                                                             // let record_segment = match self.ok_or_terminate(record_segment_result, ctx) {
-                                                             //     Some(segment) => segment,
-                                                             //     None => return,
-                                                             // };
+        let record_segment = match self.ok_or_terminate(
+            record_segment_result.ok_or(CompactionError::InvariantViolation(
+                "Invariant violation: record segment not found",
+            )),
+            ctx,
+        ) {
+            Some(segment) => segment,
+            None => return,
+        };
 
         let next_max_offset_id = match self.ok_or_terminate(
             match RecordSegmentReader::from_segment(&record_segment, &self.blockfile_provider).await
@@ -332,11 +336,16 @@ impl CompactOrchestrator {
         >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let record_segment = self.get_segment(SegmentType::BlockfileRecord).unwrap(); // todo
-                                                                                      // let record_segment = match self.ok_or_terminate(record_segment, ctx) {
-                                                                                      //     Some(segment) => segment,
-                                                                                      //     None => return,
-                                                                                      // };
+        let record_segment_result = self.get_segment(SegmentType::BlockfileRecord);
+        let record_segment = match self.ok_or_terminate(
+            record_segment_result.ok_or(CompactionError::InvariantViolation(
+                "Invariant violation: record segment not found",
+            )),
+            ctx,
+        ) {
+            Some(segment) => segment,
+            None => return,
+        };
 
         let record_segment_reader: Option<RecordSegmentReader<'_>> = match self.ok_or_terminate(
             match RecordSegmentReader::from_segment(&record_segment, &self.blockfile_provider).await
@@ -361,7 +370,18 @@ impl CompactOrchestrator {
             .or_insert(self.materialized_results.len());
 
         for materialized_result in self.materialized_results.clone() {
-            let writer = self.get_segment_writer_by_id(segment_id).unwrap(); // todo
+            let writer = match self.ok_or_terminate(
+                self.get_segment_writer_by_id(segment_id).ok_or(
+                    CompactionError::InvariantViolation(
+                        "Invariant violation: segment writer not found",
+                    ),
+                ),
+                ctx,
+            ) {
+                Some(writer) => writer,
+                None => return,
+            };
+
             let segment_type = writer.get_segment_type();
 
             let input = ApplyLogToSegmentWriterInput::new(
@@ -375,11 +395,6 @@ impl CompactOrchestrator {
                 self_address.clone(),
             );
             let span = self.get_segment_span(segment_type);
-            println!(
-                "got span for segment type: {:?} {:?}",
-                segment_type,
-                Span::current()
-            );
 
             let res = self.dispatcher().send(task, Some(span)).await;
             self.ok_or_terminate(res, ctx);
@@ -681,11 +696,15 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         };
 
         if num_tasks_left == 0 {
-            let segment_writer = self.get_segment_writer_by_id(message.segment_id).unwrap(); // todo
-                                                                                             // let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
-                                                                                             //     Some(writer) => writer,
-                                                                                             //     None => return,
-                                                                                             // };
+            let segment_writer = self.get_segment_writer_by_id(message.segment_id).ok_or(
+                CompactionError::InvariantViolation(
+                    "Invariant violation: segment writer not found",
+                ),
+            );
+            let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
+                Some(writer) => writer,
+                None => return,
+            };
 
             self.dispatch_segment_writer_commit(segment_writer, ctx.receiver(), ctx)
                 .await;
@@ -737,7 +756,15 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         };
 
         let segment_id = message.flush_info.segment_id;
-        let segment = self.get_segment_writer_by_id(segment_id).unwrap(); // todo
+        let segment =
+            self.get_segment_writer_by_id(segment_id)
+                .ok_or(CompactionError::InvariantViolation(
+                    "Invariant violation: segment writer not found",
+                ));
+        let segment = match self.ok_or_terminate(segment, ctx) {
+            Some(segment) => segment,
+            None => return,
+        };
 
         // Drops the span so that the end timestamp is accurate
         let _ = self.segment_spans.remove(&segment.get_segment_type());
