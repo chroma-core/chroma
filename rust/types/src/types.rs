@@ -23,13 +23,13 @@ macro_rules! impl_base_convert_error {
 pub enum ConversionError {
     #[error("Error decoding protobuf message")]
     DecodeError,
+    #[error("Grpc conversion error: {0}")]
+    Grpc(String),
 }
 
 impl ChromaError for ConversionError {
     fn code(&self) -> ErrorCodes {
-        match self {
-            ConversionError::DecodeError => ErrorCodes::InvalidArgument,
-        }
+        ErrorCodes::InvalidArgument
     }
 }
 
