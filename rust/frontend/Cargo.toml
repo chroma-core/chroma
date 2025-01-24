@@ -10,3 +10,12 @@ path = "src/bin/frontend_service.rs"
 [dependencies]
 tokio = { workspace = true }
 axum = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }
+figment = { workspace = true }
+uuid = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-types = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-error = { workspace = true }

@@ -28,6 +28,23 @@ pub enum SysDb {
 }
 
 impl SysDb {
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<(), CreateDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_database(database_id, database_name, tenant)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
     pub async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
@@ -221,7 +238,42 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum CreateDatabaseError {
+    #[error("Failed to create database")]
+    FailedToCreateDatabase(#[from] tonic::Status),
+}
+
+impl ChromaError for CreateDatabaseError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateDatabaseError::FailedToCreateDatabase(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
 impl GrpcSysDb {
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<(), CreateDatabaseError> {
+        let req = chroma_proto::CreateDatabaseRequest {
+            id: database_id.to_string(),
+            name: database_name,
+            tenant,
+        };
+        let res = self.client.create_database(req).await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::info!("Failed to create database {:?}", e);
+                Err(CreateDatabaseError::FailedToCreateDatabase(e))
+            }
+        }
+    }
+
     async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
