@@ -29,9 +29,9 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
     if (this.ollamaClient) return;
     try {
       // @ts-ignore
-      const { ollamaClient } = await OllamaEmbeddingFunction.import();
-      this.ollamaClient = ollamaClient;
-      this.ollamaClient = new ollamaClient.Ollama({ host: this.url });
+      const { Ollama } = await OllamaEmbeddingFunction.import();
+      this.ollamaClient = Ollama;
+      this.ollamaClient = new Ollama({ host: this.url });
     } catch (e) {
       // @ts-ignore
       if (e.code === "MODULE_NOT_FOUND") {
