@@ -29,14 +29,13 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
     if (this.ollamaClient) return;
     try {
       // @ts-ignore
-      const { Ollama } = await OllamaEmbeddingFunction.import();
-      this.ollamaClient = Ollama;
-      this.ollamaClient = new Ollama({ host: this.url });
+      const { ollama } = await OllamaEmbeddingFunction.import();
+      this.ollamaClient = new ollama.Ollama({ host: this.url });
     } catch (e) {
       // @ts-ignore
       if (e.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the ollama package to use the CohereEmbeddingFunction, `npm install -S ollama`",
+          "Please install the ollama package to use the OllamaEmbeddingFunction, `npm install -S ollama`",
         );
       }
       throw e;
@@ -46,17 +45,16 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
   /** @ignore */
   static async import(): Promise<{
     // @ts-ignore
-    ollama: typeof import("ollama/browser");
+    ollama: typeof import("ollama");
   }> {
     try {
       // @ts-ignore
-      const { ollama } = await import("ollama/browser");
-      const Ollama = ollama;
+      const { ollama } = await import("ollama").then((m) => ({ ollama: m }));
       // @ts-ignore
-      return { Ollama };
+      return { ollama };
     } catch (e) {
       throw new Error(
-        "Please install @google/generative-ai as a dependency with, e.g. `npm install @google/generative-ai`",
+        "Please install Ollama as a dependency with, e.g. `npm install ollama`",
       );
     }
   }
