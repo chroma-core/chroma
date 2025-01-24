@@ -116,6 +116,8 @@ impl Hasher for Murmur3Hasher {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     struct MockHasher {}
@@ -136,35 +138,76 @@ mod tests {
         let members = vec!["a", "b", "c"];
         let hasher = MockHasher {};
         let key = "key";
-        let member = hasher.assign_one(&members, &key).unwrap();
+        let member = hasher.assign_one(&members, key).unwrap();
         assert_eq!(member, "c".to_string());
     }
 
     #[test]
     fn test_even_distribution() {
+        let key_count = 1000;
         let member_count = 10;
-        let tolerance = 25;
-        let mut nodes = Vec::with_capacity(member_count);
+        // Probablity of a key get assigned to a particular member, assuming perfect hashing
+        let prob = 1_f64 / member_count as f64;
+        // Expected number of keys assigned to a member
+        let expected = key_count as f64 * prob;
+        // Variance of the total number of keys assigned to a member
+        let var = key_count as f64 * prob * (1_f64 - prob);
         let hasher = Murmur3Hasher {};
 
-        for i in 0..member_count {
-            let member = format!("member{}", i);
-            nodes.push(member);
-        }
+        let nodes = (0..member_count)
+            .map(|i| format!("{i}"))
+            .collect::<Vec<_>>();
 
         let mut counts = vec![0; member_count];
-        let num_keys = 1000;
-        for i in 0..num_keys {
+        for i in 0..key_count {
             let key = format!("key_{}", i);
             let member = hasher.assign_one(&nodes, &key).unwrap();
-            let index = nodes.iter().position(|x| *x == member).unwrap();
-            counts[index] += 1;
+            counts[member.parse::<usize>().unwrap()] += 1;
         }
 
-        let expected = num_keys / member_count;
         for count in counts.iter().take(member_count).copied() {
-            let diff = count - expected as i32;
-            assert!(diff.abs() < tolerance);
+            let diff = count as f64 - expected;
+            // The distribution should be Binomial(key_count, prob)
+            // Since key_count is large, this is approximately normal
+            // We are confident that number of keys assigned to any member should be within 3 standard deviation of the expected value
+            assert!(diff.abs() < var.sqrt() * 3_f64);
+        }
+    }
+
+    #[test]
+    fn test_multi_assign_even_distribution() {
+        let k = 3;
+        let key_count = 1000;
+        let member_count = 10;
+        // Probablity of a key get assigned to a particular member, assuming perfect hashing
+        let prob = k as f64 / member_count as f64;
+        // Expected number of keys assigned to a member
+        let expected = key_count as f64 * prob;
+        // Estimated variance of the total number of keys assigned to a member
+        let var = (k * key_count) as f64 * prob * (1_f64 - prob);
+        let hasher = Murmur3Hasher {};
+
+        let nodes = (0..member_count)
+            .map(|i| format!("{i}"))
+            .collect::<Vec<_>>();
+
+        let mut counts = vec![0; member_count];
+        for i in 0..key_count {
+            let key = format!("key_{}", i);
+            let members = hasher.assign(&nodes, &key, k).unwrap();
+            // Assigned members should be unique
+            let unique_members: HashSet<_> = HashSet::from_iter(members.iter());
+            assert_eq!(unique_members.len(), members.len());
+            for member in members {
+                counts[member.parse::<usize>().unwrap()] += 1;
+            }
+        }
+
+        for count in counts.iter().take(member_count).copied() {
+            let diff = count as f64 - expected;
+            // The number of keys assigned to a member should be approximately normal
+            // We are confident that number of keys assigned to any member should be within 3 standard deviation of the expected value
+            assert!(diff.abs() < var.sqrt() * 3_f64);
         }
     }
 }
