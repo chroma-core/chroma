@@ -1,10 +1,10 @@
+use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::log::Log;
+use chroma_log::log::UpdateCollectionLogOffsetError;
 use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
-use crate::log::log::Log;
-use crate::log::log::UpdateCollectionLogOffsetError;
-use async_trait::async_trait;
-use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
@@ -145,7 +145,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log::log::InMemoryLog;
+    use chroma_log::log::InMemoryLog;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
     use std::collections::HashMap;

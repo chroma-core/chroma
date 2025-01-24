@@ -1325,6 +1325,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-log"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-config",
+ "chroma-error",
+ "chroma-segment",
+ "chroma-types",
+ "opentelemetry",
+ "rand",
+ "serde",
+ "thiserror 1.0.69",
+ "tonic",
+ "tracing",
+ "tracing-opentelemetry",
+ "uuid",
+]
+
+[[package]]
 name = "chroma-segment"
 version = "0.1.0"
 dependencies = [
@@ -1333,6 +1352,7 @@ dependencies = [
  "chroma-distance",
  "chroma-error",
  "chroma-index",
+ "chroma-log",
  "chroma-storage",
  "chroma-types",
  "futures",
@@ -6895,6 +6915,7 @@ dependencies = [
  "chroma-distance",
  "chroma-error",
  "chroma-index",
+ "chroma-log",
  "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",

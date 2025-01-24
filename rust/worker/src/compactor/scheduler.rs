@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 
+use chroma_log::log::{CollectionInfo, CollectionRecord, Log};
 use chroma_sysdb::SysDb;
 use chroma_types::CollectionUuid;
 use figment::providers::Env;
@@ -11,9 +12,6 @@ use uuid::Uuid;
 use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
-use crate::log::log::CollectionInfo;
-use crate::log::log::CollectionRecord;
-use crate::log::log::Log;
 use crate::memberlist::Memberlist;
 
 pub(crate) struct Scheduler {
@@ -280,8 +278,7 @@ mod tests {
     use super::*;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
-    use crate::log::log::InMemoryLog;
-    use crate::log::log::InternalLogRecord;
+    use chroma_log::log::{InMemoryLog, InternalLogRecord};
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
 

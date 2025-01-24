@@ -1,5 +1,6 @@
-use crate::log::config::LogConfig;
-use crate::tracing::util::client_interceptor;
+use crate::tracing::client_interceptor;
+
+use super::config::LogConfig;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -22,21 +23,21 @@ use uuid::Uuid;
 /// - first_log_offset: the offset of the first log entry in the collection that needs to be compacted
 /// - first_log_ts: the timestamp of the first log entry in the collection that needs to be compacted
 #[derive(Debug)]
-pub(crate) struct CollectionInfo {
-    pub(crate) collection_id: CollectionUuid,
-    pub(crate) first_log_offset: i64,
-    pub(crate) first_log_ts: i64,
+pub struct CollectionInfo {
+    pub collection_id: CollectionUuid,
+    pub first_log_offset: i64,
+    pub first_log_ts: i64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CollectionRecord {
-    pub(crate) collection_id: CollectionUuid,
-    pub(crate) tenant_id: String,
-    pub(crate) last_compaction_time: i64,
+pub struct CollectionRecord {
+    pub collection_id: CollectionUuid,
+    pub tenant_id: String,
+    pub last_compaction_time: i64,
     #[allow(dead_code)]
-    pub(crate) first_record_time: i64,
-    pub(crate) offset: i64,
-    pub(crate) collection_version: i32,
+    pub first_record_time: i64,
+    pub offset: i64,
+    pub collection_version: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -47,7 +48,7 @@ pub enum Log {
 }
 
 impl Log {
-    pub(crate) async fn read(
+    pub async fn read(
         &mut self,
         collection_id: CollectionUuid,
         offset: i64,
@@ -66,7 +67,7 @@ impl Log {
         }
     }
 
-    pub(crate) async fn get_collections_with_new_data(
+    pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
@@ -76,7 +77,7 @@ impl Log {
         }
     }
 
-    pub(crate) async fn update_collection_log_offset(
+    pub async fn update_collection_log_offset(
         &mut self,
         collection_id: CollectionUuid,
         new_offset: i64,
@@ -295,7 +296,7 @@ impl ChromaError for PullLogsError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum GetCollectionsWithNewDataError {
+pub enum GetCollectionsWithNewDataError {
     #[error("Failed to fetch")]
     FailedGetCollectionsWithNewData(#[from] tonic::Status),
 }
@@ -311,7 +312,7 @@ impl ChromaError for GetCollectionsWithNewDataError {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum UpdateCollectionLogOffsetError {
+pub enum UpdateCollectionLogOffsetError {
     #[error("Failed to update collection log offset")]
     FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
 }
@@ -330,10 +331,10 @@ impl ChromaError for UpdateCollectionLogOffsetError {
 // internal to a mock log implementation
 #[derive(Clone)]
 pub struct InternalLogRecord {
-    pub(crate) collection_id: CollectionUuid,
-    pub(crate) log_offset: i64,
-    pub(crate) log_ts: i64,
-    pub(crate) record: LogRecord,
+    pub collection_id: CollectionUuid,
+    pub log_offset: i64,
+    pub log_ts: i64,
+    pub record: LogRecord,
 }
 
 impl Debug for InternalLogRecord {
@@ -362,7 +363,6 @@ impl InMemoryLog {
         }
     }
 
-    #[cfg(test)]
     pub fn add_log(&mut self, collection_id: CollectionUuid, log: InternalLogRecord) {
         let logs = self.collection_to_log.entry(collection_id).or_default();
         // Ensure that the log offset is correct. Since we only use the InMemoryLog for testing,
