@@ -13,9 +13,12 @@ from chromadb.api.types import (
     Documents,
     EmbeddingFunction,
     Embeddings,
+    URI,
+    URIs,
     IDs,
     Include,
     Metadata,
+    Metadatas,
     Where,
     QueryResult,
     GetResult,
@@ -27,10 +30,13 @@ from chromadb.api.types import (
 __all__ = [
     "Collection",
     "Metadata",
+    "Metadatas",
     "Where",
     "WhereDocument",
     "Documents",
     "IDs",
+    "URI",
+    "URIs",
     "Embeddings",
     "EmbeddingFunction",
     "Include",
@@ -46,6 +52,7 @@ logger = logging.getLogger(__name__)
 __settings = Settings()
 
 __version__ = "0.6.3"
+
 
 # Workaround to deal with Colab's old sqlite3 version
 def is_in_colab() -> bool:
