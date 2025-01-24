@@ -1,7 +1,7 @@
 mod api;
 mod config;
 mod server;
-use api::SegmentApi;
+use api::Frontend;
 use chroma_config::Configurable;
 use config::FrontEndConfig;
 use server::FrontendServer;
@@ -14,7 +14,7 @@ pub async fn frontend_service_entrypoint() {
         Err(_) => FrontEndConfig::load(),
     };
     // TODO: Initialize tracing.
-    let segment_api = SegmentApi::try_from_config(&config)
+    let segment_api = Frontend::try_from_config(&config)
         .await
         .expect("Error creating SegmentApi from config");
     let server = FrontendServer::new(segment_api);

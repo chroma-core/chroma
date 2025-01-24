@@ -28,7 +28,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
 
 FROM debian:bookworm-slim AS runner
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
+COPY --from=builder /chroma/rust/frontend/frontend_config.yaml .
 
 FROM runner AS frontend_service
 COPY --from=frontend_service_builder /chroma/frontend_service .

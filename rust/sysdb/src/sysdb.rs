@@ -5,7 +5,10 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
-use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid};
+use chroma_types::{
+    chroma_proto, CreateDatabaseError, SegmentFlushInfo, SegmentFlushInfoConversionError,
+    SegmentUuid,
+};
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
@@ -16,8 +19,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
 use tonic::transport::Endpoint;
-use tonic::Request;
 use tonic::Status;
+use tonic::{Code, Request};
 use uuid::{Error, Uuid};
 
 #[derive(Debug, Clone)]
@@ -238,20 +241,6 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum CreateDatabaseError {
-    #[error("Failed to create database")]
-    FailedToCreateDatabase(#[from] tonic::Status),
-}
-
-impl ChromaError for CreateDatabaseError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            CreateDatabaseError::FailedToCreateDatabase(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
 impl GrpcSysDb {
     pub async fn create_database(
         &mut self,
@@ -269,7 +258,11 @@ impl GrpcSysDb {
             Ok(_) => Ok(()),
             Err(e) => {
                 tracing::info!("Failed to create database {:?}", e);
-                Err(CreateDatabaseError::FailedToCreateDatabase(e))
+                let res = match e.code() {
+                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
+                    _ => CreateDatabaseError::FailedToCreateDatabase(e.to_string()),
+                };
+                Err(res)
             }
         }
     }
