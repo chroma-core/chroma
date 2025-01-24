@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "chromadb/rust_bindings"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings"]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -45,7 +45,7 @@ chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
 chroma-memberlist = { path = "rust/memberlist" }
-chroma-segment = { path="rust/segment" }
+chroma-segment = { path = "rust/segment" }
 chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
