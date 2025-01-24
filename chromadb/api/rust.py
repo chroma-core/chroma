@@ -37,6 +37,7 @@ class RustBindingsAPI(ServerAPI):
     bindings: rust_bindings.Bindings
 
     def __init__(self, system: System):
+        self.bindings = rust_bindings.Bindings()
         super().__init__(system)
 
     # ////////////////////////////// Admin API //////////////////////////////
