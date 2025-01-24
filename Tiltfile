@@ -49,7 +49,7 @@ docker_build(
 docker_build(
   'local:rust-frontend-service',
   '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "chromadb/rust_bindings"],
   dockerfile='./rust/frontend/Dockerfile',
   target='frontend_service'
 )
@@ -58,7 +58,7 @@ docker_build(
 docker_build(
   'local:query-service',
   '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "chromadb/rust_bindings"],
   dockerfile='./rust/worker/Dockerfile',
   target='query_service'
 )
@@ -66,7 +66,7 @@ docker_build(
 docker_build(
   'local:compaction-service',
   '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "chromadb/rust_bindings"],
   dockerfile='./rust/worker/Dockerfile',
   target='compaction_service'
 )

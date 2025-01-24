@@ -19,6 +19,7 @@ RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY idl/ idl/
+COPY chromadb/rust_bindings/ chromadb/rust_bindings/
 COPY rust/ rust/
 
 FROM builder AS query_service_builder
