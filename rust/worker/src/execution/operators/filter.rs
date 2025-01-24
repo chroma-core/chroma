@@ -500,6 +500,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_log::test::{add_delete_generator, int_as_id, LoadFromGenerator, LogGenerator};
     use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
     use chroma_types::{
@@ -508,10 +509,7 @@ mod tests {
         WhereComparison,
     };
 
-    use crate::{
-        execution::operators::filter::FilterOperator,
-        log::test::{add_delete_generator, int_as_id, LoadFromGenerator, LogGenerator},
-    };
+    use crate::execution::operators::filter::FilterOperator;
 
     use super::FilterInput;
 

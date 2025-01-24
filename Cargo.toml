@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/garbage_collector", "rust/index", "rust/load", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/frontend"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", ]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -37,17 +37,18 @@ uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", 
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
-chroma-error = { path = "rust/error" }
-chroma-config = { path = "rust/config" }
-chroma-storage = { path = "rust/storage" }
 chroma-cache = { path = "rust/cache" }
-chroma-types = { path = "rust/types" }
-chroma-index = { path = "rust/index" }
+chroma-config = { path = "rust/config" }
 chroma-distance = { path = "rust/distance" }
+chroma-error = { path = "rust/error" }
+chroma-frontend = { path = "rust/frontend" }
+chroma-index = { path = "rust/index" }
+chroma-log = { path = "rust/log" }
 chroma-segment = { path="rust/segment" }
+chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
-chroma-frontend = { path = "rust/frontend" }
+chroma-types = { path = "rust/types" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies

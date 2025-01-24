@@ -175,12 +175,11 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        execution::operators::projection::ProjectionOperator,
-        log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator},
-    };
+    use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
     use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
+
+    use crate::execution::operators::projection::ProjectionOperator;
 
     use super::ProjectionInput;
 

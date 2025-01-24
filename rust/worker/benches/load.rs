@@ -1,19 +1,17 @@
 use chroma_benchmark::datasets::sift::Sift1MData;
+use chroma_log::{
+    log::{InMemoryLog, Log},
+    test::modulo_metadata,
+};
 use chroma_segment::test::TestSegment;
 use chroma_types::{
     Chunk, CollectionUuid, DirectWhereComparison, LogRecord, MetadataSetValue, Operation,
     OperationRecord, SetOperator, Where, WhereComparison,
 };
 use indicatif::ProgressIterator;
-use worker::{
-    execution::operators::{
-        fetch_log::FetchLogOperator, filter::FilterOperator, limit::LimitOperator,
-        projection::ProjectionOperator,
-    },
-    log::{
-        log::{InMemoryLog, Log},
-        test::modulo_metadata,
-    },
+use worker::execution::operators::{
+    fetch_log::FetchLogOperator, filter::FilterOperator, limit::LimitOperator,
+    projection::ProjectionOperator,
 };
 
 const DATA_CHUNK_SIZE: usize = 10000;

@@ -279,15 +279,13 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_log::test::{upsert_generator, LoadFromGenerator, LogGenerator};
     use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
     use roaring::RoaringBitmap;
 
-    use crate::{
-        execution::operators::limit::LimitOperator,
-        log::test::{upsert_generator, LoadFromGenerator, LogGenerator},
-    };
+    use crate::execution::operators::limit::LimitOperator;
 
     use super::LimitInput;
 

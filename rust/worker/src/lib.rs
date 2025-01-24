@@ -17,7 +17,6 @@ use tokio::signal::unix::{signal, SignalKind};
 // Required for benchmark
 pub mod config;
 pub mod execution;
-pub mod log;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 

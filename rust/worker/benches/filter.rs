@@ -1,6 +1,7 @@
 use std::iter::once;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
+use chroma_log::test::{upsert_generator, LoadFromGenerator};
 use chroma_segment::test::TestSegment;
 use chroma_system::Operator;
 use chroma_types::{
@@ -10,7 +11,6 @@ use chroma_types::{
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
-use worker::log::test::{upsert_generator, LoadFromGenerator};
 
 fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
     use BooleanOperator::*;

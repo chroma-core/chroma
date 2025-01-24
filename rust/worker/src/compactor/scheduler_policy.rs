@@ -1,5 +1,6 @@
+use chroma_log::log::CollectionRecord;
+
 use crate::compactor::types::CompactionJob;
-use crate::log::log::CollectionRecord;
 
 pub(crate) trait SchedulerPolicy: Send + Sync + SchedulerPolicyClone {
     fn determine(&self, collections: Vec<CollectionRecord>, number_jobs: i32)

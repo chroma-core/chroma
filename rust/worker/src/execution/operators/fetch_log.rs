@@ -1,8 +1,8 @@
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
-use crate::log::log::{Log, PullLogsError};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::log::{Log, PullLogsError};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
@@ -108,16 +108,14 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_log::{
+        log::{InMemoryLog, InternalLogRecord},
+        test::{upsert_generator, LogGenerator},
+    };
     use chroma_system::Operator;
     use chroma_types::CollectionUuid;
 
-    use crate::{
-        execution::operators::fetch_log::FetchLogOperator,
-        log::{
-            log::{InMemoryLog, InternalLogRecord},
-            test::{upsert_generator, LogGenerator},
-        },
-    };
+    use crate::execution::operators::fetch_log::FetchLogOperator;
 
     use super::Log;
 
