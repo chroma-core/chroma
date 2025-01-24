@@ -6,13 +6,14 @@ use crate::compactor::types::ScheduledCompactionMessage;
 use crate::config::CompactionServiceConfig;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
-use crate::memberlist::Memberlist;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_config::assignment;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::log::Log;
+use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::Dispatcher;
@@ -229,8 +230,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         }
 
         let assignment_policy_config = &config.assignment_policy;
-        let assignment_policy = match crate::assignment::from_config(assignment_policy_config).await
-        {
+        let assignment_policy = match assignment::from_config(assignment_policy_config).await {
             Ok(assignment_policy) => assignment_policy,
             Err(err) => {
                 return Err(err);
@@ -354,8 +354,8 @@ impl Handler<Memberlist> for CompactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assignment::assignment_policy::AssignmentPolicy;
-    use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use assignment::assignment_policy::AssignmentPolicy;
+    use assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_log::log::InMemoryLog;
@@ -537,7 +537,7 @@ mod tests {
         let max_partition_size = 1000;
 
         // Set assignment policy
-        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member_id.clone()]);
 
         let mut scheduler = Scheduler::new(

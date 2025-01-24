@@ -12,7 +12,7 @@ pub(crate) enum MemberlistProviderType {
 /// # Options
 /// - CustomResource: Use a custom resource to get the memberlist
 #[derive(Deserialize)]
-pub(crate) enum MemberlistProviderConfig {
+pub enum MemberlistProviderConfig {
     CustomResource(CustomResourceMemberlistProviderConfig),
 }
 
@@ -22,8 +22,8 @@ pub(crate) enum MemberlistProviderConfig {
 /// - memberlist_name: The name of the custom resource to use for the memberlist.
 /// - queue_size: The size of the queue to use for the channel.
 #[derive(Deserialize)]
-pub(crate) struct CustomResourceMemberlistProviderConfig {
-    pub(crate) kube_namespace: String,
-    pub(crate) memberlist_name: String,
-    pub(crate) queue_size: usize,
+pub struct CustomResourceMemberlistProviderConfig {
+    pub kube_namespace: String,
+    pub memberlist_name: String,
+    pub queue_size: usize,
 }

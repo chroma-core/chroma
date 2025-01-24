@@ -1,9 +1,10 @@
+use crate::Configurable;
+
 use super::{
     config::{AssignmentPolicyConfig, HasherType},
     rendezvous_hash::{assign, AssignmentError, Murmur3Hasher},
 };
 use async_trait::async_trait;
-use chroma_config::Configurable;
 use chroma_error::ChromaError;
 
 /*
@@ -20,7 +21,7 @@ Interfaces
 /// - assign: Assign a key to a member.
 /// - get_members: Get the members that can be assigned to.
 /// - set_members: Set the members that can be assigned to.
-pub(crate) trait AssignmentPolicy: Send + Sync {
+pub trait AssignmentPolicy: Send + Sync {
     fn assign(&self, key: &str) -> Result<String, AssignmentError>;
     fn get_members(&self) -> Vec<String>;
     fn set_members(&mut self, members: Vec<String>);
@@ -32,17 +33,14 @@ Implementation
 ===========================================
 */
 
-pub(crate) struct RendezvousHashingAssignmentPolicy {
+pub struct RendezvousHashingAssignmentPolicy {
     hasher: Murmur3Hasher,
     members: Vec<String>,
 }
 
-// This is not reserved for testing.  If you need to use it outside test contexts, remove this
-// line.  It exists solely to satisfy the linter.
-#[cfg(test)]
-impl RendezvousHashingAssignmentPolicy {
-    pub(crate) fn new() -> RendezvousHashingAssignmentPolicy {
-        RendezvousHashingAssignmentPolicy {
+impl Default for RendezvousHashingAssignmentPolicy {
+    fn default() -> Self {
+        Self {
             hasher: Murmur3Hasher {},
             members: vec![],
         }

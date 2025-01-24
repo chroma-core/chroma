@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 
+use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::log::{CollectionInfo, CollectionRecord, Log};
+use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_sysdb::SysDb;
 use chroma_types::CollectionUuid;
 use figment::providers::Env;
@@ -9,10 +11,8 @@ use figment::Figment;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
-use crate::memberlist::Memberlist;
 
 pub(crate) struct Scheduler {
     my_ip: String,
@@ -276,8 +276,8 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
+    use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_log::log::{InMemoryLog, InternalLogRecord};
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
@@ -376,7 +376,7 @@ mod tests {
         let max_concurrent_jobs = 1000;
 
         // Set assignment policy
-        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
@@ -588,7 +588,7 @@ mod tests {
         let max_concurrent_jobs = 1000;
 
         // Set assignment policy
-        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_ip.clone()]);
 
         let mut scheduler = Scheduler::new(

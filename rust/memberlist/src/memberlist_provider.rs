@@ -17,12 +17,10 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 /* =========== Basic Types ============== */
-pub(crate) type Memberlist = Vec<String>;
+pub type Memberlist = Vec<String>;
 
 #[async_trait]
-pub(crate) trait MemberlistProvider:
-    Component + Configurable<MemberlistProviderConfig>
-{
+pub trait MemberlistProvider: Component + Configurable<MemberlistProviderConfig> {
     fn subscribe(&mut self, receiver: Box<dyn ReceiverForMessage<Memberlist> + Send>);
 }
 
@@ -46,7 +44,7 @@ pub(crate) struct Member {
 }
 
 /* =========== CR Provider ============== */
-pub(crate) struct CustomResourceMemberlistProvider {
+pub struct CustomResourceMemberlistProvider {
     memberlist_name: String,
     kube_client: Client,
     kube_ns: String,

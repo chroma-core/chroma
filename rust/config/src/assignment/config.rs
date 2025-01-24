@@ -15,7 +15,7 @@ pub(crate) enum HasherType {
 /// # Notes
 /// See config.rs in the root of the worker crate for an example of how to use
 /// config files to configure the worker.
-pub(crate) enum AssignmentPolicyConfig {
+pub enum AssignmentPolicyConfig {
     RendezvousHashing(RendezvousHashingAssignmentPolicyConfig),
 }
 
@@ -23,6 +23,6 @@ pub(crate) enum AssignmentPolicyConfig {
 /// The configuration for the rendezvous hashing assignment policy.
 /// # Fields
 /// - hasher: The type of hasher to use.
-pub(crate) struct RendezvousHashingAssignmentPolicyConfig {
+pub struct RendezvousHashingAssignmentPolicyConfig {
     pub(crate) hasher: HasherType,
 }

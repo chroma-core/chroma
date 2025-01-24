@@ -1,11 +1,12 @@
-pub(crate) mod assignment_policy;
-pub(crate) mod config;
-pub(crate) mod rendezvous_hash;
+pub mod assignment_policy;
+pub mod config;
+pub mod rendezvous_hash;
+use crate::Configurable;
+
 use self::{assignment_policy::AssignmentPolicy, config::AssignmentPolicyConfig};
-use chroma_config::Configurable;
 use chroma_error::ChromaError;
 
-pub(crate) async fn from_config(
+pub async fn from_config(
     config: &AssignmentPolicyConfig,
 ) -> Result<Box<dyn AssignmentPolicy>, Box<dyn ChromaError>> {
     match &config {

@@ -1,3 +1,4 @@
+use chroma_config::assignment;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
@@ -103,9 +104,9 @@ pub struct QueryServiceConfig {
     pub(crate) my_member_id: String,
     pub(crate) my_port: u16,
     #[allow(dead_code)]
-    pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    pub(crate) assignment_policy: assignment::config::AssignmentPolicyConfig,
     #[allow(dead_code)]
-    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
+    pub(crate) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     pub(crate) sysdb: SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: chroma_log::config::LogConfig,
@@ -131,8 +132,8 @@ pub struct CompactionServiceConfig {
     pub(crate) my_member_id: String,
     #[allow(dead_code)]
     pub(crate) my_port: u16,
-    pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
-    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
+    pub(crate) assignment_policy: assignment::config::AssignmentPolicyConfig,
+    pub(crate) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     pub(crate) sysdb: SysDbConfig,
     pub(crate) storage: chroma_storage::config::StorageConfig,
     pub(crate) log: chroma_log::config::LogConfig,
