@@ -43,10 +43,6 @@ pub enum GetSegmentsError {
 impl Operator<GetSegmentsInput, GetSegmentsOutput> for GetSegmentsOperator {
     type Error = GetSegmentsError;
 
-    fn get_name(&self) -> &'static str {
-        "GetSegmentsOperator"
-    }
-
     async fn run(&self, input: &GetSegmentsInput) -> Result<GetSegmentsOutput, Self::Error> {
         let segments = input
             .sysdb

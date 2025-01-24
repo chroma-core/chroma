@@ -87,10 +87,6 @@ impl ChromaError for GetSegmentWriterError {
 impl Operator<GetSegmentWriterInput, GetSegmentWriterOutput> for GetSegmentWriterOperator {
     type Error = GetSegmentWriterError;
 
-    fn get_name(&self) -> &'static str {
-        "GetSegmentWriterOperator"
-    }
-
     async fn run(
         &self,
         input: &GetSegmentWriterInput,
