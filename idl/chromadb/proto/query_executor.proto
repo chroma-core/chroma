@@ -13,7 +13,7 @@ message UserIds {
 // `WhereDocument` clauses, where each node is exactly one of:
 // - A leaf node representing a `$contains` or `$not_contains` query directly.
 // - An branch node with a list of children and a way to combine them (AND or OR).
-// TODO: This should be deprecated after merged with `Where`
+//   TODO: This should be deprecated after merged with `Where`
 message WhereDocument {
     oneof where_document {
         DirectWhereDocument direct = 1;
