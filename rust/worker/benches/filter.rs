@@ -5,8 +5,8 @@ use chroma_log::test::{upsert_generator, LoadFromGenerator};
 use chroma_segment::test::TestSegment;
 use chroma_system::Operator;
 use chroma_types::{
-    BooleanOperator, Chunk, DirectWhereComparison, MetadataValue, PrimitiveOperator, Where,
-    WhereChildren, WhereComparison,
+    BooleanOperator, Chunk, MetadataComparison, MetadataExpr, MetadataValue, PrimitiveOperator,
+    Where, WhereChildren,
 };
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
@@ -14,50 +14,50 @@ use worker::execution::operators::filter::{FilterInput, FilterOperator};
 
 fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
     use BooleanOperator::*;
+    use MetadataExpr::*;
     use MetadataValue::*;
     use PrimitiveOperator::*;
-    use WhereComparison::*;
     vec![
         (
             "$eq",
-            Where::DirectWhereComparison(DirectWhereComparison {
+            Where::Metadata(MetadataComparison {
                 key: "modulo_3".to_string(),
-                comparison: Primitive(Equal, Int(0)),
+                expr: Primitive(Equal, Int(0)),
             }),
         ),
         (
             "$ne",
-            Where::DirectWhereComparison(DirectWhereComparison {
+            Where::Metadata(MetadataComparison {
                 key: "modulo_3".to_string(),
-                comparison: Primitive(NotEqual, Int(0)),
+                expr: Primitive(NotEqual, Int(0)),
             }),
         ),
         (
             "$gt-small",
-            Where::DirectWhereComparison(DirectWhereComparison {
+            Where::Metadata(MetadataComparison {
                 key: "modulo_3".to_string(),
-                comparison: Primitive(GreaterThan, Int(0)),
+                expr: Primitive(GreaterThan, Int(0)),
             }),
         ),
         (
             "$gt-large",
-            Where::DirectWhereComparison(DirectWhereComparison {
+            Where::Metadata(MetadataComparison {
                 key: "id".to_string(),
-                comparison: Primitive(GreaterThan, Int(0)),
+                expr: Primitive(GreaterThan, Int(0)),
             }),
         ),
         (
             "$and-[$ne, $eq]",
-            Where::WhereChildren(WhereChildren {
+            Where::Composite(WhereChildren {
                 operator: And,
                 children: vec![
-                    Where::DirectWhereComparison(DirectWhereComparison {
+                    Where::Metadata(MetadataComparison {
                         key: "is_even".to_string(),
-                        comparison: Primitive(NotEqual, Bool(false)),
+                        expr: Primitive(NotEqual, Bool(false)),
                     }),
-                    Where::DirectWhereComparison(DirectWhereComparison {
+                    Where::Metadata(MetadataComparison {
                         key: "modulo_3".to_string(),
-                        comparison: Primitive(Equal, Int(1)),
+                        expr: Primitive(Equal, Int(1)),
                     }),
                 ],
             }),

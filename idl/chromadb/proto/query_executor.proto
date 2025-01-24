@@ -4,6 +4,163 @@ package chroma;
 
 import "chromadb/proto/chroma.proto";
 
+// A `UserIds` should contain the set of user provided ids allowed in the result.
+message UserIds {
+    repeated string ids = 1;
+}
+
+// A `WhereDocument` clause for filtering metadata. A `WhereDocument` clause is a tree of
+// `WhereDocument` clauses, where each node is exactly one of:
+// - A leaf node representing a `$contains` or `$not_contains` query directly.
+// - An branch node with a list of children and a way to combine them (AND or OR).
+// TODO: This should be deprecated after merged with `Where`
+message WhereDocument {
+    oneof where_document {
+        DirectWhereDocument direct = 1;
+        WhereDocumentChildren children = 2;
+    }
+}
+
+// A leaf-node `Where` clause may compare a document to a single value.
+message DirectWhereDocument {
+    string document = 1;
+    WhereDocumentOperator operator = 2;
+}
+
+// Types of operators for `WhereDocument` clauses. A `WhereDocument` clause can
+// either require that a document contains a value or that it does not contain
+// a value.
+enum WhereDocumentOperator {
+    CONTAINS = 0;
+    NOT_CONTAINS = 1;
+}
+
+// A branch-node `WhereDocument` node has a list of children.
+message WhereDocumentChildren {
+    repeated WhereDocument children = 1;
+    BooleanOperator operator = 2;
+}
+
+// A `Where` clause for filtering metadata. A `Where` clause is a tree of
+// `Where` clauses, where each node is exactly one of:
+// - A leaf node representing a direct comparison between a metadata key and a
+//   value or list of values.
+// - A leaf node representing a direct search for keyword against document.
+// - An branch node with a list of children and a way to combine them (AND or OR).
+message Where {
+    oneof where {
+        DirectComparison direct_comparison = 1;
+        WhereChildren children = 2;
+        DirectWhereDocument direct_where_document = 3;
+    }
+}
+
+// A leaf-node `Where` clause.
+message DirectComparison {
+    string key = 1;
+    oneof comparison {
+        SingleStringComparison single_string_operand = 2;
+        StringListComparison string_list_operand = 3;
+        SingleIntComparison single_int_operand = 4;
+        IntListComparison int_list_operand = 5;
+        SingleDoubleComparison single_double_operand = 6;
+        DoubleListComparison double_list_operand = 7;
+        BoolListComparison bool_list_operand = 8;
+        SingleBoolComparison single_bool_operand = 9;
+    }
+}
+
+// A branch-node `Where` clause has a list of children and a specification
+// for how to combine them.
+message WhereChildren {
+    repeated Where children = 1;
+    BooleanOperator operator = 2;
+}
+
+// A `Where` clause may have a list of children. This enum specifies how the
+// children should be combined.
+enum BooleanOperator {
+    AND = 0;
+    OR = 1;
+}
+
+// A `Where` clause may have a list of allowed or disallowed values. This enum
+// specifies which type of list it is.
+enum ListOperator {
+    IN = 0;
+    NIN = 1;
+}
+
+// A leaf-node `Where` clause may compare a string, int, or float to a single
+// value of the same type. These comparators apply to all three of those types.
+enum GenericComparator {
+    EQ = 0;
+    NE = 1;
+}
+
+// Used when a leaf-node `Where` clause compares an int or float to a single
+// value of the same type.
+enum NumberComparator {
+    GT = 0;
+    GTE = 1;
+    LT = 2;
+    LTE = 3;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a list of strings.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message StringListComparison {
+    repeated string values = 1;
+    ListOperator list_operator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a single string.
+message SingleStringComparison {
+    string value = 1;
+    GenericComparator comparator = 2;
+}
+
+message SingleBoolComparison {
+    bool value = 1;
+    GenericComparator comparator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a list of ints.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message IntListComparison {
+    repeated int64 values = 1;
+    ListOperator list_operator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a single int.
+message SingleIntComparison {
+    int64 value = 1;
+    oneof comparator {
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
+    }
+}
+
+// Used when a leaf-node `Where` clause compares a float to a list of floats.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message DoubleListComparison {
+    repeated double values = 1;
+    ListOperator list_operator = 2;
+}
+
+message BoolListComparison {
+    repeated bool values = 1;
+    ListOperator list_operator = 2;
+}
+
+message SingleDoubleComparison {
+    double value = 1;
+    oneof comparator {
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
+    }
+}
+
 message ScanOperator {
     Collection collection = 1;
     // Reserve for deprecated fields
@@ -16,6 +173,7 @@ message ScanOperator {
 message FilterOperator {
     optional UserIds ids = 1;
     optional Where where = 2;
+    // TODO: This should be deprecated after `where_document` is merged with `where`
     optional WhereDocument where_document = 3;
 }
 

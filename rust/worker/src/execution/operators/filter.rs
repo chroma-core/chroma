@@ -14,9 +14,9 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
-    LogRecord, MaterializedLogOperation, MetadataSetValue, MetadataValue, PrimitiveOperator,
-    Segment, SetOperator, SignedRoaringBitmap, Where, WhereChildren, WhereComparison,
+    BooleanOperator, Chunk, DocumentComparison, DocumentOperator, LogRecord,
+    MaterializedLogOperation, MetadataComparison, MetadataExpr, MetadataSetValue, MetadataValue,
+    PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where, WhereChildren,
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
@@ -278,13 +278,11 @@ impl<'me> RoaringMetadataFilter<'me> for Where {
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         match self {
-            Where::DirectWhereComparison(direct_comparison) => {
-                direct_comparison.eval(metadata_provider).await
-            }
-            Where::DirectWhereDocumentComparison(direct_document_comparison) => {
+            Where::Metadata(direct_comparison) => direct_comparison.eval(metadata_provider).await,
+            Where::Document(direct_document_comparison) => {
                 direct_document_comparison.eval(metadata_provider).await
             }
-            Where::WhereChildren(where_children) => {
+            Where::Composite(where_children) => {
                 // Box::pin is required to avoid infinite size future when recurse in async
                 Box::pin(where_children.eval(metadata_provider)).await
             }
@@ -292,13 +290,13 @@ impl<'me> RoaringMetadataFilter<'me> for Where {
     }
 }
 
-impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
+impl<'me> RoaringMetadataFilter<'me> for MetadataComparison {
     async fn eval(
         &'me self,
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        let result = match &self.comparison {
-            WhereComparison::Primitive(primitive_operator, metadata_value) => {
+        let result = match &self.expr {
+            MetadataExpr::Primitive(primitive_operator, metadata_value) => {
                 match primitive_operator {
                     // We convert the inequality check in to an equality check, and then negate the result
                     PrimitiveOperator::NotEqual => SignedRoaringBitmap::Exclude(
@@ -321,7 +319,7 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
                     ),
                 }
             }
-            WhereComparison::Set(set_operator, metadata_set_value) => {
+            MetadataExpr::Set(set_operator, metadata_set_value) => {
                 let child_values: Vec<_> = match metadata_set_value {
                     MetadataSetValue::Bool(vec) => {
                         vec.iter().map(|b| MetadataValue::Bool(*b)).collect()
@@ -364,13 +362,13 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
     }
 }
 
-impl<'me> RoaringMetadataFilter<'me> for DirectDocumentComparison {
+impl<'me> RoaringMetadataFilter<'me> for DocumentComparison {
     async fn eval(
         &'me self,
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let contain = metadata_provider
-            .filter_by_document(self.document.as_str())
+            .filter_by_document(self.query.as_str())
             .await?;
         match self.operator {
             DocumentOperator::Contains => Ok(SignedRoaringBitmap::Include(contain)),
@@ -504,9 +502,8 @@ mod tests {
     use chroma_segment::test::TestSegment;
     use chroma_system::Operator;
     use chroma_types::{
-        BooleanOperator, DirectDocumentComparison, DirectWhereComparison, MetadataSetValue,
+        BooleanOperator, DocumentComparison, MetadataComparison, MetadataExpr, MetadataSetValue,
         MetadataValue, PrimitiveOperator, SetOperator, SignedRoaringBitmap, Where, WhereChildren,
-        WhereComparison,
     };
 
     use crate::execution::operators::filter::FilterOperator;
@@ -576,12 +573,9 @@ mod tests {
     async fn test_simple_eq() {
         let filter_input = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataComparison {
             key: "is_even".to_string(),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Bool(true),
-            ),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::Equal, MetadataValue::Bool(true)),
         });
 
         let filter_operator = FilterOperator {
@@ -608,12 +602,9 @@ mod tests {
     async fn test_simple_ne() {
         let filter_input = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataComparison {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::NotEqual,
-                MetadataValue::Int(0),
-            ),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::NotEqual, MetadataValue::Int(0)),
         });
 
         let filter_operator = FilterOperator {
@@ -645,12 +636,9 @@ mod tests {
     async fn test_simple_in() {
         let filter_input = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataComparison {
             key: "is_even".to_string(),
-            comparison: WhereComparison::Set(
-                SetOperator::In,
-                MetadataSetValue::Bool(vec![false, true]),
-            ),
+            expr: MetadataExpr::Set(SetOperator::In, MetadataSetValue::Bool(vec![false, true])),
         });
 
         let filter_operator = FilterOperator {
@@ -677,9 +665,9 @@ mod tests {
     async fn test_simple_nin() {
         let filter_input = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataComparison {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![1, 2])),
+            expr: MetadataExpr::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![1, 2])),
         });
 
         let filter_operator = FilterOperator {
@@ -711,12 +699,9 @@ mod tests {
     async fn test_simple_gt() {
         let filter_input = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataComparison {
             key: "id".to_string(),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::GreaterThan,
-                MetadataValue::Int(36),
-            ),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::GreaterThan, MetadataValue::Int(36)),
         });
 
         let filter_operator = FilterOperator {
@@ -743,9 +728,9 @@ mod tests {
     async fn test_simple_contains() {
         let filter_input = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+        let where_clause = Where::Document(DocumentComparison {
             operator: chroma_types::DocumentOperator::Contains,
-            document: "<cat>".to_string(),
+            query: "<cat>".to_string(),
         });
 
         let filter_operator = FilterOperator {
@@ -772,9 +757,9 @@ mod tests {
     async fn test_simple_not_contains() {
         let filter_input = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+        let where_clause = Where::Document(DocumentComparison {
             operator: chroma_types::DocumentOperator::NotContains,
-            document: "<dog>".to_string(),
+            query: "<dog>".to_string(),
         });
 
         let filter_operator = FilterOperator {
@@ -806,23 +791,17 @@ mod tests {
     async fn test_simple_and() {
         let filter_input = setup_filter_input().await;
 
-        let where_sub_clause_1 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_1 = Where::Metadata(MetadataComparison {
             key: "id".to_string(),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::GreaterThan,
-                MetadataValue::Int(36),
-            ),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::GreaterThan, MetadataValue::Int(36)),
         });
 
-        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_2 = Where::Metadata(MetadataComparison {
             key: "is_even".to_string(),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Bool(false),
-            ),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::Equal, MetadataValue::Bool(false)),
         });
 
-        let where_clause = Where::WhereChildren(WhereChildren {
+        let where_clause = Where::Composite(WhereChildren {
             operator: BooleanOperator::And,
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
@@ -851,17 +830,17 @@ mod tests {
     async fn test_simple_or() {
         let filter_input = setup_filter_input().await;
 
-        let where_sub_clause_1 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_1 = Where::Metadata(MetadataComparison {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(0)),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(0)),
         });
 
-        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_2 = Where::Metadata(MetadataComparison {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(2)),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(2)),
         });
 
-        let where_clause = Where::WhereChildren(WhereChildren {
+        let where_clause = Where::Composite(WhereChildren {
             operator: BooleanOperator::Or,
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
@@ -890,29 +869,26 @@ mod tests {
     async fn test_complex_filter() {
         let filter_input = setup_filter_input().await;
 
-        let where_sub_clause_1 = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+        let where_sub_clause_1 = Where::Document(DocumentComparison {
             operator: chroma_types::DocumentOperator::NotContains,
-            document: "<dog>".to_string(),
+            query: "<dog>".to_string(),
         });
 
-        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_2 = Where::Metadata(MetadataComparison {
             key: "id".to_string(),
-            comparison: WhereComparison::Primitive(
-                PrimitiveOperator::LessThan,
-                MetadataValue::Int(72),
-            ),
+            expr: MetadataExpr::Primitive(PrimitiveOperator::LessThan, MetadataValue::Int(72)),
         });
 
-        let where_sub_clause_3 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_3 = Where::Metadata(MetadataComparison {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![0, 1])),
+            expr: MetadataExpr::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![0, 1])),
         });
 
-        let where_clause = Where::WhereChildren(WhereChildren {
+        let where_clause = Where::Composite(WhereChildren {
             operator: BooleanOperator::And,
             children: vec![
                 where_sub_clause_1,
-                Where::WhereChildren(WhereChildren {
+                Where::Composite(WhereChildren {
                     operator: BooleanOperator::Or,
                     children: vec![where_sub_clause_2, where_sub_clause_3],
                 }),

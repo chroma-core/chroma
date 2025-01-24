@@ -341,23 +341,23 @@ Metadata queries
 /// Currently both `where` and `where_document` clauses will be translated into `Where`, and if both are
 /// present we simply create a conjunction of both clauses as the actual filter. This is consistent with
 /// the semantics we used to have when the `where` and `where_document` clauses are treated seperately.
-/// TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
+///   TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Where {
-    DirectWhereComparison(DirectWhereComparison),
-    DirectWhereDocumentComparison(DirectDocumentComparison),
-    WhereChildren(WhereChildren),
+    Composite(WhereChildren),
+    Document(DocumentComparison),
+    Metadata(MetadataComparison),
 }
 
 impl Where {
     pub fn conjunction(children: Vec<Where>) -> Self {
-        Self::WhereChildren(WhereChildren {
+        Self::Composite(WhereChildren {
             operator: BooleanOperator::And,
             children,
         })
     }
     pub fn disjunction(children: Vec<Where>) -> Self {
-        Self::WhereChildren(WhereChildren {
+        Self::Composite(WhereChildren {
             operator: BooleanOperator::Or,
             children,
         })
@@ -365,13 +365,37 @@ impl Where {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct DirectWhereComparison {
-    pub key: String,
-    pub comparison: WhereComparison,
+pub struct WhereChildren {
+    pub operator: BooleanOperator,
+    pub children: Vec<Where>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum WhereComparison {
+pub enum BooleanOperator {
+    And,
+    Or,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DocumentComparison {
+    pub operator: DocumentOperator,
+    pub query: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DocumentOperator {
+    Contains,
+    NotContains,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataComparison {
+    pub key: String,
+    pub expr: MetadataExpr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MetadataExpr {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
 }
@@ -400,34 +424,13 @@ pub enum MetadataSetValue {
     Str(Vec<String>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct WhereChildren {
-    pub operator: BooleanOperator,
-    pub children: Vec<Where>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum BooleanOperator {
-    And,
-    Or,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DirectDocumentComparison {
-    pub operator: DocumentOperator,
-    pub document: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum DocumentOperator {
-    Contains,
-    NotContains,
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum WhereConversionError {
+    #[error("Invalid where clause")]
     InvalidWhere,
+    #[error("Invalid where comparison")]
     InvalidWhereComparison,
+    #[error("Invalid where children")]
     InvalidWhereChildren,
 }
 
@@ -437,11 +440,11 @@ impl TryFrom<chroma_proto::Where> for Where {
     fn try_from(proto_where: chroma_proto::Where) -> Result<Self, Self::Error> {
         match proto_where.r#where {
             Some(chroma_proto::r#where::Where::DirectComparison(proto_comparison)) => {
-                let comparison = DirectWhereComparison {
+                let comparison = MetadataComparison {
                     key: proto_comparison.key.clone(),
-                    comparison: proto_comparison.try_into()?,
+                    expr: proto_comparison.try_into()?,
                 };
-                Ok(Where::DirectWhereComparison(comparison))
+                Ok(Where::Metadata(comparison))
             }
             Some(chroma_proto::r#where::Where::Children(proto_children)) => {
                 let operator = match TryInto::<chroma_proto::BooleanOperator>::try_into(
@@ -458,14 +461,27 @@ impl TryFrom<chroma_proto::Where> for Where {
                         .collect::<Result<Vec<Where>, WhereConversionError>>()?,
                     operator: operator.try_into()?,
                 };
-                Ok(Where::WhereChildren(children))
+                Ok(Where::Composite(children))
+            }
+            Some(chroma_proto::r#where::Where::DirectWhereDocument(proto_document)) => {
+                let operator = match TryInto::<chroma_proto::WhereDocumentOperator>::try_into(
+                    proto_document.operator,
+                ) {
+                    Ok(operator) => operator,
+                    Err(_) => return Err(WhereConversionError::InvalidWhereComparison),
+                };
+                let document_comparison = DocumentComparison {
+                    operator: operator.try_into()?,
+                    query: proto_document.document,
+                };
+                Ok(Where::Document(document_comparison))
             }
             None => Err(WhereConversionError::InvalidWhere),
         }
     }
 }
 
-impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
+impl TryFrom<chroma_proto::DirectComparison> for MetadataExpr {
     type Error = WhereConversionError;
 
     fn try_from(proto_comparison: chroma_proto::DirectComparison) -> Result<Self, Self::Error> {
@@ -487,15 +503,15 @@ impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
         if let Some(proto_comp) = proto_comparison.r#comparison {
             use chroma_proto::direct_comparison::Comparison::*;
             match proto_comp {
-                SingleBoolOperand(single_bool_comparison) => Ok(WhereComparison::Primitive(
+                SingleBoolOperand(single_bool_comparison) => Ok(MetadataExpr::Primitive(
                     id_to_generic_comparator(single_bool_comparison.comparator)?,
                     MetadataValue::Bool(single_bool_comparison.value),
                 )),
-                SingleStringOperand(single_string_comparison) => Ok(WhereComparison::Primitive(
+                SingleStringOperand(single_string_comparison) => Ok(MetadataExpr::Primitive(
                     id_to_generic_comparator(single_string_comparison.comparator)?,
                     MetadataValue::Str(single_string_comparison.value),
                 )),
-                SingleIntOperand(single_int_comparison) => Ok(WhereComparison::Primitive(
+                SingleIntOperand(single_int_comparison) => Ok(MetadataExpr::Primitive(
                     match single_int_comparison.comparator {
                         Some(
                             chroma_proto::single_int_comparison::Comparator::GenericComparator(
@@ -511,7 +527,7 @@ impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
                     },
                     MetadataValue::Int(single_int_comparison.value),
                 )),
-                SingleDoubleOperand(single_double_comparison) => Ok(WhereComparison::Primitive(
+                SingleDoubleOperand(single_double_comparison) => Ok(MetadataExpr::Primitive(
                     match single_double_comparison.comparator {
                         Some(
                             chroma_proto::single_double_comparison::Comparator::GenericComparator(
@@ -527,19 +543,19 @@ impl TryFrom<chroma_proto::DirectComparison> for WhereComparison {
                     },
                     MetadataValue::Float(single_double_comparison.value),
                 )),
-                BoolListOperand(bool_list_comparison) => Ok(WhereComparison::Set(
+                BoolListOperand(bool_list_comparison) => Ok(MetadataExpr::Set(
                     id_to_set_comparator(bool_list_comparison.list_operator)?,
                     MetadataSetValue::Bool(bool_list_comparison.values),
                 )),
-                StringListOperand(string_list_comparison) => Ok(WhereComparison::Set(
+                StringListOperand(string_list_comparison) => Ok(MetadataExpr::Set(
                     id_to_set_comparator(string_list_comparison.list_operator)?,
                     MetadataSetValue::Str(string_list_comparison.values),
                 )),
-                IntListOperand(int_list_comparison) => Ok(WhereComparison::Set(
+                IntListOperand(int_list_comparison) => Ok(MetadataExpr::Set(
                     id_to_set_comparator(int_list_comparison.list_operator)?,
                     MetadataSetValue::Int(int_list_comparison.values),
                 )),
-                DoubleListOperand(double_list_comparison) => Ok(WhereComparison::Set(
+                DoubleListOperand(double_list_comparison) => Ok(MetadataExpr::Set(
                     id_to_set_comparator(double_list_comparison.list_operator)?,
                     MetadataSetValue::Float(double_list_comparison.values),
                 )),
@@ -614,6 +630,15 @@ impl TryFrom<chroma_proto::BooleanOperator> for BooleanOperator {
     }
 }
 
+impl From<BooleanOperator> for chroma_proto::BooleanOperator {
+    fn from(value: BooleanOperator) -> Self {
+        match value {
+            BooleanOperator::And => chroma_proto::BooleanOperator::And,
+            BooleanOperator::Or => chroma_proto::BooleanOperator::Or,
+        }
+    }
+}
+
 impl TryFrom<chroma_proto::WhereDocument> for Where {
     type Error = WhereConversionError;
 
@@ -626,11 +651,11 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
                     Ok(operator) => operator,
                     Err(_) => return Err(WhereConversionError::InvalidWhereComparison),
                 };
-                let comparison = DirectDocumentComparison {
-                    document: proto_comparison.document,
+                let comparison = DocumentComparison {
+                    query: proto_comparison.document,
                     operator: operator.try_into()?,
                 };
-                Ok(Where::DirectWhereDocumentComparison(comparison))
+                Ok(Where::Document(comparison))
             }
             Some(chroma_proto::where_document::WhereDocument::Children(proto_children)) => {
                 let operator = match TryInto::<chroma_proto::BooleanOperator>::try_into(
@@ -647,7 +672,7 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
                         .collect::<Result<_, _>>()?,
                     operator: operator.try_into()?,
                 };
-                Ok(Where::WhereChildren(children))
+                Ok(Where::Composite(children))
             }
             None => Err(WhereConversionError::InvalidWhere),
         }
@@ -770,10 +795,10 @@ mod tests {
         };
         let where_clause: Where = proto_where.try_into().unwrap();
         match where_clause {
-            Where::DirectWhereComparison(comparison) => {
+            Where::Metadata(comparison) => {
                 assert_eq!(comparison.key, "foo");
-                match comparison.comparison {
-                    WhereComparison::Primitive(_, value) => {
+                match comparison.expr {
+                    MetadataExpr::Primitive(_, value) => {
                         assert_eq!(value, MetadataValue::Int(42));
                     }
                     _ => panic!("Invalid comparison type"),
@@ -826,7 +851,7 @@ mod tests {
         };
         let where_clause: Where = proto_where.try_into().unwrap();
         match where_clause {
-            Where::WhereChildren(children) => {
+            Where::Composite(children) => {
                 assert_eq!(children.children.len(), 2);
                 assert_eq!(children.operator, BooleanOperator::And);
             }
@@ -846,8 +871,8 @@ mod tests {
         };
         let where_document: Where = proto_where.try_into().unwrap();
         match where_document {
-            Where::DirectWhereDocumentComparison(comparison) => {
-                assert_eq!(comparison.document, "foo");
+            Where::Document(comparison) => {
+                assert_eq!(comparison.query, "foo");
                 assert_eq!(comparison.operator, DocumentOperator::Contains);
             }
             _ => panic!("Invalid where document type"),
@@ -889,7 +914,7 @@ mod tests {
         };
         let where_document: Where = proto_where.try_into().unwrap();
         match where_document {
-            Where::WhereChildren(children) => {
+            Where::Composite(children) => {
                 assert_eq!(children.children.len(), 2);
                 assert_eq!(children.operator, BooleanOperator::And);
             }

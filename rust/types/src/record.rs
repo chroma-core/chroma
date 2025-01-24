@@ -244,27 +244,6 @@ pub struct GetVectorsResult {
     pub vectors: Vec<Vec<f32>>,
 }
 
-/*
-===========================================
-Metadata Embedding Record
-===========================================
-*/
-
-#[derive(Debug)]
-pub struct MetadataEmbeddingRecord {
-    pub id: String,
-    pub metadata: UpdateMetadata,
-}
-
-impl From<MetadataEmbeddingRecord> for chroma_proto::MetadataEmbeddingRecord {
-    fn from(record: MetadataEmbeddingRecord) -> Self {
-        chroma_proto::MetadataEmbeddingRecord {
-            id: record.id,
-            metadata: Some(record.metadata.into()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

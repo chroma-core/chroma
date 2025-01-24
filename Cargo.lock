@@ -1466,6 +1466,8 @@ dependencies = [
  "prost 0.13.3",
  "prost-types",
  "roaring",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tonic",
  "tonic-build",
