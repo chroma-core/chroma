@@ -1,5 +1,5 @@
 use chroma_blockstore::provider::BlockfileProvider;
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
@@ -70,8 +70,16 @@ pub enum GetSegmentWriterError {
 }
 
 impl ChromaError for GetSegmentWriterError {
-    fn code(&self) -> chroma_error::ErrorCodes {
-        unimplemented!()
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::UnsupportedSegmentType(_) => ErrorCodes::InvalidArgument,
+            Self::MetadataSegmentWriter(err) => err.code(),
+            Self::RecordSegmentWriter(err) => err.code(),
+            Self::CollectionNotFound => ErrorCodes::NotFound,
+            Self::GetCollectionError(err) => err.code(),
+            Self::HnswSegmentWriterError(err) => err.code(),
+            Self::CollectionMissingDimension => ErrorCodes::Internal,
+        }
     }
 }
 

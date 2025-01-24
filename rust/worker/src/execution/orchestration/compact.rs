@@ -128,7 +128,6 @@ pub struct CompactOrchestrator {
     segments: Vec<Segment>,
     materialized_results: Vec<MaterializeLogsResult>,
     segment_writers: Vec<ChromaSegmentWriter<'static>>,
-    // writers: OnceCell<CompactWriters>,
     flush_results: Vec<SegmentFlushInfo>,
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentType, Span>,
