@@ -29,7 +29,6 @@ from chromadb.types import (
     SeqId,
     UpdateMetadata,
     Vector,
-    VectorEmbeddingRecord,
     VectorQueryResult,
 )
 
@@ -295,54 +294,7 @@ def to_proto_submit(
     )
 
 
-def from_proto_vector_embedding_record(
-    embedding_record: chroma_pb.VectorEmbeddingRecord,
-) -> VectorEmbeddingRecord:
-    return VectorEmbeddingRecord(
-        id=embedding_record.id,
-        embedding=from_proto_vector(embedding_record.vector)[0],
-    )
-
-
-def to_proto_vector_embedding_record(
-    embedding_record: VectorEmbeddingRecord,
-    encoding: ScalarEncoding,
-) -> chroma_pb.VectorEmbeddingRecord:
-    return chroma_pb.VectorEmbeddingRecord(
-        id=embedding_record["id"],
-        vector=to_proto_vector(embedding_record["embedding"], encoding),
-    )
-
-
-def from_proto_vector_query_result(
-    vector_query_result: chroma_pb.VectorQueryResult,
-) -> VectorQueryResult:
-    return VectorQueryResult(
-        id=vector_query_result.id,
-        distance=vector_query_result.distance,
-        embedding=from_proto_vector(vector_query_result.vector)[0],
-    )
-
-
-def from_proto_request_version_context(
-    request_version_context: chroma_pb.RequestVersionContext,
-) -> RequestVersionContext:
-    return RequestVersionContext(
-        collection_version=request_version_context.collection_version,
-        log_position=request_version_context.log_position,
-    )
-
-
-def to_proto_request_version_context(
-    request_version_context: RequestVersionContext,
-) -> chroma_pb.RequestVersionContext:
-    return chroma_pb.RequestVersionContext(
-        collection_version=request_version_context["collection_version"],
-        log_position=request_version_context["log_position"],
-    )
-
-
-def to_proto_where(where: Where) -> chroma_pb.Where:
+def to_proto_where(where: Where) -> query_pb.Where:
     response = chroma_pb.Where()
     if len(where) != 1:
         raise ValueError(f"Expected where to have exactly one operator, got {where}")
@@ -525,7 +477,7 @@ def to_proto_where(where: Where) -> chroma_pb.Where:
     return response
 
 
-def to_proto_where_document(where_document: WhereDocument) -> chroma_pb.WhereDocument:
+def to_proto_where_document(where_document: WhereDocument) -> query_pb.WhereDocument:
     response = chroma_pb.WhereDocument()
     if len(where_document) != 1:
         raise ValueError(
