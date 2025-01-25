@@ -15,6 +15,7 @@ use chroma_types::{
 };
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
 use tonic::transport::{Channel, Endpoint};
@@ -187,6 +188,9 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                         return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
                     }
                 };
+                let endpoint = endpoint
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
 
                 let chans =
                     Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
