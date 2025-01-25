@@ -256,20 +256,6 @@ impl From<UpdateMetadata> for chroma_proto::UpdateMetadata {
     }
 }
 
-impl From<Metadata> for chroma_proto::UpdateMetadata {
-    fn from(metadata: Metadata) -> Self {
-        let mut metadata = metadata;
-        let mut proto_metadata = chroma_proto::UpdateMetadata {
-            metadata: HashMap::new(),
-        };
-        for (key, value) in metadata.drain() {
-            let proto_value = value.into();
-            proto_metadata.metadata.insert(key.clone(), proto_value);
-        }
-        proto_metadata
-    }
-}
-
 /*
 ===========================================
 Metadata
@@ -310,6 +296,20 @@ impl TryFrom<chroma_proto::UpdateMetadata> for Metadata {
             metadata.insert(key.clone(), value);
         }
         Ok(metadata)
+    }
+}
+
+impl From<Metadata> for chroma_proto::UpdateMetadata {
+    fn from(metadata: Metadata) -> Self {
+        let mut metadata = metadata;
+        let mut proto_metadata = chroma_proto::UpdateMetadata {
+            metadata: HashMap::new(),
+        };
+        for (key, value) in metadata.drain() {
+            let proto_value = value.into();
+            proto_metadata.metadata.insert(key.clone(), proto_value);
+        }
+        proto_metadata
     }
 }
 

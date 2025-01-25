@@ -13,6 +13,7 @@ use chroma_types::{
         self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
         KnnBatchResult, KnnPlan,
     },
+    operator::Scan,
     CollectionAndSegments,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -153,7 +154,7 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let collection_and_segments = scan.try_into()?;
+        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let fetch_log = self.fetch_log(&collection_and_segments);
 
         let count_orchestrator = CountOrchestrator::new(
@@ -179,7 +180,7 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let collection_and_segments = scan.try_into()?;
+        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let fetch_log = self.fetch_log(&collection_and_segments);
 
         let filter = get_inner
@@ -225,7 +226,7 @@ impl WorkerServer {
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
-        let collection_and_segments = scan.try_into()?;
+        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
 
         let fetch_log = self.fetch_log(&collection_and_segments);
 
