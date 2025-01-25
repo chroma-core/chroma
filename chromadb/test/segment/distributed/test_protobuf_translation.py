@@ -102,7 +102,7 @@ def test_where_document_to_proto_not_contains() -> None:
     proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("direct")
     assert proto.direct.document == "test"
-    assert proto.direct.operator == pb.WhereDocumentOperator.NOT_CONTAINS
+    assert proto.direct.operator == query_pb.WhereDocumentOperator.NOT_CONTAINS
 
 
 def test_where_document_to_proto_contains_to_proto() -> None:
@@ -110,7 +110,7 @@ def test_where_document_to_proto_contains_to_proto() -> None:
     proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("direct")
     assert proto.direct.document == "test"
-    assert proto.direct.operator == pb.WhereDocumentOperator.CONTAINS
+    assert proto.direct.operator == query_pb.WhereDocumentOperator.CONTAINS
 
 
 def test_where_document_to_proto_and() -> None:
@@ -123,7 +123,7 @@ def test_where_document_to_proto_and() -> None:
     proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("children")
     children_pb = proto.children
-    assert children_pb.operator == pb.BooleanOperator.AND
+    assert children_pb.operator == query_pb.BooleanOperator.AND
     assert len(children_pb.children) == 2
 
     children = children_pb.children
@@ -131,8 +131,8 @@ def test_where_document_to_proto_and() -> None:
         assert child.HasField("direct")
         assert child.direct.document == "test"
     # Protobuf retains the order of repeated fields so this is safe.
-    assert children[0].direct.operator == pb.WhereDocumentOperator.CONTAINS
-    assert children[1].direct.operator == pb.WhereDocumentOperator.NOT_CONTAINS
+    assert children[0].direct.operator == query_pb.WhereDocumentOperator.CONTAINS
+    assert children[1].direct.operator == query_pb.WhereDocumentOperator.NOT_CONTAINS
 
 
 def test_where_document_to_proto_or() -> None:
@@ -145,7 +145,7 @@ def test_where_document_to_proto_or() -> None:
     proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("children")
     children_pb = proto.children
-    assert children_pb.operator == pb.BooleanOperator.OR
+    assert children_pb.operator == query_pb.BooleanOperator.OR
     assert len(children_pb.children) == 2
 
     children = children_pb.children
@@ -153,8 +153,8 @@ def test_where_document_to_proto_or() -> None:
         assert child.HasField("direct")
         assert child.direct.document == "test"
     # Protobuf retains the order of repeated fields so this is safe.
-    assert children[0].direct.operator == pb.WhereDocumentOperator.CONTAINS
-    assert children[1].direct.operator == pb.WhereDocumentOperator.NOT_CONTAINS
+    assert children[0].direct.operator == query_pb.WhereDocumentOperator.CONTAINS
+    assert children[1].direct.operator == query_pb.WhereDocumentOperator.NOT_CONTAINS
 
 
 def test_where_document_to_proto_nested_boolean_operators() -> None:
@@ -177,7 +177,7 @@ def test_where_document_to_proto_nested_boolean_operators() -> None:
     proto = convert.to_proto_where_document(where_document)
     assert proto.HasField("children")
     children_pb = proto.children
-    assert children_pb.operator == pb.BooleanOperator.AND
+    assert children_pb.operator == query_pb.BooleanOperator.AND
     assert len(children_pb.children) == 2
 
     children = children_pb.children
@@ -190,9 +190,9 @@ def test_where_document_to_proto_nested_boolean_operators() -> None:
             assert nested_child.HasField("direct")
             assert nested_child.direct.document == "test"
         # Protobuf retains the order of repeated fields so this is safe.
-        assert nested_children[0].direct.operator == pb.WhereDocumentOperator.CONTAINS
+        assert nested_children[0].direct.operator == query_pb.WhereDocumentOperator.CONTAINS
         assert (
-            nested_children[1].direct.operator == pb.WhereDocumentOperator.NOT_CONTAINS
+            nested_children[1].direct.operator == query_pb.WhereDocumentOperator.NOT_CONTAINS
         )
 
 
@@ -242,7 +242,7 @@ def test_where_to_proto_and() -> None:
     proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
-    assert children_pb.operator == pb.BooleanOperator.AND
+    assert children_pb.operator == query_pb.BooleanOperator.AND
 
     children = children_pb.children
     assert len(children) == 2
@@ -266,7 +266,7 @@ def test_where_to_proto_or() -> None:
     proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
-    assert children_pb.operator == pb.BooleanOperator.OR
+    assert children_pb.operator == query_pb.BooleanOperator.OR
 
     children = children_pb.children
     assert len(children) == 2
@@ -300,7 +300,7 @@ def test_where_to_proto_nested_boolean_operators() -> None:
     proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
-    assert children_pb.operator == pb.BooleanOperator.AND
+    assert children_pb.operator == query_pb.BooleanOperator.AND
     assert len(children_pb.children) == 2
 
     children = children_pb.children
@@ -331,7 +331,7 @@ def test_where_to_proto_float_operator() -> None:
     proto = convert.to_proto_where(where)
     assert proto.HasField("children")
     children_pb = proto.children
-    assert children_pb.operator == pb.BooleanOperator.AND
+    assert children_pb.operator == query_pb.BooleanOperator.AND
     assert len(children_pb.children) == 2
 
     children = children_pb.children
