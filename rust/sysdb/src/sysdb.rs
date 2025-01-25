@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
-use tonic::transport::Endpoint;
+use tonic::transport::{Channel, Endpoint};
 use tonic::Status;
 use tonic::{Code, Request};
 use uuid::{Error, Uuid};
@@ -188,24 +188,19 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                         return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
                     }
                 };
-
                 let endpoint = endpoint
                     .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
                     .timeout(Duration::from_millis(my_config.request_timeout_ms));
-                match endpoint.connect().await {
-                    Ok(channel) => {
-                        let client: SysDbClient<
-                            interceptor::InterceptedService<
-                                tonic::transport::Channel,
-                                fn(Request<()>) -> Result<Request<()>, Status>,
-                            >,
-                        > = SysDbClient::with_interceptor(channel, client_interceptor);
-                        return Ok(GrpcSysDb { client });
-                    }
-                    Err(e) => {
-                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
-                    }
-                };
+
+                let chans =
+                    Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
+                let client: SysDbClient<
+                    interceptor::InterceptedService<
+                        Channel,
+                        fn(Request<()>) -> Result<Request<()>, Status>,
+                    >,
+                > = SysDbClient::with_interceptor(chans, client_interceptor);
+                Ok(GrpcSysDb { client })
             }
         }
     }
