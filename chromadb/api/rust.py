@@ -74,8 +74,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def heartbeat(self) -> int:
-        # TODO(hammadb): the precommit hooks don't know about the .pyi file
-        return self.bindings.heartbeat()  # type: ignore
+        return self.bindings.heartbeat()
 
     @override
     def count_collections(
