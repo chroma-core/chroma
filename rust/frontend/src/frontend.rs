@@ -1,9 +1,14 @@
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
-use chroma_types::{CreateDatabaseError, CreateDatabaseResponse};
+use chroma_types::{CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError};
 
 use crate::config::FrontendConfig;
+
+#[allow(dead_code)]
+const DEFAULT_TENANT: &str = "default_tenant";
+#[allow(dead_code)]
+const DEFAULT_DATABASE: &str = "default_database";
 
 #[derive(Clone)]
 pub struct Frontend {
@@ -28,9 +33,18 @@ impl Frontend {
             )
             .await;
         match res {
-            Ok(_) => Ok(CreateDatabaseResponse {}),
+            Ok(()) => Ok(CreateDatabaseResponse {}),
             Err(e) => Err(e),
         }
+    }
+
+    pub async fn get_database(
+        &mut self,
+        request: chroma_types::GetDatabaseRequest,
+    ) -> Result<chroma_types::GetDatabaseResponse, GetDatabaseError> {
+        self.sysdb_client
+            .get_database(request.database_name, request.tenant_id)
+            .await
     }
 }
 

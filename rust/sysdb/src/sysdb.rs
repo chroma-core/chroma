@@ -6,8 +6,8 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
-    chroma_proto, CreateDatabaseError, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid,
+    chroma_proto, CreateDatabaseError, GetDatabaseError, GetDatabaseResponse, SegmentFlushInfo,
+    SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -31,6 +31,17 @@ pub enum SysDb {
 }
 
 impl SysDb {
+    pub async fn get_database(
+        &mut self,
+        database_name: String,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn create_database(
         &mut self,
         database_id: Uuid,
@@ -242,6 +253,43 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 }
 
 impl GrpcSysDb {
+    pub async fn get_database(
+        &mut self,
+        database_name: String,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let req = chroma_proto::GetDatabaseRequest {
+            name: database_name,
+            tenant,
+        };
+        let res = self.client.get_database(req).await;
+        match res {
+            Ok(res) => {
+                let res = match res.into_inner().database {
+                    Some(res) => res,
+                    None => return Err(GetDatabaseError::ResponseEmpty),
+                };
+                let db_id = match Uuid::parse_str(res.id.as_str()) {
+                    Ok(uuid) => uuid,
+                    Err(_) => return Err(GetDatabaseError::IdParsingError),
+                };
+                Ok(GetDatabaseResponse {
+                    database_id: db_id,
+                    database_name: res.name,
+                    tenant_id: res.tenant,
+                })
+            }
+            Err(e) => {
+                tracing::error!("Failed to get database {:?}", e);
+                let res = match e.code() {
+                    Code::NotFound => GetDatabaseError::NotFound,
+                    _ => GetDatabaseError::FailedToGetDatabase(e.to_string()),
+                };
+                Err(res)
+            }
+        }
+    }
+
     pub async fn create_database(
         &mut self,
         database_id: Uuid,
