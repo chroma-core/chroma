@@ -1,7 +1,7 @@
-mod api;
+mod frontend;
 mod config;
 mod server;
-use api::Frontend;
+use frontend::Frontend;
 use chroma_config::Configurable;
 use config::FrontEndConfig;
 use server::FrontendServer;

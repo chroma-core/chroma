@@ -34,7 +34,6 @@ impl FrontEndConfig {
 #[cfg(test)]
 mod tests {
     use chroma_sysdb::SysDbConfig::Grpc;
-
     use crate::config::FrontEndConfig;
 
     #[test]

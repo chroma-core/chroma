@@ -8,7 +8,7 @@ use chroma_types::{CreateDatabaseError, CreateDatabaseRequest};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::api::Frontend;
+use crate::frontend::Frontend;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
