@@ -1,6 +1,6 @@
-use std::collections::HashSet;
-use std::str::FromStr;
-
+use super::CollectionAndSegments;
+use crate::compactor::scheduler_policy::SchedulerPolicy;
+use crate::compactor::types::CompactionJob;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
@@ -9,10 +9,9 @@ use chroma_types::CollectionUuid;
 use figment::providers::Env;
 use figment::Figment;
 use serde::Deserialize;
+use std::collections::HashSet;
+use std::str::FromStr;
 use uuid::Uuid;
-
-use crate::compactor::scheduler_policy::SchedulerPolicy;
-use crate::compactor::types::CompactionJob;
 
 pub(crate) struct Scheduler {
     my_ip: String,
@@ -86,7 +85,7 @@ impl Scheduler {
     async fn verify_and_enrich_collections(
         &mut self,
         collections: Vec<CollectionInfo>,
-    ) -> Vec<CollectionRecord> {
+    ) -> Vec<CollectionAndSegments> {
         let mut collection_records = Vec::new();
         for collection_info in collections {
             if self
@@ -99,26 +98,17 @@ impl Scheduler {
                 );
                 continue;
             }
-            let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None)
+                .get_collection_with_segments(collection_info.collection_id)
                 .await;
 
             match result {
-                Ok(collection) => {
-                    if collection.is_empty() {
-                        tracing::error!(
-                            "Collection not found: {:?}",
-                            collection_info.collection_id
-                        );
-                        continue;
-                    }
-
+                Ok((collection, segments)) => {
                     // TODO: make querying the last compaction time in batch
-                    let log_position_in_collecion = collection[0].log_position;
-                    let tenant_ids = vec![collection[0].tenant.clone()];
+                    let log_position_in_collecion = collection.log_position;
+                    let tenant_ids = vec![collection.tenant.clone()];
                     let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
                     let last_compaction_time = match tenant {
@@ -148,13 +138,16 @@ impl Scheduler {
                         offset = log_position_in_collecion + 1;
                     }
 
-                    collection_records.push(CollectionRecord {
-                        collection_id: collection[0].collection_id,
-                        tenant_id: collection[0].tenant.clone(),
-                        last_compaction_time,
-                        first_record_time: collection_info.first_log_ts,
-                        offset,
-                        collection_version: collection[0].version,
+                    collection_records.push(CollectionAndSegments {
+                        collection: CollectionRecord {
+                            collection_id: collection.collection_id,
+                            tenant_id: collection.tenant.clone(),
+                            last_compaction_time,
+                            first_record_time: collection_info.first_log_ts,
+                            offset,
+                            collection_version: collection.version,
+                        },
+                        segments,
                     });
                 }
                 Err(e) => {
@@ -165,19 +158,29 @@ impl Scheduler {
         collection_records
     }
 
-    fn filter_collections(&mut self, collections: Vec<CollectionRecord>) -> Vec<CollectionRecord> {
+    fn filter_collections(
+        &mut self,
+        collections_and_segments: Vec<CollectionAndSegments>,
+    ) -> Vec<CollectionAndSegments> {
         let mut filtered_collections = Vec::new();
         let members = self.memberlist.as_ref().unwrap();
         self.assignment_policy.set_members(members.clone());
-        for collection in collections {
+        for collection_with_segments in collections_and_segments {
             let result = self
                 .assignment_policy
                 // NOTE(rescrv):  Need to use the untyped uuid here.
-                .assign(collection.collection_id.0.to_string().as_str());
+                .assign(
+                    collection_with_segments
+                        .collection
+                        .collection_id
+                        .0
+                        .to_string()
+                        .as_str(),
+                );
             match result {
                 Ok(member) => {
                     if member == self.my_ip {
-                        filtered_collections.push(collection);
+                        filtered_collections.push(collection_with_segments);
                     }
                 }
                 Err(e) => {
@@ -189,27 +192,38 @@ impl Scheduler {
         filtered_collections
     }
 
-    pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
+    pub(crate) async fn schedule_internal(
+        &mut self,
+        collections_and_segments: Vec<CollectionAndSegments>,
+    ) {
         self.job_queue.clear();
         let mut scheduled_collections = Vec::new();
-        for record in collection_records {
-            if self.oneoff_collections.contains(&record.collection_id) {
+        for CollectionAndSegments {
+            collection,
+            segments,
+        } in collections_and_segments
+        {
+            if self.oneoff_collections.contains(&collection.collection_id) {
                 tracing::info!(
                     "Creating one-off compaction job for collection: {}",
-                    record.collection_version
+                    collection.collection_version
                 );
                 self.job_queue.push(CompactionJob {
-                    collection_id: record.collection_id,
-                    tenant_id: record.tenant_id,
-                    offset: record.offset,
-                    collection_version: record.collection_version,
+                    collection_id: collection.collection_id,
+                    tenant_id: collection.tenant_id,
+                    offset: collection.offset,
+                    collection_version: collection.collection_version,
+                    segments,
                 });
-                self.oneoff_collections.remove(&record.collection_id);
+                self.oneoff_collections.remove(&collection.collection_id);
                 if self.job_queue.len() == self.max_concurrent_jobs {
                     return;
                 }
             } else {
-                scheduled_collections.push(record);
+                scheduled_collections.push(CollectionAndSegments {
+                    collection: collection.clone(),
+                    segments,
+                });
             }
         }
 
@@ -258,8 +272,10 @@ impl Scheduler {
         if collections.is_empty() {
             return;
         }
-        let collection_records = self.verify_and_enrich_collections(collections).await;
-        self.schedule_internal(collection_records).await;
+        let collection_records_with_segments =
+            self.verify_and_enrich_collections(collections).await;
+        self.schedule_internal(collection_records_with_segments)
+            .await;
     }
 
     pub(crate) fn get_jobs(&self) -> impl Iterator<Item = &CompactionJob> {

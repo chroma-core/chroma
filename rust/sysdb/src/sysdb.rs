@@ -47,6 +47,16 @@ impl SysDb {
         }
     }
 
+    pub async fn get_collection_with_segments(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(Collection, Vec<Segment>), GetCollectionWithSegmentsError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_collection_with_segments(collection_id).await,
+            SysDb::Test(test) => test.get_collection_with_segments(collection_id).await,
+        }
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
@@ -261,6 +271,44 @@ impl GrpcSysDb {
         }
     }
 
+    async fn get_collection_with_segments(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(Collection, Vec<Segment>), GetCollectionWithSegmentsError> {
+        let res = self
+            .client
+            .get_collection_with_segments(chroma_proto::GetCollectionWithSegmentsRequest {
+                id: collection_id.0.to_string(),
+            })
+            .await;
+
+        match res {
+            Ok(res) => {
+                let res = res.into_inner();
+                let collection = res
+                    .collection
+                    .ok_or(GetCollectionWithSegmentsError::MissingCollectionField)?;
+                let segments = res.segments;
+
+                let collection: Collection = collection.try_into()?;
+                let segments = segments
+                    .into_iter()
+                    .map(|proto_segment| {
+                        proto_segment
+                            .try_into()
+                            .map_err(GetCollectionWithSegmentsError::SegmentConversionError)
+                    })
+                    .collect::<Result<Vec<Segment>, GetCollectionWithSegmentsError>>()?;
+
+                Ok((collection, segments))
+            }
+            Err(err) => match err.code() {
+                tonic::Code::NotFound => Err(GetCollectionWithSegmentsError::CollectionNotFound),
+                _ => Err(GetCollectionWithSegmentsError::FailedToGetCollectionWithSegments(err)),
+            },
+        }
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
@@ -407,6 +455,34 @@ impl ChromaError for GetCollectionsError {
         match self {
             GetCollectionsError::FailedToGetCollections(_) => ErrorCodes::Internal,
             GetCollectionsError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetCollectionWithSegmentsError {
+    #[error("Collection not found")]
+    CollectionNotFound,
+    #[error("Failed to fetch")]
+    FailedToGetCollectionWithSegments(#[from] tonic::Status),
+    #[error("Missing collection field")]
+    MissingCollectionField,
+    #[error("Failed to convert proto collection")]
+    ConversionError(#[from] CollectionConversionError),
+    #[error("Failed to convert proto segment")]
+    SegmentConversionError(#[from] SegmentConversionError),
+}
+
+impl ChromaError for GetCollectionWithSegmentsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionWithSegmentsError::CollectionNotFound => ErrorCodes::NotFound,
+            GetCollectionWithSegmentsError::FailedToGetCollectionWithSegments(_) => {
+                ErrorCodes::Internal
+            }
+            GetCollectionWithSegmentsError::MissingCollectionField => ErrorCodes::Internal,
+            GetCollectionWithSegmentsError::ConversionError(_) => ErrorCodes::Internal,
+            GetCollectionWithSegmentsError::SegmentConversionError(_) => ErrorCodes::Internal,
         }
     }
 }

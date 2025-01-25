@@ -7,6 +7,8 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::GetCollectionWithSegmentsError;
+
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetCollectionsError;
 use super::sysdb::GetLastCompactionTimeError;
@@ -123,6 +125,26 @@ impl TestSysDb {
             collections.push(collection.clone());
         }
         Ok(collections)
+    }
+
+    pub(crate) async fn get_collection_with_segments(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(Collection, Vec<Segment>), GetCollectionWithSegmentsError> {
+        let inner = self.inner.lock();
+        let collection = match inner.collections.get(&collection_id) {
+            Some(collection) => collection.clone(),
+            None => return Err(GetCollectionWithSegmentsError::CollectionNotFound),
+        };
+
+        let mut segments = Vec::new();
+        for segment in inner.segments.values() {
+            if segment.collection == collection_id {
+                segments.push(segment.clone());
+            }
+        }
+
+        Ok((collection, segments))
     }
 
     pub(crate) async fn get_segments(
