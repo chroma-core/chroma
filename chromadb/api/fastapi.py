@@ -97,6 +97,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         resp_json = self._make_request("get", "/heartbeat")
         return int(resp_json["nanosecond heartbeat"])
 
+    # Migrated to rust in distributed.
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
     def create_database(
@@ -111,6 +112,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={"name": name},
         )
 
+    # Migrated to rust in distributed.
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     def get_database(

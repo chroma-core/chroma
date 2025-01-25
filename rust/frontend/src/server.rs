@@ -5,7 +5,7 @@ use axum::{
     Json, Router,
 };
 use chroma_types::{CreateDatabaseError, CreateDatabaseRequest};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::frontend::Frontend;
@@ -26,6 +26,7 @@ impl FrontendServer {
             // `GET /` goes to `root`
             .route("/", get(root))
             .route("/api/v2/tenants/:tenant/databases", post(create_database))
+            .route("/api/v2/tenants/:tenant/databases/:name", get(get_database))
             .with_state(server);
 
         // TODO: configuration for this
@@ -81,6 +82,38 @@ async fn create_database(
             CreateDatabaseError::FailedToCreateDatabase(_) => {
                 Err(StatusCode::INTERNAL_SERVER_ERROR)
             }
+        },
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct GetDatabaseResponsePayload {
+    id: Uuid,
+    name: String,
+    tenant: String,
+}
+
+async fn get_database(
+    Path((tenant, name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<GetDatabaseResponsePayload>, StatusCode> {
+    tracing::info!("Getting database for tenant: {} and name: {}", tenant, name);
+    let res = server
+        .frontend
+        .get_database(chroma_types::GetDatabaseRequest {
+            tenant_id: tenant,
+            database_name: name,
+        })
+        .await;
+    match res {
+        Ok(res) => Ok(Json(GetDatabaseResponsePayload {
+            id: res.database_id,
+            name: res.database_name,
+            tenant: res.tenant_id,
+        })),
+        Err(e) => match e {
+            chroma_types::GetDatabaseError::NotFound => Err(StatusCode::NOT_FOUND),
+            _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
         },
     }
 }
