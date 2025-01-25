@@ -13,6 +13,7 @@ from chromadb import (
 )
 from chromadb.api import ServerAPI
 from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.segment import SegmentAPI
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 
@@ -35,9 +36,12 @@ from uuid import UUID
 # and remove the python-level types entirely.
 class RustBindingsAPI(ServerAPI):
     bindings: rust_bindings.Bindings
+    # NOTE(hammadb) We proxy all calls to this instance of the Segment API
+    proxy_segment_api: SegmentAPI
 
     def __init__(self, system: System):
         super().__init__(system)
+        self.proxy_segment_api = system.require(SegmentAPI)
 
     # ////////////////////////////// Admin API //////////////////////////////
 
@@ -267,4 +271,4 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_user_identity(self) -> UserIdentity:
-        raise NotImplementedError()
+        return self.proxy_segment_api.get_user_identity()
