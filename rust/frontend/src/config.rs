@@ -3,13 +3,13 @@ use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub(super) struct FrontEndConfig {
+pub(super) struct FrontendConfig {
     pub(super) sysdb: SysDbConfig,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";
 
-impl FrontEndConfig {
+impl FrontendConfig {
     pub(super) fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
@@ -33,12 +33,12 @@ impl FrontEndConfig {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::FrontendConfig;
     use chroma_sysdb::SysDbConfig::Grpc;
-    use crate::config::FrontEndConfig;
 
     #[test]
     fn test_load_config() {
-        let config = FrontEndConfig::load();
+        let config = FrontendConfig::load();
         let Grpc(sysdb_config) = config.sysdb;
         assert_eq!(sysdb_config.host, "sysdb.chroma");
         assert_eq!(sysdb_config.port, 50051);

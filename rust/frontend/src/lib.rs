@@ -1,17 +1,17 @@
-mod frontend;
 mod config;
+mod frontend;
 mod server;
-use frontend::Frontend;
 use chroma_config::Configurable;
-use config::FrontEndConfig;
+use config::FrontendConfig;
+use frontend::Frontend;
 use server::FrontendServer;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 pub async fn frontend_service_entrypoint() {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
-        Ok(config_path) => FrontEndConfig::load_from_path(&config_path),
-        Err(_) => FrontEndConfig::load(),
+        Ok(config_path) => FrontendConfig::load_from_path(&config_path),
+        Err(_) => FrontendConfig::load(),
     };
     // TODO: Initialize tracing.
     let segment_api = Frontend::try_from_config(&config)

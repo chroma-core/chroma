@@ -3,7 +3,7 @@ use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
 use chroma_types::{CreateDatabaseError, CreateDatabaseResponse};
 
-use crate::config::FrontEndConfig;
+use crate::config::FrontendConfig;
 
 #[derive(Clone)]
 pub struct Frontend {
@@ -35,8 +35,8 @@ impl Frontend {
 }
 
 #[async_trait::async_trait]
-impl Configurable<FrontEndConfig> for Frontend {
-    async fn try_from_config(config: &FrontEndConfig) -> Result<Self, Box<dyn ChromaError>> {
+impl Configurable<FrontendConfig> for Frontend {
+    async fn try_from_config(config: &FrontendConfig) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
 
         Ok(Frontend::new(sysdb_client))
