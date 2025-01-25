@@ -4,7 +4,7 @@ from uuid import UUID
 import numpy as np
 from numpy.typing import NDArray
 
-import chromadb.proto.chroma_pb2 as query_pb
+import chromadb.proto.chroma_pb2 as pb
 import chromadb.proto.query_executor_pb2 as query_pb
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.types import Embedding, Where, WhereDocument
@@ -44,7 +44,7 @@ class KNNProjectionRecord(TypedDict):
 
 
 # TODO: Unit tests for this file, handling optional states etc
-def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> query_pb.Vector:
+def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> pb.Vector:
     if encoding == ScalarEncoding.FLOAT32:
         as_bytes = np.array(vector, dtype=np.float32).tobytes()
         proto_encoding = query_pb.ScalarEncoding.FLOAT32
@@ -57,10 +57,10 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> query_pb.Vector
             or {ScalarEncoding.INT32}"
         )
 
-    return query_pb.Vector(dimension=vector.size, vector=as_bytes, encoding=proto_encoding)
+    return pb.Vector(dimension=vector.size, vector=as_bytes, encoding=proto_encoding)
 
 
-def from_proto_vector(vector: query_pb.Vector) -> Tuple[Embedding, ScalarEncoding]:
+def from_proto_vector(vector: pb.Vector) -> Tuple[Embedding, ScalarEncoding]:
     encoding = vector.encoding
     as_array: Union[NDArray[np.int32], NDArray[np.float32]]
     if encoding == query_pb.ScalarEncoding.FLOAT32:
