@@ -13,10 +13,8 @@ use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
-use futures::channel::oneshot::channel;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
 use tonic::transport::{Channel, Endpoint};
