@@ -462,10 +462,10 @@ class EmbeddingFunction(Protocol[D]):
         # Raise an exception if __call__ is not defined since it is expected to be defined
         call = getattr(cls, "__call__")
 
-        def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
-            if not isinstance(input, list):
-                input = [input]
-            result = call(self, input)
+        def __call__(self: EmbeddingFunction[D], embeddable_input: D) -> Embeddings:
+            if not isinstance(embeddable_input, list):
+                embeddable_input = [embeddable_input]
+            result = call(self, embeddable_input)
             assert result is not None
             return validate_embeddings(cast(Embeddings, normalize_embeddings(result)))
 
