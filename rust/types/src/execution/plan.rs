@@ -1,4 +1,4 @@
-use super::operator::{Filter, KnnProjection, Limit, Projection, Scan};
+use super::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan};
 
 /// The `Count` plan shoud ouutput the total number of records in the collection
 pub struct Count {
@@ -17,6 +17,6 @@ pub struct Get {
 pub struct Knn {
     pub scan: Scan,
     pub filter: Filter,
-    pub knn: Vec<Knn>,
+    pub knn: KnnBatch,
     pub proj: KnnProjection,
 }
