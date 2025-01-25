@@ -44,5 +44,6 @@ mod tests {
         assert_eq!(sysdb_config.port, 50051);
         assert_eq!(sysdb_config.connect_timeout_ms, 60000);
         assert_eq!(sysdb_config.request_timeout_ms, 60000);
+        assert_eq!(sysdb_config.num_channels, 5);
     }
 }
