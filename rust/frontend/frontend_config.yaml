@@ -1,0 +1,6 @@
+sysdb:
+  Grpc:
+    host: "sysdb.chroma"
+    port: 50051
+    connect_timeout_ms: 60000
+    request_timeout_ms: 60000

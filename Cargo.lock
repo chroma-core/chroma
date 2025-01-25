@@ -2353,8 +2353,17 @@ dependencies = [
 name = "frontend"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
+ "chroma-config",
+ "chroma-error",
+ "chroma-sysdb",
+ "chroma-types",
+ "figment",
+ "serde",
  "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

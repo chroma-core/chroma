@@ -5,7 +5,10 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
-use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid};
+use chroma_types::{
+    chroma_proto, CreateDatabaseError, SegmentFlushInfo, SegmentFlushInfoConversionError,
+    SegmentUuid,
+};
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
@@ -16,8 +19,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
 use tonic::transport::Endpoint;
-use tonic::Request;
 use tonic::Status;
+use tonic::{Code, Request};
 use uuid::{Error, Uuid};
 
 #[derive(Debug, Clone)]
@@ -28,6 +31,23 @@ pub enum SysDb {
 }
 
 impl SysDb {
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<(), CreateDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_database(database_id, database_name, tenant)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
     pub async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
@@ -222,6 +242,31 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 }
 
 impl GrpcSysDb {
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<(), CreateDatabaseError> {
+        let req = chroma_proto::CreateDatabaseRequest {
+            id: database_id.to_string(),
+            name: database_name,
+            tenant,
+        };
+        let res = self.client.create_database(req).await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::error!("Failed to create database {:?}", e);
+                let res = match e.code() {
+                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
+                    _ => CreateDatabaseError::FailedToCreateDatabase(e.to_string()),
+                };
+                Err(res)
+            }
+        }
+    }
+
     async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
