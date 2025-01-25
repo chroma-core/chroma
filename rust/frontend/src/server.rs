@@ -60,9 +60,10 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateDatabasePayload>,
 ) -> Result<(), StatusCode> {
-    println!(
+    tracing::info!(
         "Creating database for tenant: {} and name: {:?}",
-        tenant, payload
+        tenant,
+        payload
     );
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),

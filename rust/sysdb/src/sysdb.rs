@@ -257,7 +257,7 @@ impl GrpcSysDb {
         match res {
             Ok(_) => Ok(()),
             Err(e) => {
-                tracing::info!("Failed to create database {:?}", e);
+                tracing::error!("Failed to create database {:?}", e);
                 let res = match e.code() {
                     Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
                     _ => CreateDatabaseError::FailedToCreateDatabase(e.to_string()),
