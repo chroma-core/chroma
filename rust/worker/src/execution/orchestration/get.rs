@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_system::{wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, PanicError, TaskError, TaskMessage, TaskResult};
+use chroma_system::{
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    PanicError, TaskError, TaskMessage, TaskResult,
+};
 use chroma_types::CollectionAndSegments;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};

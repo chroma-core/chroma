@@ -1,5 +1,5 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, ConversionError, Segment};
+use crate::{chroma_proto, Segment};
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 use uuid::Uuid;
@@ -91,41 +91,29 @@ impl TryFrom<chroma_proto::Collection> for Collection {
     }
 }
 
+impl From<Collection> for chroma_proto::Collection {
+    fn from(value: Collection) -> Self {
+        Self {
+            id: value.collection_id.0.to_string(),
+            name: value.name,
+            configuration_json_str: String::new(),
+            metadata: value.metadata.map(Into::into),
+            dimension: value.dimension,
+            tenant: value.tenant,
+            database: value.database,
+            log_position: value.log_position,
+            version: value.version,
+            total_records_post_compaction: value.total_records_post_compaction,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CollectionAndSegments {
     pub collection: Collection,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
     pub vector_segment: Segment,
-}
-
-impl TryFrom<chroma_proto::ScanOperator> for CollectionAndSegments {
-    type Error = ConversionError;
-
-    fn try_from(value: chroma_proto::ScanOperator) -> Result<Self, ConversionError> {
-        Ok(Self {
-            collection: value
-                .collection
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            metadata_segment: value
-                .metadata
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            record_segment: value
-                .record
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            vector_segment: value
-                .knn
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-        })
-    }
 }
 
 #[cfg(test)]
