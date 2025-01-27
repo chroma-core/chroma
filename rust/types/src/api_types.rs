@@ -4,6 +4,7 @@ use tonic::Status;
 use uuid::Uuid;
 
 use crate::error::QueryConversionError;
+use crate::{operator::KnnProjection, Where};
 
 #[derive(Clone)]
 pub struct CreateDatabaseRequest {
@@ -36,6 +37,30 @@ impl ChromaError for CreateDatabaseError {
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
+}
+
+#[derive(Clone)]
+pub struct QueryRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: Uuid,
+    pub r#where: Option<Where>,
+    pub include: KnnProjection,
+    pub embeddings: Vec<Vec<f32>>,
+    pub n_results: u32,
+}
+
+#[derive(Clone)]
+// TODO(Sanket): Implement this
+pub struct QueryResponse {}
+
+#[derive(Error, Debug)]
+pub enum QueryError {}
+
+impl ChromaError for QueryError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
 }
 
 #[derive(Clone)]

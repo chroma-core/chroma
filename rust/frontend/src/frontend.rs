@@ -1,7 +1,7 @@
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
-use chroma_types::{CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError};
+use chroma_types::{CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError, QueryError};
 
 use crate::{config::FrontendConfig, executor::Executor};
 
@@ -51,6 +51,13 @@ impl Frontend {
         self.sysdb_client
             .get_database(request.database_name, request.tenant_id)
             .await
+    }
+
+    pub async fn query(
+        &mut self,
+        _: chroma_types::QueryRequest,
+    ) -> Result<chroma_types::QueryResponse, QueryError> {
+        todo!()
     }
 }
 
