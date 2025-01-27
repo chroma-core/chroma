@@ -3,7 +3,8 @@ use crate::in_memory_log::InMemoryLog;
 use crate::types::{
     CollectionInfo, GetCollectionsWithNewDataError, PullLogsError, UpdateCollectionLogOffsetError,
 };
-use chroma_types::{CollectionUuid, LogRecord};
+use crate::PushLogsError;
+use chroma_types::{CollectionUuid, LogRecord, OperationRecord};
 use std::fmt::Debug;
 
 #[derive(Clone, Debug)]
@@ -41,6 +42,17 @@ impl Log {
                 log.read(collection_id, offset, batch_size, end_timestamp)
                     .await
             }
+        }
+    }
+
+    pub async fn push_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        records: Vec<OperationRecord>,
+    ) -> Result<(), PushLogsError> {
+        match self {
+            Log::Grpc(log) => log.push_logs(collection_id, records).await,
+            Log::InMemory(_) => unimplemented!(),
         }
     }
 

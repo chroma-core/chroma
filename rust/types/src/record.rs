@@ -50,6 +50,35 @@ impl_base_convert_error!(RecordConversionError, {
     RecordConversionError::VectorConversionError(inner) => inner.code(),
 });
 
+impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
+    type Error = RecordConversionError;
+
+    fn try_from(operation_record: OperationRecord) -> Result<Self, Self::Error> {
+        let vector = match operation_record.embedding {
+            Some(embedding) => {
+                let len = embedding.len();
+                let encoding = operation_record.encoding.unwrap_or(ScalarEncoding::FLOAT32);
+                Some((embedding, encoding, len))
+            }
+            None => None,
+        };
+
+        let metadata = operation_record.metadata.map(|metadata| metadata.into());
+
+        let proto_vector = match vector {
+            Some(vector) => Some(vector.try_into()?),
+            None => None,
+        };
+
+        Ok(chroma_proto::OperationRecord {
+            id: operation_record.id,
+            vector: proto_vector,
+            metadata,
+            operation: operation_record.operation as i32,
+        })
+    }
+}
+
 impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
     type Error = RecordConversionError;
 
