@@ -34,7 +34,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_log::log::Log;
+use chroma_log::Log;
 use chroma_segment::blockfile_metadata::MetadataSegmentWriter;
 use chroma_segment::blockfile_record::RecordSegmentReader;
 use chroma_segment::blockfile_record::RecordSegmentReaderCreationError;

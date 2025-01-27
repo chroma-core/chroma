@@ -1,12 +1,9 @@
 use chroma_benchmark::datasets::sift::Sift1MData;
-use chroma_log::{
-    log::{InMemoryLog, Log},
-    test::modulo_metadata,
-};
+use chroma_log::{in_memory_log::InMemoryLog, test::modulo_metadata, Log};
 use chroma_segment::test::TestSegment;
 use chroma_types::{
-    Chunk, CollectionUuid, MetadataExpression, LogRecord, MetadataSetValue, Operation,
-    OperationRecord, SetOperator, Where, MetadataComparison,
+    Chunk, CollectionUuid, LogRecord, MetadataComparison, MetadataExpression, MetadataSetValue,
+    Operation, OperationRecord, SetOperator, Where,
 };
 use indicatif::ProgressIterator;
 use worker::execution::operators::{

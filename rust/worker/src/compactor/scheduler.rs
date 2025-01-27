@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
-use chroma_log::log::{CollectionInfo, CollectionRecord, Log};
+use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_sysdb::SysDb;
 use chroma_types::CollectionUuid;
@@ -282,7 +282,7 @@ mod tests {
     use super::*;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
-    use chroma_log::log::{InMemoryLog, InternalLogRecord};
+    use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};

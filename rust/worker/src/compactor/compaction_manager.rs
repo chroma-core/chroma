@@ -12,7 +12,7 @@ use chroma_config::assignment;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_log::log::Log;
+use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
@@ -358,8 +358,7 @@ mod tests {
     use assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
-    use chroma_log::log::InMemoryLog;
-    use chroma_log::log::InternalLogRecord;
+    use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
