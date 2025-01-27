@@ -643,7 +643,9 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
     fixtures = [
         fixture
         for fixture in system_fixtures()
-        if fixture != sqlite_fixture and fixture != sqlite_persistent_fixture
+        if fixture != sqlite_fixture
+        and fixture != sqlite_persistent_fixture
+        and fixture != rust_system
     ]
     return fixtures
 
