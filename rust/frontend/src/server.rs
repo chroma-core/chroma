@@ -4,10 +4,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chroma_types::{
-    operator::{KnnProjection, Projection},
-    CreateDatabaseError, CreateDatabaseRequest,
-};
+use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -137,7 +134,7 @@ pub struct QueryRequestPayload {
     where_document: Option<WhereDocumentPayload>,
     query_embeddings: Vec<Vec<f32>>,
     n_results: Option<u32>,
-    include: Option<chroma_types::IncludePayload>,
+    include: Vec<Include>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -162,14 +159,7 @@ async fn query(
             database_name,
             collection_id: collection_uuid,
             r#where: None,
-            include: KnnProjection {
-                distance: false,
-                projection: Projection {
-                    document: false,
-                    embedding: false,
-                    metadata: false,
-                },
-            },
+            include: Vec::new(),
             embeddings: payload.query_embeddings,
             n_results: payload.n_results.unwrap_or(10),
         })
