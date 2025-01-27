@@ -107,7 +107,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return self.proxy_segment_api.create_collection(
+        return self.bindings.create_collection(
             name, configuration, metadata, get_or_create, tenant, database
         )
 

@@ -603,6 +603,23 @@ def sqlite_persistent() -> Generator[System, None, None]:
     yield from sqlite_persistent_fixture()
 
 
+def rust_system() -> Generator[System, None, None]:
+    """Fixture generator for system using Rust bindings"""
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        is_persistent=False,
+        allow_reset=True,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
         fastapi,
@@ -617,6 +634,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures = [integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        fixtures = [rust_system]
     return fixtures
 
 
@@ -624,7 +643,9 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
     fixtures = [
         fixture
         for fixture in system_fixtures()
-        if fixture != sqlite_fixture and fixture != sqlite_persistent_fixture
+        if fixture != sqlite_fixture
+        and fixture != sqlite_persistent_fixture
+        and fixture != rust_system
     ]
     return fixtures
 
@@ -910,7 +931,7 @@ def is_client_in_process(client: ClientAPI) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def log_tests(request):
+def log_tests(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     """Automatically logs the start and end of each test."""
     test_name = request.node.name
     logger.debug(f"Starting test: {test_name}")
