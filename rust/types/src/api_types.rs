@@ -1,9 +1,11 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
 
 use crate::error::QueryConversionError;
+use crate::Metadata;
 use crate::{operator::KnnProjection, Where};
 
 #[derive(Clone)]
@@ -52,7 +54,25 @@ pub struct QueryRequest {
 
 #[derive(Clone)]
 // TODO(Sanket): Implement this
-pub struct QueryResponse {}
+pub struct QueryResponse {
+    ids: Vec<Vec<String>>,
+    embeddings: Option<Vec<Vec<Vec<f32>>>>,
+    documents: Option<Vec<Vec<String>>>,
+    uri: Option<Vec<Vec<String>>>,
+    metadatas: Option<Vec<Vec<Metadata>>>,
+    distances: Option<Vec<Vec<f32>>>,
+    // TODO(Sanket): Add the include field.
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IncludePayload {
+    pub document: bool,
+    pub metadata: bool,
+    pub uri: bool,
+    pub embedding: bool,
+    pub distance: bool,
+    pub data: bool,
+}
 
 #[derive(Error, Debug)]
 pub enum QueryError {}

@@ -1,7 +1,7 @@
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
-use chroma_types::{CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError, QueryError};
+use chroma_types::{operator::KnnBatchResult, CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError, QueryError};
 
 use crate::{config::FrontendConfig, executor::Executor};
 

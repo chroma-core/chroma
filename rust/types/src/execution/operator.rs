@@ -3,7 +3,10 @@ use std::{
     collections::BinaryHeap,
 };
 
-use crate::{chroma_proto, CollectionAndSegments, CollectionUuid, Metadata, ScalarEncoding, Where};
+use crate::{
+    chroma_proto, CollectionAndSegments, CollectionUuid, IncludePayload, Metadata, QueryResponse,
+    ScalarEncoding, Where,
+};
 
 use super::error::QueryConversionError;
 
@@ -516,6 +519,57 @@ impl TryFrom<KnnProjectionOutput> for chroma_proto::KnnResult {
 }
 
 pub type KnnBatchResult = Vec<KnnProjectionOutput>;
+
+impl TryFrom<(KnnBatchResult, crate::IncludePayload)> for QueryResponse {
+    type Error = ();
+
+    fn try_from(
+        (
+            results,
+            IncludePayload {
+                document,
+                embedding,
+                metadata,
+                uri,
+                distance,
+                data,
+            },
+        ): (KnnBatchResult, IncludePayload),
+    ) -> Result<Self, Self::Error> {
+        let ids: Vec<Vec<String>> = vec![];
+        let mut embeddings: Option<Vec<Vec<Vec<f32>>>>;
+        if embedding {
+            embeddings = Some(vec![]);
+        } else {
+            embeddings = None;
+        }
+        let mut documents: Option<Vec<Vec<String>>>;
+        if document {
+            documents = Some(vec![]);
+        } else {
+            documents = None;
+        }
+        let mut uris: Option<Vec<Vec<String>>>;
+        if uri {
+            uris = Some(vec![]);
+        } else {
+            uris = None;
+        }
+        let mut metadatas: Option<Vec<Vec<Metadata>>>;
+        if metadata {
+            metadatas = Some(vec![]);
+        } else {
+            metadatas = None;
+        }
+        let mut distances: Option<Vec<Vec<f32>>>;
+        if distance {
+            distances = Some(vec![]);
+        } else {
+            distances = None;
+        }
+        todo!()
+    }
+}
 
 pub fn from_proto_knn_batch_result(
     results: chroma_proto::KnnBatchResult,

@@ -132,15 +132,12 @@ pub struct WherePayload {}
 pub struct WhereDocumentPayload {}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct IncludePayload {}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct QueryRequestPayload {
     r#where: Option<WherePayload>,
     where_document: Option<WhereDocumentPayload>,
     query_embeddings: Vec<Vec<f32>>,
     n_results: Option<u32>,
-    include: Option<IncludePayload>,
+    include: Option<chroma_types::IncludePayload>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
