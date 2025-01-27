@@ -3,7 +3,7 @@ use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
 use chroma_types::{CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError};
 
-use crate::config::FrontendConfig;
+use crate::{config::FrontendConfig, executor::Executor};
 
 #[allow(dead_code)]
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -12,12 +12,18 @@ const DEFAULT_DATABASE: &str = "default_database";
 
 #[derive(Clone)]
 pub struct Frontend {
+    #[allow(dead_code)]
+    executor: Executor,
     sysdb_client: Box<sysdb::SysDb>,
 }
 
 impl Frontend {
     pub fn new(sysdb_client: Box<sysdb::SysDb>) -> Self {
-        Frontend { sysdb_client }
+        Frontend {
+            // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
+            executor: Executor::default(),
+            sysdb_client,
+        }
     }
 
     pub async fn create_database(

@@ -14,6 +14,7 @@ serde = { workspace = true }
 async-trait = { workspace = true }
 figment = { workspace = true }
 uuid = { workspace = true }
+tonic = { workspace = true }
 tracing = { workspace = true }
 
 chroma-config = { workspace = true }

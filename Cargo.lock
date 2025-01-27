@@ -2362,6 +2362,7 @@ dependencies = [
  "figment",
  "serde",
  "tokio",
+ "tonic",
  "tracing",
  "uuid",
 ]

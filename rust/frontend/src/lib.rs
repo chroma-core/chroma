@@ -1,4 +1,6 @@
 mod config;
+#[allow(dead_code)]
+mod executor;
 mod frontend;
 mod server;
 use chroma_config::Configurable;
