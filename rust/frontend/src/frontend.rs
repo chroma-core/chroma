@@ -1,3 +1,8 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use mdac::Scorecard;
+
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
@@ -20,14 +25,20 @@ pub struct Frontend {
     #[allow(dead_code)]
     executor: Executor,
     sysdb_client: Box<sysdb::SysDb>,
+    scorecard_enabled: Arc<AtomicBool>,
+    scorecard: Arc<Scorecard<'static>>,
 }
 
 impl Frontend {
     pub fn new(sysdb_client: Box<sysdb::SysDb>) -> Self {
+        let scorecard_enabled = Arc::new(AtomicBool::new(false));
+        let scorecard = Arc::new(Scorecard::new(&(), vec![], 128));
         Frontend {
             // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
             executor: Executor::default(),
             sysdb_client,
+            scorecard_enabled,
+            scorecard,
         }
     }
 

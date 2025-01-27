@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac"]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -29,6 +29,7 @@ thiserror = "1.0.69"
 tokio = { version = "1.41", features = ["macros", "rt-multi-thread"] }
 tokio-util = "0.7.12"
 tonic = "0.12"
+tower = "0.5"
 tracing = "0.1"
 tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
@@ -50,6 +51,7 @@ chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
 chroma-types = { path = "rust/types" }
+mdac = { path = "rust/mdac" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies
