@@ -6,13 +6,14 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
-    chroma_proto, CreateDatabaseError, GetDatabaseError, GetDatabaseResponse, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid,
+    chroma_proto, CollectionAndSegments, CreateDatabaseError, GetDatabaseError,
+    GetDatabaseResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
@@ -97,6 +98,20 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.get_segments(id, r#type, scope, collection).await,
             SysDb::Test(test) => test.get_segments(id, r#type, scope, collection).await,
+        }
+    }
+
+    pub async fn get_collection_with_segments(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
+        match self {
+            SysDb::Grpc(grpc_sys_db) => {
+                grpc_sys_db
+                    .get_collection_with_segments(collection_id)
+                    .await
+            }
+            SysDb::Test(_test_sys_db) => todo!(),
         }
     }
 
@@ -402,6 +417,50 @@ impl GrpcSysDb {
         }
     }
 
+    async fn get_collection_with_segments(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
+        let res = self
+            .client
+            .get_collection_with_segments(chroma_proto::GetCollectionWithSegmentsRequest {
+                id: collection_id.to_string(),
+            })
+            .await?
+            .into_inner();
+        let raw_segment_counts = res.segments.len();
+        let mut segment_map: HashMap<_, _> = res
+            .segments
+            .into_iter()
+            .map(|seg| (seg.scope(), seg))
+            .collect();
+        if segment_map.len() < raw_segment_counts {
+            return Err(GetCollectionWithSegmentsError::DuplicateSegment);
+        }
+        Ok(CollectionAndSegments {
+            collection: res
+                .collection
+                .ok_or(GetCollectionWithSegmentsError::Field(
+                    "collection".to_string(),
+                ))?
+                .try_into()?,
+            metadata_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Metadata)
+                .ok_or(GetCollectionWithSegmentsError::Field(
+                    "metadata".to_string(),
+                ))?
+                .try_into()?,
+            record_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Record)
+                .ok_or(GetCollectionWithSegmentsError::Field("record".to_string()))?
+                .try_into()?,
+            vector_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Vector)
+                .ok_or(GetCollectionWithSegmentsError::Field("vector".to_string()))?
+                .try_into()?,
+        })
+    }
+
     async fn get_last_compaction_time(
         &mut self,
         tenant_ids: Vec<String>,
@@ -516,6 +575,20 @@ impl ChromaError for GetSegmentsError {
             GetSegmentsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum GetCollectionWithSegmentsError {
+    #[error("Failed to convert proto collection")]
+    CollectionConversionError(#[from] CollectionConversionError),
+    #[error("Duplicate segment")]
+    DuplicateSegment,
+    #[error("Missing field: {0}")]
+    Field(String),
+    #[error("Failed to convert proto segment")]
+    SegmentConversionError(#[from] SegmentConversionError),
+    #[error("Failed to fetch")]
+    FailedToGetSegments(#[from] tonic::Status),
 }
 
 #[derive(Error, Debug)]
