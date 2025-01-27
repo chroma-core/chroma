@@ -13,6 +13,7 @@ from chromadb import (
 )
 from chromadb.api import ServerAPI
 from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.segment import SegmentAPI
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 
@@ -35,23 +36,27 @@ from uuid import UUID
 # and remove the python-level types entirely.
 class RustBindingsAPI(ServerAPI):
     bindings: rust_bindings.Bindings
+    # NOTE(hammadb) We proxy all calls to this instance of the Segment API
+    proxy_segment_api: SegmentAPI
 
     def __init__(self, system: System):
         super().__init__(system)
+        self.proxy_segment_api = system.require(SegmentAPI)
+        self.bindings = rust_bindings.Bindings(proxy_frontend=self.proxy_segment_api)
 
     # ////////////////////////////// Admin API //////////////////////////////
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        raise NotImplementedError()
+        return self.bindings.create_database(name, tenant)
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
-        raise NotImplementedError()
+        return self.bindings.get_database(name, tenant)
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        raise NotImplementedError()
+        return self.bindings.delete_database(name, tenant)
 
     @override
     def list_databases(
@@ -60,15 +65,15 @@ class RustBindingsAPI(ServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
-        raise NotImplementedError()
+        return self.bindings.list_databases(limit, offset, tenant)
 
     @override
     def create_tenant(self, name: str) -> None:
-        raise NotImplementedError()
+        return self.bindings.create_tenant(name)
 
     @override
     def get_tenant(self, name: str) -> Tenant:
-        raise NotImplementedError()
+        return self.bindings.get_tenant(name)
 
     # ////////////////////////////// Base API //////////////////////////////
 
@@ -80,7 +85,7 @@ class RustBindingsAPI(ServerAPI):
     def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
-        raise NotImplementedError()
+        return self.proxy_segment_api.count_collections(tenant, database)
 
     @override
     def list_collections(
@@ -90,7 +95,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
-        raise NotImplementedError()
+        return self.proxy_segment_api.list_collections(limit, offset, tenant, database)
 
     @override
     def create_collection(
@@ -102,7 +107,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError()
+        return self.proxy_segment_api.create_collection(
+            name, configuration, metadata, get_or_create, tenant, database
+        )
 
     @override
     def get_collection(
@@ -111,7 +118,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError()
+        return self.proxy_segment_api.get_collection(name, tenant, database)
 
     @override
     def get_or_create_collection(
@@ -122,7 +129,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError()
+        return self.proxy_segment_api.get_or_create_collection(
+            name, configuration, metadata, tenant, database
+        )
 
     @override
     def delete_collection(
@@ -131,7 +140,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        raise NotImplementedError()
+        return self.proxy_segment_api.delete_collection(name, tenant, database)
 
     @override
     def _modify(
@@ -142,7 +151,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        raise NotImplementedError()
+        return self.proxy_segment_api._modify(
+            id, new_name, new_metadata, tenant, database
+        )
 
     @override
     def _count(
@@ -151,7 +162,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        raise NotImplementedError()
+        return self.proxy_segment_api._count(collection_id, tenant, database)  # type: ignore[no-any-return]
 
     @override
     def _peek(
@@ -161,7 +172,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        raise NotImplementedError()
+        return self.proxy_segment_api._peek(collection_id, n, tenant, database)
 
     @override
     def _get(
@@ -179,7 +190,20 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        raise NotImplementedError()
+        return self.proxy_segment_api._get(  # type: ignore[no-any-return]
+            collection_id,
+            ids,
+            where,
+            sort,
+            limit,
+            offset,
+            page,
+            page_size,
+            where_document,
+            include,
+            tenant,
+            database,
+        )
 
     @override
     def _add(
@@ -193,7 +217,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError()
+        return self.proxy_segment_api._add(
+            ids, collection_id, embeddings, metadatas, documents, uris, tenant, database
+        )
 
     @override
     def _update(
@@ -207,7 +233,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError()
+        return self.proxy_segment_api._update(
+            collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
+        )
 
     @override
     def _upsert(
@@ -221,7 +249,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        raise NotImplementedError()
+        return self.proxy_segment_api._upsert(
+            collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
+        )
 
     @override
     def _query(
@@ -235,7 +265,16 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
-        raise NotImplementedError()
+        return self.proxy_segment_api._query(  # type: ignore[no-any-return]
+            collection_id,
+            query_embeddings,
+            n_results,
+            where,
+            where_document,
+            include,
+            tenant,
+            database,
+        )
 
     @override
     def _delete(
@@ -247,24 +286,26 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        raise NotImplementedError()
+        return self.proxy_segment_api._delete(
+            collection_id, ids, where, where_document, tenant, database
+        )
 
     @override
     def reset(self) -> bool:
-        raise NotImplementedError()
+        return self.proxy_segment_api.reset()
 
     @override
     def get_version(self) -> str:
-        raise NotImplementedError()
+        return self.proxy_segment_api.get_version()
 
     @override
     def get_settings(self) -> Settings:
-        raise NotImplementedError()
+        return self.proxy_segment_api.get_settings()
 
     @override
     def get_max_batch_size(self) -> int:
-        raise NotImplementedError()
+        return self.proxy_segment_api.get_max_batch_size()
 
     @override
     def get_user_identity(self) -> UserIdentity:
-        raise NotImplementedError()
+        return self.proxy_segment_api.get_user_identity()
