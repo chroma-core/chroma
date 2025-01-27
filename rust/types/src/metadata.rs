@@ -1,4 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -97,7 +98,7 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
 pub enum MetadataValue {
     Bool(bool),
     Int(i64),

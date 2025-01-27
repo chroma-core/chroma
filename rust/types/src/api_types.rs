@@ -56,7 +56,7 @@ pub struct QueryRequest {
     pub include: Vec<Include>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 // TODO(Sanket): Implement this
 pub struct QueryResponse {
     ids: Vec<Vec<String>>,

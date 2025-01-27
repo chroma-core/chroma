@@ -47,11 +47,12 @@ impl DistributedExecutor {
 // WARN: This is a placeholder impl, which should be replaced by proper initialization from memberlist
 impl Default for DistributedExecutor {
     fn default() -> Self {
-        let endpoint =
-            Endpoint::from_shared("query-service-0.query-service.chroma.svc.cluster.local:50051")
-                .expect("This should be a valid endpoint for query service")
-                .connect_timeout(Duration::from_secs(6))
-                .timeout(Duration::from_secs(1));
+        let endpoint = Endpoint::from_shared(
+            "http://query-service-0.query-service.chroma.svc.cluster.local:50051",
+        )
+        .expect("This should be a valid endpoint for query service")
+        .connect_timeout(Duration::from_secs(6))
+        .timeout(Duration::from_secs(1));
         Self {
             client: QueryExecutorClient::new(Channel::balance_list(once(endpoint).cycle().take(6))),
         }

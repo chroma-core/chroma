@@ -4,7 +4,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include};
+use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include, QueryResponse};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -137,22 +137,20 @@ pub struct QueryRequestPayload {
     include: Vec<Include>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct QueryResponsePayload {}
-
 async fn query(
     Path((tenant, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
-) -> Result<Json<QueryResponsePayload>, StatusCode> {
-    let collection_uuid = Uuid::parse_str(&collection_id).map_err(|_| StatusCode::BAD_REQUEST)?;
+) -> Result<Json<QueryResponse>, (StatusCode, String)> {
+    let collection_uuid = Uuid::parse_str(&collection_id)
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
     tracing::info!(
         "Querying database for tenant: {}, db_name: {} and collection id: {}",
         tenant,
         database_name,
         collection_uuid
     );
-    let res = server
+    match server
         .frontend
         .query(chroma_types::QueryRequest {
             tenant_id: tenant,
@@ -163,10 +161,9 @@ async fn query(
             embeddings: payload.query_embeddings,
             n_results: payload.n_results.unwrap_or(10),
         })
-        .await;
-    // TODO: Implement this.
-    match res {
-        Ok(_) => Ok(Json(QueryResponsePayload {})),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        .await
+    {
+        Ok(result) => Ok(Json(result)),
+        Err(err) => Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
     }
 }
