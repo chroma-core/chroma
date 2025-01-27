@@ -52,4 +52,5 @@ type ICollectionDb interface {
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
 	ListCollectionsToGc() ([]*CollectionToGc, error)
+	UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName string) (int64, error)
 }

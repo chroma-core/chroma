@@ -403,6 +403,7 @@ class SegmentAPI(ServerAPI):
             self._sysdb.delete_collection(
                 existing[0].id, tenant=tenant, database=database
             )
+            # NOTE: delete_segments is a no-op in distributed mode
             self._manager.delete_segments(existing[0].id)
         else:
             raise ValueError(f"Collection {name} does not exist.")

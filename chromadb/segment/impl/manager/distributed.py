@@ -78,10 +78,8 @@ class DistributedSegmentManager(SegmentManager):
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
-        # TODO: this should be a pass, delete_collection is expected to delete segments in
-        # distributed
-        segments = self._sysdb.get_segments(collection=collection_id)
-        return [s["id"] for s in segments]
+        # delete_collection deletes segments in distributed mode
+        return []
 
     @trace_method(
         "DistributedSegmentManager.get_endpoint",

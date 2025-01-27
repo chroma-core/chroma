@@ -5,7 +5,10 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
-use chroma_types::{chroma_proto, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid};
+use chroma_types::{
+    chroma_proto, CreateDatabaseError, GetDatabaseError, GetDatabaseResponse, SegmentFlushInfo,
+    SegmentFlushInfoConversionError, SegmentUuid,
+};
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
     FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
@@ -15,9 +18,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tonic::service::interceptor;
-use tonic::transport::Endpoint;
-use tonic::Request;
+use tonic::transport::{Channel, Endpoint};
 use tonic::Status;
+use tonic::{Code, Request};
 use uuid::{Error, Uuid};
 
 #[derive(Debug, Clone)]
@@ -28,6 +31,34 @@ pub enum SysDb {
 }
 
 impl SysDb {
+    pub async fn get_database(
+        &mut self,
+        database_name: String,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<(), CreateDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_database(database_id, database_name, tenant)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
     pub async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
@@ -157,24 +188,19 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                         return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
                     }
                 };
-
                 let endpoint = endpoint
                     .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
                     .timeout(Duration::from_millis(my_config.request_timeout_ms));
-                match endpoint.connect().await {
-                    Ok(channel) => {
-                        let client: SysDbClient<
-                            interceptor::InterceptedService<
-                                tonic::transport::Channel,
-                                fn(Request<()>) -> Result<Request<()>, Status>,
-                            >,
-                        > = SysDbClient::with_interceptor(channel, client_interceptor);
-                        return Ok(GrpcSysDb { client });
-                    }
-                    Err(e) => {
-                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
-                    }
-                };
+
+                let chans =
+                    Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
+                let client: SysDbClient<
+                    interceptor::InterceptedService<
+                        Channel,
+                        fn(Request<()>) -> Result<Request<()>, Status>,
+                    >,
+                > = SysDbClient::with_interceptor(chans, client_interceptor);
+                Ok(GrpcSysDb { client })
             }
         }
     }
@@ -222,6 +248,68 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 }
 
 impl GrpcSysDb {
+    pub async fn get_database(
+        &mut self,
+        database_name: String,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let req = chroma_proto::GetDatabaseRequest {
+            name: database_name,
+            tenant,
+        };
+        let res = self.client.get_database(req).await;
+        match res {
+            Ok(res) => {
+                let res = match res.into_inner().database {
+                    Some(res) => res,
+                    None => return Err(GetDatabaseError::ResponseEmpty),
+                };
+                let db_id = match Uuid::parse_str(res.id.as_str()) {
+                    Ok(uuid) => uuid,
+                    Err(_) => return Err(GetDatabaseError::IdParsingError),
+                };
+                Ok(GetDatabaseResponse {
+                    database_id: db_id,
+                    database_name: res.name,
+                    tenant_id: res.tenant,
+                })
+            }
+            Err(e) => {
+                tracing::error!("Failed to get database {:?}", e);
+                let res = match e.code() {
+                    Code::NotFound => GetDatabaseError::NotFound,
+                    _ => GetDatabaseError::FailedToGetDatabase(e.to_string()),
+                };
+                Err(res)
+            }
+        }
+    }
+
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<(), CreateDatabaseError> {
+        let req = chroma_proto::CreateDatabaseRequest {
+            id: database_id.to_string(),
+            name: database_name,
+            tenant,
+        };
+        let res = self.client.create_database(req).await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::error!("Failed to create database {:?}", e);
+                let res = match e.code() {
+                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
+                    _ => CreateDatabaseError::FailedToCreateDatabase(e.to_string()),
+                };
+                Err(res)
+            }
+        }
+    }
+
     async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,

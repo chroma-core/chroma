@@ -1,19 +1,23 @@
-use std::sync::Arc;
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use chroma_types::{CreateDatabaseError, CreateDatabaseRequest};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use axum::{extract::State, routing::get, Router};
-
-struct FrontendServerInner {}
+use crate::frontend::Frontend;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
-    _inner: Arc<FrontendServerInner>,
+    frontend: Frontend,
 }
 
 impl FrontendServer {
-    pub fn new() -> FrontendServer {
-        FrontendServer {
-            _inner: Arc::new(FrontendServerInner {}),
-        }
+    pub fn new(frontend: Frontend) -> FrontendServer {
+        FrontendServer { frontend }
     }
 
     #[allow(dead_code)]
@@ -21,6 +25,8 @@ impl FrontendServer {
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/", get(root))
+            .route("/api/v2/tenants/:tenant/databases", post(create_database))
+            .route("/api/v2/tenants/:tenant/databases/:name", get(get_database))
             .with_state(server);
 
         // TODO: configuration for this
@@ -43,4 +49,71 @@ impl FrontendServer {
 // Dummy implementation for now
 async fn root(State(server): State<FrontendServer>) -> &'static str {
     server.root()
+}
+
+#[derive(Deserialize, Debug)]
+struct CreateDatabasePayload {
+    name: String,
+}
+
+async fn create_database(
+    Path(tenant): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<CreateDatabasePayload>,
+) -> Result<(), StatusCode> {
+    tracing::info!(
+        "Creating database for tenant: {} and name: {:?}",
+        tenant,
+        payload
+    );
+    let create_database_request = CreateDatabaseRequest {
+        database_id: Uuid::new_v4(),
+        tenant_id: tenant,
+        database_name: payload.name,
+    };
+    let res = server
+        .frontend
+        .create_database(create_database_request)
+        .await;
+    match res {
+        Ok(_) => Ok(()),
+        Err(e) => match e {
+            CreateDatabaseError::AlreadyExists => Err(StatusCode::CONFLICT),
+            CreateDatabaseError::FailedToCreateDatabase(_) => {
+                Err(StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        },
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct GetDatabaseResponsePayload {
+    id: Uuid,
+    name: String,
+    tenant: String,
+}
+
+async fn get_database(
+    Path((tenant, name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<GetDatabaseResponsePayload>, StatusCode> {
+    tracing::info!("Getting database for tenant: {} and name: {}", tenant, name);
+    let res = server
+        .frontend
+        .get_database(chroma_types::GetDatabaseRequest {
+            tenant_id: tenant,
+            database_name: name,
+        })
+        .await;
+    match res {
+        Ok(res) => Ok(Json(GetDatabaseResponsePayload {
+            id: res.database_id,
+            name: res.database_name,
+            tenant: res.tenant_id,
+        })),
+        Err(e) => match e {
+            chroma_types::GetDatabaseError::NotFound => Err(StatusCode::NOT_FOUND),
+            _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        },
+    }
 }

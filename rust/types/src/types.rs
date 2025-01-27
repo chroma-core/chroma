@@ -27,9 +27,7 @@ pub enum ConversionError {
 
 impl ChromaError for ConversionError {
     fn code(&self) -> ErrorCodes {
-        match self {
-            ConversionError::DecodeError => ErrorCodes::InvalidArgument,
-        }
+        ErrorCodes::InvalidArgument
     }
 }
 

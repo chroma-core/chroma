@@ -29,18 +29,33 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
     if (this.ollamaClient) return;
     try {
       // @ts-ignore
-      this.ollamaClient = await import("ollama/browser").then((ollama) => {
-        // @ts-ignore
-        return new ollama.Ollama({ host: this.url });
-      });
+      const { ollama } = await OllamaEmbeddingFunction.import();
+      this.ollamaClient = new ollama.Ollama({ host: this.url });
     } catch (e) {
       // @ts-ignore
       if (e.code === "MODULE_NOT_FOUND") {
         throw new Error(
-          "Please install the ollama package to use the CohereEmbeddingFunction, `npm install -S ollama`",
+          "Please install the ollama package to use the OllamaEmbeddingFunction, `npm install -S ollama`",
         );
       }
       throw e;
+    }
+  }
+
+  /** @ignore */
+  static async import(): Promise<{
+    // @ts-ignore
+    ollama: typeof import("ollama");
+  }> {
+    try {
+      // @ts-ignore
+      const { ollama } = await import("ollama").then((m) => ({ ollama: m }));
+      // @ts-ignore
+      return { ollama };
+    } catch (e) {
+      throw new Error(
+        "Please install Ollama as a dependency with, e.g. `npm install ollama`",
+      );
     }
   }
 
@@ -54,24 +69,5 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
       .then((response: any) => {
         return response.embeddings;
       });
-    // let embeddings: number[][] = [];
-    // for (let text of texts) {
-    //   const response = await fetch(this.url, {
-    //     method: "POST",
-    //     headers: {
-    //       "Content-Type": "application/json",
-    //     },
-    //     body: JSON.stringify({ model: this.model, prompt: text }),
-    //   });
-    //
-    //   if (!response.ok) {
-    //     throw new Error(
-    //       `Failed to generate embeddings: ${response.status} (${response.statusText})`,
-    //     );
-    //   }
-    //   let finalResponse = await response.json();
-    //   embeddings.push(finalResponse["embedding"]);
-    // }
-    // return embeddings;
   }
 }
