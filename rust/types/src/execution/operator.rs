@@ -56,6 +56,8 @@ impl From<Scan> for chroma_proto::ScanOperator {
     }
 }
 
+pub type CountResult = u32;
+
 /// The `FetchLog` operator fetches logs from the log service
 ///
 /// # Parameters
@@ -411,6 +413,8 @@ impl TryFrom<ProjectionOutput> for chroma_proto::GetResult {
     }
 }
 
+pub type GetResult = ProjectionOutput;
+
 /// The `KnnProjection` operator retrieves record content by offset ids
 /// It is based on `ProjectionOperator`, and it attaches the distance
 /// of the records to the target embedding to the record content
@@ -511,9 +515,11 @@ impl TryFrom<KnnProjectionOutput> for chroma_proto::KnnResult {
     }
 }
 
+pub type KnnBatchResult = Vec<KnnProjectionOutput>;
+
 pub fn from_proto_knn_batch_result(
     results: chroma_proto::KnnBatchResult,
-) -> Result<Vec<KnnProjectionOutput>, QueryConversionError> {
+) -> Result<KnnBatchResult, QueryConversionError> {
     results
         .results
         .into_iter()
@@ -522,7 +528,7 @@ pub fn from_proto_knn_batch_result(
 }
 
 pub fn to_proto_knn_batch_result(
-    results: Vec<KnnProjectionOutput>,
+    results: KnnBatchResult,
 ) -> Result<chroma_proto::KnnBatchResult, QueryConversionError> {
     Ok(chroma_proto::KnnBatchResult {
         results: results

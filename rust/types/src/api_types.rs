@@ -1,6 +1,9 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
+use tonic::Status;
 use uuid::Uuid;
+
+use crate::error::QueryConversionError;
 
 #[derive(Clone)]
 pub struct CreateDatabaseRequest {
@@ -61,4 +64,12 @@ impl ChromaError for GetDatabaseError {
             _ => ErrorCodes::Internal,
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum ExecutorError {
+    #[error("Error converting: {0}")]
+    Conversion(#[from] QueryConversionError),
+    #[error("Error from grpc: {0}")]
+    Grpc(#[from] Status),
 }
