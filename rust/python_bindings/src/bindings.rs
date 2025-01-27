@@ -77,4 +77,28 @@ impl Bindings {
     }
 
     ////////////////////////////// Base API //////////////////////////////
+    #[allow(clippy::too_many_arguments)]
+    fn create_collection(
+        &self,
+        name: String,
+        configuration: PyObject,
+        metadata: PyObject,
+        get_or_create: bool,
+        tenant: String,
+        database: String,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        self.proxy_frontend.call_method1(
+            py,
+            "create_collection",
+            (
+                name,
+                configuration,
+                metadata,
+                get_or_create,
+                tenant,
+                database,
+            ),
+        )
+    }
 }

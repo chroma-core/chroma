@@ -40,7 +40,6 @@ class RustBindingsAPI(ServerAPI):
     proxy_segment_api: SegmentAPI
 
     def __init__(self, system: System):
-        self.bindings = rust_bindings.Bindings()
         super().__init__(system)
         self.proxy_segment_api = system.require(SegmentAPI)
         self.bindings = rust_bindings.Bindings(proxy_frontend=self.proxy_segment_api)
@@ -108,7 +107,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return self.proxy_segment_api.create_collection(
+        return self.bindings.create_collection(
             name, configuration, metadata, get_or_create, tenant, database
         )
 

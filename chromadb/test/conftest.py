@@ -603,12 +603,8 @@ def sqlite_persistent() -> Generator[System, None, None]:
     yield from sqlite_persistent_fixture()
 
 
-@pytest.fixture
 def rust_system() -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" not in os.environ:
-        pytest.skip("Rust binding tests are not enabled")
-
     settings = Settings(
         chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -638,6 +634,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures = [integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        fixtures = [rust_system]
     return fixtures
 
 
