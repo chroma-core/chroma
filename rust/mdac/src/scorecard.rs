@@ -28,6 +28,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -117,11 +118,10 @@ impl<'a> Scorecard<'a> {
     pub fn new(
         metrics: &'a dyn ScorecardMetrics,
         rules: Vec<Rule>,
-        estimate_thread_count: usize,
+        estimate_thread_count: NonZeroUsize,
     ) -> Self {
-        assert!(estimate_thread_count > 0);
         metrics.new_scorecard();
-        let stride = estimate_thread_count * estimate_thread_count;
+        let stride = estimate_thread_count.get() * estimate_thread_count.get();
         let rules = Mutex::new(Arc::new(RuleEvaluator::from(rules)));
         let mut buckets = Vec::with_capacity(stride);
         for _ in 0..stride {
@@ -498,13 +498,13 @@ mod tests {
     #[test]
     fn basics() {
         let metrics = TestMetrics::default();
-        // NOTE(rescrv):  We diverge from the upstream behavior here.  If a tag doesn't match a
-        // rule, it won't be tracked by the scorecard for efficiency reasons.  Thus, an empty
-        // scorecard admits everything.
+        // NOTE(rescrv):  We diverge from the upstream behavior in the Dropbox load management
+        // library here.  If a tag doesn't match a rule, it won't be tracked by the scorecard for
+        // efficiency reasons.  Thus, an empty scorecard admits everything.
         let req1 = &["meta_www", "TeamUserAssoc", "GID_10", "Point_Read"];
         let req2 = &["meta_api", "UserEntity", "GID_20", "Point_Read"];
         let req3 = &["meta_www", "TeamUserAssoc", "GID_30", "List_Read"];
-        let sc = Scorecard::new(&metrics, vec![], 1);
+        let sc = Scorecard::new(&metrics, vec![], 1.try_into().unwrap());
 
         let ret1 = sc.track(req1);
         assert!(ret1.is_some());
@@ -534,7 +534,7 @@ mod tests {
                 vec![Pattern::must("op:*"), Pattern::must("client:*")],
                 10,
             )],
-            1,
+            1.try_into().unwrap(),
         );
         let mut saved_tickets = vec![];
         // Fill to the limit
@@ -574,7 +574,7 @@ mod tests {
                 ),
                 Rule::new(vec![Pattern::must("op:*"), Pattern::must("client:*")], 10),
             ],
-            1,
+            1.try_into().unwrap(),
         );
         let mut saved_tickets = vec![];
         // Fill to the limit specified in the first rule.
