@@ -13,6 +13,7 @@ roaring = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
 uuid = { workspace = true }
+serde = { workspace = true }
 
 chroma-error = { workspace = true }
 

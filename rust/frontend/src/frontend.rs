@@ -1,7 +1,12 @@
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
-use chroma_types::{CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError};
+use chroma_types::{
+    operator::{Filter, KnnBatch, KnnProjection, Projection, Scan},
+    plan::Knn,
+    CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError, Include,
+    QueryError,
+};
 
 use crate::{config::FrontendConfig, executor::Executor};
 
@@ -51,6 +56,43 @@ impl Frontend {
         self.sysdb_client
             .get_database(request.database_name, request.tenant_id)
             .await
+    }
+
+    pub async fn query(
+        &mut self,
+        request: chroma_types::QueryRequest,
+    ) -> Result<chroma_types::QueryResponse, QueryError> {
+        let collectio_id = CollectionUuid(request.collection_id);
+        let collection_and_segments = self
+            .sysdb_client
+            .get_collection_with_segments(collectio_id)
+            .await
+            .map_err(|_| QueryError::CollectionSegments)?;
+        let query_result = self
+            .executor
+            .knn(Knn {
+                scan: Scan {
+                    collection_and_segments,
+                },
+                filter: Filter {
+                    query_ids: None,
+                    where_clause: None,
+                },
+                knn: KnnBatch {
+                    embeddings: request.embeddings,
+                    fetch: request.n_results,
+                },
+                proj: KnnProjection {
+                    projection: Projection {
+                        document: request.include.contains(&Include::Document),
+                        embedding: request.include.contains(&Include::Embedding),
+                        metadata: request.include.contains(&Include::Metadata),
+                    },
+                    distance: request.include.contains(&Include::Distance),
+                },
+            })
+            .await?;
+        Ok((query_result, request.include).into())
     }
 }
 
