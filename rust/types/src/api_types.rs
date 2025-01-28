@@ -56,7 +56,7 @@ pub struct QueryRequest {
     pub r#where: Option<Where>,
     pub embeddings: Vec<Vec<f32>>,
     pub n_results: u32,
-    pub include: Vec<Include>,
+    pub include: IncludeList,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -80,11 +80,36 @@ pub enum Include {
     Uri,
 }
 
+#[derive(Debug, Clone)]
+pub struct IncludeList {
+    pub includes: Vec<Include>,
+}
+
+impl IncludeList {
+    pub fn default_query() -> Self {
+        Self {
+            includes: vec![Include::Document, Include::Metadata, Include::Distance],
+        }
+    }
+    pub fn default_get() -> Self {
+        Self {
+            includes: vec![Include::Document, Include::Metadata],
+        }
+    }
+}
+
 pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
-impl From<(KnnBatchResult, Vec<Include>)> for QueryResponse {
-    fn from((result_vec, include_vec): (KnnBatchResult, Vec<Include>)) -> Self {
+impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
+    fn from(
+        (
+            result_vec,
+            IncludeList {
+                includes: include_vec,
+            },
+        ): (KnnBatchResult, IncludeList),
+    ) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec

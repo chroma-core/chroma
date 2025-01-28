@@ -13,19 +13,16 @@ use mdac::CircuitBreakerConfig;
 use std::f32::consts::E;
 
 use axum::{
-    body::{self, Body, Bytes},
-    extract::{FromRequest, FromRequestParts, Path, State},
-    http::{request::Parts, Request, StatusCode},
+    extract::{Path, State},
+    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
 use chroma_types::{
-    operator::{KnnProjection, Projection},
-    CompositeExpression, DocumentOperator, MetadataExpression, OperationRecord, PrimitiveOperator,
+    CompositeExpression, DocumentOperator, IncludeList, MetadataExpression, PrimitiveOperator,
     Where,
 };
 use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include, QueryResponse};
-use figment::value;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -145,7 +142,7 @@ pub struct QueryRequestPayload {
     r#where: Option<Where>,
     query_embeddings: Vec<Vec<f32>>,
     n_results: Option<u32>,
-    include: Vec<Include>,
+    include: IncludeList,
 }
 
 fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
@@ -496,12 +493,36 @@ impl TryFrom<Value> for QueryRequestPayload {
             None => where_document_clause,
         };
         // Parse includes.
+        let include = match &json_payload["include"] {
+            Value::Null => IncludeList::default_query(),
+            Value::Array(arr) => {
+                let mut include_list = IncludeList {
+                    includes: Vec::new(),
+                };
+                for val in arr {
+                    if !val.is_string() {
+                        return Err(StatusCode::BAD_REQUEST);
+                    }
+                    let include_str = val.as_str().unwrap();
+                    match include_str {
+                        "distance" => include_list.includes.push(Include::Distance),
+                        "document" => include_list.includes.push(Include::Document),
+                        "embedding" => include_list.includes.push(Include::Embedding),
+                        "metadata" => include_list.includes.push(Include::Metadata),
+                        "uri" => include_list.includes.push(Include::Uri),
+                        _ => return Err(StatusCode::BAD_REQUEST),
+                    }
+                }
+                include_list
+            }
+            _ => return Err(StatusCode::BAD_REQUEST),
+        };
 
         Ok(QueryRequestPayload {
             r#where: combined_where,
             query_embeddings: embeddings,
             n_results,
-            include: Vec::new(),
+            include,
         })
     }
 }
@@ -537,8 +558,8 @@ async fn query(
             tenant_id: tenant,
             database_name,
             collection_id: collection_uuid,
-            r#where: None,
-            include: Vec::new(),
+            r#where: payload.r#where,
+            include: payload.include,
             embeddings: payload.query_embeddings,
             n_results: payload.n_results.unwrap_or(10),
         })
