@@ -1,18 +1,17 @@
+use crate::ac::AdmissionControlledService;
+use crate::errors::{ServerError, ValidationError};
+use crate::frontend::Frontend;
 use axum::ServiceExt;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
+
+use chroma_types::{CreateDatabaseRequest, Include, QueryResponse};
 use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include, QueryResponse};
-
-use crate::ac::AdmissionControlledService;
-use crate::frontend::Frontend;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
@@ -80,7 +79,7 @@ async fn create_database(
     Path(tenant): Path<String>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateDatabasePayload>,
-) -> Result<(), StatusCode> {
+) -> Result<(), ServerError> {
     tracing::info!(
         "Creating database for tenant: {} and name: {:?}",
         tenant,
@@ -91,20 +90,11 @@ async fn create_database(
         tenant_id: tenant,
         database_name: payload.name,
     };
-    let res = server
+    server
         .frontend
         .create_database(create_database_request)
-        .await;
-    match res {
-        Ok(_) => Ok(()),
-        Err(e) => match e {
-            CreateDatabaseError::AlreadyExists => Err(StatusCode::CONFLICT),
-            CreateDatabaseError::FailedToCreateDatabase(_) => {
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
-            }
-            CreateDatabaseError::RateLimited => Err(StatusCode::TOO_MANY_REQUESTS),
-        },
-    }
+        .await?;
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -117,7 +107,7 @@ struct GetDatabaseResponsePayload {
 async fn get_database(
     Path((tenant, name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
-) -> Result<Json<GetDatabaseResponsePayload>, StatusCode> {
+) -> Result<Json<GetDatabaseResponsePayload>, ServerError> {
     tracing::info!("Getting database for tenant: {} and name: {}", tenant, name);
     let res = server
         .frontend
@@ -125,18 +115,12 @@ async fn get_database(
             tenant_id: tenant,
             database_name: name,
         })
-        .await;
-    match res {
-        Ok(res) => Ok(Json(GetDatabaseResponsePayload {
-            id: res.database_id,
-            name: res.database_name,
-            tenant: res.tenant_id,
-        })),
-        Err(e) => match e {
-            chroma_types::GetDatabaseError::NotFound => Err(StatusCode::NOT_FOUND),
-            _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
-        },
-    }
+        .await?;
+    Ok(Json(GetDatabaseResponsePayload {
+        id: res.database_id,
+        name: res.database_name,
+        tenant: res.tenant_id,
+    }))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -158,16 +142,17 @@ async fn query(
     Path((tenant, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
-) -> Result<Json<QueryResponse>, (StatusCode, String)> {
-    let collection_uuid = Uuid::parse_str(&collection_id)
-        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+) -> Result<Json<QueryResponse>, ServerError> {
+    let collection_uuid =
+        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
     tracing::info!(
         "Querying database for tenant: {}, db_name: {} and collection id: {}",
         tenant,
         database_name,
         collection_uuid
     );
-    match server
+
+    let res = server
         .frontend
         .query(chroma_types::QueryRequest {
             tenant_id: tenant,
@@ -178,9 +163,7 @@ async fn query(
             embeddings: payload.query_embeddings,
             n_results: payload.n_results.unwrap_or(10),
         })
-        .await
-    {
-        Ok(result) => Ok(Json(result)),
-        Err(err) => Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
-    }
+        .await?;
+
+    Ok(Json(res))
 }

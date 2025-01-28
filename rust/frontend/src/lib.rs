@@ -1,5 +1,6 @@
 mod ac;
 mod config;
+mod errors;
 #[allow(dead_code)]
 mod executor;
 mod frontend;
