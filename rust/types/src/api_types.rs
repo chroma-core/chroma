@@ -28,6 +28,8 @@ pub enum CreateDatabaseError {
     AlreadyExists,
     #[error("Failed to create database: {0}")]
     FailedToCreateDatabase(String),
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for CreateDatabaseError {
@@ -35,6 +37,7 @@ impl ChromaError for CreateDatabaseError {
         match self {
             CreateDatabaseError::AlreadyExists => ErrorCodes::AlreadyExists,
             CreateDatabaseError::FailedToCreateDatabase(_) => ErrorCodes::Internal,
+            CreateDatabaseError::RateLimited => ErrorCodes::ResourceExhausted,
         }
     }
 }

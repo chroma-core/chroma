@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use mdac::Scorecard;
+use mdac::{Scorecard, ScorecardTicket};
 
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
@@ -19,6 +19,19 @@ use crate::{config::FrontendConfig, executor::Executor};
 const DEFAULT_TENANT: &str = "default_tenant";
 #[allow(dead_code)]
 const DEFAULT_DATABASE: &str = "default_database";
+
+struct ScorecardGuard {
+    scorecard: Arc<Scorecard<'static>>,
+    ticket: Option<ScorecardTicket>,
+}
+
+impl Drop for ScorecardGuard {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.ticket.take() {
+            self.scorecard.untrack(ticket);
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Frontend {
@@ -42,6 +55,20 @@ impl Frontend {
         }
     }
 
+    fn scorecard_request(&self, tags: &[&str]) -> Option<ScorecardGuard> {
+        if self.scorecard_enabled.load(Ordering::Relaxed) {
+            self.scorecard.track(tags).map(|ticket| ScorecardGuard {
+                scorecard: Arc::clone(&self.scorecard),
+                ticket: Some(ticket),
+            })
+        } else {
+            Some(ScorecardGuard {
+                scorecard: Arc::clone(&self.scorecard),
+                ticket: None,
+            })
+        }
+    }
+
     pub async fn create_database(
         &mut self,
         request: chroma_types::CreateDatabaseRequest,
@@ -51,18 +78,9 @@ impl Frontend {
             &format!("tenant_id:{}", request.tenant_id),
             &format!("database_id:{}", request.database_id),
         ];
-        let (admit, ticket) = if self.scorecard_enabled.load(Ordering::Relaxed) {
-            if let Some(ticket) = self.scorecard.track(tags) {
-                (true, Some(ticket))
-            } else {
-                (false, None)
-            }
-        } else {
-            (true, None)
-        };
-        if !admit {
-            todo!();
-        }
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(CreateDatabaseError::RateLimited)?;
         let res = self
             .sysdb_client
             .create_database(
@@ -71,9 +89,6 @@ impl Frontend {
                 request.tenant_id,
             )
             .await;
-        if let Some(ticket) = ticket {
-            self.scorecard.untrack(ticket);
-        }
         match res {
             Ok(()) => Ok(CreateDatabaseResponse {}),
             Err(e) => Err(e),

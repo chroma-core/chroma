@@ -102,6 +102,7 @@ async fn create_database(
             CreateDatabaseError::FailedToCreateDatabase(_) => {
                 Err(StatusCode::INTERNAL_SERVER_ERROR)
             }
+            CreateDatabaseError::RateLimited => Err(StatusCode::TOO_MANY_REQUESTS),
         },
     }
 }
