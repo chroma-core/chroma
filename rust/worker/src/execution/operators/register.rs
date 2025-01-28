@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_log::{Log, UpdateCollectionLogOffsetError};
+use chroma_log::Log;
 use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
@@ -86,7 +86,7 @@ pub enum RegisterError {
     #[error("Flush compaction error: {0}")]
     FlushCompactionError(#[from] FlushCompactionError),
     #[error("Update log offset error: {0}")]
-    UpdateLogOffsetError(#[from] UpdateCollectionLogOffsetError),
+    UpdateLogOffsetError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for RegisterError {
