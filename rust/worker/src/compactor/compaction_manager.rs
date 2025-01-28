@@ -360,6 +360,7 @@ mod tests {
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_log::log::InMemoryLog;
     use chroma_log::log::InternalLogRecord;
+    use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
     use chroma_system::Dispatcher;
@@ -528,7 +529,11 @@ mod tests {
             _ => panic!("Invalid sysdb type"),
         }
 
-        let my_member_id = "1".to_string();
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
         let compaction_manager_queue_size = 1000;
         let max_concurrent_jobs = 10;
         let compaction_interval = Duration::from_secs(1);
@@ -538,10 +543,10 @@ mod tests {
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
-        assignment_policy.set_members(vec![my_member_id.clone()]);
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_member_id.clone(),
+            my_member.member_id.clone(),
             log.clone(),
             sysdb.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
@@ -551,7 +556,7 @@ mod tests {
             HashSet::new(),
         );
         // Set memberlist
-        scheduler.set_memberlist(vec![my_member_id.clone()]);
+        scheduler.set_memberlist(vec![my_member.clone()]);
 
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
