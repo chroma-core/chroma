@@ -107,7 +107,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
-            configuration_json: proto_collection.configuration_json_str.parse()?,
+            configuration_json: serde_json::from_str(&proto_collection.configuration_json_str)?,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
@@ -124,7 +124,8 @@ impl From<Collection> for chroma_proto::Collection {
         Self {
             id: value.collection_id.0.to_string(),
             name: value.name,
-            configuration_json_str: String::new(),
+            configuration_json_str: serde_json::to_string(&value.configuration_json)
+                .unwrap_or("{}".to_string()),
             metadata: value.metadata.map(Into::into),
             dimension: value.dimension,
             tenant: value.tenant,

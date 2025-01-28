@@ -45,12 +45,12 @@ impl FrontendServer {
             .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
             .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
-                post(query),
-            )
-            .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
                 get(get_collection),
+            )
+            .route(
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
+                post(query),
             )
             .with_state(server.clone());
         // TODO: configuration for this
