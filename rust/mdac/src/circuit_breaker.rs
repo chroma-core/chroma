@@ -188,4 +188,9 @@ mod tests {
             epsilon
         );
     }
+
+    #[test]
+    fn default_config_disabled() {
+        assert!(!CircuitBreakerConfig::default().enabled());
+    }
 }

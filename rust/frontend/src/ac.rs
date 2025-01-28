@@ -80,6 +80,7 @@ where
                 (StatusCode::TOO_MANY_REQUESTS, "You have been rate limited.").into_response(),
             )))
         } else {
+            // SAFETY(rescrv):  The `inner` future is pinned, so we can safely call `poll` on it.
             let res = unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.inner) }.poll(cx);
             if res.is_ready() {
                 self.circuit_breaker.release_one();
