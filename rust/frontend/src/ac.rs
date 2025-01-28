@@ -14,7 +14,7 @@ pub struct AdmissionControlledService<S: Service<Request<Body>> + Send>
 where
     S::Future: Send,
 {
-    circuit_breaker: Arc<CircuitBreaker>,
+    circuit_breaker: Arc<CircuitBreaker<'static>>,
     service: S,
 }
 
@@ -24,7 +24,7 @@ where
     S::Future: Send,
 {
     pub fn new(config: CircuitBreakerConfig, s: S) -> Self {
-        let circuit_breaker = Arc::new(CircuitBreaker::new(config));
+        let circuit_breaker = Arc::new(CircuitBreaker::new(&(), config));
         Self {
             circuit_breaker,
             service: s,
@@ -63,7 +63,7 @@ where
     S::Future: Send,
 {
     inner: S::Future,
-    circuit_breaker: Arc<CircuitBreaker>,
+    circuit_breaker: Arc<CircuitBreaker<'static>>,
     ticket: bool,
 }
 
