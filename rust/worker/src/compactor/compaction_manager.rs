@@ -366,6 +366,7 @@ mod tests {
     use chroma_system::Dispatcher;
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
+    use serde_json::Value;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -430,6 +431,7 @@ mod tests {
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            config_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
@@ -443,6 +445,7 @@ mod tests {
         let collection_2 = Collection {
             collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
+            config_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),

@@ -1,11 +1,15 @@
 use super::{Metadata, MetadataValueConversionError};
 use crate::{chroma_proto, Segment};
 use chroma_error::{ChromaError, ErrorCodes};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+)]
 pub struct CollectionUuid(pub Uuid);
 
 impl CollectionUuid {
@@ -31,10 +35,11 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Collection {
     pub collection_id: CollectionUuid,
     pub name: String,
+    pub config_json: Value,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
@@ -44,8 +49,27 @@ pub struct Collection {
     pub total_records_post_compaction: u64,
 }
 
+impl Collection {
+    pub fn test_collection(dim: i32) -> Self {
+        Self {
+            collection_id: CollectionUuid::new(),
+            name: "test_collection".to_string(),
+            config_json: Value::Null,
+            metadata: None,
+            dimension: Some(dim),
+            tenant: "default_tenant".to_string(),
+            database: "default_database".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum CollectionConversionError {
+    #[error("Invalid config")]
+    InvalidConfig(#[from] serde_json::Error),
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -55,6 +79,7 @@ pub enum CollectionConversionError {
 impl ChromaError for CollectionConversionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CollectionConversionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             CollectionConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             CollectionConversionError::MetadataValueConversionError(e) => e.code(),
         }
@@ -80,6 +105,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
+            config_json: proto_collection.configuration_json_str.parse()?,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,

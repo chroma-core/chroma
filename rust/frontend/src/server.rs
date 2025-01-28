@@ -1,22 +1,23 @@
-use crate::ac::AdmissionControlledService;
-use crate::errors::{ServerError, ValidationError};
-use crate::frontend::Frontend;
 use axum::ServiceExt;
 use axum::{
     extract::{Path, State},
     routing::{get, post},
     Json, Router,
 };
-use chroma_types::{CreateDatabaseRequest, Include, QueryResponse};
-use mdac::CircuitBreakerConfig;
 
 use chroma_types::{
-    CompositeExpression, DocumentOperator, IncludeList, MetadataExpression, PrimitiveOperator,
-    Where,
+    Collection, CompositeExpression, CreateDatabaseRequest, DocumentOperator, GetCollectionRequest,
+    GetDatabaseRequest, Include, IncludeList, MetadataExpression, PrimitiveOperator, QueryRequest,
+    QueryResponse, Where,
 };
+use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::ac::AdmissionControlledService;
+use crate::errors::{ServerError, ValidationError};
+use crate::frontend::Frontend;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
@@ -39,11 +40,15 @@ impl FrontendServer {
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/", get(root))
-            .route("/api/v2/tenants/:tenant/databases", post(create_database))
-            .route("/api/v2/tenants/:tenant/databases/:name", get(get_database))
+            .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
+            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/query",
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
                 post(query),
+            )
+            .route(
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
+                get(get_collection),
             )
             .with_state(server.clone());
         // TODO: configuration for this
@@ -81,18 +86,18 @@ struct CreateDatabasePayload {
 }
 
 async fn create_database(
-    Path(tenant): Path<String>,
+    Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateDatabasePayload>,
 ) -> Result<(), ServerError> {
     tracing::info!(
         "Creating database for tenant: {} and name: {:?}",
-        tenant,
+        tenant_id,
         payload
     );
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
-        tenant_id: tenant,
+        tenant_id,
         database_name: payload.name,
     };
     server
@@ -110,15 +115,19 @@ struct GetDatabaseResponsePayload {
 }
 
 async fn get_database(
-    Path((tenant, name)): Path<(String, String)>,
+    Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponsePayload>, ServerError> {
-    tracing::info!("Getting database for tenant: {} and name: {}", tenant, name);
+    tracing::info!(
+        "Getting database for tenant: {} and name: {}",
+        tenant_id,
+        database_name
+    );
     let res = server
         .frontend
-        .get_database(chroma_types::GetDatabaseRequest {
-            tenant_id: tenant,
-            database_name: name,
+        .get_database(GetDatabaseRequest {
+            tenant_id,
+            database_name,
         })
         .await?;
     Ok(Json(GetDatabaseResponsePayload {
@@ -126,6 +135,22 @@ async fn get_database(
         name: res.database_name,
         tenant: res.tenant_id,
     }))
+}
+
+async fn get_collection(
+    Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<Collection>, ServerError> {
+    tracing::info!("Getting collection for tenant [{tenant_id}], database [{database_name}], and collection name [{collection_name}]");
+    let collection = server
+        .frontend
+        .get_collection(GetCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_name,
+        })
+        .await?;
+    Ok(Json(collection))
 }
 
 #[derive(Debug, Clone)]
@@ -529,7 +554,7 @@ impl TryFrom<Value> for QueryRequestPayload {
 }
 
 async fn query(
-    Path((tenant, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(json_payload): Json<Value>,
 ) -> Result<Json<QueryResponse>, ServerError> {
@@ -539,15 +564,15 @@ async fn query(
     println!("{:?} Query payload", payload);
     tracing::info!(
         "Querying database for tenant: {}, db_name: {} and collection id: {}",
-        tenant,
+        tenant_id,
         database_name,
         collection_uuid
     );
 
     let res = server
         .frontend
-        .query(chroma_types::QueryRequest {
-            tenant_id: tenant,
+        .query(QueryRequest {
+            tenant_id,
             database_name,
             collection_id: collection_uuid,
             r#where: payload.r#where,

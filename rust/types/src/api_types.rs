@@ -9,6 +9,7 @@ use crate::error::QueryConversionError;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::Collection;
 use crate::Metadata;
 use crate::Where;
 
@@ -49,6 +50,60 @@ pub struct GetDatabaseRequest {
 }
 
 #[derive(Clone)]
+pub struct GetDatabaseResponse {
+    pub database_id: Uuid,
+    pub database_name: String,
+    pub tenant_id: String,
+}
+
+#[derive(Error, Debug)]
+pub enum GetDatabaseError {
+    #[error("Database not found")]
+    NotFound,
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Failed to parse database id")]
+    IdParsingError,
+    #[error("Failed to get database: {0}")]
+    FailedToGetDatabase(String),
+}
+
+impl ChromaError for GetDatabaseError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetDatabaseError::NotFound => ErrorCodes::NotFound,
+            _ => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct GetCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_name: String,
+}
+
+pub type GetCollectionResponse = Collection;
+
+#[derive(Debug, Error)]
+pub enum GetCollectionError {
+    #[error("Collection not found")]
+    NotFound,
+    #[error("Error getting collection from sysdb {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for GetCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionError::NotFound => ErrorCodes::NotFound,
+            GetCollectionError::SysDB(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -60,7 +115,6 @@ pub struct QueryRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-// TODO(Sanket): Implement this
 pub struct QueryResponse {
     ids: Vec<Vec<String>>,
     embeddings: Option<Vec<Vec<Vec<f32>>>>,
@@ -201,34 +255,6 @@ pub enum QueryError {
 impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
-    }
-}
-
-#[derive(Clone)]
-pub struct GetDatabaseResponse {
-    pub database_id: Uuid,
-    pub database_name: String,
-    pub tenant_id: String,
-}
-
-#[derive(Error, Debug)]
-pub enum GetDatabaseError {
-    #[error("Database not found")]
-    NotFound,
-    #[error("Server sent empty response")]
-    ResponseEmpty,
-    #[error("Failed to parse database id")]
-    IdParsingError,
-    #[error("Failed to get database: {0}")]
-    FailedToGetDatabase(String),
-}
-
-impl ChromaError for GetDatabaseError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            GetDatabaseError::NotFound => ErrorCodes::NotFound,
-            _ => ErrorCodes::Internal,
-        }
     }
 }
 
