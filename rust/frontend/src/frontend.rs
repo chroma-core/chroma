@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Projection, Scan},
     plan::Knn,
-    CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError, Include,
-    QueryError,
+    CollectionAndSegments, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse,
+    GetDatabaseError, Include, QueryError,
 };
 
 use crate::{config::FrontendConfig, executor::Executor};
@@ -20,6 +22,8 @@ pub struct Frontend {
     #[allow(dead_code)]
     executor: Executor,
     sysdb_client: Box<sysdb::SysDb>,
+    // WARN: This cache is only used for experiments and should be removed
+    collection_version_cache: HashMap<CollectionUuid, CollectionAndSegments>,
 }
 
 impl Frontend {
@@ -28,6 +32,7 @@ impl Frontend {
             // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
             executor: Executor::default(),
             sysdb_client,
+            collection_version_cache: HashMap::new(),
         }
     }
 
@@ -62,12 +67,25 @@ impl Frontend {
         &mut self,
         request: chroma_types::QueryRequest,
     ) -> Result<chroma_types::QueryResponse, QueryError> {
-        let collectio_id = CollectionUuid(request.collection_id);
-        let collection_and_segments = self
-            .sysdb_client
-            .get_collection_with_segments(collectio_id)
-            .await
-            .map_err(|_| QueryError::CollectionSegments)?;
+        let collection_id = CollectionUuid(request.collection_id);
+        let collection_and_segments =
+            if let Some(cas) = self.collection_version_cache.get(&collection_id) {
+                cas.clone()
+            } else {
+                let collection_and_segments = self
+                    .sysdb_client
+                    .get_collection_with_segments(collection_id)
+                    .await
+                    .map_err(|_| QueryError::CollectionSegments)?;
+                self.collection_version_cache
+                    .insert(collection_id, collection_and_segments.clone());
+                collection_and_segments
+            };
+        // let collection_and_segments = self
+        //     .sysdb_client
+        //     .get_collection_with_segments(collectio_id)
+        //     .await
+        //     .map_err(|_| QueryError::CollectionSegments)?;
         let query_result = self
             .executor
             .knn(Knn {
