@@ -2380,6 +2380,7 @@ dependencies = [
  "chroma-types",
  "figment",
  "mdac",
+ "opentelemetry",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

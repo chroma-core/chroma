@@ -1,35 +1,63 @@
-use crate::ac::AdmissionControlledService;
 use crate::errors::{ServerError, ValidationError};
-use crate::frontend::Frontend;
 use axum::ServiceExt;
 use axum::{
     extract::{Path, State},
     routing::{get, post},
     Json, Router,
 };
-use chroma_types::{CreateDatabaseRequest, Include, QueryResponse};
-use mdac::CircuitBreakerConfig;
-
 use chroma_types::{
     CompositeExpression, DocumentOperator, IncludeList, MetadataExpression, PrimitiveOperator,
     Where,
 };
+use mdac::CircuitBreakerConfig;
+use opentelemetry::global;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::ac::AdmissionControlledService;
+use crate::frontend::Frontend;
+
+struct Stopwatch<'a>(
+    &'a opentelemetry::metrics::Histogram<f64>,
+    std::time::Instant,
+);
+
+impl<'a> Stopwatch<'a> {
+    fn new(histogram: &'a opentelemetry::metrics::Histogram<f64>) -> Self {
+        Self(histogram, std::time::Instant::now())
+    }
+}
+
+impl Drop for Stopwatch<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.1.elapsed().as_secs_f64();
+        self.0.record(elapsed, &[]);
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
     circuit_breaker_config: CircuitBreakerConfig,
     frontend: Frontend,
+    create_database_latency: opentelemetry::metrics::Histogram<f64>,
+    get_database_latency: opentelemetry::metrics::Histogram<f64>,
+    query_latency: opentelemetry::metrics::Histogram<f64>,
 }
 
 impl FrontendServer {
     pub fn new(circuit_breaker_config: CircuitBreakerConfig, frontend: Frontend) -> FrontendServer {
         let frontend = frontend;
+        let meter = global::meter("chroma");
+        let create_database_latency = meter.f64_histogram("create_database_latency").build();
+        let get_database_latency = meter.f64_histogram("get_database_latency").build();
+        let query_latency = meter.f64_histogram("query_latency").build();
         FrontendServer {
             circuit_breaker_config,
             frontend,
+            create_database_latency,
+            get_database_latency,
+            query_latency,
         }
     }
 
@@ -85,6 +113,7 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateDatabasePayload>,
 ) -> Result<(), ServerError> {
+    let _sw = Stopwatch::new(&server.create_database_latency);
     tracing::info!(
         "Creating database for tenant: {} and name: {:?}",
         tenant,
@@ -113,6 +142,7 @@ async fn get_database(
     Path((tenant, name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponsePayload>, ServerError> {
+    let _sw = Stopwatch::new(&server.get_database_latency);
     tracing::info!("Getting database for tenant: {} and name: {}", tenant, name);
     let res = server
         .frontend
@@ -533,6 +563,7 @@ async fn query(
     State(mut server): State<FrontendServer>,
     Json(json_payload): Json<Value>,
 ) -> Result<Json<QueryResponse>, ServerError> {
+    let _sw = Stopwatch::new(&server.query_latency);
     let collection_uuid =
         Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
     let payload = QueryRequestPayload::try_from(json_payload)?;
