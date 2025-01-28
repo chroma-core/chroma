@@ -1,9 +1,8 @@
 use crate::grpc_log::GrpcLog;
 use crate::in_memory_log::InMemoryLog;
-use crate::types::{
-    CollectionInfo, GetCollectionsWithNewDataError, PullLogsError, UpdateCollectionLogOffsetError,
-};
-use crate::PushLogsError;
+use crate::sqlite_log::SqliteLog;
+use crate::types::CollectionInfo;
+use chroma_error::ChromaError;
 use chroma_types::{CollectionUuid, LogRecord, OperationRecord};
 use std::fmt::Debug;
 
@@ -20,6 +19,7 @@ pub struct CollectionRecord {
 
 #[derive(Clone, Debug)]
 pub enum Log {
+    Sqlite(SqliteLog),
     Grpc(GrpcLog),
     #[allow(dead_code)]
     InMemory(InMemoryLog),
@@ -32,16 +32,19 @@ impl Log {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError> {
+    ) -> Result<Vec<LogRecord>, Box<dyn ChromaError>> {
         match self {
-            Log::Grpc(log) => {
-                log.read(collection_id, offset, batch_size, end_timestamp)
-                    .await
-            }
-            Log::InMemory(log) => {
-                log.read(collection_id, offset, batch_size, end_timestamp)
-                    .await
-            }
+            Log::Sqlite(log) => log
+                .read(collection_id, offset, batch_size, end_timestamp)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .read(collection_id, offset, batch_size, end_timestamp)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => Ok(log
+                .read(collection_id, offset, batch_size, end_timestamp)
+                .await),
         }
     }
 
@@ -49,9 +52,16 @@ impl Log {
         &mut self,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
-    ) -> Result<(), PushLogsError> {
+    ) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            Log::Grpc(log) => log.push_logs(collection_id, records).await,
+            Log::Sqlite(log) => log
+                .push_logs(collection_id, records)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .push_logs(collection_id, records)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => unimplemented!(),
         }
     }
@@ -59,10 +69,17 @@ impl Log {
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
-    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+    ) -> Result<Vec<CollectionInfo>, Box<dyn ChromaError>> {
         match self {
-            Log::Grpc(log) => log.get_collections_with_new_data(min_compaction_size).await,
-            Log::InMemory(log) => log.get_collections_with_new_data(min_compaction_size).await,
+            Log::Sqlite(log) => log
+                .get_collections_with_new_data(min_compaction_size)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .get_collections_with_new_data(min_compaction_size)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => Ok(log.get_collections_with_new_data(min_compaction_size).await),
         }
     }
 
@@ -70,15 +87,20 @@ impl Log {
         &mut self,
         collection_id: CollectionUuid,
         new_offset: i64,
-    ) -> Result<(), UpdateCollectionLogOffsetError> {
+    ) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            Log::Grpc(log) => {
-                log.update_collection_log_offset(collection_id, new_offset)
-                    .await
-            }
+            Log::Sqlite(log) => log
+                .update_collection_log_offset(collection_id, new_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .update_collection_log_offset(collection_id, new_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => {
                 log.update_collection_log_offset(collection_id, new_offset)
-                    .await
+                    .await;
+                Ok(())
             }
         }
     }

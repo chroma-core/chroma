@@ -16,9 +16,15 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 uuid = { workspace = true }
 tower = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+bytemuck = { workspace = true }
+futures = { workspace = true }
 
+
+chroma-tracing = { workspace = true, features = ["grpc"] }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
 chroma-segment = { workspace = true }
 chroma-types = { workspace = true }
-chroma-tracing = { workspace = true, features = ["grpc"] }
