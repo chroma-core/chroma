@@ -146,9 +146,7 @@ pub struct QueryRequestPayload {
 }
 
 fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
-    let where_doc_payload = json_payload["where_document"]
-        .as_object()
-        .ok_or(StatusCode::BAD_REQUEST)?;
+    let where_doc_payload = json_payload.as_object().ok_or(StatusCode::BAD_REQUEST)?;
     if where_doc_payload.len() != 1 {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -201,9 +199,7 @@ fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
 }
 
 fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
-    let where_payload = json_payload["where"]
-        .as_object()
-        .ok_or(StatusCode::BAD_REQUEST)?;
+    let where_payload = json_payload.as_object().ok_or(StatusCode::BAD_REQUEST)?;
     if where_payload.len() != 1 {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -476,11 +472,13 @@ impl TryFrom<Value> for QueryRequestPayload {
             .collect::<Result<Vec<Vec<f32>>, _>>()?;
         let mut where_clause = None;
         if !json_payload["where"].is_null() {
-            where_clause = Some(parse_where(&json_payload)?);
+            let where_payload = &json_payload["where"];
+            where_clause = Some(parse_where(where_payload)?);
         }
         let mut where_document_clause = None;
         if !json_payload["where_document"].is_null() {
-            where_document_clause = Some(parse_where_document(&json_payload)?);
+            let where_document_payload = &json_payload["where_document"];
+            where_document_clause = Some(parse_where_document(where_document_payload)?);
         }
         let combined_where = match where_clause {
             Some(where_clause) => match where_document_clause {
