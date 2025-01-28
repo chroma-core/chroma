@@ -58,6 +58,19 @@ pub enum RecordSegmentWriterCreationError {
     BlockfileOpenError(#[from] Box<OpenError>),
 }
 
+impl ChromaError for RecordSegmentWriterCreationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::InvalidSegmentType => ErrorCodes::InvalidArgument,
+            Self::MissingFile(_) => ErrorCodes::Internal,
+            Self::IncorrectNumberOfFiles => ErrorCodes::Internal,
+            Self::InvalidUuid(_) => ErrorCodes::Internal,
+            Self::BlockfileCreateError(e) => e.code(),
+            Self::BlockfileOpenError(e) => e.code(),
+        }
+    }
+}
+
 impl RecordSegmentWriter {
     async fn construct_and_set_data_record(
         &self,
