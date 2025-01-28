@@ -2364,6 +2364,7 @@ dependencies = [
  "mdac",
  "serde",
  "thiserror 1.0.69",
+ "serde_json",
  "tokio",
  "tonic",
  "tower 0.5.1",
