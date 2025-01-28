@@ -2,7 +2,7 @@ use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_log::{Log, PullLogsError};
+use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
@@ -43,7 +43,7 @@ pub type FetchLogOutput = Chunk<LogRecord>;
 #[derive(Error, Debug)]
 pub enum FetchLogError {
     #[error("Error when pulling log: {0}")]
-    PullLog(#[from] PullLogsError),
+    PullLog(#[from] Box<dyn ChromaError>),
     #[error("Error when capturing system time: {0}")]
     SystemTime(#[from] SystemTimeError),
 }

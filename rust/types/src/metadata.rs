@@ -1,5 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Number, Value};
 use std::{
     cmp::Ordering,
@@ -90,6 +90,21 @@ impl TryFrom<&UpdateMetadataValue> for MetadataValue {
             UpdateMetadataValue::Float(value) => Ok(MetadataValue::Float(*value)),
             UpdateMetadataValue::Str(value) => Ok(MetadataValue::Str(value.clone())),
             UpdateMetadataValue::None => Err(MetadataValueConversionError::InvalidValue),
+        }
+    }
+}
+
+impl Serialize for UpdateMetadataValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            UpdateMetadataValue::Bool(b) => serializer.serialize_bool(*b),
+            UpdateMetadataValue::Int(i) => serializer.serialize_i64(*i),
+            UpdateMetadataValue::Float(f) => serializer.serialize_f64(*f),
+            UpdateMetadataValue::Str(s) => serializer.serialize_str(s),
+            UpdateMetadataValue::None => serializer.serialize_unit(),
         }
     }
 }
