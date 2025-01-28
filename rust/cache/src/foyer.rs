@@ -1,5 +1,6 @@
 use super::{CacheError, Weighted};
 use chroma_error::ChromaError;
+use chroma_types::CollectionAndSegments;
 use clap::Parser;
 use foyer::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 use foyer::{
@@ -538,4 +539,10 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + Weighted + StorageValue + 'static,
 {
+}
+
+impl crate::Weighted for CollectionAndSegments {
+    fn weight(&self) -> usize {
+        1
+    }
 }
