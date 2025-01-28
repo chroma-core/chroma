@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
@@ -52,7 +54,7 @@ use tracing::{trace_span, Instrument, Span};
 */
 #[derive(Debug)]
 pub struct Dispatcher {
-    task_queue: Vec<(TaskMessage, Span)>,
+    task_queue: VecDeque<(TaskMessage, Span)>,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,
     queue_size: usize,
@@ -67,7 +69,7 @@ impl Dispatcher {
     /// - worker_queue_size: The size of the worker components queue
     pub fn new(n_worker_threads: usize, queue_size: usize, worker_queue_size: usize) -> Self {
         Dispatcher {
-            task_queue: Vec::new(),
+            task_queue: VecDeque::new(),
             waiters: Vec::new(),
             n_worker_threads,
             queue_size,
@@ -113,7 +115,7 @@ impl Dispatcher {
                         }
                     },
                     None => {
-                        self.task_queue.push((task, Span::current()));
+                        self.task_queue.push_back((task, Span::current()));
                     }
                 }
             }
@@ -126,7 +128,7 @@ impl Dispatcher {
     ///   If no work is available, the worker will be placed in a queue and a task will be sent to
     ///   it when one is available
     async fn handle_work_request(&mut self, request: TaskRequestMessage) {
-        match self.task_queue.pop() {
+        match self.task_queue.pop_front() {
             Some((task, span)) => match request.reply_to.send(task, Some(span)).await {
                 Ok(_) => {}
                 Err(e) => {
