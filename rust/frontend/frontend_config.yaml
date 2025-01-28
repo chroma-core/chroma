@@ -9,3 +9,9 @@ sysdb:
 cache_config:
   lru:
     capacity: 1000
+log:
+  Grpc:
+    host: "logservice.chroma"
+    port: 50051
+    connect_timeout_ms: 5000
+    request_timeout_ms: 5000

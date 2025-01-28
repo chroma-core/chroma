@@ -2376,6 +2376,7 @@ dependencies = [
  "chroma-cache",
  "chroma-config",
  "chroma-error",
+ "chroma-log",
  "chroma-sysdb",
  "chroma-tracing",
  "chroma-types",

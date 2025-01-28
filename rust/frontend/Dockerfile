@@ -4,6 +4,10 @@ ARG RELEASE_MODE=
 
 WORKDIR /
 
+# ADD with an external URL is always run, so this will trigger a cache invalidation (and thus run the below git clone) if the latest commit changes
+ADD "https://api.github.com/repos/chroma-core/hnswlib/commits?per_page=1" hnswlib_commits.json
+RUN git clone https://github.com/chroma-core/hnswlib.git
+
 WORKDIR /chroma/
 
 ENV PROTOC_ZIP=protoc-25.1-linux-x86_64.zip

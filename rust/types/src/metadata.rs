@@ -161,6 +161,17 @@ impl TryFrom<&MetadataValue> for String {
     }
 }
 
+impl From<MetadataValue> for UpdateMetadataValue {
+    fn from(value: MetadataValue) -> Self {
+        match value {
+            MetadataValue::Bool(v) => UpdateMetadataValue::Bool(v),
+            MetadataValue::Int(v) => UpdateMetadataValue::Int(v),
+            MetadataValue::Float(v) => UpdateMetadataValue::Float(v),
+            MetadataValue::Str(v) => UpdateMetadataValue::Str(v),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum MetadataValueConversionError {
     #[error("Invalid metadata value, valid values are: Int, Float, Str")]

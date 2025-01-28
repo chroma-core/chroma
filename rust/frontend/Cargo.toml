@@ -27,3 +27,4 @@ chroma-error = { workspace = true }
 chroma-tracing = { workspace = true }
 mdac = { workspace = true }
 chroma-cache = { workspace = true }
+chroma-log = { workspace = true }
