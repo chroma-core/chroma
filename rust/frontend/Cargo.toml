@@ -17,6 +17,7 @@ uuid = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 tower = { workspace = true }
+thiserror = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-types = { workspace = true }
