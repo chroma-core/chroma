@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use mdac::{Scorecard, ScorecardTicket};
 
-use std::sync::Arc;
-
 use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
