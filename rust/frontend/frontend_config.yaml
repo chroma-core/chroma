@@ -1,3 +1,5 @@
+service_name: "rust-frontend-service"
+otel_endpoint: "http://otel-collector:4317"
 sysdb:
   Grpc:
     host: "sysdb.chroma"

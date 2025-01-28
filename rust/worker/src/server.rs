@@ -8,6 +8,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::log::Log;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
+use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
         self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
@@ -30,7 +31,6 @@ use crate::{
             CountOrchestrator,
         },
     },
-    tracing::util::wrap_span_with_parent_context,
     utils::convert::{from_proto_knn, to_proto_knn_batch_result},
 };
 

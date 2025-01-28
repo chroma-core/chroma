@@ -10,6 +10,8 @@ pub(super) struct FrontendConfig {
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
     pub(super) cache_config: CacheConfig,
+    pub service_name: String,
+    pub otel_endpoint: String,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";

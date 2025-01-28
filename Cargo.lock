@@ -1459,6 +1459,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-tracing"
+version = "0.1.0"
+dependencies = [
+ "fastrace",
+ "fastrace-opentelemetry",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "tonic",
+ "tracing",
+ "tracing-bunyan-formatter",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "chroma-types"
 version = "0.1.0"
 dependencies = [
@@ -2360,6 +2376,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-sysdb",
+ "chroma-tracing",
  "chroma-types",
  "figment",
  "mdac",
@@ -7058,6 +7075,7 @@ dependencies = [
  "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
+ "chroma-tracing",
  "chroma-types",
  "clap",
  "criterion",

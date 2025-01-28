@@ -18,6 +18,7 @@ pub async fn frontend_service_entrypoint() {
         Ok(config_path) => FrontendConfig::load_from_path(&config_path),
         Err(_) => FrontendConfig::load(),
     };
+    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
     // TODO: Initialize tracing.
     let segment_api = Frontend::try_from_config(&config)
         .await
