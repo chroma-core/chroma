@@ -45,6 +45,8 @@ pub struct Frontend {
 impl Frontend {
     pub fn new(sysdb_client: Box<sysdb::SysDb>) -> Self {
         let scorecard_enabled = Arc::new(AtomicBool::new(false));
+        // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
+        // hardware with that many threads anytime soon for frontends, if ever.
         let scorecard = Arc::new(Scorecard::new(&(), vec![], 128));
         Frontend {
             // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
