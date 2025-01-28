@@ -168,7 +168,10 @@ impl Scheduler {
     fn filter_collections(&mut self, collections: Vec<CollectionRecord>) -> Vec<CollectionRecord> {
         let mut filtered_collections = Vec::new();
         let members = self.memberlist.as_ref().unwrap();
-        let members_as_string = members.iter().map(|member| member.id.clone()).collect();
+        let members_as_string = members
+            .iter()
+            .map(|member| member.member_id.clone())
+            .collect();
         self.assignment_policy.set_members(members_as_string);
         for collection in collections {
             let result = self
@@ -374,19 +377,19 @@ mod tests {
         }
 
         let my_member = Member {
-            id: "member_1".to_string(),
-            ip: "10.0.0.1".to_string(),
-            node: "node_1".to_string(),
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
         };
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let max_concurrent_jobs = 1000;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
-        assignment_policy.set_members(vec![my_member.id.clone()]);
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_member.id.clone(),
+            my_member.member_id.clone(),
             log,
             sysdb.clone(),
             scheduler_policy,
@@ -467,14 +470,14 @@ mod tests {
 
         // Test filter_collections
         let member_1 = Member {
-            id: "member_1".to_string(),
-            ip: "10.0.0.1".to_string(),
-            node: "node_1".to_string(),
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
         };
         let member_2 = Member {
-            id: "member_2".to_string(),
-            ip: "10.0.0.2".to_string(),
-            node: "node_2".to_string(),
+            member_id: "member_2".to_string(),
+            member_ip: "10.0.0.2".to_string(),
+            member_node_name: "node_2".to_string(),
         };
         let members = vec![member_1.clone(), member_2.clone()];
         scheduler.set_memberlist(members);
@@ -598,19 +601,19 @@ mod tests {
             _ => panic!("Invalid sysdb type"),
         }
         let my_member = Member {
-            id: "member_1".to_string(),
-            ip: "0.0.0.1".to_string(),
-            node: "node_1".to_string(),
+            member_id: "member_1".to_string(),
+            member_ip: "0.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
         };
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let max_concurrent_jobs = 1000;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
-        assignment_policy.set_members(vec![my_member.id.clone()]);
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_member.id.clone(),
+            my_member.member_id.clone(),
             log,
             sysdb.clone(),
             scheduler_policy,

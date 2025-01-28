@@ -42,11 +42,11 @@ pub(crate) struct MemberListCrd {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Member {
     // The ID of the member
-    pub id: String,
+    pub member_id: String,
     // The IP address of the member
-    pub ip: String,
+    pub member_ip: String,
     // The k8s node name of the member
-    pub node: String,
+    pub member_node_name: String,
 }
 
 /* =========== CR Provider ============== */
@@ -155,6 +155,7 @@ impl CustomResourceMemberlistProvider {
         let stream = stream.then(|event| async move {
             match event {
                 Ok(event) => {
+                    println!("Kube stream event: {:?}", event);
                     tracing::info!("Kube stream event: {:?}", event);
                     Some(event)
                 }
@@ -200,6 +201,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
         event: Option<MemberListKubeResource>,
         _ctx: &ComponentContext<CustomResourceMemberlistProvider>,
     ) {
+        println!("MEMBERLIST EVENT: {:?}", event);
         match event {
             Some(memberlist) => {
                 tracing::info!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
@@ -241,6 +243,36 @@ impl MemberlistProvider for CustomResourceMemberlistProvider {
 mod tests {
     use super::*;
     use chroma_system::System;
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct MemberlistSubscriber {
+        memberlist: Arc<RwLock<Option<Memberlist>>>,
+    }
+
+    impl Component for MemberlistSubscriber {
+        fn queue_size(&self) -> usize {
+            10
+        }
+
+        fn get_name() -> &'static str {
+            "Memberlist subscriber"
+        }
+    }
+
+    #[async_trait]
+    impl Handler<Memberlist> for MemberlistSubscriber {
+        type Result = ();
+
+        async fn handle(
+            &mut self,
+            event: Memberlist,
+            _ctx: &ComponentContext<MemberlistSubscriber>,
+        ) {
+            let mut memberlist = self.memberlist.write();
+            *memberlist = Some(event);
+        }
+    }
 
     #[tokio::test]
     // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
@@ -249,15 +281,37 @@ mod tests {
         // We need to implement a test harness for this. For now, it will silently do nothing
         // if you don't have a kubernetes cluster running locally and only serve as a reminder
         // and demonstration of how to use the memberlist provider.
+
+        let system = System::new();
+
         let kube_ns = "chroma".to_string();
         let kube_client = Client::try_default().await.unwrap();
-        let memberlist_provider = CustomResourceMemberlistProvider::new(
+        let mut memberlist_provider = CustomResourceMemberlistProvider::new(
             "query-service-memberlist".to_string(),
             kube_client.clone(),
             kube_ns.clone(),
             10,
         );
-        let system = System::new();
+
+        let debug_memberlist = Arc::new(RwLock::new(None));
+        let subscriber = MemberlistSubscriber {
+            memberlist: debug_memberlist.clone(),
+        };
+        let subscriber_handle = system.start_component(subscriber);
+        memberlist_provider.subscribe(subscriber_handle.receiver());
         let _handle = system.start_component(memberlist_provider);
+
+        // Wait for a while to let the stream run
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+        let memberlist = debug_memberlist.read();
+        assert!(memberlist.is_some());
+        let memberlist = memberlist.as_ref().unwrap();
+        // The query service memberlist in our test tilt config has two nodes
+        assert_eq!(memberlist.len(), 2);
+        // The ids should be formmatted as "query-service-<node number>"
+        for member in memberlist.iter() {
+            assert!(member.member_id.starts_with("query-service-"));
+        }
     }
 }

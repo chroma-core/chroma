@@ -530,9 +530,9 @@ mod tests {
         }
 
         let my_member = Member {
-            id: "member_1".to_string(),
-            ip: "10.0.0.1".to_string(),
-            node: "node_1".to_string(),
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
         };
         let compaction_manager_queue_size = 1000;
         let max_concurrent_jobs = 10;
@@ -543,10 +543,10 @@ mod tests {
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
-        assignment_policy.set_members(vec![my_member.id.clone()]);
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_member.id.clone(),
+            my_member.member_id.clone(),
             log.clone(),
             sysdb.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
