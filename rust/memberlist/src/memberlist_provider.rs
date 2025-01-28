@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 /* =========== Basic Types ============== */
-pub type Memberlist = Vec<String>;
+pub type Memberlist = Vec<Member>;
 
 #[async_trait]
 pub trait MemberlistProvider: Component + Configurable<MemberlistProviderConfig> {
@@ -37,10 +37,16 @@ pub(crate) struct MemberListCrd {
     pub(crate) members: Vec<Member>,
 }
 
-// Define the structure for items in the members array
+/// A member in a memberlist represents a kubernetes pod
+/// who's been deemed eligible to participate in the memberlist
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub(crate) struct Member {
-    pub(crate) member_id: String,
+pub struct Member {
+    // The ID of the member
+    pub id: String,
+    // The IP address of the member
+    pub ip: String,
+    // The k8s node name of the member
+    pub node: String,
 }
 
 /* =========== CR Provider ============== */
@@ -149,11 +155,11 @@ impl CustomResourceMemberlistProvider {
         let stream = stream.then(|event| async move {
             match event {
                 Ok(event) => {
-                    println!("Kube stream event: {:?}", event);
+                    tracing::info!("Kube stream event: {:?}", event);
                     Some(event)
                 }
                 Err(err) => {
-                    println!("Error acquiring memberlist: {}", err);
+                    tracing::error!("Error acquiring memberlist: {}", err);
                     None
                 }
             }
@@ -196,7 +202,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
     ) {
         match event {
             Some(memberlist) => {
-                println!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
+                tracing::info!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
                 let name = match &memberlist.metadata.name {
                     Some(name) => name,
                     None => {
@@ -208,13 +214,9 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
                     return;
                 }
                 let memberlist = memberlist.spec.members;
-                let memberlist = memberlist
-                    .iter()
-                    .map(|member| member.member_id.clone())
-                    .collect::<Vec<String>>();
                 {
                     let mut curr_memberlist_handle = self.current_memberlist.write();
-                    *curr_memberlist_handle = memberlist;
+                    *curr_memberlist_handle = memberlist.clone();
                 }
                 // Inform subscribers
                 self.notify_subscribers().await;
