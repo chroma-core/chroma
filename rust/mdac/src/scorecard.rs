@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn empty() {
         let metrics = TestMetrics::default();
-        let sc = Scorecard::new(&metrics, vec![], 1);
+        let sc = Scorecard::new(&metrics, vec![], 1.try_into().unwrap());
         let ticket = sc.track(&["foo"]);
         assert!(ticket.is_some());
         sc.untrack(ticket.unwrap());
@@ -464,7 +464,7 @@ mod tests {
                 patterns: vec![Pattern::must("op:*".to_string())],
                 limit: 2,
             }],
-            1,
+            1.try_into().unwrap(),
         );
         let ticket1 = sc.track(&["op:foo"]);
         assert_eq!(metrics.new_scorecard.load(Ordering::SeqCst), 1);

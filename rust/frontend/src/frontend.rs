@@ -47,7 +47,8 @@ impl Frontend {
         let scorecard_enabled = Arc::new(AtomicBool::new(false));
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
-        let scorecard = Arc::new(Scorecard::new(&(), vec![], 128));
+        // SAFETY(rescrv):  This is safe because 128 is non-zero.
+        let scorecard = Arc::new(Scorecard::new(&(), vec![], 128.try_into().unwrap()));
         Frontend {
             // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
             executor: Executor::default(),
