@@ -1,27 +1,37 @@
+use axum::ServiceExt;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
-use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include, QueryResponse};
+use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include, QueryResponse};
+
+use crate::ac::AdmissionControlledService;
 use crate::frontend::Frontend;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
+    circuit_breaker_config: CircuitBreakerConfig,
     frontend: Frontend,
 }
 
 impl FrontendServer {
-    pub fn new(frontend: Frontend) -> FrontendServer {
-        FrontendServer { frontend }
+    pub fn new(circuit_breaker_config: CircuitBreakerConfig, frontend: Frontend) -> FrontendServer {
+        let frontend = frontend;
+        FrontendServer {
+            circuit_breaker_config,
+            frontend,
+        }
     }
 
     #[allow(dead_code)]
     pub async fn run(server: FrontendServer) {
+        let circuit_breaker_config = server.circuit_breaker_config.clone();
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/", get(root))
@@ -31,12 +41,18 @@ impl FrontendServer {
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/query",
                 post(query),
             )
-            .with_state(server);
-
+            .with_state(server.clone());
         // TODO: configuration for this
         // TODO: tracing
         let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-        axum::serve(listener, app).await.unwrap();
+        if circuit_breaker_config.enabled() {
+            let service = AdmissionControlledService::new(circuit_breaker_config, app);
+            axum::serve(listener, service.into_make_service())
+                .await
+                .unwrap();
+        } else {
+            axum::serve(listener, app).await.unwrap();
+        };
     }
 
     ////////////////////////// Method Implementations //////////////////////
@@ -86,6 +102,7 @@ async fn create_database(
             CreateDatabaseError::FailedToCreateDatabase(_) => {
                 Err(StatusCode::INTERNAL_SERVER_ERROR)
             }
+            CreateDatabaseError::RateLimited => Err(StatusCode::TOO_MANY_REQUESTS),
         },
     }
 }

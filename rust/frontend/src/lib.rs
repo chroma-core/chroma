@@ -1,8 +1,10 @@
+mod ac;
 mod config;
 #[allow(dead_code)]
 mod executor;
 mod frontend;
 mod server;
+
 use chroma_config::Configurable;
 use config::FrontendConfig;
 use frontend::Frontend;
@@ -19,6 +21,6 @@ pub async fn frontend_service_entrypoint() {
     let segment_api = Frontend::try_from_config(&config)
         .await
         .expect("Error creating SegmentApi from config");
-    let server = FrontendServer::new(segment_api);
+    let server = FrontendServer::new(config.circuit_breaker, segment_api);
     FrontendServer::run(server).await;
 }

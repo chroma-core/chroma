@@ -1,10 +1,13 @@
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
+use mdac::CircuitBreakerConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub(super) struct FrontendConfig {
     pub(super) sysdb: SysDbConfig,
+    #[serde(default = "CircuitBreakerConfig::default")]
+    pub circuit_breaker: CircuitBreakerConfig,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";

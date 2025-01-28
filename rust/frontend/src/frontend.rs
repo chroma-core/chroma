@@ -1,3 +1,8 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use mdac::{Scorecard, ScorecardTicket};
+
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
@@ -15,19 +20,55 @@ const DEFAULT_TENANT: &str = "default_tenant";
 #[allow(dead_code)]
 const DEFAULT_DATABASE: &str = "default_database";
 
+struct ScorecardGuard {
+    scorecard: Arc<Scorecard<'static>>,
+    ticket: Option<ScorecardTicket>,
+}
+
+impl Drop for ScorecardGuard {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.ticket.take() {
+            self.scorecard.untrack(ticket);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Frontend {
     #[allow(dead_code)]
     executor: Executor,
     sysdb_client: Box<sysdb::SysDb>,
+    scorecard_enabled: Arc<AtomicBool>,
+    scorecard: Arc<Scorecard<'static>>,
 }
 
 impl Frontend {
     pub fn new(sysdb_client: Box<sysdb::SysDb>) -> Self {
+        let scorecard_enabled = Arc::new(AtomicBool::new(false));
+        // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
+        // hardware with that many threads anytime soon for frontends, if ever.
+        // SAFETY(rescrv):  This is safe because 128 is non-zero.
+        let scorecard = Arc::new(Scorecard::new(&(), vec![], 128.try_into().unwrap()));
         Frontend {
             // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
             executor: Executor::default(),
             sysdb_client,
+            scorecard_enabled,
+            scorecard,
+        }
+    }
+
+    fn scorecard_request(&self, tags: &[&str]) -> Option<ScorecardGuard> {
+        if self.scorecard_enabled.load(Ordering::Relaxed) {
+            self.scorecard.track(tags).map(|ticket| ScorecardGuard {
+                scorecard: Arc::clone(&self.scorecard),
+                ticket: Some(ticket),
+            })
+        } else {
+            Some(ScorecardGuard {
+                scorecard: Arc::clone(&self.scorecard),
+                ticket: None,
+            })
         }
     }
 
@@ -35,6 +76,14 @@ impl Frontend {
         &mut self,
         request: chroma_types::CreateDatabaseRequest,
     ) -> Result<chroma_types::CreateDatabaseResponse, CreateDatabaseError> {
+        let tags = &[
+            "op:create_database",
+            &format!("tenant_id:{}", request.tenant_id),
+            &format!("database_id:{}", request.database_id),
+        ];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(CreateDatabaseError::RateLimited)?;
         let res = self
             .sysdb_client
             .create_database(
