@@ -7,22 +7,13 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-
 use chroma_types::{CreateDatabaseRequest, Include, QueryResponse};
 use mdac::CircuitBreakerConfig;
-use std::f32::consts::E;
 
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    routing::{get, post},
-    Json, Router,
-};
 use chroma_types::{
     CompositeExpression, DocumentOperator, IncludeList, MetadataExpression, PrimitiveOperator,
     Where,
 };
-use chroma_types::{CreateDatabaseError, CreateDatabaseRequest, Include, QueryResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -145,17 +136,21 @@ pub struct QueryRequestPayload {
     include: IncludeList,
 }
 
-fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
-    let where_doc_payload = json_payload.as_object().ok_or(StatusCode::BAD_REQUEST)?;
+fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationError> {
+    let where_doc_payload = json_payload
+        .as_object()
+        .ok_or(ValidationError::InvalidWhereDocumentClause)?;
     if where_doc_payload.len() != 1 {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(ValidationError::InvalidWhereDocumentClause);
     }
     let (key, value) = where_doc_payload.iter().next().unwrap();
     // Check if it is a composite expression.
     if key == "$and" {
         let logical_operator = chroma_types::BooleanOperator::And;
         // Check that the value is list type.
-        let children = value.as_array().ok_or(StatusCode::BAD_REQUEST)?;
+        let children = value
+            .as_array()
+            .ok_or(ValidationError::InvalidWhereDocumentClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -169,7 +164,9 @@ fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
     if key == "$or" {
         let logical_operator = chroma_types::BooleanOperator::Or;
         // Check that the value is list type.
-        let children = value.as_array().ok_or(StatusCode::BAD_REQUEST)?;
+        let children = value
+            .as_array()
+            .ok_or(ValidationError::InvalidWhereDocumentClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -181,7 +178,7 @@ fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
         }));
     }
     if !value.is_string() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(ValidationError::InvalidWhereDocumentClause);
     }
     let value_str = value.as_str().unwrap();
     let operator_type;
@@ -190,7 +187,7 @@ fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
     } else if key == "not_contains" {
         operator_type = DocumentOperator::NotContains;
     } else {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(ValidationError::InvalidWhereDocumentClause);
     }
     Ok(Where::Document(chroma_types::DocumentExpression {
         operator: operator_type,
@@ -198,17 +195,21 @@ fn parse_where_document(json_payload: &Value) -> Result<Where, StatusCode> {
     }))
 }
 
-fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
-    let where_payload = json_payload.as_object().ok_or(StatusCode::BAD_REQUEST)?;
+fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
+    let where_payload = json_payload
+        .as_object()
+        .ok_or(ValidationError::InvalidWhereClause)?;
     if where_payload.len() != 1 {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(ValidationError::InvalidWhereClause);
     }
     let (key, value) = where_payload.iter().next().unwrap();
     // Check if it is a composite expression.
     if key == "$and" {
         let logical_operator = chroma_types::BooleanOperator::And;
         // Check that the value is list type.
-        let children = value.as_array().ok_or(StatusCode::BAD_REQUEST)?;
+        let children = value
+            .as_array()
+            .ok_or(ValidationError::InvalidWhereClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -222,7 +223,9 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
     if key == "$or" {
         let logical_operator = chroma_types::BooleanOperator::Or;
         // Check that the value is list type.
-        let children = value.as_array().ok_or(StatusCode::BAD_REQUEST)?;
+        let children = value
+            .as_array()
+            .ok_or(ValidationError::InvalidWhereClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -275,7 +278,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
         let value_obj = value.as_object().unwrap();
         // value_obj should have exactly one key.
         if value_obj.len() != 1 {
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(ValidationError::InvalidWhereClause);
         }
         let (operator, operand) = value_obj.iter().next().unwrap();
         if operand.is_array() {
@@ -285,18 +288,18 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             } else if operator == "$nin" {
                 set_operator = chroma_types::SetOperator::NotIn;
             } else {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(ValidationError::InvalidWhereClause);
             }
             let operand = operand.as_array().unwrap();
             if operand.is_empty() {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(ValidationError::InvalidWhereClause);
             }
             if operand[0].is_string() {
                 let operand_str = operand
                     .iter()
                     .map(|val| {
                         val.as_str()
-                            .ok_or(StatusCode::BAD_REQUEST)
+                            .ok_or(ValidationError::InvalidWhereClause)
                             .map(|s| s.to_string())
                     })
                     .collect::<Result<Vec<String>, _>>()?;
@@ -311,7 +314,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             if operand[0].is_boolean() {
                 let operand_bool = operand
                     .iter()
-                    .map(|val| val.as_bool().ok_or(StatusCode::BAD_REQUEST))
+                    .map(|val| val.as_bool().ok_or(ValidationError::InvalidWhereClause))
                     .collect::<Result<Vec<bool>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
@@ -324,7 +327,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             if operand[0].is_f64() {
                 let operand_f64 = operand
                     .iter()
-                    .map(|val| val.as_f64().ok_or(StatusCode::BAD_REQUEST))
+                    .map(|val| val.as_f64().ok_or(ValidationError::InvalidWhereClause))
                     .collect::<Result<Vec<f64>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
@@ -337,7 +340,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             if operand[0].is_i64() {
                 let operand_i64 = operand
                     .iter()
-                    .map(|val| val.as_i64().ok_or(StatusCode::BAD_REQUEST))
+                    .map(|val| val.as_i64().ok_or(ValidationError::InvalidWhereClause))
                     .collect::<Result<Vec<i64>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
@@ -347,7 +350,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
                     ),
                 }));
             }
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(ValidationError::InvalidWhereClause);
         }
         if operand.is_string() {
             let operand_str = operand.as_str().unwrap();
@@ -357,7 +360,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
             } else {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(ValidationError::InvalidWhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -375,7 +378,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
             } else {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(ValidationError::InvalidWhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -401,7 +404,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
             } else {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(ValidationError::InvalidWhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -427,7 +430,7 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
             } else {
-                return Err(StatusCode::BAD_REQUEST);
+                return Err(ValidationError::InvalidWhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -437,33 +440,33 @@ fn parse_where(json_payload: &Value) -> Result<Where, StatusCode> {
                 ),
             }));
         }
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(ValidationError::InvalidWhereClause);
     }
-    Err(StatusCode::BAD_REQUEST)
+    Err(ValidationError::InvalidWhereClause)
 }
 
 impl TryFrom<Value> for QueryRequestPayload {
-    type Error = StatusCode;
+    type Error = ValidationError;
 
     fn try_from(json_payload: Value) -> Result<Self, Self::Error> {
         let n_results = match &json_payload["n_results"] {
             Value::Null => None,
             Value::Number(n) => Some(n.as_u64().unwrap() as u32),
-            _ => return Err(StatusCode::BAD_REQUEST),
+            _ => return Err(ValidationError::InvalidnresultsClause),
         };
         let embeddings = json_payload["query_embeddings"]
             .as_array()
-            .ok_or(StatusCode::BAD_REQUEST)?
+            .ok_or(ValidationError::InvalidEmbeddings)?
             .iter()
             .map(|inner_array| {
                 inner_array
                     .as_array()
-                    .ok_or(StatusCode::BAD_REQUEST)
+                    .ok_or(ValidationError::InvalidEmbeddings)
                     .and_then(|arr| {
                         arr.iter()
                             .map(|num| {
                                 num.as_f64()
-                                    .ok_or(StatusCode::BAD_REQUEST)
+                                    .ok_or(ValidationError::InvalidEmbeddings)
                                     .map(|n| n as f32)
                             })
                             .collect::<Result<Vec<f32>, _>>()
@@ -499,7 +502,7 @@ impl TryFrom<Value> for QueryRequestPayload {
                 };
                 for val in arr {
                     if !val.is_string() {
-                        return Err(StatusCode::BAD_REQUEST);
+                        return Err(ValidationError::InvalidIncludeList);
                     }
                     let include_str = val.as_str().unwrap();
                     match include_str {
@@ -508,12 +511,12 @@ impl TryFrom<Value> for QueryRequestPayload {
                         "embedding" => include_list.includes.push(Include::Embedding),
                         "metadata" => include_list.includes.push(Include::Metadata),
                         "uri" => include_list.includes.push(Include::Uri),
-                        _ => return Err(StatusCode::BAD_REQUEST),
+                        _ => return Err(ValidationError::InvalidIncludeList),
                     }
                 }
                 include_list
             }
-            _ => return Err(StatusCode::BAD_REQUEST),
+            _ => return Err(ValidationError::InvalidIncludeList),
         };
 
         Ok(QueryRequestPayload {
@@ -532,12 +535,7 @@ async fn query(
 ) -> Result<Json<QueryResponse>, ServerError> {
     let collection_uuid =
         Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
-    let payload = QueryRequestPayload::try_from(json_payload).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            "Error parsing json to custom struct".to_string(),
-        )
-    })?;
+    let payload = QueryRequestPayload::try_from(json_payload)?;
     println!("{:?} Query payload", payload);
     tracing::info!(
         "Querying database for tenant: {}, db_name: {} and collection id: {}",
@@ -545,10 +543,6 @@ async fn query(
         database_name,
         collection_uuid
     );
-    println!("{:?} Query json", json_payload);
-    let payload =
-        QueryRequestPayload::try_from(json_payload).map_err(|_| StatusCode::BAD_REQUEST)?;
-    println!("{:?} Query payload", payload);
 
     let res = server
         .frontend
