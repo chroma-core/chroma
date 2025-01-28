@@ -112,6 +112,7 @@ pub struct CompactOrchestrator {
     state: ExecutionState,
     // Component Execution
     collection_id: CollectionUuid,
+    segments: Vec<Segment>,
     // Dependencies
     log: Box<Log>,
     sysdb: Box<SysDb>,
@@ -130,7 +131,6 @@ pub struct CompactOrchestrator {
     max_compaction_size: usize,
     max_partition_size: usize,
     // Populated during the compaction process
-    cached_segments: Option<Vec<Segment>>,
     writers: OnceCell<CompactWriters>,
     flush_results: Vec<SegmentFlushInfo>,
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
@@ -232,6 +232,7 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         collection_id: CollectionUuid,
+        segments: Vec<Segment>,
         log: Box<Log>,
         sysdb: Box<SysDb>,
         blockfile_provider: BlockfileProvider,
@@ -246,6 +247,7 @@ impl CompactOrchestrator {
             compaction_job,
             state: ExecutionState::Pending,
             collection_id,
+            segments,
             log,
             sysdb,
             blockfile_provider,
@@ -257,7 +259,6 @@ impl CompactOrchestrator {
             result_channel,
             max_compaction_size,
             max_partition_size,
-            cached_segments: None,
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             segment_spans: HashMap::new(),
@@ -278,14 +279,13 @@ impl CompactOrchestrator {
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;
 
-        let segments = self.get_all_segments().await.unwrap();
-        for segment in segments {
+        for segment in self.segments.clone() {
             if segment.r#type == SegmentType::BlockfileMetadata
                 || segment.r#type == SegmentType::BlockfileRecord
             {
                 let prefetch_task = wrap(
                     Box::new(PrefetchSegmentOperator::new()),
-                    PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
+                    PrefetchSegmentInput::new(segment.clone(), self.blockfile_provider.clone()),
                     ctx.receiver(),
                 );
 
@@ -504,26 +504,12 @@ impl CompactOrchestrator {
         self.send(task, ctx).await;
     }
 
-    async fn get_all_segments(&mut self) -> Result<Vec<Segment>, GetSegmentsError> {
-        if let Some(segments) = &self.cached_segments {
-            return Ok(segments.clone());
-        }
-
-        let segments = self
-            .sysdb
-            .get_segments(None, None, None, self.collection_id)
-            .await?;
-
-        self.cached_segments = Some(segments.clone());
-        Ok(segments)
-    }
-
     async fn get_segment(
         &mut self,
         segment_type: SegmentType,
     ) -> Result<Segment, GetSegmentWritersError> {
-        let segments = self.get_all_segments().await?;
-        let segment = segments
+        let segment = self
+            .segments
             .iter()
             .find(|segment| segment.r#type == segment_type)
             .cloned();

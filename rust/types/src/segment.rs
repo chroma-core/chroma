@@ -36,7 +36,7 @@ impl std::fmt::Display for SegmentUuid {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SegmentType {
     HnswDistributed,
     BlockfileMetadata,
@@ -74,7 +74,7 @@ impl TryFrom<&str> for SegmentType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Segment {
     pub id: SegmentUuid,
     pub r#type: SegmentType,
