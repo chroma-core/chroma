@@ -37,9 +37,9 @@ impl std::fmt::Display for CollectionUuid {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Collection {
-    pub collection_id: CollectionUuid,
+    pub id: CollectionUuid,
     pub name: String,
-    pub config_json: Value,
+    pub configuration_json: Value,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
@@ -52,9 +52,9 @@ pub struct Collection {
 impl Collection {
     pub fn test_collection(dim: i32) -> Self {
         Self {
-            collection_id: CollectionUuid::new(),
+            id: CollectionUuid::new(),
             name: "test_collection".to_string(),
-            config_json: Value::Null,
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(dim),
             tenant: "default_tenant".to_string(),
@@ -103,9 +103,9 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             None => None,
         };
         Ok(Collection {
-            collection_id,
+            id: collection_id,
             name: proto_collection.name,
-            config_json: proto_collection.configuration_json_str.parse()?,
+            configuration_json: proto_collection.configuration_json_str.parse()?,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
@@ -120,7 +120,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
 impl From<Collection> for chroma_proto::Collection {
     fn from(value: Collection) -> Self {
         Self {
-            id: value.collection_id.0.to_string(),
+            id: value.id.0.to_string(),
             name: value.name,
             configuration_json_str: String::new(),
             metadata: value.metadata.map(Into::into),
@@ -162,10 +162,7 @@ mod test {
             total_records_post_compaction: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
-        assert_eq!(
-            converted_collection.collection_id,
-            CollectionUuid(Uuid::nil())
-        );
+        assert_eq!(converted_collection.id, CollectionUuid(Uuid::nil()));
         assert_eq!(converted_collection.name, "foo".to_string());
         assert_eq!(converted_collection.metadata, None);
         assert_eq!(converted_collection.dimension, None);

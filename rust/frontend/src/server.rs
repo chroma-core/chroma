@@ -7,8 +7,8 @@ use axum::{
 
 use chroma_types::{
     Collection, CompositeExpression, CreateDatabaseRequest, DocumentOperator, GetCollectionRequest,
-    GetDatabaseRequest, Include, IncludeList, MetadataExpression, PrimitiveOperator, QueryRequest,
-    QueryResponse, Where,
+    GetDatabaseRequest, GetTenantResponse, GetUserIdentityResponse, Include, IncludeList,
+    MetadataExpression, PrimitiveOperator, QueryRequest, QueryResponse, Where,
 };
 use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,8 @@ impl FrontendServer {
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/", get(root))
+            .route("/api/v2/auth/identity", get(get_user_identity))
+            .route("/api/v2/tenants/:tenant_id", get(get_tenant))
             .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
             .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
             .route(
@@ -78,6 +80,22 @@ impl FrontendServer {
 // Dummy implementation for now
 async fn root(State(server): State<FrontendServer>) -> &'static str {
     server.root()
+}
+
+// Dummy implementation for now
+async fn get_user_identity() -> Json<GetUserIdentityResponse> {
+    Json(GetUserIdentityResponse {
+        user_id: String::new(),
+        tenant: "default_tenant".to_string(),
+        databases: vec!["default_database".to_string()],
+    })
+}
+
+// Dummy implementation for now
+async fn get_tenant() -> Json<GetTenantResponse> {
+    Json(GetTenantResponse {
+        name: "default_tenant".to_string(),
+    })
 }
 
 #[derive(Deserialize, Debug)]

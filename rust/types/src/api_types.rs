@@ -13,6 +13,18 @@ use crate::Collection;
 use crate::Metadata;
 use crate::Where;
 
+#[derive(Clone, Deserialize, Serialize)]
+pub struct GetUserIdentityResponse {
+    pub user_id: String,
+    pub tenant: String,
+    pub databases: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct GetTenantResponse {
+    pub name: String,
+}
+
 #[derive(Clone)]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,

@@ -85,6 +85,7 @@ class Collection(
         database: str,
         version: int = 0,
         log_position: int = 0,
+        **kwargs
     ):
         super().__init__(
             id=id,

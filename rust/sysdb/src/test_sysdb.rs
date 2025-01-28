@@ -40,7 +40,7 @@ impl TestSysDb {
         let mut inner = self.inner.lock();
         inner
             .collections
-            .insert(collection.collection_id, collection);
+            .insert(collection.id, collection);
     }
 
     pub fn add_segment(&mut self, segment: Segment) {
@@ -62,7 +62,7 @@ impl TestSysDb {
         tenant: Option<String>,
         database: Option<String>,
     ) -> bool {
-        if collection_id.is_some() && collection_id.unwrap() != collection.collection_id {
+        if collection_id.is_some() && collection_id.unwrap() != collection.id {
             return false;
         }
         if name.is_some() && name.unwrap() != collection.name {
@@ -186,7 +186,7 @@ impl TestSysDb {
         collection.total_records_post_compaction = total_records_post_compaction;
         inner
             .collections
-            .insert(collection.collection_id, collection);
+            .insert(collection.id, collection);
         let mut last_compaction_time = match inner.tenant_last_compaction_time.get(&tenant_id) {
             Some(last_compaction_time) => *last_compaction_time,
             None => 0,
