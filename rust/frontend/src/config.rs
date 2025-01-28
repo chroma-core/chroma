@@ -1,3 +1,4 @@
+use chroma_cache::CacheConfig;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
@@ -8,6 +9,7 @@ pub(super) struct FrontendConfig {
     pub(super) sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
+    pub(super) cache_config: CacheConfig,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";
@@ -37,6 +39,7 @@ impl FrontendConfig {
 #[cfg(test)]
 mod tests {
     use crate::config::FrontendConfig;
+    use chroma_cache::CacheConfig;
     use chroma_sysdb::SysDbConfig::Grpc;
 
     #[test]
@@ -48,5 +51,10 @@ mod tests {
         assert_eq!(sysdb_config.connect_timeout_ms, 60000);
         assert_eq!(sysdb_config.request_timeout_ms, 60000);
         assert_eq!(sysdb_config.num_channels, 5);
+        if let CacheConfig::Memory(cache_config) = config.cache_config {
+            assert_eq!(cache_config.capacity, 1000);
+        } else {
+            panic!("Expected Memory cache config");
+        }
     }
 }

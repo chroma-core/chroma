@@ -3,14 +3,15 @@ use std::sync::Arc;
 
 use mdac::{Scorecard, ScorecardTicket};
 
+use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Projection, Scan},
     plan::Knn,
-    CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, GetDatabaseError, Include,
-    QueryError,
+    CollectionAndSegments, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse,
+    GetDatabaseError, Include, QueryError,
 };
 
 use crate::{config::FrontendConfig, executor::Executor};
@@ -40,10 +41,14 @@ pub struct Frontend {
     sysdb_client: Box<sysdb::SysDb>,
     scorecard_enabled: Arc<AtomicBool>,
     scorecard: Arc<Scorecard<'static>>,
+    collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
 }
 
 impl Frontend {
-    pub fn new(sysdb_client: Box<sysdb::SysDb>) -> Self {
+    pub fn new(
+        sysdb_client: Box<sysdb::SysDb>,
+        collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
+    ) -> Self {
         let scorecard_enabled = Arc::new(AtomicBool::new(false));
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
@@ -55,6 +60,7 @@ impl Frontend {
             sysdb_client,
             scorecard_enabled,
             scorecard,
+            collections_with_segments_cache,
         }
     }
 
@@ -111,12 +117,39 @@ impl Frontend {
         &mut self,
         request: chroma_types::QueryRequest,
     ) -> Result<chroma_types::QueryResponse, QueryError> {
-        let collectio_id = CollectionUuid(request.collection_id);
-        let collection_and_segments = self
-            .sysdb_client
-            .get_collection_with_segments(collectio_id)
+        let collection_id = CollectionUuid(request.collection_id);
+        let collection_and_segments = match self
+            .collections_with_segments_cache
+            .get(&collection_id)
             .await
-            .map_err(|_| QueryError::CollectionSegments)?;
+            .map_err(|_| QueryError::CollectionSegments)?
+        {
+            Some(collection_and_segments) => collection_and_segments,
+            None => {
+                let collection_and_segments_sysdb = self
+                    .sysdb_client
+                    .get_collection_with_segments(collection_id)
+                    .await
+                    .map_err(|_| QueryError::CollectionSegments)?;
+                // NOTE: We use a double check pattern here so that if another thread concurrently
+                // inserts into the cache by the time we reach here, we keep the one that was inserted.
+                // This ensures that all threads get the same reference for the cache.
+                match self
+                    .collections_with_segments_cache
+                    .get(&collection_id)
+                    .await
+                    .map_err(|_| QueryError::CollectionSegments)?
+                {
+                    Some(collection_and_segments) => collection_and_segments,
+                    None => {
+                        self.collections_with_segments_cache
+                            .insert(collection_id, collection_and_segments_sysdb.clone())
+                            .await;
+                        collection_and_segments_sysdb
+                    }
+                }
+            }
+        };
         let query_result = self
             .executor
             .knn(Knn {
@@ -150,6 +183,15 @@ impl Configurable<FrontendConfig> for Frontend {
     async fn try_from_config(config: &FrontendConfig) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
 
-        Ok(Frontend::new(sysdb_client))
+        let collections_with_segments_cache = chroma_cache::from_config::<
+            CollectionUuid,
+            CollectionAndSegments,
+        >(&config.cache_config)
+        .await?;
+
+        Ok(Frontend::new(
+            sysdb_client,
+            collections_with_segments_cache.into(),
+        ))
     }
 }

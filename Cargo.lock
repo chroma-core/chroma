@@ -2356,6 +2356,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "chroma-cache",
  "chroma-config",
  "chroma-error",
  "chroma-sysdb",
