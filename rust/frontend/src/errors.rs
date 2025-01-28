@@ -8,15 +8,32 @@ use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum ValidationError {
+pub enum ValidationError {
     #[error("Collection ID is not a valid UUIDv4")]
     InvalidCollectionId,
+    #[error("Error parsing where clause")]
+    InvalidWhereClause,
+    #[error("Error parsing where document clause")]
+    InvalidWhereDocumentClause,
+    #[error("Error parsing n results")]
+    InvalidnresultsClause,
+    #[error("Error parsing embeddings")]
+    InvalidEmbeddings,
+    #[error("Error parsing include list")]
+    InvalidIncludeList,
 }
 
 impl ChromaError for ValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             ValidationError::InvalidCollectionId => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::InvalidWhereClause => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::InvalidWhereDocumentClause => {
+                chroma_error::ErrorCodes::InvalidArgument
+            }
+            ValidationError::InvalidnresultsClause => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::InvalidEmbeddings => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::InvalidIncludeList => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
 }
