@@ -18,6 +18,59 @@
 //! serving or reject it altogether based upon current system conditions.
 
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
+
+/////////////////////////////////////// CircuitBreakerMetrics //////////////////////////////////////
+
+/// Metrics about what's happening inside a circuit breaker.
+pub trait CircuitBreakerMetrics: std::fmt::Debug + Send + Sync {
+    /// A clicker that increments every time a new circuit breaker is created.
+    fn new_scorecard(&self) {}
+    /// A circuit breaker successfully tracked a request under the limit.
+    fn successful_admit_one(&self) {}
+    /// A circuit breaker failed to track a request.
+    fn failed_admit_one(&self) {}
+    /// A successful release.
+    fn successful_release_one(&self) {}
+}
+
+impl CircuitBreakerMetrics for () {}
+
+impl<T: CircuitBreakerMetrics> CircuitBreakerMetrics for Arc<T> {
+    fn new_scorecard(&self) {
+        self.as_ref().new_scorecard()
+    }
+
+    fn successful_admit_one(&self) {
+        self.as_ref().successful_admit_one()
+    }
+
+    fn failed_admit_one(&self) {
+        self.as_ref().failed_admit_one()
+    }
+
+    fn successful_release_one(&self) {
+        self.as_ref().successful_release_one()
+    }
+}
+
+impl<T: CircuitBreakerMetrics> CircuitBreakerMetrics for &T {
+    fn new_scorecard(&self) {
+        (*self).new_scorecard()
+    }
+
+    fn successful_admit_one(&self) {
+        (*self).successful_admit_one()
+    }
+
+    fn failed_admit_one(&self) {
+        (*self).failed_admit_one()
+    }
+
+    fn successful_release_one(&self) {
+        (*self).successful_release_one()
+    }
+}
 
 /////////////////////////////////////// CircuitBreakerConfig ///////////////////////////////////////
 
@@ -38,23 +91,27 @@ impl CircuitBreakerConfig {
 
 ////////////////////////////////////////// CircuitBreaker //////////////////////////////////////////
 
-pub struct CircuitBreaker {
+pub struct CircuitBreaker<'a> {
+    metrics: &'a dyn CircuitBreakerMetrics,
     count: AtomicI64,
 }
 
-impl CircuitBreaker {
+impl<'a> CircuitBreaker<'a> {
     /// Construct a new circuit breaker from the configuration.
-    pub fn new(config: CircuitBreakerConfig) -> Self {
+    pub fn new(metrics: &'a dyn CircuitBreakerMetrics, config: CircuitBreakerConfig) -> Self {
         let count = AtomicI64::new(config.requests as i64);
-        Self { count }
+        metrics.new_scorecard();
+        Self { metrics, count }
     }
 
     /// Admit one request into the circuit breaker.  If the request is admitted, a ticket is
     /// returned.  If the request is not admitted, no ticket is returned.
     pub fn admit_one(&self) -> bool {
         if self.count.fetch_sub(1, Ordering::Relaxed) > 0 {
+            self.metrics.successful_admit_one();
             true
         } else {
+            self.metrics.failed_admit_one();
             self.count.fetch_add(1, Ordering::Relaxed);
             false
         }
@@ -62,6 +119,7 @@ impl CircuitBreaker {
 
     /// Release a previously returned ticket.
     pub fn release_one(&self) {
+        self.metrics.successful_release_one();
         self.count.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -79,13 +137,13 @@ mod tests {
     #[test]
     fn empty() {
         let config = CircuitBreakerConfig { requests: 1 };
-        let _semaphore = CircuitBreaker::new(config);
+        let _semaphore = CircuitBreaker::new(&(), config);
     }
 
     #[test]
     fn serial() {
         let config = CircuitBreakerConfig { requests: 1 };
-        let semaphore = CircuitBreaker::new(config);
+        let semaphore = CircuitBreaker::new(&(), config);
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(10) {
             if semaphore.admit_one() {
@@ -149,7 +207,7 @@ mod tests {
     ) -> (u64, u64) {
         let success = Arc::new(AtomicU64::new(0));
         let failure = Arc::new(AtomicU64::new(0));
-        let semaphore = Arc::new(CircuitBreaker::new(config));
+        let semaphore = Arc::new(CircuitBreaker::new(&(), config));
         let now = Instant::now();
         let mut tasks = vec![];
         for _ in 0..num_tasks {
