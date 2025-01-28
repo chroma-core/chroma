@@ -24,7 +24,7 @@ pub struct TestSegment {
 impl TestSegment {
     pub fn new_with_dimension(dimension: usize) -> Self {
         let collection = Collection::test_collection(dimension as i32);
-        let collection_uuid = collection.id;
+        let collection_uuid = collection.collection_id;
         Self {
             blockfile_provider: test_arrow_blockfile_provider(2 << 22),
             hnsw_provider: test_hnsw_index_provider(),

@@ -162,7 +162,7 @@ mod tests {
         let tenant_1 = "tenant_1".to_string();
         let total_records_post_compaction: u64 = 5;
         let collection_1 = Collection {
-            id: collection_uuid_1,
+            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
             configuration_json: Value::Null,
             metadata: None,
@@ -178,7 +178,7 @@ mod tests {
             CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            id: collection_uuid_2,
+            collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
             configuration_json: Value::Null,
             metadata: None,

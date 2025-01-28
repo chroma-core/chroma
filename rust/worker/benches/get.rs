@@ -18,7 +18,7 @@ fn trivial_get(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
@@ -36,7 +36,7 @@ fn get_false_filter(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
@@ -54,7 +54,7 @@ fn get_true_filter(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
@@ -72,7 +72,7 @@ fn get_true_filter_limit(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
@@ -90,7 +90,7 @@ fn get_true_filter_limit_projection(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     GetOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,

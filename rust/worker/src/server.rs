@@ -141,7 +141,7 @@ impl WorkerServer {
             // Note that we query using the incoming log position this is critical for correctness
             start_log_offset_id: collection_and_segments.collection.log_position as u32 + 1,
             maximum_fetch_count: None,
-            collection_uuid: collection_and_segments.collection.id,
+            collection_uuid: collection_and_segments.collection.collection_id,
         }
     }
 

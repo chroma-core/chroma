@@ -149,7 +149,7 @@ impl Scheduler {
                     }
 
                     collection_records.push(CollectionRecord {
-                        collection_id: collection[0].id,
+                        collection_id: collection[0].collection_id,
                         tenant_id: collection[0].tenant.clone(),
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
@@ -344,7 +344,7 @@ mod tests {
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            id: collection_uuid_1,
+            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
             configuration_json: Value::Null,
             metadata: None,
@@ -358,7 +358,7 @@ mod tests {
 
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            id: collection_uuid_2,
+            collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
             configuration_json: Value::Null,
             metadata: None,
@@ -584,7 +584,7 @@ mod tests {
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            id: collection_uuid_1,
+            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
             configuration_json: Value::Null,
             metadata: None,

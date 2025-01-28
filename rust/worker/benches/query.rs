@@ -32,7 +32,7 @@ fn trivial_knn_filter(
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
     let hnsw_provider = test_segments.hnsw_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     KnnFilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
@@ -50,7 +50,7 @@ fn always_true_knn_filter(
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
     let hnsw_provider = test_segments.hnsw_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     KnnFilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
@@ -68,7 +68,7 @@ fn always_false_knn_filter(
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
     let hnsw_provider = test_segments.hnsw_provider.clone();
-    let collection_uuid = test_segments.collection.id;
+    let collection_uuid = test_segments.collection.collection_id;
     KnnFilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
