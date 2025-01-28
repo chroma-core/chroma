@@ -477,26 +477,49 @@ impl TryFrom<Value> for QueryRequestPayload {
                     })
             })
             .collect::<Result<Vec<Vec<f32>>, _>>()?;
+        let mut where_clause = None;
+        if !json_payload["where"].is_null() {
+            where_clause = Some(parse_where(&json_payload)?);
+        }
+        let mut where_document_clause = None;
+        if !json_payload["where_document"].is_null() {
+            where_document_clause = Some(parse_where_document(&json_payload)?);
+        }
+        let combined_where = match where_clause {
+            Some(where_clause) => match where_document_clause {
+                Some(where_document_clause) => Some(Where::Composite(CompositeExpression {
+                    operator: chroma_types::BooleanOperator::And,
+                    children: vec![where_clause, where_document_clause],
+                })),
+                None => Some(where_clause),
+            },
+            None => where_document_clause,
+        };
+        // Parse includes.
 
         Ok(QueryRequestPayload {
-            r#where: None,
-            query_embeddings: vec![],
-            n_results: None,
-            include: None,
+            r#where: combined_where,
+            query_embeddings: embeddings,
+            n_results,
+            include: Vec::new(),
         })
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct QueryResponsePayload {}
-
 async fn query(
     Path((tenant, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<QueryRequestPayload>,
+    Json(json_payload): Json<Value>,
 ) -> Result<Json<QueryResponse>, ServerError> {
     let collection_uuid =
         Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
+    let payload = QueryRequestPayload::try_from(json_payload).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Error parsing json to custom struct".to_string(),
+        )
+    })?;
+    println!("{:?} Query payload", payload);
     tracing::info!(
         "Querying database for tenant: {}, db_name: {} and collection id: {}",
         tenant,
