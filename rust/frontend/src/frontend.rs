@@ -46,6 +46,23 @@ impl Frontend {
         &mut self,
         request: chroma_types::CreateDatabaseRequest,
     ) -> Result<chroma_types::CreateDatabaseResponse, CreateDatabaseError> {
+        let tags = &[
+            "op:create_database",
+            &format!("tenant_id:{}", request.tenant_id),
+            &format!("database_id:{}", request.database_id),
+        ];
+        let (admit, ticket) = if self.scorecard_enabled.load(Ordering::Relaxed) {
+            if let Some(ticket) = self.scorecard.track(tags) {
+                (true, Some(ticket))
+            } else {
+                (false, None)
+            }
+        } else {
+            (true, None)
+        };
+        if !admit {
+            todo!();
+        }
         let res = self
             .sysdb_client
             .create_database(
@@ -54,6 +71,9 @@ impl Frontend {
                 request.tenant_id,
             )
             .await;
+        if let Some(ticket) = ticket {
+            self.scorecard.untrack(ticket);
+        }
         match res {
             Ok(()) => Ok(CreateDatabaseResponse {}),
             Err(e) => Err(e),
