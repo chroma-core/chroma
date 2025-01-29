@@ -1,7 +1,9 @@
+use crate::{config::FrontendConfig, executor::Executor};
 use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
+use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Projection, Scan},
     plan::Knn,
@@ -16,8 +18,6 @@ use chroma_types::{
 use mdac::{Scorecard, ScorecardTicket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
-use crate::{config::FrontendConfig, executor::Executor};
 
 #[allow(dead_code)]
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -37,7 +37,7 @@ impl Drop for ScorecardGuard {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Frontend {
     #[allow(dead_code)]
     executor: Executor,
@@ -53,6 +53,7 @@ impl Frontend {
         sysdb_client: Box<sysdb::SysDb>,
         collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
         log_client: Box<chroma_log::Log>,
+        executor: Executor,
     ) -> Self {
         let scorecard_enabled = Arc::new(AtomicBool::new(false));
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
@@ -60,8 +61,7 @@ impl Frontend {
         // SAFETY(rescrv):  This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), vec![], 128.try_into().unwrap()));
         Frontend {
-            // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
-            executor: Executor::default(),
+            executor,
             sysdb_client,
             log_client,
             scorecard_enabled,
@@ -282,8 +282,10 @@ impl Frontend {
 }
 
 #[async_trait::async_trait]
-impl Configurable<FrontendConfig> for Frontend {
-    async fn try_from_config(config: &FrontendConfig) -> Result<Self, Box<dyn ChromaError>> {
+impl Configurable<(FrontendConfig, System)> for Frontend {
+    async fn try_from_config(
+        (config, system): &(FrontendConfig, System),
+    ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
         let log_client = chroma_log::from_config(&config.log).await?;
 
@@ -293,10 +295,13 @@ impl Configurable<FrontendConfig> for Frontend {
         >(&config.cache_config)
         .await?;
 
+        let executor =
+            Executor::try_from_config(&(config.executor.clone(), system.clone())).await?;
         Ok(Frontend::new(
             sysdb_client,
             collections_with_segments_cache.into(),
             log_client,
+            executor,
         ))
     }
 }

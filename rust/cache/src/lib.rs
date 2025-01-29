@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::hash::Hash;
 
 use ::foyer::{StorageKey, StorageValue};
@@ -58,7 +59,7 @@ pub enum CacheConfig {
 
 /// A cache offers async access.  It's unspecified whether this cache is persistent or not.
 #[async_trait::async_trait]
-pub trait Cache<K, V>: Send + Sync
+pub trait Cache<K, V>: Send + Sync + Debug
 where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + Weighted + 'static,

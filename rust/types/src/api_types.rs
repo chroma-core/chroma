@@ -1,10 +1,3 @@
-use chroma_error::{ChromaError, ErrorCodes};
-use serde::Deserialize;
-use serde::Serialize;
-use thiserror::Error;
-use tonic::Status;
-use uuid::Uuid;
-
 use crate::error::QueryConversionError;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
@@ -12,6 +5,13 @@ use crate::operator::ProjectionRecord;
 use crate::Collection;
 use crate::Metadata;
 use crate::Where;
+use chroma_config::assignment::rendezvous_hash::AssignmentError;
+use chroma_error::{ChromaError, ErrorCodes};
+use serde::Deserialize;
+use serde::Serialize;
+use thiserror::Error;
+use tonic::Status;
+use uuid::Uuid;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct GetUserIdentityResponse {
@@ -307,4 +307,22 @@ pub enum ExecutorError {
     Conversion(#[from] QueryConversionError),
     #[error("Error from grpc: {0}")]
     Grpc(#[from] Status),
+    #[error("Memberlist is empty")]
+    EmptyMemberlist,
+    #[error("Assignment error: {0}")]
+    AssignmentError(#[from] AssignmentError),
+    #[error("No client found for node: {0}")]
+    NoClientFound(String),
+}
+
+impl ChromaError for ExecutorError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
+            ExecutorError::Grpc(_) => ErrorCodes::Internal,
+            ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
+            ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
+            ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
+        }
+    }
 }
