@@ -194,13 +194,7 @@ impl HnswIndexProvider {
         };
 
         // See the comment in open() for why we lock the write mutex here.
-        let _guard = self
-            .write_mutex
-            .lock()
-            .instrument(
-                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
-            )
-            .await;
+        let _guard = self.write_mutex.lock().await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(&new_id, cache_key).await {
@@ -218,7 +212,6 @@ impl HnswIndexProvider {
         }
     }
 
-    #[instrument(skip(self, buf))]
     async fn copy_bytes_to_local_file(
         &self,
         file_path: &Path,
@@ -293,7 +286,7 @@ impl HnswIndexProvider {
         }
 
         // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for actual write to local disk")).await;
+        let _guard = self.write_mutex.lock().await;
         // Do nothing if the file exists, we assume the concurrent writer wrote the same data.
         // This is a safe assumption because the data is immutable from our perspective.
         if !file_path.exists() {
@@ -309,7 +302,6 @@ impl HnswIndexProvider {
         remove_temporary_files(&random_dir).await
     }
 
-    #[instrument]
     async fn load_hnsw_segment_into_directory(
         &self,
         source_id: &IndexUuid,
@@ -322,7 +314,6 @@ impl HnswIndexProvider {
             let buf = s3_fetch_span
                 .in_scope(|| async {
                     let key = self.format_key(source_id, file);
-                    tracing::info!("Loading hnsw index file: {} into directory", key);
                     let bytes_res = self.storage.get_parallel(&key).await;
                     let bytes_read;
                     let buf = match bytes_res {
@@ -335,11 +326,6 @@ impl HnswIndexProvider {
                             return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
                         }
                     };
-                    tracing::info!(
-                        "Fetched {} bytes from s3 for storage key {:?}",
-                        bytes_read,
-                        key,
-                    );
                     Ok(buf)
                 })
                 .await?;
@@ -390,13 +376,7 @@ impl HnswIndexProvider {
 
         // We choose to lock the write mutex here because we want to check if a concurrent writer has already loaded the index
         // and then load it. This is not great if we want concurrent loads, but we can optimize this later.
-        let _guard = self
-            .write_mutex
-            .lock()
-            .instrument(
-                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
-            )
-            .await;
+        let _guard = self.write_mutex.lock().await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(id, cache_key).await {
@@ -407,6 +387,7 @@ impl HnswIndexProvider {
                         inner: Arc::new(RwLock::new(index)),
                     };
                     self.cache.insert(*cache_key, index.clone()).await;
+                    println!("[HNSW-CACHE] Successfully inserted index into cache");
                     Ok(index)
                 }
                 Err(e) => Err(Box::new(HnswIndexProviderOpenError::IndexLoadError(e))),
@@ -491,9 +472,7 @@ impl HnswIndexProvider {
                 .put_file(&key, file_path.to_str().unwrap())
                 .await;
             match res {
-                Ok(_) => {
-                    tracing::info!("Flushed hnsw index file: {}", file);
-                }
+                Ok(_) => {}
                 Err(e) => {
                     return Err(Box::new(HnswIndexProviderFlushError::StoragePutError(e)));
                 }
