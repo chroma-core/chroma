@@ -52,7 +52,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
     let operator_type;
     if key == "$contains" {
         operator_type = DocumentOperator::Contains;
-    } else if key == "not_contains" {
+    } else if key == "$not_contains" {
         operator_type = DocumentOperator::NotContains;
     } else {
         return Err(ValidationError::InvalidWhereDocumentClause);
@@ -311,4 +311,159 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
         return Err(ValidationError::InvalidWhereClause);
     }
     Err(ValidationError::InvalidWhereClause)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // TODO: add a proptest when there's an Arbitrary impl for Where and WhereDocument
+    #[test]
+    fn test_parse_where_document() {
+        let payloads = [
+            // $contains
+            json!({
+              "$and": [
+                  {"$contains": "value1"},
+                  {"$or": [
+                      {"$contains": "value2"},
+                      {"$contains": "value3"}
+                  ]}
+              ]
+            }),
+            // $not_contains
+            json!({
+              "$not_contains": "value1",
+            }),
+        ];
+
+        let expected_results = [
+            // $contains
+            Where::Composite(CompositeExpression {
+                operator: chroma_types::BooleanOperator::And,
+                children: vec![
+                    Where::Document(chroma_types::DocumentExpression {
+                        operator: DocumentOperator::Contains,
+                        text: "value1".to_string(),
+                    }),
+                    Where::Composite(CompositeExpression {
+                        operator: chroma_types::BooleanOperator::Or,
+                        children: vec![
+                            Where::Document(chroma_types::DocumentExpression {
+                                operator: DocumentOperator::Contains,
+                                text: "value2".to_string(),
+                            }),
+                            Where::Document(chroma_types::DocumentExpression {
+                                operator: DocumentOperator::Contains,
+                                text: "value3".to_string(),
+                            }),
+                        ],
+                    }),
+                ],
+            }),
+            // $not_contains
+            Where::Document(chroma_types::DocumentExpression {
+                operator: DocumentOperator::NotContains,
+                text: "value1".to_string(),
+            }),
+        ];
+
+        for (payload, expected_result) in payloads.iter().zip(expected_results.iter()) {
+            let result = parse_where_document(payload);
+            assert!(
+                result.is_ok(),
+                "Parsing failed for payload: {}: {:?}",
+                serde_json::to_string_pretty(payload).unwrap(),
+                result
+            );
+            assert_eq!(
+                result.unwrap(),
+                *expected_result,
+                "Parsed result did not match expected result: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_where() {
+        let payloads = [
+            // $in
+            json!({
+              "key1": {"$in": ["value1", "value2", "value3"]}
+            }),
+            // $nin
+            json!({
+              "key1": {"$nin": ["value1", "value2", "value3"]}
+            }),
+            // $eq
+            json!({
+              "key1": {"$eq": "value1"}
+            }),
+            // $ne
+            json!({
+              "key1": {"$ne": "value1"}
+            }),
+        ];
+
+        let expected_results = [
+            // $in
+            Where::Metadata(MetadataExpression {
+                key: "key1".to_string(),
+                comparison: chroma_types::MetadataComparison::Set(
+                    chroma_types::SetOperator::In,
+                    chroma_types::MetadataSetValue::Str(vec![
+                        "value1".to_string(),
+                        "value2".to_string(),
+                        "value3".to_string(),
+                    ]),
+                ),
+            }),
+            // $nin
+            Where::Metadata(MetadataExpression {
+                key: "key1".to_string(),
+                comparison: chroma_types::MetadataComparison::Set(
+                    chroma_types::SetOperator::NotIn,
+                    chroma_types::MetadataSetValue::Str(vec![
+                        "value1".to_string(),
+                        "value2".to_string(),
+                        "value3".to_string(),
+                    ]),
+                ),
+            }),
+            // $eq
+            Where::Metadata(MetadataExpression {
+                key: "key1".to_string(),
+                comparison: chroma_types::MetadataComparison::Primitive(
+                    PrimitiveOperator::Equal,
+                    chroma_types::MetadataValue::Str("value1".to_string()),
+                ),
+            }),
+            // $ne
+            Where::Metadata(MetadataExpression {
+                key: "key1".to_string(),
+                comparison: chroma_types::MetadataComparison::Primitive(
+                    PrimitiveOperator::NotEqual,
+                    chroma_types::MetadataValue::Str("value1".to_string()),
+                ),
+            }),
+        ];
+
+        for (payload, expected_result) in payloads.iter().zip(expected_results.iter()) {
+            let result = parse_where(payload);
+            assert!(
+                result.is_ok(),
+                "Parsing failed for payload: {}: {:?}",
+                serde_json::to_string_pretty(payload).unwrap(),
+                result
+            );
+            assert_eq!(
+                result.unwrap(),
+                *expected_result,
+                "Parsed result did not match expected result: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
+    }
 }
