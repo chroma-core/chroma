@@ -155,7 +155,6 @@ impl CustomResourceMemberlistProvider {
         let stream = stream.then(|event| async move {
             match event {
                 Ok(event) => {
-                    println!("Kube stream event: {:?}", event);
                     tracing::info!("Kube stream event: {:?}", event);
                     Some(event)
                 }
@@ -201,7 +200,6 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
         event: Option<MemberListKubeResource>,
         _ctx: &ComponentContext<CustomResourceMemberlistProvider>,
     ) {
-        println!("MEMBERLIST EVENT: {:?}", event);
         match event {
             Some(memberlist) => {
                 tracing::info!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
