@@ -23,7 +23,7 @@ fn default_num_channels() -> usize {
 
 //////////////////////// SYSDB CONFIG ////////////////////////
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub enum SysDbConfig {
     Grpc(GrpcSysDbConfig),
 }

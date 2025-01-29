@@ -307,7 +307,7 @@ mod tests {
         let memberlist = memberlist.as_ref().unwrap();
         // The query service memberlist in our test tilt config has two nodes
         assert_eq!(memberlist.len(), 2);
-        // The ids should be formmatted as "query-service-<node number>"
+        // The ids should be formatted as "query-service-<node number>"
         for member in memberlist.iter() {
             assert!(member.member_id.starts_with("query-service-"));
         }

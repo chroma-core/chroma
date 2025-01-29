@@ -17,8 +17,10 @@ figment = { workspace = true }
 uuid = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
-tower = { workspace = true }
 thiserror = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+tower = { version = "0.4.13", features = ["discover"] }
 
 chroma-config = { workspace = true }
 chroma-types = { workspace = true }
@@ -28,3 +30,5 @@ chroma-tracing = { workspace = true }
 mdac = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-log = { workspace = true }
+chroma-memberlist = { workspace = true }
+chroma-system = { workspace = true }

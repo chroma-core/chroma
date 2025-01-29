@@ -5,10 +5,14 @@ use chroma_types::{
 };
 use distributed::DistributedExecutor;
 
+//////////////////////// Exposed Modules ////////////////////////
+pub(super) mod client_manager;
+pub(crate) mod config;
 mod distributed;
 
-#[derive(Clone)]
-pub enum Executor {
+//////////////////////// Main Types ////////////////////////
+#[derive(Clone, Debug)]
+pub(crate) enum Executor {
     Distributed(DistributedExecutor),
 }
 
@@ -27,12 +31,5 @@ impl Executor {
         match self {
             Executor::Distributed(distributed_executor) => distributed_executor.knn(plan).await,
         }
-    }
-}
-
-// WARN: This is a placeholder impl, which should be replaced by proper initialization from config
-impl Default for Executor {
-    fn default() -> Self {
-        Self::Distributed(DistributedExecutor::default())
     }
 }

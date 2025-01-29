@@ -9,7 +9,6 @@ use chroma_memberlist::memberlist_provider::{
 use clap::Parser;
 use compactor::compaction_client::CompactionClient;
 use compactor::compaction_server::CompactionServer;
-
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 

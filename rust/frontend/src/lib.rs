@@ -7,6 +7,7 @@ mod frontend;
 mod server;
 
 use chroma_config::Configurable;
+use chroma_system::System;
 use config::FrontendConfig;
 use frontend::Frontend;
 use server::FrontendServer;
@@ -19,10 +20,11 @@ pub async fn frontend_service_entrypoint() {
         Err(_) => FrontendConfig::load(),
     };
     chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    let system = System::new();
     // TODO: Initialize tracing.
-    let segment_api = Frontend::try_from_config(&config)
+    let frontend = Frontend::try_from_config(&(config.clone(), system))
         .await
         .expect("Error creating SegmentApi from config");
-    let server = FrontendServer::new(config.circuit_breaker, segment_api);
+    let server = FrontendServer::new(config.circuit_breaker, frontend);
     FrontendServer::run(server).await;
 }

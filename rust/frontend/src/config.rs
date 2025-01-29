@@ -1,3 +1,4 @@
+use crate::executor::config::ExecutorConfig;
 use chroma_cache::CacheConfig;
 use chroma_log::config::LogConfig;
 use chroma_sysdb::SysDbConfig;
@@ -5,7 +6,7 @@ use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub(super) struct FrontendConfig {
     pub(super) sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
@@ -14,6 +15,7 @@ pub(super) struct FrontendConfig {
     pub service_name: String,
     pub otel_endpoint: String,
     pub(super) log: LogConfig,
+    pub(super) executor: ExecutorConfig,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";

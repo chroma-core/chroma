@@ -10,6 +10,7 @@ use foyer::{
 };
 use opentelemetry::global;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
@@ -257,6 +258,16 @@ where
     clear_latency: opentelemetry::metrics::Histogram<u64>,
 }
 
+impl<K, V> Debug for FoyerHybridCache<K, V>
+where
+    K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
+    V: Clone + Send + Sync + StorageValue + Weighted + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FoyerHybridCache").finish()
+    }
+}
+
 impl<K, V> FoyerHybridCache<K, V>
 where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
@@ -410,6 +421,16 @@ where
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl<K, V> Debug for FoyerPlainCache<K, V>
+where
+    K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+    V: Clone + Send + Sync + Weighted + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FoyerPlainCache").finish()
+    }
 }
 
 impl<K, V> FoyerPlainCache<K, V>
