@@ -13,7 +13,8 @@ use chroma_types::{
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
     GetUserIdentityResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionResponse, UpdateMetadata,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    UpsertCollectionResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -72,6 +73,14 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
                 post(collection_add),
+            )
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
+                post(collection_update),
+            )
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
+                post(collection_upsert),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
@@ -341,7 +350,7 @@ pub struct AddToCollectionPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
     documents: Option<Vec<String>>,
-    uri: Option<Vec<String>>,
+    uris: Option<Vec<String>>,
     metadatas: Option<Vec<Metadata>>,
 }
 
@@ -362,12 +371,80 @@ async fn collection_add(
             ids: payload.ids,
             embeddings: payload.embeddings,
             documents: payload.documents,
-            uri: payload.uri,
+            uris: payload.uris,
             metadatas: payload.metadatas,
         })
         .await?;
 
     Ok(Json(res))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct UpdateCollectionRecordsPayload {
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<String>>,
+    uris: Option<Vec<String>>,
+    metadatas: Option<Vec<UpdateMetadata>>,
+}
+
+async fn collection_update(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateCollectionRecordsPayload>,
+) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
+    let collection_id =
+        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    Ok(Json(
+        server
+            .frontend
+            .update(chroma_types::UpdateCollectionRecordsRequest {
+                tenant_id,
+                database_name,
+                collection_id,
+                ids: payload.ids,
+                embeddings: payload.embeddings,
+                documents: payload.documents,
+                uris: payload.uris,
+                metadatas: payload.metadatas,
+            })
+            .await?,
+    ))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct UpsertCollectionPayload {
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<String>>,
+    uris: Option<Vec<String>>,
+    metadatas: Option<Vec<UpdateMetadata>>,
+}
+
+async fn collection_upsert(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpsertCollectionPayload>,
+) -> Result<Json<UpsertCollectionResponse>, ServerError> {
+    let collection_id =
+        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    Ok(Json(
+        server
+            .frontend
+            .upsert(chroma_types::UpsertCollectionRequest {
+                tenant_id,
+                database_name,
+                collection_id,
+                ids: payload.ids,
+                embeddings: payload.embeddings,
+                documents: payload.documents,
+                uris: payload.uris,
+                metadatas: payload.metadatas,
+            })
+            .await?,
+    ))
 }
 
 async fn collection_count(
