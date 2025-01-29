@@ -733,7 +733,10 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
     ) {
         let records = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs,
-            None => todo!(),
+            None => {
+                tracing::info!("cancelled fetch log task");
+                return;
+            }
         };
         tracing::info!("Pulled Records: {:?}", records.len());
         let final_record_pulled = records.get(records.len() - 1);
