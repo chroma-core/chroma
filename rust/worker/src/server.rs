@@ -445,7 +445,7 @@ mod tests {
             collection: Some(chroma_proto::Collection {
                 id: collection_id.clone(),
                 name: "test-collection".to_string(),
-                configuration_json_str: String::new(),
+                configuration_json_str: "{}".to_string(),
                 metadata: None,
                 dimension: None,
                 tenant: "test-tenant".to_string(),
@@ -548,7 +548,7 @@ mod tests {
         scan_operator.collection = Some(chroma_proto::Collection {
             id: "invalid-collection-iD".to_string(),
             name: "broken-collection".to_string(),
-            configuration_json_str: String::new(),
+            configuration_json_str: "{}".to_string(),
             metadata: None,
             dimension: None,
             tenant: "test-tenant".to_string(),
