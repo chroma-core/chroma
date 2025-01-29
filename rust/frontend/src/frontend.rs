@@ -1,8 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use mdac::{Scorecard, ScorecardTicket};
-
 use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
@@ -10,9 +8,12 @@ use chroma_sysdb::sysdb;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Projection, Scan},
     plan::Knn,
-    CollectionAndSegments, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse,
-    GetDatabaseError, Include, QueryError,
+    CollectionAndSegments, CollectionUuid, CreateDatabaseError, CreateDatabaseRequest,
+    CreateDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, Include, QueryError, QueryRequest,
+    QueryResponse,
 };
+use mdac::{Scorecard, ScorecardTicket};
 
 use crate::{config::FrontendConfig, executor::Executor};
 
@@ -80,8 +81,8 @@ impl Frontend {
 
     pub async fn create_database(
         &mut self,
-        request: chroma_types::CreateDatabaseRequest,
-    ) -> Result<chroma_types::CreateDatabaseResponse, CreateDatabaseError> {
+        request: CreateDatabaseRequest,
+    ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         let tags = &[
             "op:create_database",
             &format!("tenant_id:{}", request.tenant_id),
@@ -106,17 +107,31 @@ impl Frontend {
 
     pub async fn get_database(
         &mut self,
-        request: chroma_types::GetDatabaseRequest,
-    ) -> Result<chroma_types::GetDatabaseResponse, GetDatabaseError> {
+        request: GetDatabaseRequest,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         self.sysdb_client
             .get_database(request.database_name, request.tenant_id)
             .await
     }
 
-    pub async fn query(
+    pub async fn get_collection(
         &mut self,
-        request: chroma_types::QueryRequest,
-    ) -> Result<chroma_types::QueryResponse, QueryError> {
+        request: GetCollectionRequest,
+    ) -> Result<GetCollectionResponse, GetCollectionError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(
+                None,
+                Some(request.collection_name),
+                Some(request.tenant_id),
+                Some(request.database_name),
+            )
+            .await
+            .map_err(|err| GetCollectionError::SysDB(err.to_string()))?;
+        collections.pop().ok_or(GetCollectionError::NotFound)
+    }
+
+    pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
         let collection_id = CollectionUuid(request.collection_id);
         let collection_and_segments = match self
             .collections_with_segments_cache
@@ -158,7 +173,7 @@ impl Frontend {
                 },
                 filter: Filter {
                     query_ids: None,
-                    where_clause: None,
+                    where_clause: request.r#where,
                 },
                 knn: KnnBatch {
                     embeddings: request.embeddings,

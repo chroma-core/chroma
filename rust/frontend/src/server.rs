@@ -1,22 +1,23 @@
-use crate::ac::AdmissionControlledService;
-use crate::errors::{ServerError, ValidationError};
-use crate::frontend::Frontend;
 use axum::ServiceExt;
 use axum::{
     extract::{Path, State},
     routing::{get, post},
     Json, Router,
 };
-use chroma_types::{CreateDatabaseRequest, Include, QueryResponse};
-use mdac::CircuitBreakerConfig;
 
 use chroma_types::{
-    CompositeExpression, DocumentOperator, IncludeList, MetadataExpression, PrimitiveOperator,
-    Where,
+    Collection, CompositeExpression, CreateDatabaseRequest, DocumentOperator, GetCollectionRequest,
+    GetDatabaseRequest, GetTenantResponse, GetUserIdentityResponse, Include, IncludeList,
+    MetadataExpression, PrimitiveOperator, QueryRequest, QueryResponse, Where,
 };
+use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::ac::AdmissionControlledService;
+use crate::errors::{ServerError, ValidationError};
+use crate::frontend::Frontend;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
@@ -39,10 +40,16 @@ impl FrontendServer {
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/", get(root))
-            .route("/api/v2/tenants/:tenant/databases", post(create_database))
-            .route("/api/v2/tenants/:tenant/databases/:name", get(get_database))
+            .route("/api/v2/auth/identity", get(get_user_identity))
+            .route("/api/v2/tenants/:tenant_id", get(get_tenant))
+            .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
+            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/query",
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
+                get(get_collection),
+            )
+            .route(
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
                 post(query),
             )
             .with_state(server.clone());
@@ -75,24 +82,40 @@ async fn root(State(server): State<FrontendServer>) -> &'static str {
     server.root()
 }
 
+// Dummy implementation for now
+async fn get_user_identity() -> Json<GetUserIdentityResponse> {
+    Json(GetUserIdentityResponse {
+        user_id: String::new(),
+        tenant: "default_tenant".to_string(),
+        databases: vec!["default_database".to_string()],
+    })
+}
+
+// Dummy implementation for now
+async fn get_tenant() -> Json<GetTenantResponse> {
+    Json(GetTenantResponse {
+        name: "default_tenant".to_string(),
+    })
+}
+
 #[derive(Deserialize, Debug)]
 struct CreateDatabasePayload {
     name: String,
 }
 
 async fn create_database(
-    Path(tenant): Path<String>,
+    Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateDatabasePayload>,
 ) -> Result<(), ServerError> {
     tracing::info!(
         "Creating database for tenant: {} and name: {:?}",
-        tenant,
+        tenant_id,
         payload
     );
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
-        tenant_id: tenant,
+        tenant_id,
         database_name: payload.name,
     };
     server
@@ -110,15 +133,19 @@ struct GetDatabaseResponsePayload {
 }
 
 async fn get_database(
-    Path((tenant, name)): Path<(String, String)>,
+    Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponsePayload>, ServerError> {
-    tracing::info!("Getting database for tenant: {} and name: {}", tenant, name);
+    tracing::info!(
+        "Getting database for tenant: {} and name: {}",
+        tenant_id,
+        database_name
+    );
     let res = server
         .frontend
-        .get_database(chroma_types::GetDatabaseRequest {
-            tenant_id: tenant,
-            database_name: name,
+        .get_database(GetDatabaseRequest {
+            tenant_id,
+            database_name,
         })
         .await?;
     Ok(Json(GetDatabaseResponsePayload {
@@ -126,6 +153,22 @@ async fn get_database(
         name: res.database_name,
         tenant: res.tenant_id,
     }))
+}
+
+async fn get_collection(
+    Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<Collection>, ServerError> {
+    tracing::info!("Getting collection for tenant [{tenant_id}], database [{database_name}], and collection name [{collection_name}]");
+    let collection = server
+        .frontend
+        .get_collection(GetCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_name,
+        })
+        .await?;
+    Ok(Json(collection))
 }
 
 #[derive(Debug, Clone)]
@@ -506,11 +549,11 @@ impl TryFrom<Value> for QueryRequestPayload {
                     }
                     let include_str = val.as_str().unwrap();
                     match include_str {
-                        "distance" => include_list.includes.push(Include::Distance),
-                        "document" => include_list.includes.push(Include::Document),
-                        "embedding" => include_list.includes.push(Include::Embedding),
-                        "metadata" => include_list.includes.push(Include::Metadata),
-                        "uri" => include_list.includes.push(Include::Uri),
+                        "distances" => include_list.includes.push(Include::Distance),
+                        "documents" => include_list.includes.push(Include::Document),
+                        "embeddings" => include_list.includes.push(Include::Embedding),
+                        "metadatas" => include_list.includes.push(Include::Metadata),
+                        "uris" => include_list.includes.push(Include::Uri),
                         _ => return Err(ValidationError::InvalidIncludeList),
                     }
                 }
@@ -529,25 +572,21 @@ impl TryFrom<Value> for QueryRequestPayload {
 }
 
 async fn query(
-    Path((tenant, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(json_payload): Json<Value>,
 ) -> Result<Json<QueryResponse>, ServerError> {
     let collection_uuid =
         Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
     let payload = QueryRequestPayload::try_from(json_payload)?;
-    println!("{:?} Query payload", payload);
     tracing::info!(
-        "Querying database for tenant: {}, db_name: {} and collection id: {}",
-        tenant,
-        database_name,
-        collection_uuid
+        "Querying collection [{collection_uuid}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
     );
 
     let res = server
         .frontend
-        .query(chroma_types::QueryRequest {
-            tenant_id: tenant,
+        .query(QueryRequest {
+            tenant_id,
             database_name,
             collection_id: collection_uuid,
             r#where: payload.r#where,

@@ -3,8 +3,7 @@ use std::sync::atomic::AtomicU32;
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
 use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
 use chroma_types::{
-    test_segment, Chunk, Collection, CollectionAndSegments, CollectionUuid, LogRecord, Segment,
-    SegmentScope,
+    test_segment, Chunk, Collection, CollectionAndSegments, LogRecord, Segment, SegmentScope,
 };
 
 use super::{
@@ -24,18 +23,8 @@ pub struct TestSegment {
 
 impl TestSegment {
     pub fn new_with_dimension(dimension: usize) -> Self {
-        let collection_uuid = CollectionUuid::new();
-        let collection = Collection {
-            collection_id: collection_uuid,
-            name: "Test Collection".to_string(),
-            metadata: None,
-            dimension: Some(dimension as i32),
-            tenant: "Test Tenant".to_string(),
-            database: String::new(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-        };
+        let collection = Collection::test_collection(dimension as i32);
+        let collection_uuid = collection.collection_id;
         Self {
             blockfile_provider: test_arrow_blockfile_provider(2 << 22),
             hnsw_provider: test_hnsw_index_provider(),

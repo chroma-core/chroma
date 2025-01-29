@@ -147,6 +147,7 @@ mod tests {
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
+    use serde_json::Value;
     use std::collections::HashMap;
     use std::str::FromStr;
 
@@ -162,6 +163,7 @@ mod tests {
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
@@ -177,6 +179,7 @@ mod tests {
         let collection_2 = Collection {
             collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),
