@@ -405,8 +405,8 @@ mod tests {
     use chroma_proto::query_executor_client::QueryExecutorClient;
     use chroma_segment::test::TestSegment;
     use chroma_sysdb::TestSysDb;
-    use chroma_system::dispatcher;
     use chroma_system::system;
+    use chroma_system::DispatcherConfig;
     use uuid::Uuid;
 
     fn run_server() -> String {
@@ -426,7 +426,12 @@ mod tests {
         };
 
         let system: system::System = system::System::new();
-        let dispatcher = dispatcher::Dispatcher::new(4, 10, 10);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 4,
+            task_queue_limit: 10,
+            dispatcher_queue_size: 10,
+            worker_queue_size: 10,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
 
         server.set_system(system);

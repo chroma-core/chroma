@@ -362,7 +362,7 @@ mod tests {
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
-    use chroma_system::Dispatcher;
+    use chroma_system::{Dispatcher, DispatcherConfig};
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use serde_json::Value;
@@ -590,8 +590,12 @@ mod tests {
         );
 
         let system = System::new();
-
-        let dispatcher = Dispatcher::new(10, 10, 10);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 10,
+            task_queue_limit: 10,
+            dispatcher_queue_size: 10,
+            worker_queue_size: 10,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);

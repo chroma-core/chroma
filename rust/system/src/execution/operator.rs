@@ -238,7 +238,7 @@ mod tests {
 
     use crate::{
         execution::dispatcher::Dispatcher,
-        {Component, ComponentContext, ComponentHandle, Handler, System},
+        DispatcherConfig, {Component, ComponentContext, ComponentHandle, Handler, System},
     };
 
     use super::*;
@@ -296,7 +296,12 @@ mod tests {
     #[tokio::test]
     async fn task_catches_panic() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(1, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 1,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
 
         let received_results = Arc::new(Mutex::new(Vec::new()));

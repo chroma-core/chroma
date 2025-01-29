@@ -55,6 +55,7 @@ use tracing::{trace_span, Instrument, Span};
 #[derive(Debug)]
 pub struct Dispatcher {
     task_queue: VecDeque<(TaskMessage, Span)>,
+    task_queue_limit: usize,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,
     queue_size: usize,
@@ -67,13 +68,14 @@ impl Dispatcher {
     /// - n_worker_threads: The number of worker threads to use
     /// - queue_size: The size of the components message queue
     /// - worker_queue_size: The size of the worker components queue
-    pub fn new(n_worker_threads: usize, queue_size: usize, worker_queue_size: usize) -> Self {
+    pub fn new(config: DispatcherConfig) -> Self {
         Dispatcher {
             task_queue: VecDeque::new(),
+            task_queue_limit: config.task_queue_limit,
             waiters: Vec::new(),
-            n_worker_threads,
-            queue_size,
-            worker_queue_size,
+            n_worker_threads: config.num_worker_threads,
+            queue_size: config.dispatcher_queue_size,
+            worker_queue_size: config.worker_queue_size,
         }
     }
 
@@ -115,7 +117,7 @@ impl Dispatcher {
                         }
                     },
                     None => {
-                        if self.task_queue.len() > self.queue_size {
+                        if self.task_queue.len() >= self.task_queue_limit {
                             task.abort().await;
                         } else {
                             self.task_queue.push_back((task, Span::current()));
@@ -149,11 +151,7 @@ impl Dispatcher {
 #[async_trait]
 impl Configurable<DispatcherConfig> for Dispatcher {
     async fn try_from_config(config: &DispatcherConfig) -> Result<Self, Box<dyn ChromaError>> {
-        Ok(Dispatcher::new(
-            config.num_worker_threads,
-            config.dispatcher_queue_size,
-            config.worker_queue_size,
-        ))
+        Ok(Dispatcher::new(config.clone()))
     }
 }
 
@@ -415,7 +413,12 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher_io_tasks() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
         let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
@@ -443,7 +446,12 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher_non_io_tasks() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
         let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
