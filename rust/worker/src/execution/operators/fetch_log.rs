@@ -101,7 +101,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 break;
             }
         }
-        tracing::info!(name: "Fetched log records", num_records = fetched.len());
+        // tracing::info!(name: "Fetched log records", num_records = fetched.len());
         Ok(Chunk::new(fetched.into()))
     }
 }

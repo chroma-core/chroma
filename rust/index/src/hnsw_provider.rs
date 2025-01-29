@@ -286,7 +286,6 @@ impl HnswIndexProvider {
         }
 
         // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().await;
         // Do nothing if the file exists, we assume the concurrent writer wrote the same data.
         // This is a safe assumption because the data is immutable from our perspective.
         if !file_path.exists() {
@@ -344,6 +343,8 @@ impl HnswIndexProvider {
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
+        let _guard = self.write_mutex.lock().await;
+
         // Create directories should be thread safe.
         match self.create_dir_all(&index_storage_path).await {
             Ok(_) => {}
@@ -376,7 +377,7 @@ impl HnswIndexProvider {
 
         // We choose to lock the write mutex here because we want to check if a concurrent writer has already loaded the index
         // and then load it. This is not great if we want concurrent loads, but we can optimize this later.
-        let _guard = self.write_mutex.lock().await;
+        // let _guard = self.write_mutex.lock().await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(id, cache_key).await {
