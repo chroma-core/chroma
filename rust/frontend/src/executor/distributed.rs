@@ -18,7 +18,7 @@ use chroma_types::{
 };
 use parking_lot::Mutex;
 use rand::Rng;
-use std::{collections::HashMap, sync::Arc};
+use std::{cmp::min, collections::HashMap, sync::Arc};
 use tonic::Request;
 
 #[derive(Clone, Debug)]
@@ -101,15 +101,20 @@ impl DistributedExecutor {
         collection_id: CollectionUuid,
     ) -> Result<QueryExecutorClient<tonic::transport::Channel>, ExecutorError> {
         let node_name_to_client_guard = self.node_name_to_client.lock();
-        let members = node_name_to_client_guard.keys().cloned().collect();
+        let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
+
+        // Ensure that the target replication factor is not greater than the number of members
+        // the assignment policy errors if the target replication factor is greater than the number of members
+        // We would prefer that we still send the request to a node even if the target replication factor is greater
+        let target_replication_factor = min(self.replication_factor, members.len());
         self.assignment_policy.set_members(members);
         let assigned = self
             .assignment_policy
-            .assign(&collection_id.to_string(), self.replication_factor)?;
+            .assign(&collection_id.to_string(), target_replication_factor)?;
         let random_index = rand::thread_rng().gen_range(0..assigned.len());
         let client = node_name_to_client_guard
             .get(&assigned[random_index])
-            .ok_or_else(|| ExecutorError::NoClientFound(assigned[0].clone()))?;
+            .ok_or_else(|| ExecutorError::NoClientFound(assigned[random_index].clone()))?;
         Ok(client.clone())
     }
 }

@@ -57,7 +57,9 @@ impl ClientManager {
     }
 
     async fn add_ip_for_node(&mut self, ip: String, node: &str) {
-        let endpoint = match Endpoint::from_shared(ip.clone()) {
+        // TODO: Configure the port
+        let ip_with_port = format!("http://{}:{}", ip, 50051);
+        let endpoint = match Endpoint::from_shared(ip_with_port) {
             Ok(endpoint) => endpoint,
             Err(e) => {
                 // There is no one to return the error to, so just log it
@@ -110,6 +112,39 @@ impl Handler<Memberlist> for ClientManager {
     type Result = ();
 
     async fn handle(&mut self, new_members: Memberlist, _ctx: &ComponentContext<ClientManager>) {
+        // NOTE(hammadb) In production, we assume that each query service is 1:1 with a node. I.e that no
+        // two query services are running on the same node. However, in local
+        // development, we may have multiple query services running on the same node.
+        // In order to handle this, we append the member_id to the node name to make it unique.
+        // This is purely for local development purposes.
+
+        // Determine if all members share a node
+        let mut all_same_node = true;
+        let mut node = "";
+        for new_member in new_members.iter() {
+            if node.is_empty() {
+                node = new_member.member_node_name.as_str();
+            } else if node != new_member.member_node_name.as_str() {
+                all_same_node = false;
+                break;
+            }
+        }
+
+        // Rewrite the memberlist to include the member_id in the node name
+        // if they all share the same node
+        let mut rewritten_new_members = Vec::new();
+        for new_member in new_members.iter() {
+            let mut new_member = new_member.clone();
+            if all_same_node {
+                new_member.member_node_name =
+                    format!("{}-{}", new_member.member_node_name, new_member.member_id);
+            }
+            rewritten_new_members.push(new_member);
+        }
+        let new_members = rewritten_new_members;
+
+        // Process the new memberlist, determining if any nodes have been added or removed
+        // or if any nodes have changed their ip address
         let mut old_node_to_ip = HashMap::new();
         for old_member in self.old_memberlist.iter() {
             old_node_to_ip.insert(
