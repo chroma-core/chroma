@@ -37,6 +37,8 @@ pub enum TaskError<Err> {
     Panic(PanicError),
     #[error("Task failed with error: {0:?}")]
     TaskFailed(#[from] Err),
+    #[error("Task was aborted")]
+    Aborted,
 }
 
 impl<Err> ChromaError for TaskError<Err>
@@ -47,6 +49,7 @@ where
         match self {
             TaskError::Panic(_) => ErrorCodes::Internal,
             TaskError::TaskFailed(e) => e.code(),
+            TaskError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -96,6 +99,7 @@ pub trait TaskWrapper: Send + Debug {
     #[allow(dead_code)]
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
+    async fn abort(&self);
 }
 
 /// Implement the TaskWrapper trait for every Task. This allows us to
@@ -179,6 +183,29 @@ where
 
     fn get_type(&self) -> OperatorType {
         self.operator.get_type()
+    }
+
+    async fn abort(&self) {
+        match self
+            .reply_channel
+            .send(
+                TaskResult {
+                    result: Err(TaskError::Aborted),
+                    task_id: self.task_id,
+                },
+                None,
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(err) => {
+                tracing::error!(
+                    "Failed to send task error for task {} to reply channel: {}",
+                    self.task_id,
+                    err
+                );
+            }
+        }
     }
 }
 

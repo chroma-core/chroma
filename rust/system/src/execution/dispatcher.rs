@@ -115,7 +115,11 @@ impl Dispatcher {
                         }
                     },
                     None => {
-                        self.task_queue.push_back((task, Span::current()));
+                        if self.task_queue.len() > self.queue_size {
+                            task.abort().await;
+                        } else {
+                            self.task_queue.push_back((task, Span::current()));
+                        }
                     }
                 }
             }
