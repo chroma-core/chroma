@@ -4,28 +4,37 @@ use chroma_log::config::LogConfig;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Clone)]
-pub(super) struct FrontendConfig {
-    pub(super) sysdb: SysDbConfig,
+#[derive(Deserialize, Serialize, Clone)]
+pub struct ScorecardRule {
+    pub patterns: Vec<String>,
+    pub score: u32,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct FrontendConfig {
+    pub sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
-    pub(super) cache_config: CacheConfig,
+    pub cache_config: CacheConfig,
     pub service_name: String,
     pub otel_endpoint: String,
-    pub(super) log: LogConfig,
-    pub(super) executor: ExecutorConfig,
+    pub log: LogConfig,
+    pub executor: ExecutorConfig,
+    pub scorecard_enabled: bool,
+    #[serde(default)]
+    pub scorecard: Vec<ScorecardRule>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";
 
 impl FrontendConfig {
-    pub(super) fn load() -> Self {
+    pub fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
 
-    pub(super) fn load_from_path(path: &str) -> Self {
+    pub fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(
