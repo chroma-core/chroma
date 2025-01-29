@@ -5,12 +5,12 @@ use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
 use chroma_system::System;
 use chroma_types::{
-    operator::{Filter, KnnBatch, KnnProjection, Projection, Scan},
-    plan::Knn,
-    CollectionAndSegments, CollectionUuid, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, Include, QueryError, QueryRequest,
-    QueryResponse,
+    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
+    plan::{Count, Get, Knn},
+    CollectionAndSegments, CollectionUuid, CountRequest, CountResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, GetCollectionError, GetCollectionRequest,
+    GetCollectionResponse, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, Include, QueryError, QueryRequest, QueryResponse,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -136,67 +136,6 @@ impl Frontend {
         collections.pop().ok_or(GetCollectionError::NotFound)
     }
 
-    pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
-        let collection_id = CollectionUuid(request.collection_id);
-        let collection_and_segments = match self
-            .collections_with_segments_cache
-            .get(&collection_id)
-            .await
-            .map_err(|_| QueryError::CollectionSegments)?
-        {
-            Some(collection_and_segments) => collection_and_segments,
-            None => {
-                let collection_and_segments_sysdb = self
-                    .sysdb_client
-                    .get_collection_with_segments(collection_id)
-                    .await
-                    .map_err(|_| QueryError::CollectionSegments)?;
-                // NOTE: We use a double check pattern here so that if another thread concurrently
-                // inserts into the cache by the time we reach here, we keep the one that was inserted.
-                // This ensures that all threads get the same reference for the cache.
-                match self
-                    .collections_with_segments_cache
-                    .get(&collection_id)
-                    .await
-                    .map_err(|_| QueryError::CollectionSegments)?
-                {
-                    Some(collection_and_segments) => collection_and_segments,
-                    None => {
-                        self.collections_with_segments_cache
-                            .insert(collection_id, collection_and_segments_sysdb.clone())
-                            .await;
-                        collection_and_segments_sysdb
-                    }
-                }
-            }
-        };
-        let query_result = self
-            .executor
-            .knn(Knn {
-                scan: Scan {
-                    collection_and_segments,
-                },
-                filter: Filter {
-                    query_ids: None,
-                    where_clause: request.r#where,
-                },
-                knn: KnnBatch {
-                    embeddings: request.embeddings,
-                    fetch: request.n_results,
-                },
-                proj: KnnProjection {
-                    projection: Projection {
-                        document: request.include.includes.contains(&Include::Document),
-                        embedding: request.include.includes.contains(&Include::Embedding),
-                        metadata: request.include.includes.contains(&Include::Metadata),
-                    },
-                    distance: request.include.includes.contains(&Include::Distance),
-                },
-            })
-            .await?;
-        Ok((query_result, request.include).into())
-    }
-
     pub async fn add(
         &mut self,
         request: chroma_types::AddToCollectionRequest,
@@ -278,6 +217,109 @@ impl Frontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         Ok(chroma_types::AddToCollectionResponse {})
+    }
+
+    pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
+        let scan = self
+            .fetch_collection_snapshot(request.collection_id)
+            .await?;
+        Ok(self.executor.count(Count { scan }).await?)
+    }
+
+    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        let scan = self
+            .fetch_collection_snapshot(request.collection_id)
+            .await?;
+        let get_result = self
+            .executor
+            .get(Get {
+                scan,
+                filter: Filter {
+                    query_ids: request.ids,
+                    where_clause: request.r#where,
+                },
+                limit: Limit {
+                    skip: request.offset,
+                    fetch: request.limit,
+                },
+                proj: Projection {
+                    document: request.include.includes.contains(&Include::Document),
+                    embedding: request.include.includes.contains(&Include::Embedding),
+                    metadata: request.include.includes.contains(&Include::Metadata),
+                },
+            })
+            .await?;
+        Ok((get_result, request.include).into())
+    }
+
+    pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        let scan = self
+            .fetch_collection_snapshot(request.collection_id)
+            .await?;
+        let query_result = self
+            .executor
+            .knn(Knn {
+                scan,
+                filter: Filter {
+                    query_ids: request.ids,
+                    where_clause: request.r#where,
+                },
+                knn: KnnBatch {
+                    embeddings: request.embeddings,
+                    fetch: request.n_results,
+                },
+                proj: KnnProjection {
+                    projection: Projection {
+                        document: request.include.includes.contains(&Include::Document),
+                        embedding: request.include.includes.contains(&Include::Embedding),
+                        metadata: request.include.includes.contains(&Include::Metadata),
+                    },
+                    distance: request.include.includes.contains(&Include::Distance),
+                },
+            })
+            .await?;
+        Ok((query_result, request.include).into())
+    }
+
+    async fn fetch_collection_snapshot(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Scan, QueryError> {
+        let collection_and_segments = match self
+            .collections_with_segments_cache
+            .get(&collection_id)
+            .await
+            .map_err(|_| QueryError::CollectionSegments)?
+        {
+            Some(collection_and_segments) => collection_and_segments,
+            None => {
+                let collection_and_segments_sysdb = self
+                    .sysdb_client
+                    .get_collection_with_segments(collection_id)
+                    .await
+                    .map_err(|_| QueryError::CollectionSegments)?;
+                // NOTE: We use a double check pattern here so that if another thread concurrently
+                // inserts into the cache by the time we reach here, we keep the one that was inserted.
+                // This ensures that all threads get the same reference for the cache.
+                match self
+                    .collections_with_segments_cache
+                    .get(&collection_id)
+                    .await
+                    .map_err(|_| QueryError::CollectionSegments)?
+                {
+                    Some(collection_and_segments) => collection_and_segments,
+                    None => {
+                        self.collections_with_segments_cache
+                            .insert(collection_id, collection_and_segments_sysdb.clone())
+                            .await;
+                        collection_and_segments_sysdb
+                    }
+                }
+            }
+        };
+        Ok(Scan {
+            collection_and_segments,
+        })
     }
 }
 
