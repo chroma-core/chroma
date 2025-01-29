@@ -1410,7 +1410,7 @@ class FastAPI(Server):
         - The user has access to a single tenant and/or single database.
         """
         return await to_thread.run_sync(
-            self.auth_and_get_tenant_and_database_for_request,
+            self.sync_auth_and_get_tenant_and_database_for_request,
             headers,
             action,
             tenant,

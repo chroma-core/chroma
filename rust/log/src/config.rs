@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct GrpcLogConfig {
     pub host: String,
     pub port: u16,
@@ -8,7 +8,7 @@ pub struct GrpcLogConfig {
     pub request_timeout_ms: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub enum LogConfig {
     Grpc(GrpcLogConfig),
 }

@@ -17,6 +17,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 chroma-error = { workspace = true }
+chroma-config = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"

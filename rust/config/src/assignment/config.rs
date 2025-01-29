@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 /// The type of hasher to use.
 /// # Options
 /// - Murmur3: The murmur3 hasher.
@@ -8,7 +8,7 @@ pub(crate) enum HasherType {
     Murmur3,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 /// The configuration for the assignment policy.
 /// # Options
 /// - RendezvousHashing: The rendezvous hashing assignment policy.
@@ -19,7 +19,7 @@ pub enum AssignmentPolicyConfig {
     RendezvousHashing(RendezvousHashingAssignmentPolicyConfig),
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 /// The configuration for the rendezvous hashing assignment policy.
 /// # Fields
 /// - hasher: The type of hasher to use.
