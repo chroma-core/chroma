@@ -10,10 +10,12 @@ path = "src/bin/frontend_service.rs"
 [dependencies]
 tokio = { workspace = true }
 axum = { workspace = true }
+futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 figment = { workspace = true }
+parking_lot = { workspace = true }
 uuid = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }

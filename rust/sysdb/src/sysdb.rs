@@ -104,7 +104,7 @@ impl SysDb {
     pub async fn get_collection_with_segments(
         &mut self,
         collection_id: CollectionUuid,
-    ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
+    ) -> Result<Arc<CollectionAndSegments>, Arc<GetCollectionWithSegmentsError>> {
         match self {
             SysDb::Grpc(grpc_sys_db) => {
                 grpc_sys_db
@@ -420,13 +420,13 @@ impl GrpcSysDb {
     async fn get_collection_with_segments(
         &mut self,
         collection_id: CollectionUuid,
-    ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
+    ) -> Result<Arc<CollectionAndSegments>, Arc<GetCollectionWithSegmentsError>> {
         let res = self
             .client
             .get_collection_with_segments(chroma_proto::GetCollectionWithSegmentsRequest {
                 id: collection_id.to_string(),
             })
-            .await?
+            .await;
             .into_inner();
         let raw_segment_counts = res.segments.len();
         let mut segment_map: HashMap<_, _> = res
@@ -435,15 +435,16 @@ impl GrpcSysDb {
             .map(|seg| (seg.scope(), seg))
             .collect();
         if segment_map.len() < raw_segment_counts {
-            return Err(GetCollectionWithSegmentsError::DuplicateSegment);
+            return Err(Arc::new(GetCollectionWithSegmentsError::DuplicateSegment));
         }
-        Ok(CollectionAndSegments {
+        Ok(Arc::new(CollectionAndSegments {
             collection: res
                 .collection
-                .ok_or(GetCollectionWithSegmentsError::Field(
+                .ok_or(Arc::new(GetCollectionWithSegmentsError::Field(
                     "collection".to_string(),
-                ))?
-                .try_into()?,
+                )))?
+                .try_into()
+                .map_err(|e| Arc::new(e))?,
             metadata_segment: segment_map
                 .remove(&chroma_proto::SegmentScope::Metadata)
                 .ok_or(GetCollectionWithSegmentsError::Field(
@@ -458,7 +459,7 @@ impl GrpcSysDb {
                 .remove(&chroma_proto::SegmentScope::Vector)
                 .ok_or(GetCollectionWithSegmentsError::Field("vector".to_string()))?
                 .try_into()?,
-        })
+        }))
     }
 
     async fn get_last_compaction_time(

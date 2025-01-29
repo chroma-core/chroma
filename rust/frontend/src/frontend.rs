@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_sysdb::sysdb;
+use chroma_sysdb::{sysdb, GetCollectionWithSegmentsError};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Projection, Scan},
     plan::Knn,
@@ -13,7 +16,10 @@ use chroma_types::{
     GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, Include, QueryError, QueryRequest,
     QueryResponse,
 };
+use futures::future::Shared;
+use futures::FutureExt;
 use mdac::{Scorecard, ScorecardTicket};
+use parking_lot::Mutex;
 
 use crate::{config::FrontendConfig, executor::Executor};
 
@@ -36,13 +42,38 @@ impl Drop for ScorecardGuard {
 }
 
 #[derive(Clone)]
+pub struct CollectionWithSegmentsSource {
+    pub collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
+    pub outstanding_sysdb_requests: Arc<
+        Mutex<
+            HashMap<
+                CollectionUuid,
+                Shared<
+                    Pin<
+                        Box<
+                            dyn Future<
+                                    Output = Result<
+                                        Arc<CollectionAndSegments>,
+                                        GetCollectionWithSegmentsError,
+                                    >,
+                                > + Send
+                                + 'static,
+                        >,
+                    >,
+                >,
+            >,
+        >,
+    >,
+}
+
+#[derive(Clone)]
 pub struct Frontend {
     #[allow(dead_code)]
     executor: Executor,
     sysdb_client: Box<sysdb::SysDb>,
     scorecard_enabled: Arc<AtomicBool>,
     scorecard: Arc<Scorecard<'static>>,
-    collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
+    collection_with_segments_source: CollectionWithSegmentsSource,
 }
 
 impl Frontend {
@@ -61,7 +92,10 @@ impl Frontend {
             sysdb_client,
             scorecard_enabled,
             scorecard,
-            collections_with_segments_cache,
+            collection_with_segments_source: CollectionWithSegmentsSource {
+                collections_with_segments_cache,
+                outstanding_sysdb_requests: Arc::new(Mutex::new(HashMap::new())),
+            },
         }
     }
 
@@ -134,6 +168,7 @@ impl Frontend {
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
         let collection_id = CollectionUuid(request.collection_id);
         let collection_and_segments = match self
+            .collection_with_segments_source
             .collections_with_segments_cache
             .get(&collection_id)
             .await
@@ -141,6 +176,23 @@ impl Frontend {
         {
             Some(collection_and_segments) => collection_and_segments,
             None => {
+                // Dedup if there is already an outstanding request.
+                let maybe_in_flight = self
+                    .collection_with_segments_source
+                    .outstanding_sysdb_requests
+                    .lock()
+                    .get(&collection_id);
+                let fut = match maybe_in_flight {
+                    Some(in_flight_request) => in_flight_request,
+                    None => {
+                        let get_fut = self
+                            .sysdb_client
+                            .get_collection_with_segments(collection_id)
+                            .boxed()
+                            .shared();
+                        get_fut
+                    }
+                };
                 let collection_and_segments_sysdb = self
                     .sysdb_client
                     .get_collection_with_segments(collection_id)
