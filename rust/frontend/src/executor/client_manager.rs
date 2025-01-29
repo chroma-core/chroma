@@ -10,6 +10,15 @@ use std::{
 use tonic::transport::{Channel, Endpoint};
 use tower::discover::Change;
 
+/// A component that manages the gRPC clients for the query executors
+/// # Fields
+/// - `node_name_to_client` - A map from the node name to the gRPC client
+/// - `node_name_to_change_sender` - A map from the node name to the sender to the channel to add / remove the ip
+/// - `connections_per_node` - The number of connections to maintain per node
+/// - `old_memberlist` - The old memberlist to compare against
+/// # Notes
+/// The client manager is responsible for creating and maintaining the gRPC clients for the query nodes.
+/// It listens for changes to the memberlist and updates the clients accordingly.
 #[derive(Debug)]
 pub(super) struct ClientManager {
     // The name of the node to the grpc client
@@ -19,6 +28,8 @@ pub(super) struct ClientManager {
     node_name_to_change_sender:
         HashMap<String, tokio::sync::mpsc::Sender<Change<String, Endpoint>>>,
     connections_per_node: usize,
+    connect_timeout_ms: u64,
+    request_timeout_ms: u64,
     old_memberlist: Memberlist,
 }
 
@@ -28,11 +39,15 @@ impl ClientManager {
             Mutex<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>,
         >,
         connections_per_node: usize,
+        connect_timeout_ms: u64,
+        request_timeout_ms: u64,
     ) -> Self {
         ClientManager {
             node_name_to_client,
             node_name_to_change_sender: HashMap::new(),
             connections_per_node,
+            connect_timeout_ms,
+            request_timeout_ms,
             old_memberlist: Memberlist::new(),
         }
     }
@@ -47,11 +62,14 @@ impl ClientManager {
             }
         };
 
-        match sender.send(Change::Remove(ip)).await {
-            Ok(_) => {}
-            Err(e) => {
-                // There is no one to return the error to, so just log it
-                tracing::error!("Failed to remove ip from client manager: {:?}", e);
+        for i in 0..self.connections_per_node {
+            let indexed_connection_id = Self::indexed_connection_id(node, i);
+            match sender.send(Change::Remove(indexed_connection_id)).await {
+                Ok(_) => {}
+                Err(e) => {
+                    // There is no one to return the error to, so just log it
+                    tracing::error!("Failed to remove ip from client manager: {:?}", e);
+                }
             }
         }
     }
@@ -60,7 +78,9 @@ impl ClientManager {
         // TODO: Configure the port
         let ip_with_port = format!("http://{}:{}", ip, 50051);
         let endpoint = match Endpoint::from_shared(ip_with_port) {
-            Ok(endpoint) => endpoint,
+            Ok(endpoint) => endpoint
+                .connect_timeout(std::time::Duration::from_millis(self.connect_timeout_ms))
+                .timeout(std::time::Duration::from_millis(self.request_timeout_ms)),
             Err(e) => {
                 // There is no one to return the error to, so just log it
                 tracing::error!("Failed to create endpoint from ip: {:?}", e);
@@ -71,12 +91,10 @@ impl ClientManager {
         let sender = match self.node_name_to_change_sender.get(node) {
             Some(sender) => sender.clone(),
             None => {
-                // TODO(hammadb): configure timeouts and such
                 let (chan, channel_change_sender) =
                     Channel::balance_channel::<String>(self.connections_per_node);
                 let client = QueryExecutorClient::new(chan);
 
-                // TODO: insert up to the max number of connections
                 let mut node_name_to_client_guard = self.node_name_to_client.lock();
                 node_name_to_client_guard.insert(node.to_string(), client);
                 self.node_name_to_change_sender
@@ -85,13 +103,25 @@ impl ClientManager {
             }
         };
 
-        match sender.send(Change::Insert(ip, endpoint)).await {
-            Ok(_) => {}
-            Err(e) => {
-                // There is no one to return the error to, so just log it
-                tracing::error!("Failed to add ip to client manager: {:?}", e);
+        for i in 0..self.connections_per_node {
+            // Append the index to the node name to make it unique, otherwise
+            // the channel will be overwritten and we will only have one connection
+            let indexed_connection_id = Self::indexed_connection_id(node, i);
+            match sender
+                .send(Change::Insert(indexed_connection_id, endpoint.clone()))
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    // There is no one to return the error to, so just log it
+                    tracing::error!("Failed to add ip to client manager: {:?}", e);
+                }
             }
         }
+    }
+
+    fn indexed_connection_id(node: &str, index: usize) -> String {
+        format!("{}-{}", node, index)
     }
 }
 

@@ -5,10 +5,12 @@ use chroma_types::{
 };
 use distributed::DistributedExecutor;
 
+//////////////////////// Exposed Modules ////////////////////////
 pub(super) mod client_manager;
 pub(crate) mod config;
 mod distributed;
 
+//////////////////////// Main Types ////////////////////////
 #[derive(Clone, Debug)]
 pub(crate) enum Executor {
     Distributed(DistributedExecutor),

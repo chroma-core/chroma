@@ -21,6 +21,16 @@ use rand::Rng;
 use std::{cmp::min, collections::HashMap, sync::Arc};
 use tonic::Request;
 
+/// A distributed executor that routes requests to the appropriate node based on the assignment policy
+/// # Fields
+/// - `node_name_to_client` - A map from the node name to the gRPC client
+/// - `assignment_policy` - The assignment policy to use for routing requests
+/// - `replication_factor` - The target replication factor for the request
+/// # Notes
+/// The executor internally uses a memberlist provider to get the list of nodes to route requests to
+/// this memberlist provider sends the list of nodes to the client manager which creates the gRPC clients
+/// for the nodes. The ClientManager is considered internal to the DistributedExecutor and is not exposed
+/// outside.
 #[derive(Clone, Debug)]
 pub struct DistributedExecutor {
     node_name_to_client:
@@ -36,8 +46,12 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
     ) -> Result<Self, Box<dyn ChromaError>> {
         let assignment_policy = assignment::from_config(&config.assignment).await?;
         let node_name_to_client = Arc::new(Mutex::new(HashMap::new()));
-        let client_manager =
-            ClientManager::new(node_name_to_client.clone(), config.connections_per_node);
+        let client_manager = ClientManager::new(
+            node_name_to_client.clone(),
+            config.connections_per_node,
+            config.connect_timeout_ms,
+            config.request_timeout_ms,
+        );
         let client_manager_handle = system.start_component(client_manager);
 
         let mut memberlist_provider = match &config.memberlist_provider {
@@ -100,12 +114,14 @@ impl DistributedExecutor {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<QueryExecutorClient<tonic::transport::Channel>, ExecutorError> {
+        // NOTE(hammadb): We hold the lock for the entire duration of the function
+        // we could potentially hold the lock for a shorter duration
         let node_name_to_client_guard = self.node_name_to_client.lock();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
 
         // Ensure that the target replication factor is not greater than the number of members
-        // the assignment policy errors if the target replication factor is greater than the number of members
-        // We would prefer that we still send the request to a node even if the target replication factor is greater
+        // since the assignment policy errors if the target replication factor is greater than the number of members.
+        // We would prefer that we still send the request to a node rather than erroring.
         let target_replication_factor = min(self.replication_factor, members.len());
         self.assignment_policy.set_members(members);
         let assigned = self

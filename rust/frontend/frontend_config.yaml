@@ -19,6 +19,8 @@ executor:
   Distributed:
     connections_per_node: 5
     replication_factor: 2
+    connect_timeout_ms: 5000
+    request_timeout_ms: 5000
     assignment:
       RendezvousHashing:
         hasher: Murmur3
