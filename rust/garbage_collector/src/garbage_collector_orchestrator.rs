@@ -300,7 +300,7 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
 
         let fetch_task = wrap(
             Box::new(FetchSparseIndexFilesOperator {
-                s3_client: self.storage.clone(), // You'll need to implement this
+                storage: self.storage.clone(),
             }),
             FetchSparseIndexFilesInput {
                 version_file: output.version_file,

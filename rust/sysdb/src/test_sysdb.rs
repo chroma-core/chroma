@@ -228,4 +228,16 @@ impl TestSysDb {
             Ok(())
         }
     }
+
+    pub async fn delete_collection_version(
+        &self,
+        _versions: Vec<VersionListForCollection>,
+    ) -> HashMap<String, bool> {
+        // For testing, return success for all collections
+        let mut results = HashMap::new();
+        for version_list in _versions {
+            results.insert(version_list.collection_id, true);
+        }
+        results
+    }
 }

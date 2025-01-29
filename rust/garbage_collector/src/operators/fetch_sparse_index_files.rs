@@ -1,14 +1,20 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::chroma_proto::{CollectionVersionFile, FilePath, VersionListForCollection};
+use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use std::collections::HashMap;
 use thiserror::Error;
 
-#[derive(Clone, Debug)]
+impl std::fmt::Debug for FetchSparseIndexFilesOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FetchSparseIndexFilesOperator").finish()
+    }
+}
+
 pub struct FetchSparseIndexFilesOperator {
-    s3_client: S3Client, // You'll need to implement/import this
+    pub storage: Storage,
 }
 
 #[derive(Debug)]
@@ -24,6 +30,7 @@ pub struct FetchSparseIndexFilesOutput {
     pub version_file: CollectionVersionFile,
     pub epoch_id: i64,
     pub sysdb_client: Box<SysDb>,
+    pub versions_to_delete: VersionListForCollection,
     pub version_to_content: HashMap<i64, Vec<u8>>,
 }
 
@@ -64,20 +71,29 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
         for version in &input.versions_to_delete.versions {
             if let Some(version_info) = input
                 .version_file
-                .versions
-                .iter()
-                .find(|v| v.version == *version)
+                .version_history
+                .as_ref()
+                .and_then(|history| history.versions.iter().find(|v| v.version == *version))
             {
-                if let Some(file_path) = &version_info.file_path {
-                    match self.s3_client.get_object(&file_path.path).await {
-                        Ok(content) => {
-                            version_to_content.insert(*version, content);
-                        }
-                        Err(e) => {
-                            return Err(FetchSparseIndexFilesError::S3Error(format!(
-                                "Failed to fetch file for version {}: {}",
-                                version, e
-                            )));
+                // Get segment info from the version
+                if let Some(segment_info) = &version_info.segment_info {
+                    for segment_compaction_info in &segment_info.segment_compaction_info {
+                        // Iterate through file paths for each segment
+                        for file_paths in segment_compaction_info.file_paths.values() {
+                            // Attempt to fetch each file
+                            for file_path in &file_paths.paths {
+                                match self.storage.get(&file_path).await {
+                                    Ok(content) => {
+                                        version_to_content.insert(*version, (*content).to_vec());
+                                    }
+                                    Err(e) => {
+                                        return Err(FetchSparseIndexFilesError::S3Error(format!(
+                                            "Failed to fetch file for version {}: {}",
+                                            version, e
+                                        )));
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
@@ -92,6 +108,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
             version_file: input.version_file.clone(),
             epoch_id: input.epoch_id,
             sysdb_client: input.sysdb_client.clone(),
+            versions_to_delete: input.versions_to_delete.clone(),
             version_to_content,
         })
     }

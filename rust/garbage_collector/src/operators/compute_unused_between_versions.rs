@@ -71,7 +71,7 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
     type Error = ComputeUnusedBetweenVersionsError;
 
     fn get_type(&self) -> OperatorType {
-        OperatorType::CPU
+        OperatorType::Other
     }
 
     async fn run(
