@@ -55,6 +55,7 @@ struct ErrorResponse {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
+        tracing::error!("Error: {:?}", self.0);
         let status_code = match self.0.code() {
             chroma_error::ErrorCodes::Success => StatusCode::OK,
             chroma_error::ErrorCodes::Cancelled => StatusCode::BAD_REQUEST,

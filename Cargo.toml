@@ -35,6 +35,7 @@ tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+tower-http = { version = "0.6.2", features = ["trace"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }

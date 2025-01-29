@@ -5,6 +5,7 @@ mod errors;
 mod executor;
 mod frontend;
 mod server;
+mod tower_tracing;
 
 use chroma_config::Configurable;
 use config::FrontendConfig;

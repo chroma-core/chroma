@@ -105,6 +105,7 @@ pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
                 "chroma-storage",
                 "chroma-test",
                 "chroma-types",
+                "frontend",
                 "compaction_service",
                 "distance_metrics",
                 "full_text",

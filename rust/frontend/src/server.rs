@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::ac::AdmissionControlledService;
 use crate::errors::{ServerError, ValidationError};
 use crate::frontend::Frontend;
+use crate::tower_tracing::add_tracing_middleware;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
@@ -57,6 +58,7 @@ impl FrontendServer {
                 post(add),
             )
             .with_state(server);
+        let app = add_tracing_middleware(app);
 
         // TODO: configuration for this
         // TODO: tracing
