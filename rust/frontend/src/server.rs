@@ -549,11 +549,11 @@ impl TryFrom<Value> for QueryRequestPayload {
                     }
                     let include_str = val.as_str().unwrap();
                     match include_str {
-                        "distance" => include_list.includes.push(Include::Distance),
-                        "document" => include_list.includes.push(Include::Document),
-                        "embedding" => include_list.includes.push(Include::Embedding),
-                        "metadata" => include_list.includes.push(Include::Metadata),
-                        "uri" => include_list.includes.push(Include::Uri),
+                        "distances" => include_list.includes.push(Include::Distance),
+                        "documents" => include_list.includes.push(Include::Document),
+                        "embeddings" => include_list.includes.push(Include::Embedding),
+                        "metadatas" => include_list.includes.push(Include::Metadata),
+                        "uris" => include_list.includes.push(Include::Uri),
                         _ => return Err(ValidationError::InvalidIncludeList),
                     }
                 }
@@ -579,12 +579,8 @@ async fn query(
     let collection_uuid =
         Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
     let payload = QueryRequestPayload::try_from(json_payload)?;
-    println!("{:?} Query payload", payload);
     tracing::info!(
-        "Querying database for tenant: {}, db_name: {} and collection id: {}",
-        tenant_id,
-        database_name,
-        collection_uuid
+        "Querying collection [{collection_uuid}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
     );
 
     let res = server

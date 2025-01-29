@@ -173,7 +173,7 @@ impl Frontend {
                 },
                 filter: Filter {
                     query_ids: None,
-                    where_clause: None,
+                    where_clause: request.r#where,
                 },
                 knn: KnnBatch {
                     embeddings: request.embeddings,
