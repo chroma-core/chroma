@@ -1,4 +1,7 @@
-use crate::{config::FrontendConfig, executor::Executor};
+use crate::{
+    config::{FrontendConfig, ScorecardRule},
+    executor::Executor,
+};
 use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
@@ -15,7 +18,7 @@ use chroma_types::{
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
 };
-use mdac::{Scorecard, ScorecardTicket};
+use mdac::{Pattern, Rule, Scorecard, ScorecardTicket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -37,6 +40,20 @@ impl Drop for ScorecardGuard {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ScorecardRuleError {
+    #[error("Invalid pattern: {0}")]
+    InvalidPattern(String),
+}
+
+impl ChromaError for ScorecardRuleError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            ScorecardRuleError::InvalidPattern(_) => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Frontend {
     #[allow(dead_code)]
@@ -54,12 +71,14 @@ impl Frontend {
         collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
         log_client: Box<chroma_log::Log>,
         executor: Executor,
+        scorecard_enabled: bool,
+        rules: Vec<Rule>,
     ) -> Self {
-        let scorecard_enabled = Arc::new(AtomicBool::new(false));
+        let scorecard_enabled = Arc::new(AtomicBool::new(scorecard_enabled));
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
         // SAFETY(rescrv):  This is safe because 128 is non-zero.
-        let scorecard = Arc::new(Scorecard::new(&(), vec![], 128.try_into().unwrap()));
+        let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
         Frontend {
             executor,
             sysdb_client,
@@ -339,11 +358,32 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
 
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone())).await?;
+        fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {
+            let patterns = rule
+                .patterns
+                .iter()
+                .map(|p| {
+                    Pattern::new(p).ok_or_else(|| ScorecardRuleError::InvalidPattern(p.clone()))
+                })
+                .collect::<Result<Vec<_>, ScorecardRuleError>>()?;
+            Ok(Rule {
+                patterns,
+                limit: rule.score as usize,
+            })
+        }
+        let rules = config
+            .scorecard
+            .iter()
+            .map(rule_to_rule)
+            .collect::<Result<Vec<_>, ScorecardRuleError>>()
+            .map_err(|x| Box::new(x) as _)?;
         Ok(Frontend::new(
             sysdb_client,
             collections_with_segments_cache.into(),
             log_client,
             executor,
+            config.scorecard_enabled,
+            rules,
         ))
     }
 }

@@ -29,3 +29,9 @@ executor:
           kube_namespace: "chroma"
           memberlist_name: "query-service-memberlist"
           queue_size: 100
+scorecard_enabled: true
+scorecard:
+- patterns:
+  - 'op:*'
+  - 'collection_id:*'
+  score: 100

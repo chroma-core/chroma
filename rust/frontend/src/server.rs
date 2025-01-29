@@ -13,33 +13,29 @@ use chroma_types::{
     Include, IncludeList, Metadata, MetadataExpression, PrimitiveOperator, QueryRequest,
     QueryResponse, Where,
 };
-use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::ac::AdmissionControlledService;
+use crate::config::FrontendConfig;
 use crate::errors::{ServerError, ValidationError};
 use crate::frontend::Frontend;
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
-    circuit_breaker_config: CircuitBreakerConfig,
+    config: FrontendConfig,
     frontend: Frontend,
 }
 
 impl FrontendServer {
-    pub fn new(circuit_breaker_config: CircuitBreakerConfig, frontend: Frontend) -> FrontendServer {
-        let frontend = frontend;
-        FrontendServer {
-            circuit_breaker_config,
-            frontend,
-        }
+    pub fn new(config: FrontendConfig, frontend: Frontend) -> FrontendServer {
+        FrontendServer { config, frontend }
     }
 
     #[allow(dead_code)]
     pub async fn run(server: FrontendServer) {
-        let circuit_breaker_config = server.circuit_breaker_config.clone();
+        let circuit_breaker_config = server.config.circuit_breaker.clone();
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/", get(root))

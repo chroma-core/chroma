@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_system::System;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for the distributed executor.
 /// # Fields
@@ -13,18 +13,18 @@ use serde::Deserialize;
 /// - `request_timeout_ms` - The timeout for the request
 /// - `assignment` - The assignment policy to use for routing requests
 /// - `memberlist_provider` - The memberlist provider to use for getting the list of nodes
-#[derive(Deserialize, Clone)]
-pub(crate) struct DistributedExecutorConfig {
-    pub(crate) connections_per_node: usize,
-    pub(crate) replication_factor: usize,
-    pub(crate) connect_timeout_ms: u64,
-    pub(crate) request_timeout_ms: u64,
-    pub(crate) assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
-    pub(crate) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+#[derive(Deserialize, Clone, Serialize)]
+pub struct DistributedExecutorConfig {
+    pub connections_per_node: usize,
+    pub replication_factor: usize,
+    pub connect_timeout_ms: u64,
+    pub request_timeout_ms: u64,
+    pub assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
+    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
 }
 
-#[derive(Deserialize, Clone)]
-pub(crate) enum ExecutorConfig {
+#[derive(Deserialize, Clone, Serialize)]
+pub enum ExecutorConfig {
     Distributed(DistributedExecutorConfig),
 }
 
