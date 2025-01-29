@@ -197,6 +197,8 @@ pub enum CompactionError {
     Generic(#[from] Box<dyn ChromaError>),
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -207,13 +209,18 @@ where
         match value {
             TaskError::Panic(e) => CompactionError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => CompactionError::Aborted,
         }
     }
 }
 
 impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        if matches!(self, CompactionError::Aborted) {
+            ErrorCodes::ResourceExhausted
+        } else {
+            ErrorCodes::Internal
+        }
     }
 }
 

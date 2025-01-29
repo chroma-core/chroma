@@ -56,6 +56,8 @@ pub enum KnnError {
     Result(#[from] RecvError),
     #[error("Invalid distance function")]
     InvalidDistanceFunction,
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl ChromaError for KnnError {
@@ -75,6 +77,7 @@ impl ChromaError for KnnError {
             KnnError::Panic(_) => ErrorCodes::Aborted,
             KnnError::Result(_) => ErrorCodes::Internal,
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
+            KnnError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -87,6 +90,7 @@ where
         match value {
             TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => KnnError::Aborted,
         }
     }
 }
