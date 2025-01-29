@@ -1,30 +1,8 @@
+use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use sqlx::{Executor, Row};
 use std::path::PathBuf;
-
-//////////////////////// SqliteDb ////////////////////////////
-
-#[derive(Clone)]
-struct SqliteDBConfig {
-    // The SQLite database URL
-    url: String,
-    // TODO: change this to something bundled with binary
-    // The root directory where all migration files are stored
-    // The migration files are stored in subdirectories of this directory
-    migrations_root_dir: PathBuf,
-    hash_type: MigrationHash,
-    migration_mode: MigrationMode,
-}
-
-/// Migration mode for the database
-/// - Apply: Apply the migrations
-/// - Validate: Validate the applied migrations and ensure none are unappliued
-#[derive(Clone, PartialEq)]
-enum MigrationMode {
-    Apply,
-    Validate,
-}
 
 // TODO:
 // - support memory mode, add concurrency tests
@@ -384,12 +362,6 @@ impl MigrationDir {
     }
 }
 
-#[derive(Clone)]
-enum MigrationHash {
-    SHA256,
-    MD5,
-}
-
 //////////////////////// SqliteSysDb ////////////////////////
 
 struct SqliteSysDb {
@@ -405,6 +377,7 @@ impl SqliteSysDb {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MigrationHash;
     use sqlx::Row;
     use tempfile::tempdir;
 
