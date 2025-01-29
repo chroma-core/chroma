@@ -5675,6 +5675,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlite"
+version = "0.1.0"
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
