@@ -24,5 +24,6 @@ chroma-config = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-error = { workspace = true }
+chroma-tracing = { workspace = true }
 mdac = { workspace = true }
 chroma-cache = { workspace = true }

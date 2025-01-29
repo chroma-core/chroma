@@ -1,0 +1,16 @@
+[package]
+name = "chroma-tracing"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tracing-bunyan-formatter = { workspace = true }
+fastrace = "0.7"
+fastrace-opentelemetry = "0.8"
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing.workspace = true
+tonic.workspace = true

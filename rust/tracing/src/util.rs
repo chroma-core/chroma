@@ -5,7 +5,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
 const SPAN_ID_HEADER_KEY: &str = "chroma-spanid";
 
-pub(crate) fn try_parse_tracecontext(metadata: &MetadataMap) -> (Option<TraceId>, Option<SpanId>) {
+pub fn try_parse_tracecontext(metadata: &MetadataMap) -> (Option<TraceId>, Option<SpanId>) {
     let mut traceid: Option<TraceId> = None;
     let mut spanid: Option<SpanId> = None;
     if metadata.contains_key(TRACE_ID_HEADER_KEY) {
@@ -39,7 +39,7 @@ pub(crate) fn try_parse_tracecontext(metadata: &MetadataMap) -> (Option<TraceId>
     (traceid, spanid)
 }
 
-pub(crate) fn wrap_span_with_parent_context(
+pub fn wrap_span_with_parent_context(
     request_span: tracing::Span,
     metadata: &MetadataMap,
 ) -> tracing::Span {
