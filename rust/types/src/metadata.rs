@@ -1,5 +1,6 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
+use serde_json::{Number, Value};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -168,6 +169,21 @@ impl From<MetadataValue> for UpdateMetadataValue {
             MetadataValue::Int(v) => UpdateMetadataValue::Int(v),
             MetadataValue::Float(v) => UpdateMetadataValue::Float(v),
             MetadataValue::Str(v) => UpdateMetadataValue::Str(v),
+        }
+    }
+}
+
+impl From<MetadataValue> for Value {
+    fn from(value: MetadataValue) -> Self {
+        match value {
+            MetadataValue::Bool(val) => Self::Bool(val),
+            MetadataValue::Int(val) => Self::Number(
+                Number::from_i128(val as i128).expect("i64 should be representable in JSON"),
+            ),
+            MetadataValue::Float(val) => Self::Number(
+                Number::from_f64(val).expect("Inf and NaN should not be present in MetadataValue"),
+            ),
+            MetadataValue::Str(val) => Self::String(val),
         }
     }
 }

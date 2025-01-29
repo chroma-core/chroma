@@ -1,14 +1,17 @@
 use crate::error::QueryConversionError;
+use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::Collection;
+use crate::CollectionUuid;
 use crate::Metadata;
 use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
@@ -115,28 +118,6 @@ impl ChromaError for GetCollectionError {
     }
 }
 
-#[derive(Clone)]
-pub struct QueryRequest {
-    pub tenant_id: String,
-    pub database_name: String,
-    pub collection_id: Uuid,
-    pub r#where: Option<Where>,
-    pub embeddings: Vec<Vec<f32>>,
-    pub n_results: u32,
-    pub include: IncludeList,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct QueryResponse {
-    ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Vec<f32>>>>,
-    documents: Option<Vec<Vec<String>>>,
-    uri: Option<Vec<Vec<String>>>,
-    metadatas: Option<Vec<Vec<Metadata>>>,
-    distances: Option<Vec<Vec<f32>>>,
-    include: Vec<Include>,
-}
-
 pub struct AddToCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -193,6 +174,123 @@ impl IncludeList {
             includes: vec![Include::Document, Include::Metadata],
         }
     }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct CountRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+}
+
+pub type CountResponse = u32;
+
+#[derive(Clone)]
+pub struct GetRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub ids: Option<Vec<String>>,
+    pub r#where: Option<Where>,
+    pub limit: Option<u32>,
+    pub offset: u32,
+    pub include: IncludeList,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct GetResponse {
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<String>>,
+    uri: Option<Vec<String>>,
+    metadatas: Option<Vec<Value>>,
+    include: Vec<Include>,
+}
+
+impl From<(GetResult, IncludeList)> for GetResponse {
+    fn from(
+        (
+            result_vec,
+            IncludeList {
+                includes: include_vec,
+            },
+        ): (GetResult, IncludeList),
+    ) -> Self {
+        let mut res = Self {
+            ids: Vec::new(),
+            embeddings: include_vec
+                .contains(&Include::Embedding)
+                .then_some(Vec::new()),
+            documents: include_vec
+                .contains(&Include::Document)
+                .then_some(Vec::new()),
+            uri: include_vec.contains(&Include::Uri).then_some(Vec::new()),
+            metadatas: include_vec
+                .contains(&Include::Metadata)
+                .then_some(Vec::new()),
+            include: include_vec,
+        };
+        for ProjectionRecord {
+            id,
+            document,
+            embedding,
+            mut metadata,
+        } in result_vec.records
+        {
+            res.ids.push(id);
+            if let (Some(emb), Some(embeddings)) = (embedding, res.embeddings.as_mut()) {
+                embeddings.push(emb);
+            }
+            if let (Some(doc), Some(documents)) = (document, res.documents.as_mut()) {
+                documents.push(doc);
+            }
+            if let (Some(crate::MetadataValue::Str(uri)), Some(uris)) = (
+                metadata
+                    .as_mut()
+                    .and_then(|meta| meta.remove(CHROMA_URI_KEY)),
+                res.uri.as_mut(),
+            ) {
+                uris.push(uri);
+            }
+            if let (Some(meta), Some(metadatas)) = (
+                metadata.map(|m| {
+                    Value::Object(
+                        m.into_iter()
+                            .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                            .map(|(k, v)| (k, v.into()))
+                            .collect(),
+                    )
+                }),
+                res.metadatas.as_mut(),
+            ) {
+                metadatas.push(meta);
+            }
+        }
+        res
+    }
+}
+
+#[derive(Clone)]
+pub struct QueryRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub ids: Option<Vec<String>>,
+    pub r#where: Option<Where>,
+    pub embeddings: Vec<Vec<f32>>,
+    pub n_results: u32,
+    pub include: IncludeList,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct QueryResponse {
+    ids: Vec<Vec<String>>,
+    embeddings: Option<Vec<Vec<Vec<f32>>>>,
+    documents: Option<Vec<Vec<String>>>,
+    uri: Option<Vec<Vec<String>>>,
+    metadatas: Option<Vec<Vec<Value>>>,
+    distances: Option<Vec<Vec<f32>>>,
+    include: Vec<Include>,
 }
 
 pub const CHROMA_KEY: &str = "chroma:";
@@ -256,9 +354,12 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
                     uris.push(uri);
                 }
                 if let Some(meta) = metadata.map(|m| {
-                    m.into_iter()
-                        .filter_map(|(k, v)| (!k.starts_with(CHROMA_KEY)).then_some((k, v)))
-                        .collect()
+                    Value::Object(
+                        m.into_iter()
+                            .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                            .map(|(k, v)| (k, v.into()))
+                            .collect(),
+                    )
                 }) {
                     metadatas.push(meta);
                 }
