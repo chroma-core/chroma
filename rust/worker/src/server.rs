@@ -5,7 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_log::log::Log;
+use chroma_log::Log;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_types::{
@@ -399,7 +399,7 @@ mod tests {
 
     use super::*;
     use chroma_index::test_hnsw_index_provider;
-    use chroma_log::log::InMemoryLog;
+    use chroma_log::in_memory_log::InMemoryLog;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;

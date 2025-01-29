@@ -1,4 +1,4 @@
-use chroma_log::log::CollectionRecord;
+use chroma_log::CollectionRecord;
 
 use crate::compactor::types::CompactionJob;
 

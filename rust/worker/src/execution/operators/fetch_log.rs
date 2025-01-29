@@ -2,7 +2,7 @@ use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_log::log::{Log, PullLogsError};
+use chroma_log::{Log, PullLogsError};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
@@ -109,7 +109,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
 #[cfg(test)]
 mod tests {
     use chroma_log::{
-        log::{InMemoryLog, InternalLogRecord},
+        in_memory_log::{InMemoryLog, InternalLogRecord},
         test::{upsert_generator, LogGenerator},
     };
     use chroma_system::Operator;

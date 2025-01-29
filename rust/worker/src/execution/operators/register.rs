@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_log::log::Log;
-use chroma_log::log::UpdateCollectionLogOffsetError;
+use chroma_log::{Log, UpdateCollectionLogOffsetError};
 use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
@@ -145,7 +144,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_log::log::InMemoryLog;
+    use chroma_log::in_memory_log::InMemoryLog;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
     use std::collections::HashMap;
