@@ -83,6 +83,14 @@ impl FrontendServer {
                 post(collection_upsert),
             )
             .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
+                post(collection_update),
+            )
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
+                post(collection_upsert),
+            )
+            .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
                 get(collection_count),
             )
