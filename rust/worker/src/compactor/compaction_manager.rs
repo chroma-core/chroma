@@ -579,6 +579,7 @@ mod tests {
                 storage,
                 PathBuf::from(tmpdir.path().to_str().unwrap()),
                 hnsw_cache,
+                16,
                 rx,
             ),
             compaction_manager_queue_size,

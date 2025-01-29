@@ -60,6 +60,7 @@ query_service:
         hnsw_cache_config:
             weighted_lru:
                 capacity: 8589934592 # 8GB
+        num_parallel_collections: 16
 
 compaction_service:
     service_name: "compaction-service"
@@ -126,3 +127,4 @@ compaction_service:
         hnsw_cache_config:
             weighted_lru:
                 capacity: 8192 # 8192 MiB = 8GB
+        num_parallel_collections: 16

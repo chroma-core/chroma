@@ -10,14 +10,14 @@ use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
-use chroma_types::CollectionUuid;
+use chroma_types::{AysncPartitionedMutex, CollectionUuid};
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
 use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
-use tracing::{instrument, Instrument, Span};
+use tracing::{instrument, Span};
 use uuid::Uuid;
 
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
@@ -29,8 +29,6 @@ const FILES: [&str; 4] = [
     "length.bin",
     "link_lists.bin",
 ];
-
-const STAGED_FILE_PATH: &str = "staged_files";
 
 type CacheKey = CollectionUuid;
 
@@ -52,7 +50,7 @@ pub struct HnswIndexProvider {
     cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
-    write_mutex: Arc<tokio::sync::Mutex<()>>,
+    pub write_mutex: AysncPartitionedMutex<IndexUuid>,
     #[allow(dead_code)]
     purger: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
@@ -85,6 +83,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
             storage.clone(),
             PathBuf::from(&hnsw_config.hnsw_temporary_path),
             cache,
+            hnsw_config.num_parallel_collections,
             rx,
         ))
     }
@@ -111,6 +110,7 @@ impl HnswIndexProvider {
         storage: Storage,
         storage_path: PathBuf,
         cache: Box<dyn Cache<CollectionUuid, HnswIndexRef>>,
+        num_parallel_collections: u32,
         mut evicted: tokio::sync::mpsc::UnboundedReceiver<(CollectionUuid, HnswIndexRef)>,
     ) -> Self {
         let cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>> = cache.into();
@@ -130,7 +130,7 @@ impl HnswIndexProvider {
             cache,
             storage,
             temporary_storage_path: storage_path,
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            write_mutex: AysncPartitionedMutex::with_workers(num_parallel_collections as usize, ()),
             purger,
         }
     }
@@ -161,6 +161,7 @@ impl HnswIndexProvider {
         dimensionality: i32,
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
+        let _guard = self.write_mutex.lock(source_id).await;
         let new_id = IndexUuid(Uuid::new_v4());
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
         // This is ok to be called from multiple threads concurrently. See
@@ -193,14 +194,6 @@ impl HnswIndexProvider {
             }
         };
 
-        // See the comment in open() for why we lock the write mutex here.
-        let _guard = self
-            .write_mutex
-            .lock()
-            .instrument(
-                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
-            )
-            .await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(&new_id, cache_key).await {
@@ -224,89 +217,31 @@ impl HnswIndexProvider {
         file_path: &Path,
         buf: Arc<Vec<u8>>,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
-        let path_prefix = match file_path.parent() {
-            Some(path) => path,
-            None => {
-                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
-            }
-        };
-        let path_suffix = match file_path.file_name() {
-            Some(path) => path,
-            None => {
-                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
-            }
-        };
+        let file_handle = tokio::fs::File::create(&file_path).await;
 
-        let random_dir = path_prefix
-            .join(Path::new(STAGED_FILE_PATH))
-            .join(uuid::Uuid::new_v4().to_string());
-
-        // This is ok to be called from multiple threads concurrently. See
-        // the documentation of tokio::fs::create_dir_all to see why.
-        match self.create_dir_all(&random_dir).await {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(e);
-            }
-        }
-
-        let random_file_path = random_dir.join(path_suffix);
-
-        // First write to a random file path and then rename to the actual file path.
-        // this defends against potentially concurrent writes to the same file. But still
-        // allows concurrent writes to different files.
-        let file_handle = tokio::fs::File::create(&random_file_path).await;
         let mut file_handle = match file_handle {
             Ok(file) => file,
             Err(e) => {
-                tracing::error!("Failed to create temporary file: {}", e);
+                tracing::error!("Failed to create file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         };
+
         let res = file_handle.write_all(&buf).await;
         match res {
             Ok(_) => {}
             Err(e) => {
-                tracing::error!("Failed to copy temporary file: {}", e);
+                tracing::error!("Failed to copy file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
         match file_handle.flush().await {
-            Ok(_) => {}
+            Ok(_) => Ok(()),
             Err(e) => {
                 tracing::error!("Failed to flush temporary file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
-
-        async fn remove_temporary_files(
-            path: &Path,
-        ) -> Result<(), Box<HnswIndexProviderFileError>> {
-            // Remove the random directory.
-            match tokio::fs::remove_dir_all(path).await {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    tracing::error!("Failed to remove temporary directory: {}", e);
-                    Err(Box::new(HnswIndexProviderFileError::IOError(e)))
-                }
-            }
-        }
-
-        // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for actual write to local disk")).await;
-        // Do nothing if the file exists, we assume the concurrent writer wrote the same data.
-        // This is a safe assumption because the data is immutable from our perspective.
-        if !file_path.exists() {
-            match tokio::fs::rename(&random_file_path, file_path).await {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to rename file: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            }
-        }
-        // Remove the random file path.
-        remove_temporary_files(&random_dir).await
     }
 
     #[instrument]
@@ -349,6 +284,8 @@ impl HnswIndexProvider {
         Ok(())
     }
 
+    // There is no synchronization here. Assumes the caller synchronizes concurrent open()
+    // for the same index uuid.
     pub async fn open(
         &self,
         id: &IndexUuid,
@@ -358,7 +295,6 @@ impl HnswIndexProvider {
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
-        // Create directories should be thread safe.
         match self.create_dir_all(&index_storage_path).await {
             Ok(_) => {}
             Err(e) => {
@@ -376,7 +312,6 @@ impl HnswIndexProvider {
             }
         }
 
-        // Thread safe.
         let index_config = IndexConfig::new(dimensionality, distance_function);
 
         let index_storage_path_str = match index_storage_path.to_str() {
@@ -388,15 +323,6 @@ impl HnswIndexProvider {
             }
         };
 
-        // We choose to lock the write mutex here because we want to check if a concurrent writer has already loaded the index
-        // and then load it. This is not great if we want concurrent loads, but we can optimize this later.
-        let _guard = self
-            .write_mutex
-            .lock()
-            .instrument(
-                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
-            )
-            .await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(id, cache_key).await {
@@ -434,6 +360,7 @@ impl HnswIndexProvider {
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
         let id = IndexUuid(Uuid::new_v4());
+        let _guard = self.write_mutex.lock(&id).await;
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
         match self.create_dir_all(&index_storage_path).await {
@@ -457,7 +384,6 @@ impl HnswIndexProvider {
         let index = HnswIndex::init(&index_config, Some(&hnsw_config), id)
             .map_err(|e| Box::new(HnswIndexProviderCreateError::IndexInitError(e)))?;
 
-        let _guard = self.write_mutex.lock().await;
         match self.get(&id, cache_key).await {
             Some(index) => Ok(index.clone()),
             None => {
@@ -671,7 +597,7 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = new_non_persistent_cache_for_test();
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, rx);
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, rx);
         let collection_id = CollectionUuid(Uuid::new_v4());
 
         let dimensionality = 128;
