@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{
-    CollectionVersionFile, CollectionVersionHistory, CollectionVersionInfo,
+    CollectionInfoImmutable, CollectionVersionFile, VersionListForCollection,
 };
 use chrono::{DateTime, Duration, Utc};
 use thiserror::Error;
@@ -10,6 +10,7 @@ use thiserror::Error;
 #[derive(Clone, Debug)]
 pub struct ComputeVersionsToDeleteOperator {}
 
+#[derive(Debug)]
 pub struct ComputeVersionsToDeleteInput {
     pub version_file: CollectionVersionFile,
     pub cutoff_time: DateTime<Utc>,
@@ -19,6 +20,7 @@ pub struct ComputeVersionsToDeleteInput {
 #[derive(Debug)]
 pub struct ComputeVersionsToDeleteOutput {
     pub version_file: CollectionVersionFile,
+    pub versions_to_delete: VersionListForCollection,
 }
 
 #[derive(Error, Debug)]
@@ -27,6 +29,8 @@ pub enum ComputeVersionsToDeleteError {
     ComputeError(String),
     #[error("Invalid timestamp in version file")]
     InvalidTimestamp,
+    #[error("Error parsing version file: {0}")]
+    ParseError(#[from] prost::DecodeError),
 }
 
 impl ChromaError for ComputeVersionsToDeleteError {
@@ -50,6 +54,14 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         input: &ComputeVersionsToDeleteInput,
     ) -> Result<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError> {
         let mut version_file = input.version_file.clone();
+        let collection_info = version_file
+            .collection_info_immutable
+            .as_ref()
+            .ok_or_else(|| {
+                ComputeVersionsToDeleteError::ComputeError("Missing collection info".to_string())
+            })?;
+
+        let mut marked_versions = Vec::new();
 
         if let Some(ref mut version_history) = version_file.version_history {
             let mut unique_versions_seen = 0;
@@ -76,9 +88,27 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                     version.marked_for_deletion = true;
                 }
             }
+
+            // Collect marked versions
+            marked_versions = version_history
+                .versions
+                .iter()
+                .filter(|v| v.marked_for_deletion)
+                .map(|v| v.version)
+                .collect();
         }
 
-        Ok(ComputeVersionsToDeleteOutput { version_file })
+        let versions_to_delete = VersionListForCollection {
+            tenant_id: collection_info.tenant_id.clone(),
+            database_id: collection_info.database_id.clone(),
+            collection_id: collection_info.collection_id.clone(),
+            versions: marked_versions,
+        };
+
+        Ok(ComputeVersionsToDeleteOutput {
+            version_file,
+            versions_to_delete,
+        })
     }
 }
 
@@ -125,7 +155,13 @@ mod tests {
 
         let version_file = CollectionVersionFile {
             version_history: Some(version_history),
-            collection_info_immutable: None,
+            collection_info_immutable: Some(CollectionInfoImmutable {
+                tenant_id: "test_tenant".to_string(),
+                database_id: "test_db".to_string(),
+                collection_id: "test_collection".to_string(),
+                dimension: 0,
+                ..Default::default()
+            }),
         };
 
         let input = ComputeVersionsToDeleteInput {

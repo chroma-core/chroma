@@ -8,14 +8,25 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
+use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::CollectionUuid;
+use chrono::{Duration, Utc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
 use crate::fetch_version_file::{
     FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator, FetchVersionFileOutput,
 };
+use crate::operators::compute_versions_to_delete::{
+    ComputeVersionsToDeleteError, ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOperator,
+    ComputeVersionsToDeleteOutput,
+};
+use crate::operators::mark_versions_at_sysdb::{
+    MarkVersionsAtSysDbError, MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOperator,
+    MarkVersionsAtSysDbOutput,
+};
 
+use prost::Message;
 #[allow(dead_code)]
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
@@ -74,6 +85,10 @@ pub enum GarbageCollectorError {
     Result(#[from] RecvError),
     #[error("{0}")]
     Generic(#[from] Box<dyn ChromaError>),
+    #[error("ComputeVersionsToDelete error: {0}")]
+    ComputeVersionsToDelete(#[from] ComputeVersionsToDeleteError),
+    #[error("MarkVersionsAtSysDb error: {0}")]
+    MarkVersionsAtSysDb(#[from] MarkVersionsAtSysDbError),
 }
 
 impl ChromaError for GarbageCollectorError {
@@ -141,10 +156,92 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
         message: TaskResult<FetchVersionFileOutput, FetchVersionFileError>,
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
-        let _ = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(recs) => recs,
-            None => todo!(),
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
         };
-        // TODO(Sanket): Dispatch a task to determine versions to prune.
+
+        let cutoff_time = Utc::now() - Duration::hours(self.cutoff_time_hours as i64);
+
+        let version_file =
+            match CollectionVersionFile::decode(output.version_file_content().as_bytes()) {
+                Ok(file) => file,
+                Err(e) => {
+                    let result: Result<FetchVersionFileOutput, GarbageCollectorError> =
+                        Err(GarbageCollectorError::ComputeVersionsToDelete(
+                            ComputeVersionsToDeleteError::ParseError(e),
+                        ));
+                    self.ok_or_terminate(result, ctx);
+                    return;
+                }
+            };
+
+        let compute_task = wrap(
+            Box::new(ComputeVersionsToDeleteOperator {}),
+            ComputeVersionsToDeleteInput {
+                version_file,
+                cutoff_time,
+                min_versions_to_keep: 2,
+            },
+            ctx.receiver(),
+        );
+
+        self.dispatcher().send(compute_task, None).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError>>
+    for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError>,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
+
+        let mark_task = wrap(
+            Box::new(MarkVersionsAtSysDbOperator {}),
+            MarkVersionsAtSysDbInput {
+                version_file: output.version_file,
+                versions_to_delete: output.versions_to_delete,
+                sysdb_client: self.sysdb_client.clone(),
+                epoch_id: 0,
+            },
+            ctx.receiver(),
+        );
+
+        self.dispatcher().send(mark_task, None).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
+    for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        let _output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
+
+        let response = GarbageCollectorResponse {
+            collection_id: self.collection_id.clone(),
+            version_file_path: self.version_file_path.clone(),
+        };
+
+        self.terminate_with_result(Ok(response), ctx);
     }
 }

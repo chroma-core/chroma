@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
+use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, CollectionAndSegments, CreateDatabaseError, GetDatabaseError,
     GetDatabaseResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
@@ -157,6 +158,17 @@ impl SysDb {
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn mark_version_for_deletion(
+        &mut self,
+        epoch_id: i64,
+        versions: Vec<VersionListForCollection>,
+    ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.mark_version_for_deletion(epoch_id, versions).await,
+            SysDb::Test(_) => todo!(),
         }
     }
 }
@@ -537,6 +549,17 @@ impl GrpcSysDb {
             Err(e) => Err(FlushCompactionError::FailedToFlushCompaction(e)),
         }
     }
+
+    async fn mark_version_for_deletion(
+        &mut self,
+        epoch_id: i64,
+        versions: Vec<chroma_proto::VersionListForCollection>,
+    ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
+        let req = chroma_proto::MarkVersionForDeletionRequest { epoch_id, versions };
+
+        let res = self.client.mark_version_for_deletion(req).await?;
+        Ok(res.into_inner().collection_id_to_success)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -631,6 +654,20 @@ impl ChromaError for FlushCompactionError {
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum MarkVersionForDeletionError {
+    #[error("Failed to mark version for deletion")]
+    FailedToMarkVersion(#[from] tonic::Status),
+}
+
+impl ChromaError for MarkVersionForDeletionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            MarkVersionForDeletionError::FailedToMarkVersion(_) => ErrorCodes::Internal,
         }
     }
 }
