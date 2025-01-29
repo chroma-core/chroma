@@ -52,7 +52,7 @@ pub struct HnswIndexProvider {
     cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
-    write_mutex: Arc<tokio::sync::Mutex<()>>,
+    pub write_mutex: Arc<tokio::sync::Mutex<()>>,
     #[allow(dead_code)]
     purger: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
@@ -342,8 +342,6 @@ impl HnswIndexProvider {
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
-
-        let _guard = self.write_mutex.lock().await;
 
         // Create directories should be thread safe.
         match self.create_dir_all(&index_storage_path).await {

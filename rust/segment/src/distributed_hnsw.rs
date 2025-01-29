@@ -329,7 +329,7 @@ impl DistributedHNSWSegmentReader {
                 }
             };
             let index_uuid = IndexUuid(index_uuid);
-
+            let _guard = hnsw_index_provider.write_mutex.lock().await;
             let index = match hnsw_index_provider
                 .get(&index_uuid, &segment.collection)
                 .await
