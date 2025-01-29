@@ -36,12 +36,15 @@ impl ChromaError for PullLogsError {
 pub enum PushLogsError {
     #[error("Failed to push logs")]
     FailedToPushLogs(#[from] tonic::Status),
+    #[error("Failed to convert records to proto")]
+    ConversionError(#[from] RecordConversionError),
 }
 
 impl ChromaError for PushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             PushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            PushLogsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
 }

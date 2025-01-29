@@ -3,12 +3,13 @@ use crate::tracing::client_interceptor;
 use crate::types::{
     CollectionInfo, GetCollectionsWithNewDataError, PullLogsError, UpdateCollectionLogOffsetError,
 };
+use crate::PushLogsError;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self};
-use chroma_types::{CollectionUuid, LogRecord};
+use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionError};
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
@@ -134,6 +135,26 @@ impl GrpcLog {
                 Err(PullLogsError::FailedToPullLogs(e))
             }
         }
+    }
+
+    pub(super) async fn push_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        records: Vec<OperationRecord>,
+    ) -> Result<(), PushLogsError> {
+        let request = chroma_proto::PushLogsRequest {
+            collection_id: collection_id.0.to_string(),
+
+            records:
+                records.into_iter().map(|r| r.try_into()).collect::<Result<
+                    Vec<chroma_types::chroma_proto::OperationRecord>,
+                    RecordConversionError,
+                >>()?,
+        };
+
+        self.client.push_logs(request).await?;
+
+        Ok(())
     }
 
     pub(super) async fn get_collections_with_new_data(
