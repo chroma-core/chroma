@@ -1,10 +1,8 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Operator, OperatorType};
-use chroma_types::chroma_proto::{
-    CollectionInfoImmutable, CollectionVersionFile, VersionListForCollection,
-};
-use chrono::{DateTime, Duration, Utc};
+use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -116,8 +114,10 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
 mod tests {
     use super::*;
     use chroma_types::chroma_proto::{
-        CollectionVersionFile, CollectionVersionHistory, CollectionVersionInfo,
+        CollectionInfoImmutable, CollectionVersionFile, CollectionVersionHistory,
+        CollectionVersionInfo,
     };
+    use chrono::{Duration, Utc};
 
     #[tokio::test]
     async fn test_compute_versions_to_delete() {

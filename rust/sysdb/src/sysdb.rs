@@ -168,7 +168,21 @@ impl SysDb {
     ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
         match self {
             SysDb::Grpc(grpc) => grpc.mark_version_for_deletion(epoch_id, versions).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => {
+                let versions_clone = versions.clone();
+                test.mark_version_for_deletion(epoch_id, versions_clone)
+                    .await
+                    .map_err(|e| {
+                        MarkVersionForDeletionError::FailedToMarkVersion(Status::internal(e))
+                    })
+                    .map(|_| {
+                        let mut result = HashMap::new();
+                        for version in versions {
+                            result.insert(version.collection_id, true);
+                        }
+                        result
+                    })
+            }
         }
     }
 }

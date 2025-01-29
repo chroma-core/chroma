@@ -11,6 +11,7 @@ use super::sysdb::FlushCompactionError;
 use super::sysdb::GetCollectionsError;
 use super::sysdb::GetLastCompactionTimeError;
 use super::sysdb::GetSegmentsError;
+use chroma_types::chroma_proto::VersionListForCollection;
 
 #[derive(Clone, Debug)]
 pub struct TestSysDb {
@@ -209,5 +210,22 @@ impl TestSysDb {
             new_collection_version,
             last_compaction_time,
         ))
+    }
+
+    pub(crate) async fn mark_version_for_deletion(
+        &self,
+        _epoch_id: i64,
+        versions: Vec<VersionListForCollection>,
+    ) -> Result<(), String> {
+        // For testing success case, return Ok when versions are not empty
+        if !versions.is_empty() && !versions[0].versions.is_empty() {
+            // Simulate error case when version is 1
+            if versions[0].versions.contains(&1) {
+                return Err("Failed to mark version for deletion".to_string());
+            }
+            Ok(())
+        } else {
+            Ok(())
+        }
     }
 }

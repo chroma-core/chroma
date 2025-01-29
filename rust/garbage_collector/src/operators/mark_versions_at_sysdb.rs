@@ -60,3 +60,91 @@ impl Operator<MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOutput> for MarkVersi
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_sysdb::TestSysDb;
+
+    #[tokio::test]
+    async fn test_mark_versions_success() {
+        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let version_file = CollectionVersionFile::default();
+        let versions_to_delete = VersionListForCollection {
+            collection_id: "test_collection".to_string(),
+            database_id: "default".to_string(),
+            tenant_id: "default".to_string(),
+            versions: vec![2, 3, 4],
+        };
+
+        let input = MarkVersionsAtSysDbInput {
+            version_file: version_file.clone(),
+            versions_to_delete,
+            sysdb_client: sysdb,
+            epoch_id: 123,
+        };
+
+        let operator = MarkVersionsAtSysDbOperator {};
+        let result = operator.run(&input).await;
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.version_file, version_file);
+    }
+
+    #[tokio::test]
+    async fn test_mark_versions_empty_list() {
+        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let version_file = CollectionVersionFile::default();
+        let versions_to_delete = VersionListForCollection {
+            collection_id: "test_collection".to_string(),
+            database_id: "default".to_string(),
+            tenant_id: "default".to_string(),
+            versions: vec![],
+        };
+
+        let input = MarkVersionsAtSysDbInput {
+            version_file: version_file.clone(),
+            versions_to_delete,
+            sysdb_client: sysdb,
+            epoch_id: 123,
+        };
+
+        let operator = MarkVersionsAtSysDbOperator {};
+        let result = operator.run(&input).await;
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.version_file, version_file);
+    }
+
+    #[tokio::test]
+    async fn test_mark_versions_error() {
+        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let version_file = CollectionVersionFile::default();
+        let versions_to_delete = VersionListForCollection {
+            collection_id: "test_collection".to_string(),
+            database_id: "default".to_string(),
+            tenant_id: "default".to_string(),
+            versions: vec![1],
+        };
+
+        let input = MarkVersionsAtSysDbInput {
+            version_file,
+            versions_to_delete,
+            sysdb_client: sysdb,
+            epoch_id: 123,
+        };
+
+        let operator = MarkVersionsAtSysDbOperator {};
+        let result = operator.run(&input).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(MarkVersionsAtSysDbError::SysDBError(err)) => {
+                assert_eq!(err, "Failed to mark version for deletion");
+            }
+            _ => panic!("Expected SysDBError"),
+        }
+    }
+}

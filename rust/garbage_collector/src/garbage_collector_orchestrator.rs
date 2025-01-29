@@ -186,7 +186,10 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             ctx.receiver(),
         );
 
-        self.dispatcher().send(compute_task, None).await;
+        if let Err(e) = self.dispatcher().send(compute_task, None).await {
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            return;
+        }
     }
 }
 
@@ -217,7 +220,10 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
             ctx.receiver(),
         );
 
-        self.dispatcher().send(mark_task, None).await;
+        if let Err(e) = self.dispatcher().send(mark_task, None).await {
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            return;
+        }
     }
 }
 
