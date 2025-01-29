@@ -1,4 +1,5 @@
 use chroma_cache::CacheConfig;
+use chroma_log::config::LogConfig;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
@@ -12,6 +13,7 @@ pub(super) struct FrontendConfig {
     pub(super) cache_config: CacheConfig,
     pub service_name: String,
     pub otel_endpoint: String,
+    pub(super) log: LogConfig,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";

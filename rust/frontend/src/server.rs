@@ -4,11 +4,11 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-
 use chroma_types::{
-    Collection, CompositeExpression, CreateDatabaseRequest, DocumentOperator, GetCollectionRequest,
-    GetDatabaseRequest, GetTenantResponse, GetUserIdentityResponse, Include, IncludeList,
-    MetadataExpression, PrimitiveOperator, QueryRequest, QueryResponse, Where,
+    AddToCollectionResponse, Collection, CompositeExpression, CreateDatabaseRequest,
+    DocumentOperator, GetCollectionRequest, GetDatabaseRequest, GetTenantResponse,
+    GetUserIdentityResponse, Include, IncludeList, Metadata, MetadataExpression, PrimitiveOperator,
+    QueryRequest, QueryResponse, Where,
 };
 use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,12 @@ impl FrontendServer {
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
                 post(query),
             )
-            .with_state(server.clone());
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
+                post(add),
+            )
+            .with_state(server);
+
         // TODO: configuration for this
         // TODO: tracing
         let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -597,4 +602,38 @@ async fn query(
         .await?;
 
     Ok(Json(res))
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AddToCollectionPayload {
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<String>>,
+    uri: Option<Vec<String>>,
+    metadatas: Option<Vec<Metadata>>,
+}
+
+async fn add(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<AddToCollectionPayload>,
+) -> Result<Json<AddToCollectionResponse>, ServerError> {
+    let collection_id =
+        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
+
+    server
+        .frontend
+        .add(chroma_types::AddToCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids: payload.ids,
+            embeddings: payload.embeddings,
+            documents: payload.documents,
+            uri: payload.uri,
+            metadatas: payload.metadatas,
+        })
+        .await?;
+
+    Ok(Json(AddToCollectionResponse {}))
 }

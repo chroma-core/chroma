@@ -137,6 +137,37 @@ pub struct QueryResponse {
     include: Vec<Include>,
 }
 
+pub struct AddToCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: Uuid,
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<String>>,
+    pub uri: Option<Vec<String>>,
+    pub metadatas: Option<Vec<Metadata>>,
+}
+
+#[derive(Serialize)]
+pub struct AddToCollectionResponse {}
+
+#[derive(Error, Debug)]
+pub enum AddToCollectionError {
+    #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
+    InconsistentLength,
+    #[error("Failed to push logs: {0}")]
+    FailedToPushLogs(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for AddToCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            AddToCollectionError::InconsistentLength => ErrorCodes::InvalidArgument,
+            AddToCollectionError::FailedToPushLogs(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
     Distance,

@@ -1,6 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
 use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
@@ -13,7 +10,12 @@ use chroma_types::{
     GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, Include, QueryError, QueryRequest,
     QueryResponse,
 };
+use chroma_types::{
+    Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
+};
 use mdac::{Scorecard, ScorecardTicket};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::{config::FrontendConfig, executor::Executor};
 
@@ -40,6 +42,7 @@ pub struct Frontend {
     #[allow(dead_code)]
     executor: Executor,
     sysdb_client: Box<sysdb::SysDb>,
+    log_client: Box<chroma_log::Log>,
     scorecard_enabled: Arc<AtomicBool>,
     scorecard: Arc<Scorecard<'static>>,
     collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
@@ -49,6 +52,7 @@ impl Frontend {
     pub fn new(
         sysdb_client: Box<sysdb::SysDb>,
         collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
+        log_client: Box<chroma_log::Log>,
     ) -> Self {
         let scorecard_enabled = Arc::new(AtomicBool::new(false));
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
@@ -59,6 +63,7 @@ impl Frontend {
             // WARN: This is a placeholder impl, which should be replaced by proper initialization from config
             executor: Executor::default(),
             sysdb_client,
+            log_client,
             scorecard_enabled,
             scorecard,
             collections_with_segments_cache,
@@ -191,12 +196,96 @@ impl Frontend {
             .await?;
         Ok((query_result, request.include).into())
     }
+
+    pub async fn add(
+        &mut self,
+        request: chroma_types::AddToCollectionRequest,
+    ) -> Result<chroma_types::AddToCollectionResponse, chroma_types::AddToCollectionError> {
+        let collection_id = CollectionUuid(request.collection_id);
+
+        let chroma_types::AddToCollectionRequest {
+            mut ids,
+            mut embeddings,
+            mut documents,
+            mut uri,
+            mut metadatas,
+            ..
+        } = request;
+
+        let mut records: Vec<OperationRecord> = vec![];
+        while let Some(id) = ids.pop() {
+            let embedding = embeddings
+                .as_mut()
+                .map(|v| {
+                    v.pop()
+                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
+                })
+                .transpose()?;
+            let document = documents
+                .as_mut()
+                .map(|v| {
+                    v.pop()
+                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
+                })
+                .transpose()?;
+            let uri = uri
+                .as_mut()
+                .map(|v| {
+                    v.pop()
+                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
+                })
+                .transpose()?;
+            let metadata = metadatas
+                .as_mut()
+                .map(|v| {
+                    v.pop()
+                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
+                })
+                .transpose()?;
+
+            let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
+
+            let mut metadata = metadata
+                .map(|m| {
+                    m.into_iter()
+                        .map(|(key, value)| (key, value.into()))
+                        .collect::<UpdateMetadata>()
+                })
+                .unwrap_or_default();
+            if let Some(document) = document.clone() {
+                metadata.insert(
+                    "chroma:document".to_string(),
+                    UpdateMetadataValue::Str(document),
+                );
+            }
+            if let Some(uri) = uri {
+                metadata.insert("chroma:uri".to_string(), UpdateMetadataValue::Str(uri));
+            }
+
+            records.push(OperationRecord {
+                id,
+                embedding,
+                document,
+                encoding,
+                metadata: Some(metadata),
+                operation: Operation::Add,
+            });
+        }
+
+        self.log_client
+            .push_logs(collection_id, records)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(chroma_types::AddToCollectionResponse {})
+    }
 }
 
 #[async_trait::async_trait]
 impl Configurable<FrontendConfig> for Frontend {
     async fn try_from_config(config: &FrontendConfig) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
+        let log_client = chroma_log::from_config(&config.log).await?;
 
         let collections_with_segments_cache = chroma_cache::from_config::<
             CollectionUuid,
@@ -207,6 +296,7 @@ impl Configurable<FrontendConfig> for Frontend {
         Ok(Frontend::new(
             sysdb_client,
             collections_with_segments_cache.into(),
+            log_client,
         ))
     }
 }
