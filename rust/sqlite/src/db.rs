@@ -2,7 +2,6 @@ use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use sqlx::{Executor, Row};
-use std::path::PathBuf;
 
 // TODO:
 // - support memory mode, add concurrency tests
@@ -15,16 +14,11 @@ struct SqliteDb {
 impl SqliteDb {
     pub async fn try_from_config(config: &SqliteDBConfig) -> Result<Self, String> {
         // TODO: error type
-
-        // PRAGMA legacy_alter_table=ON is required for some of our older
-        // migrations that use the ALTER TABLE ... RENAME TO ... syntax
-        // cur.execute("PRAGMA foreign_keys = ON")
-        // cur.execute("PRAGMA case_sensitive_like = ON")
         // TODO: copy all other pragmas from python and add basic tests
         let options = SqliteConnectOptions::new()
             .filename(&config.url)
             // Due to a bug in the python code, foreign_keys is turned off
-            // the python code enabled it in a transaction, however,
+            // The python code enabled it in a transaction, however,
             // https://www.sqlite.org/pragma.html states that foreign_keys
             // is a no-op in a transaction. In order to be able to run our migrations
             // we turn it off
