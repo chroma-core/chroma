@@ -78,7 +78,9 @@ enum TaskState {
     NotStarted,
     Running,
     Aborted,
-    // There is no finished; it transitions from not-running to something else
+    // There is no FinishedState to simplify the implementation.  Adding one requires covering all
+    // cases and makes a diamond state machine.  Having just one valid transition (from NotStarted
+    // to anything else) simplfies the implementation.
 }
 
 /// A task is a wrapper around an operator and its input.
