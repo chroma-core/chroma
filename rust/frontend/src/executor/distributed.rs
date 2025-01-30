@@ -18,7 +18,7 @@ use chroma_types::{
     plan::{Count, Get, Knn},
     CollectionUuid, ExecutorError,
 };
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use rand::seq::SliceRandom;
 use std::{cmp::min, collections::HashMap, sync::Arc};
 use tonic::Request;
@@ -36,7 +36,7 @@ use tonic::Request;
 #[derive(Clone, Debug)]
 pub struct DistributedExecutor {
     node_name_to_client:
-        Arc<Mutex<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
+        Arc<RwLock<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
     backoff: ExponentialBuilder,
@@ -48,7 +48,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         (config, system): &(config::DistributedExecutorConfig, System),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let assignment_policy = assignment::from_config(&config.assignment).await?;
-        let node_name_to_client = Arc::new(Mutex::new(HashMap::new()));
+        let node_name_to_client = Arc::new(RwLock::new(HashMap::new()));
         let client_manager = ClientManager::new(
             node_name_to_client.clone(),
             config.connections_per_node,
@@ -82,7 +82,7 @@ impl DistributedExecutor {
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            choose_client(&clients)?
+            choose_client(clients.as_slice())?
                 .count(Request::new(plan.clone().into()))
                 .await
         })
@@ -96,7 +96,7 @@ impl DistributedExecutor {
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            choose_client(&clients)?
+            choose_client(clients.as_slice())?
                 .get(Request::new(plan.clone().try_into()?))
                 .await
         })
@@ -108,7 +108,7 @@ impl DistributedExecutor {
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            choose_client(&clients)?
+            choose_client(clients.as_slice())?
                 .knn(Request::new(plan.clone().try_into()?))
                 .await
         })
@@ -132,7 +132,7 @@ impl DistributedExecutor {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<Vec<QueryExecutorClient<tonic::transport::Channel>>, ExecutorError> {
-        let node_name_to_client_guard = self.node_name_to_client.lock();
+        let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
         let target_replication_factor = min(self.replication_factor, members.len());
         self.assignment_policy.set_members(members);

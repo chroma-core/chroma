@@ -343,10 +343,10 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
-pub struct AddToCollectionRequest {
+pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
-    pub collection_id: Uuid,
+    pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
     pub embeddings: Option<Vec<Vec<f32>>>,
     pub documents: Option<Vec<String>>,
@@ -355,21 +355,21 @@ pub struct AddToCollectionRequest {
 }
 
 #[derive(Serialize)]
-pub struct AddToCollectionResponse {}
+pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
-pub enum AddToCollectionError {
+pub enum AddCollectionRecordsError {
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for AddToCollectionError {
+impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AddToCollectionError::InconsistentLength => ErrorCodes::InvalidArgument,
-            AddToCollectionError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            AddCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
+            AddCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -377,7 +377,7 @@ impl ChromaError for AddToCollectionError {
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
-    pub collection_id: Uuid,
+    pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
     pub embeddings: Option<Vec<Vec<f32>>>,
     pub documents: Option<Vec<String>>,
@@ -405,10 +405,10 @@ impl ChromaError for UpdateCollectionRecordsError {
     }
 }
 
-pub struct UpsertCollectionRequest {
+pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
-    pub collection_id: Uuid,
+    pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
     pub embeddings: Option<Vec<Vec<f32>>>,
     pub documents: Option<Vec<String>>,
@@ -417,21 +417,52 @@ pub struct UpsertCollectionRequest {
 }
 
 #[derive(Serialize)]
-pub struct UpsertCollectionResponse {}
+pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
-pub enum UpsertCollectionError {
+pub enum UpsertCollectionRecordsError {
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for UpsertCollectionError {
+impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionError::InconsistentLength => ErrorCodes::InvalidArgument,
-            UpsertCollectionError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            UpsertCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
+            UpsertCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+pub struct DeleteCollectionRecordsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub ids: Option<Vec<String>>,
+    pub r#where: Option<Where>,
+}
+
+#[derive(Serialize)]
+pub struct DeleteCollectionRecordsResponse {}
+
+#[derive(Error, Debug)]
+pub enum DeleteCollectionRecordsError {
+    #[error("Failed to get collection snapshot")]
+    FetchCollectionSnapshot(#[from] QueryError),
+    #[error("Failed to resolve IDs: {0}")]
+    GetFailed(#[from] ExecutorError),
+    #[error("Failed to push logs: {0}")]
+    FailedToPushLogs(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for DeleteCollectionRecordsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteCollectionRecordsError::FetchCollectionSnapshot(err) => err.code(),
+            DeleteCollectionRecordsError::GetFailed(err) => err.code(),
+            DeleteCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
         }
     }
 }

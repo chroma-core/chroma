@@ -6,15 +6,15 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_types::{
-    AddToCollectionResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest,
-    GetTenantResponse, GetUserIdentityResponse, IncludeList, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionResponse,
+    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
+    IncludeList, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest,
+    ListDatabasesResponse, Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -81,6 +81,10 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
                 post(collection_upsert),
+            )
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/delete",
+                post(collection_delete),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
@@ -387,7 +391,7 @@ async fn delete_collection(
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AddToCollectionPayload {
+pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
     documents: Option<Vec<String>>,
@@ -398,15 +402,14 @@ pub struct AddToCollectionPayload {
 async fn collection_add(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<AddToCollectionPayload>,
-) -> Result<Json<AddToCollectionResponse>, ServerError> {
-    tracing::info!("Adding records to collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
+    Json(payload): Json<AddCollectionRecordsPayload>,
+) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     let res = server
         .frontend
-        .add(chroma_types::AddToCollectionRequest {
+        .add(chroma_types::AddCollectionRecordsRequest {
             tenant_id,
             database_name,
             collection_id,
@@ -436,7 +439,7 @@ async fn collection_update(
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     Ok(Json(
         server
@@ -456,7 +459,7 @@ async fn collection_update(
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct UpsertCollectionPayload {
+pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
     documents: Option<Vec<String>>,
@@ -467,15 +470,15 @@ pub struct UpsertCollectionPayload {
 async fn collection_upsert(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<UpsertCollectionPayload>,
-) -> Result<Json<UpsertCollectionResponse>, ServerError> {
+    Json(payload): Json<UpsertCollectionRecordsPayload>,
+) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     Ok(Json(
         server
             .frontend
-            .upsert(chroma_types::UpsertCollectionRequest {
+            .upsert(chroma_types::UpsertCollectionRecordsRequest {
                 tenant_id,
                 database_name,
                 collection_id,
@@ -487,6 +490,35 @@ async fn collection_upsert(
             })
             .await?,
     ))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeleteCollectionRecordsPayload {
+    ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    where_fields: RawWhereFields,
+}
+
+async fn collection_delete(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<DeleteCollectionRecordsPayload>,
+) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    server
+        .frontend
+        .delete(chroma_types::DeleteCollectionRecordsRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids: payload.ids,
+            r#where: payload.where_fields.parse()?,
+        })
+        .await?;
+
+    Ok(Json(DeleteCollectionRecordsResponse {}))
 }
 
 async fn collection_count(
