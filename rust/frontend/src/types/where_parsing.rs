@@ -2,14 +2,50 @@ use super::errors::ValidationError;
 use chroma_types::{
     CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where,
 };
+use serde::Deserialize;
 use serde_json::Value;
+
+#[derive(Deserialize, Debug, Clone)]
+pub(crate) struct RawWhereFields {
+    #[serde(default)]
+    r#where: Value,
+    #[serde(default)]
+    where_document: Value,
+}
+
+impl RawWhereFields {
+    pub(crate) fn parse(self) -> Result<Option<Where>, ValidationError> {
+        let mut where_clause = None;
+        if !self.r#where.is_null() {
+            let where_payload = &self.r#where;
+            where_clause = Some(parse_where(where_payload)?);
+        }
+        let mut where_document_clause = None;
+        if !self.where_document.is_null() {
+            let where_document_payload = &self.where_document;
+            where_document_clause = Some(parse_where_document(where_document_payload)?);
+        }
+        let combined_where = match where_clause {
+            Some(where_clause) => match where_document_clause {
+                Some(where_document_clause) => Some(Where::Composite(CompositeExpression {
+                    operator: chroma_types::BooleanOperator::And,
+                    children: vec![where_clause, where_document_clause],
+                })),
+                None => Some(where_clause),
+            },
+            None => where_document_clause,
+        };
+
+        Ok(combined_where)
+    }
+}
 
 pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationError> {
     let where_doc_payload = json_payload
         .as_object()
-        .ok_or(ValidationError::InvalidWhereDocumentClause)?;
+        .ok_or(ValidationError::WhereDocumentClause)?;
     if where_doc_payload.len() != 1 {
-        return Err(ValidationError::InvalidWhereDocumentClause);
+        return Err(ValidationError::WhereDocumentClause);
     }
     let (key, value) = where_doc_payload.iter().next().unwrap();
     // Check if it is a composite expression.
@@ -18,7 +54,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
         // Check that the value is list type.
         let children = value
             .as_array()
-            .ok_or(ValidationError::InvalidWhereDocumentClause)?;
+            .ok_or(ValidationError::WhereDocumentClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -34,7 +70,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
         // Check that the value is list type.
         let children = value
             .as_array()
-            .ok_or(ValidationError::InvalidWhereDocumentClause)?;
+            .ok_or(ValidationError::WhereDocumentClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -46,7 +82,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
         }));
     }
     if !value.is_string() {
-        return Err(ValidationError::InvalidWhereDocumentClause);
+        return Err(ValidationError::WhereDocumentClause);
     }
     let value_str = value.as_str().unwrap();
     let operator_type;
@@ -55,7 +91,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
     } else if key == "$not_contains" {
         operator_type = DocumentOperator::NotContains;
     } else {
-        return Err(ValidationError::InvalidWhereDocumentClause);
+        return Err(ValidationError::WhereDocumentClause);
     }
     Ok(Where::Document(chroma_types::DocumentExpression {
         operator: operator_type,
@@ -66,18 +102,16 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
 pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
     let where_payload = json_payload
         .as_object()
-        .ok_or(ValidationError::InvalidWhereClause)?;
+        .ok_or(ValidationError::WhereClause)?;
     if where_payload.len() != 1 {
-        return Err(ValidationError::InvalidWhereClause);
+        return Err(ValidationError::WhereClause);
     }
     let (key, value) = where_payload.iter().next().unwrap();
     // Check if it is a composite expression.
     if key == "$and" {
         let logical_operator = chroma_types::BooleanOperator::And;
         // Check that the value is list type.
-        let children = value
-            .as_array()
-            .ok_or(ValidationError::InvalidWhereClause)?;
+        let children = value.as_array().ok_or(ValidationError::WhereClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -91,9 +125,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
     if key == "$or" {
         let logical_operator = chroma_types::BooleanOperator::Or;
         // Check that the value is list type.
-        let children = value
-            .as_array()
-            .ok_or(ValidationError::InvalidWhereClause)?;
+        let children = value.as_array().ok_or(ValidationError::WhereClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -146,7 +178,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
         let value_obj = value.as_object().unwrap();
         // value_obj should have exactly one key.
         if value_obj.len() != 1 {
-            return Err(ValidationError::InvalidWhereClause);
+            return Err(ValidationError::WhereClause);
         }
         let (operator, operand) = value_obj.iter().next().unwrap();
         if operand.is_array() {
@@ -156,18 +188,18 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$nin" {
                 set_operator = chroma_types::SetOperator::NotIn;
             } else {
-                return Err(ValidationError::InvalidWhereClause);
+                return Err(ValidationError::WhereClause);
             }
             let operand = operand.as_array().unwrap();
             if operand.is_empty() {
-                return Err(ValidationError::InvalidWhereClause);
+                return Err(ValidationError::WhereClause);
             }
             if operand[0].is_string() {
                 let operand_str = operand
                     .iter()
                     .map(|val| {
                         val.as_str()
-                            .ok_or(ValidationError::InvalidWhereClause)
+                            .ok_or(ValidationError::WhereClause)
                             .map(|s| s.to_string())
                     })
                     .collect::<Result<Vec<String>, _>>()?;
@@ -182,7 +214,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             if operand[0].is_boolean() {
                 let operand_bool = operand
                     .iter()
-                    .map(|val| val.as_bool().ok_or(ValidationError::InvalidWhereClause))
+                    .map(|val| val.as_bool().ok_or(ValidationError::WhereClause))
                     .collect::<Result<Vec<bool>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
@@ -195,7 +227,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             if operand[0].is_f64() {
                 let operand_f64 = operand
                     .iter()
-                    .map(|val| val.as_f64().ok_or(ValidationError::InvalidWhereClause))
+                    .map(|val| val.as_f64().ok_or(ValidationError::WhereClause))
                     .collect::<Result<Vec<f64>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
@@ -208,7 +240,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             if operand[0].is_i64() {
                 let operand_i64 = operand
                     .iter()
-                    .map(|val| val.as_i64().ok_or(ValidationError::InvalidWhereClause))
+                    .map(|val| val.as_i64().ok_or(ValidationError::WhereClause))
                     .collect::<Result<Vec<i64>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
@@ -218,7 +250,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
                     ),
                 }));
             }
-            return Err(ValidationError::InvalidWhereClause);
+            return Err(ValidationError::WhereClause);
         }
         if operand.is_string() {
             let operand_str = operand.as_str().unwrap();
@@ -228,7 +260,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
             } else {
-                return Err(ValidationError::InvalidWhereClause);
+                return Err(ValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -246,7 +278,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
             } else {
-                return Err(ValidationError::InvalidWhereClause);
+                return Err(ValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -272,7 +304,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
             } else {
-                return Err(ValidationError::InvalidWhereClause);
+                return Err(ValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -298,7 +330,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
             } else {
-                return Err(ValidationError::InvalidWhereClause);
+                return Err(ValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
@@ -308,9 +340,9 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
                 ),
             }));
         }
-        return Err(ValidationError::InvalidWhereClause);
+        return Err(ValidationError::WhereClause);
     }
-    Err(ValidationError::InvalidWhereClause)
+    Err(ValidationError::WhereClause)
 }
 
 #[cfg(test)]

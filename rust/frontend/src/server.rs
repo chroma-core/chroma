@@ -3,7 +3,7 @@ use crate::config::FrontendConfig;
 use crate::frontend::Frontend;
 use crate::tower_tracing::add_tracing_middleware;
 use crate::types::errors::{ServerError, ValidationError};
-use crate::types::where_parsing::{parse_where, parse_where_document};
+use crate::types::where_parsing::RawWhereFields;
 use axum::ServiceExt;
 use axum::{
     extract::{Path, State},
@@ -11,13 +11,11 @@ use axum::{
     Json, Router,
 };
 use chroma_types::{
-    AddToCollectionResponse, Collection, CollectionUuid, CompositeExpression, CountRequest,
-    CountResponse, CreateDatabaseRequest, GetCollectionRequest, GetDatabaseRequest, GetRequest,
-    GetResponse, GetTenantResponse, GetUserIdentityResponse, Include, IncludeList, Metadata,
-    QueryRequest, QueryResponse, Where,
+    AddToCollectionResponse, Collection, CollectionUuid, CountRequest, CountResponse,
+    CreateDatabaseRequest, GetCollectionRequest, GetDatabaseRequest, GetRequest, GetResponse,
+    GetTenantResponse, GetUserIdentityResponse, IncludeList, Metadata, QueryRequest, QueryResponse,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -183,110 +181,14 @@ async fn get_collection(
     Ok(Json(collection))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct QueryRequestPayload {
     ids: Option<Vec<String>>,
-    r#where: Option<Where>,
+    #[serde(flatten)]
+    where_fields: RawWhereFields,
     query_embeddings: Vec<Vec<f32>>,
     n_results: Option<u32>,
     include: IncludeList,
-}
-
-impl TryFrom<Value> for QueryRequestPayload {
-    type Error = ValidationError;
-
-    fn try_from(json_payload: Value) -> Result<Self, Self::Error> {
-        let ids = match &json_payload["ids"] {
-            Value::Null => None,
-            Value::Array(uids) => Some(
-                uids.iter()
-                    .map(|id| {
-                        id.as_str()
-                            .ok_or(ValidationError::InvalidUserID)
-                            .map(ToString::to_string)
-                    })
-                    .collect::<Result<_, _>>()?,
-            ),
-            _ => return Err(ValidationError::InvalidUserID),
-        };
-        let n_results = match &json_payload["n_results"] {
-            Value::Null => None,
-            Value::Number(n) => Some(n.as_u64().unwrap() as u32),
-            _ => return Err(ValidationError::InvalidLimit),
-        };
-        let embeddings = json_payload["query_embeddings"]
-            .as_array()
-            .ok_or(ValidationError::InvalidEmbeddings)?
-            .iter()
-            .map(|inner_array| {
-                inner_array
-                    .as_array()
-                    .ok_or(ValidationError::InvalidEmbeddings)
-                    .and_then(|arr| {
-                        arr.iter()
-                            .map(|num| {
-                                num.as_f64()
-                                    .ok_or(ValidationError::InvalidEmbeddings)
-                                    .map(|n| n as f32)
-                            })
-                            .collect::<Result<Vec<f32>, _>>()
-                    })
-            })
-            .collect::<Result<Vec<Vec<f32>>, _>>()?;
-        let mut where_clause = None;
-        if !json_payload["where"].is_null() {
-            let where_payload = &json_payload["where"];
-            where_clause = Some(parse_where(where_payload)?);
-        }
-        let mut where_document_clause = None;
-        if !json_payload["where_document"].is_null() {
-            let where_document_payload = &json_payload["where_document"];
-            where_document_clause = Some(parse_where_document(where_document_payload)?);
-        }
-        let combined_where = match where_clause {
-            Some(where_clause) => match where_document_clause {
-                Some(where_document_clause) => Some(Where::Composite(CompositeExpression {
-                    operator: chroma_types::BooleanOperator::And,
-                    children: vec![where_clause, where_document_clause],
-                })),
-                None => Some(where_clause),
-            },
-            None => where_document_clause,
-        };
-        // Parse includes.
-        let include = match &json_payload["include"] {
-            Value::Null => IncludeList::default_query(),
-            Value::Array(arr) => {
-                let mut include_list = IncludeList {
-                    includes: Vec::new(),
-                };
-                for val in arr {
-                    if !val.is_string() {
-                        return Err(ValidationError::InvalidIncludeList);
-                    }
-                    let include_str = val.as_str().unwrap();
-                    match include_str {
-                        "distances" => include_list.includes.push(Include::Distance),
-                        "documents" => include_list.includes.push(Include::Document),
-                        "embeddings" => include_list.includes.push(Include::Embedding),
-                        "metadatas" => include_list.includes.push(Include::Metadata),
-                        "uris" => include_list.includes.push(Include::Uri),
-                        _ => return Err(ValidationError::InvalidIncludeList),
-                    }
-                }
-                include_list
-            }
-            _ => return Err(ValidationError::InvalidIncludeList),
-        };
-
-        Ok(QueryRequestPayload {
-            ids,
-            r#where: combined_where,
-            query_embeddings: embeddings,
-            n_results,
-            include,
-        })
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -304,7 +206,7 @@ async fn add(
     Json(payload): Json<AddToCollectionPayload>,
 ) -> Result<Json<AddToCollectionResponse>, ServerError> {
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::InvalidCollectionId)?;
+        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
     server
         .frontend
@@ -338,112 +240,29 @@ async fn count(
                 tenant_id,
                 database_name,
                 collection_id: CollectionUuid::from_str(&collection_id)
-                    .map_err(|_| ValidationError::InvalidCollectionId)?,
+                    .map_err(|_| ValidationError::CollectionId)?,
             })
             .await?,
     ))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct GetRequestPayload {
     ids: Option<Vec<String>>,
-    r#where: Option<Where>,
+    #[serde(flatten)]
+    where_fields: RawWhereFields,
     limit: Option<u32>,
     offset: u32,
     include: IncludeList,
 }
 
-impl TryFrom<Value> for GetRequestPayload {
-    type Error = ValidationError;
-
-    fn try_from(json_payload: Value) -> Result<Self, Self::Error> {
-        let ids = match &json_payload["ids"] {
-            Value::Null => None,
-            Value::Array(uids) => Some(
-                uids.iter()
-                    .map(|id| {
-                        id.as_str()
-                            .ok_or(ValidationError::InvalidUserID)
-                            .map(ToString::to_string)
-                    })
-                    .collect::<Result<_, _>>()?,
-            ),
-            _ => return Err(ValidationError::InvalidUserID),
-        };
-        let limit = match &json_payload["limit"] {
-            Value::Null => None,
-            Value::Number(n) => Some(n.as_u64().unwrap() as u32),
-            _ => return Err(ValidationError::InvalidLimit),
-        };
-        let offset = match &json_payload["offset"] {
-            Value::Null => 0,
-            Value::Number(n) => n.as_u64().unwrap() as u32,
-            _ => return Err(ValidationError::InvalidLimit),
-        };
-        let mut where_clause = None;
-        if !json_payload["where"].is_null() {
-            let where_payload = &json_payload["where"];
-            where_clause = Some(parse_where(where_payload)?);
-        }
-        let mut where_document_clause = None;
-        if !json_payload["where_document"].is_null() {
-            let where_document_payload = &json_payload["where_document"];
-            where_document_clause = Some(parse_where_document(where_document_payload)?);
-        }
-        let combined_where = match where_clause {
-            Some(where_clause) => match where_document_clause {
-                Some(where_document_clause) => Some(Where::Composite(CompositeExpression {
-                    operator: chroma_types::BooleanOperator::And,
-                    children: vec![where_clause, where_document_clause],
-                })),
-                None => Some(where_clause),
-            },
-            None => where_document_clause,
-        };
-        // Parse includes.
-        let include = match &json_payload["include"] {
-            Value::Null => IncludeList::default_query(),
-            Value::Array(arr) => {
-                let mut include_list = IncludeList {
-                    includes: Vec::new(),
-                };
-                for val in arr {
-                    if !val.is_string() {
-                        return Err(ValidationError::InvalidIncludeList);
-                    }
-                    let include_str = val.as_str().unwrap();
-                    match include_str {
-                        "distances" => include_list.includes.push(Include::Distance),
-                        "documents" => include_list.includes.push(Include::Document),
-                        "embeddings" => include_list.includes.push(Include::Embedding),
-                        "metadatas" => include_list.includes.push(Include::Metadata),
-                        "uris" => include_list.includes.push(Include::Uri),
-                        _ => return Err(ValidationError::InvalidIncludeList),
-                    }
-                }
-                include_list
-            }
-            _ => return Err(ValidationError::InvalidIncludeList),
-        };
-
-        Ok(GetRequestPayload {
-            ids,
-            r#where: combined_where,
-            limit,
-            offset,
-            include,
-        })
-    }
-}
-
 async fn collection_get(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(json_payload): Json<Value>,
+    Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
-    let collection_id = CollectionUuid::from_str(&collection_id)
-        .map_err(|_| ValidationError::InvalidCollectionId)?;
-    let payload = GetRequestPayload::try_from(json_payload)?;
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
         "Get collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
     );
@@ -454,7 +273,7 @@ async fn collection_get(
             database_name,
             collection_id,
             ids: payload.ids,
-            r#where: payload.r#where,
+            r#where: payload.where_fields.parse()?,
             limit: payload.limit,
             offset: payload.offset,
             include: payload.include,
@@ -466,11 +285,10 @@ async fn collection_get(
 async fn query(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(json_payload): Json<Value>,
+    Json(payload): Json<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
-    let collection_id = CollectionUuid::from_str(&collection_id)
-        .map_err(|_| ValidationError::InvalidCollectionId)?;
-    let payload = QueryRequestPayload::try_from(json_payload)?;
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
         "Querying collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
     );
@@ -482,7 +300,7 @@ async fn query(
             database_name,
             collection_id,
             ids: payload.ids,
-            r#where: payload.r#where,
+            r#where: payload.where_fields.parse()?,
             include: payload.include,
             embeddings: payload.query_embeddings,
             n_results: payload.n_results.unwrap_or(10),
