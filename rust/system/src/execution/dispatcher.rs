@@ -99,7 +99,6 @@ impl Dispatcher {
                 let mut witness = self.active_io_tasks.load(Ordering::Relaxed);
                 loop {
                     if witness == 0 {
-                        println!("FINDME {}:{}", file!(), line!());
                         task.abort().await;
                         return;
                     }
@@ -141,7 +140,6 @@ impl Dispatcher {
                     },
                     None => {
                         if self.task_queue.len() >= self.config.task_queue_limit {
-                            println!("FINDME {}:{}", file!(), line!());
                             task.abort().await;
                         } else {
                             self.task_queue.push_back((task, Span::current()));
