@@ -55,6 +55,9 @@ impl CollectionsWithSegmentsProvider {
         {
             Some(collection_and_segments) => collection_and_segments,
             None => {
+                // We acquire a lock to prevent the sysdb from experiencing a thundering herd.
+                // This can happen when a large number of threads try to get the same collection
+                // at the same time.
                 let _guard = self.sysdb_rpc_lock.lock(&collection_id).await;
                 // Double checked locking pattern to avoid lock contention in the
                 // happy path when the collection is already cached.
