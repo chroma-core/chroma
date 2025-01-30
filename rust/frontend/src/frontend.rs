@@ -10,7 +10,6 @@ use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
-    AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CollectionUuid,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
     CreateTenantRequest, CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest,
@@ -340,11 +339,10 @@ impl Frontend {
 
     pub async fn add(
         &mut self,
-        request: AddToCollectionRequest,
-    ) -> Result<AddToCollectionResponse, AddToCollectionError> {
-        let collection_id = CollectionUuid(request.collection_id);
-
-        let chroma_types::AddToCollectionRequest {
+        request: chroma_types::AddCollectionRecordsRequest,
+    ) -> Result<chroma_types::AddCollectionRecordsResponse, chroma_types::AddCollectionRecordsError>
+    {
+        let chroma_types::AddCollectionRecordsRequest {
             ids,
             embeddings,
             documents,
@@ -356,15 +354,15 @@ impl Frontend {
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
             .map_err(|err| match err {
                 ToRecordsError::InconsistentLength => {
-                    chroma_types::AddToCollectionError::InconsistentLength
+                    chroma_types::AddCollectionRecordsError::InconsistentLength
                 }
             })?;
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(request.collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::AddToCollectionResponse {})
+        Ok(chroma_types::AddCollectionRecordsResponse {})
     }
 
     pub async fn update(
@@ -374,8 +372,6 @@ impl Frontend {
         chroma_types::UpdateCollectionRecordsResponse,
         chroma_types::UpdateCollectionRecordsError,
     > {
-        let collection_id = CollectionUuid(request.collection_id);
-
         let chroma_types::UpdateCollectionRecordsRequest {
             ids,
             embeddings,
@@ -400,7 +396,7 @@ impl Frontend {
         })?;
 
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(request.collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -409,11 +405,12 @@ impl Frontend {
 
     pub async fn upsert(
         &mut self,
-        request: chroma_types::UpsertCollectionRequest,
-    ) -> Result<chroma_types::UpsertCollectionResponse, chroma_types::UpsertCollectionError> {
-        let collection_id = CollectionUuid(request.collection_id);
-
-        let chroma_types::UpsertCollectionRequest {
+        request: chroma_types::UpsertCollectionRecordsRequest,
+    ) -> Result<
+        chroma_types::UpsertCollectionRecordsResponse,
+        chroma_types::UpsertCollectionRecordsError,
+    > {
+        let chroma_types::UpsertCollectionRecordsRequest {
             ids,
             embeddings,
             documents,
@@ -432,16 +429,73 @@ impl Frontend {
         )
         .map_err(|err| match err {
             ToRecordsError::InconsistentLength => {
-                chroma_types::UpsertCollectionError::InconsistentLength
+                chroma_types::UpsertCollectionRecordsError::InconsistentLength
             }
         })?;
 
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(request.collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::UpsertCollectionResponse {})
+        Ok(chroma_types::UpsertCollectionRecordsResponse {})
+    }
+
+    pub async fn delete(
+        &mut self,
+        request: chroma_types::DeleteCollectionRecordsRequest,
+    ) -> Result<
+        chroma_types::DeleteCollectionRecordsResponse,
+        chroma_types::DeleteCollectionRecordsError,
+    > {
+        let scan = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(request.collection_id)
+            .await?;
+        let get_result = self
+            .executor
+            .get(Get {
+                scan,
+                filter: Filter {
+                    query_ids: request.ids,
+                    where_clause: request.r#where,
+                },
+                limit: Limit {
+                    skip: 0,
+                    fetch: None,
+                },
+                proj: Projection {
+                    document: false,
+                    embedding: false,
+                    metadata: false,
+                },
+            })
+            .await?;
+
+        if get_result.records.is_empty() {
+            tracing::debug!("Bailing because no records were found");
+            return Ok(chroma_types::DeleteCollectionRecordsResponse {});
+        }
+
+        let records = get_result
+            .records
+            .into_iter()
+            .map(|record| OperationRecord {
+                id: record.id,
+                operation: Operation::Delete,
+                document: None,
+                embedding: None,
+                encoding: None,
+                metadata: None,
+            })
+            .collect::<Vec<_>>();
+
+        self.log_client
+            .push_logs(request.collection_id, records)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(chroma_types::DeleteCollectionRecordsResponse {})
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
