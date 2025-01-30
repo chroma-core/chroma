@@ -1,19 +1,19 @@
 use crate::{
     config::{FrontendConfig, ScorecardRule},
     executor::Executor,
+    CollectionsWithSegmentsProvider,
 };
-use chroma_cache::Cache;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_sysdb::sysdb;
 use chroma_system::System;
 use chroma_types::{
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
+    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
-    AysncPartitionedMutex, CollectionAndSegments, CollectionUuid, CountRequest, CountResponse,
-    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetDatabaseError, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, Include, QueryError, QueryRequest, QueryResponse,
+    CollectionUuid, CountRequest, CountResponse, CreateDatabaseError, CreateDatabaseRequest,
+    CreateDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, Include,
+    QueryError, QueryRequest, QueryResponse,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -55,56 +55,6 @@ impl ChromaError for ScorecardRuleError {
 }
 
 #[derive(Clone, Debug)]
-struct CollectionsWithSegmentsProvider {
-    sysdb_client: Box<sysdb::SysDb>,
-    collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
-    sysdb_rpc_lock: chroma_types::AysncPartitionedMutex<CollectionUuid>,
-}
-
-impl CollectionsWithSegmentsProvider {
-    async fn get_collection_with_segments(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Scan, QueryError> {
-        let collection_and_segments = match self
-            .collections_with_segments_cache
-            .get(&collection_id)
-            .await
-            .map_err(|_| QueryError::CollectionSegments)?
-        {
-            Some(collection_and_segments) => collection_and_segments,
-            None => {
-                let _guard = self.sysdb_rpc_lock.lock(&collection_id).await;
-                // Double checked locking pattern to avoid lock contention in the
-                // happy path when the collection is already cached.
-                match self
-                    .collections_with_segments_cache
-                    .get(&collection_id)
-                    .await
-                    .map_err(|_| QueryError::CollectionSegments)?
-                {
-                    Some(collection_and_segments) => collection_and_segments,
-                    None => {
-                        let collection_and_segments_sysdb = self
-                            .sysdb_client
-                            .get_collection_with_segments(collection_id)
-                            .await
-                            .map_err(|_| QueryError::CollectionSegments)?;
-                        self.collections_with_segments_cache
-                            .insert(collection_id, collection_and_segments_sysdb.clone())
-                            .await;
-                        collection_and_segments_sysdb
-                    }
-                }
-            }
-        };
-        Ok(Scan {
-            collection_and_segments,
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct Frontend {
     #[allow(dead_code)]
     executor: Executor,
@@ -118,7 +68,7 @@ pub struct Frontend {
 impl Frontend {
     pub fn new(
         sysdb_client: Box<sysdb::SysDb>,
-        collections_with_segments_cache: Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
+        collections_with_segments_provider: CollectionsWithSegmentsProvider,
         log_client: Box<chroma_log::Log>,
         executor: Executor,
         scorecard_enabled: bool,
@@ -129,11 +79,6 @@ impl Frontend {
         // hardware with that many threads anytime soon for frontends, if ever.
         // SAFETY(rescrv):  This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
-        let collections_with_segments_provider = CollectionsWithSegmentsProvider {
-            sysdb_client: sysdb_client.clone(),
-            collections_with_segments_cache,
-            sysdb_rpc_lock: AysncPartitionedMutex::new(()),
-        };
 
         Frontend {
             executor,
@@ -368,9 +313,12 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
         let log_client = chroma_log::from_config(&config.log).await?;
 
-        let collections_with_segments_cache =
-            chroma_cache::from_config::<CollectionUuid, CollectionAndSegments>(&config.cache)
-                .await?;
+        let collections_with_segments_provider =
+            CollectionsWithSegmentsProvider::try_from_config(&(
+                config.collections_with_segments_provider.clone(),
+                sysdb_client.clone(),
+            ))
+            .await?;
 
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone())).await?;
@@ -395,7 +343,7 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
             .map_err(|x| Box::new(x) as _)?;
         Ok(Frontend::new(
             sysdb_client,
-            collections_with_segments_cache.into(),
+            collections_with_segments_provider,
             log_client,
             executor,
             config.scorecard_enabled,

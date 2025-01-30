@@ -1,5 +1,4 @@
-use crate::executor::config::ExecutorConfig;
-use chroma_cache::CacheConfig;
+use crate::{executor::config::ExecutorConfig, CollectionsWithSegmentsProviderConfig};
 use chroma_log::config::LogConfig;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
@@ -17,7 +16,7 @@ pub struct FrontendConfig {
     pub sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
-    pub cache: CacheConfig,
+    pub collections_with_segments_provider: CollectionsWithSegmentsProviderConfig,
     pub service_name: String,
     pub otel_endpoint: String,
     pub log: LogConfig,
@@ -66,7 +65,13 @@ mod tests {
         assert_eq!(sysdb_config.connect_timeout_ms, 60000);
         assert_eq!(sysdb_config.request_timeout_ms, 60000);
         assert_eq!(sysdb_config.num_channels, 5);
-        match config.cache {
+        assert_eq!(
+            config
+                .collections_with_segments_provider
+                .permitted_parallelism,
+            180
+        );
+        match config.collections_with_segments_provider.cache {
             CacheConfig::Memory(c) => {
                 assert_eq!(c.capacity, 1000);
             }
