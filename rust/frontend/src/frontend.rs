@@ -10,16 +10,15 @@ use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
-    AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CountCollectionsRequest,
-    CountCollectionsResponse, CountRequest, CountResponse, CreateDatabaseError,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, QueryError, QueryRequest,
-    QueryResponse, ResetError, UpdateCollectionError, UpdateCollectionRequest,
-    UpdateCollectionResponse, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantRequest, CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantError, GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    QueryError, QueryRequest, QueryResponse, ResetError, UpdateCollectionError,
+    UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -340,9 +339,10 @@ impl Frontend {
 
     pub async fn add(
         &mut self,
-        request: AddToCollectionRequest,
-    ) -> Result<AddToCollectionResponse, AddToCollectionError> {
-        let chroma_types::AddToCollectionRequest {
+        request: chroma_types::AddCollectionRecordsRequest,
+    ) -> Result<chroma_types::AddCollectionRecordsResponse, chroma_types::AddCollectionRecordsError>
+    {
+        let chroma_types::AddCollectionRecordsRequest {
             ids,
             embeddings,
             documents,
@@ -354,7 +354,7 @@ impl Frontend {
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
             .map_err(|err| match err {
                 ToRecordsError::InconsistentLength => {
-                    chroma_types::AddToCollectionError::InconsistentLength
+                    chroma_types::AddCollectionRecordsError::InconsistentLength
                 }
             })?;
         self.log_client
@@ -362,7 +362,7 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::AddToCollectionResponse {})
+        Ok(chroma_types::AddCollectionRecordsResponse {})
     }
 
     pub async fn update(
@@ -405,9 +405,12 @@ impl Frontend {
 
     pub async fn upsert(
         &mut self,
-        request: chroma_types::UpsertCollectionRequest,
-    ) -> Result<chroma_types::UpsertCollectionResponse, chroma_types::UpsertCollectionError> {
-        let chroma_types::UpsertCollectionRequest {
+        request: chroma_types::UpsertCollectionRecordsRequest,
+    ) -> Result<
+        chroma_types::UpsertCollectionRecordsResponse,
+        chroma_types::UpsertCollectionRecordsError,
+    > {
+        let chroma_types::UpsertCollectionRecordsRequest {
             ids,
             embeddings,
             documents,
@@ -426,7 +429,7 @@ impl Frontend {
         )
         .map_err(|err| match err {
             ToRecordsError::InconsistentLength => {
-                chroma_types::UpsertCollectionError::InconsistentLength
+                chroma_types::UpsertCollectionRecordsError::InconsistentLength
             }
         })?;
 
@@ -435,7 +438,7 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::UpsertCollectionResponse {})
+        Ok(chroma_types::UpsertCollectionRecordsResponse {})
     }
 
     pub async fn delete(

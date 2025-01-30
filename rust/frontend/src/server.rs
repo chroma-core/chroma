@@ -6,7 +6,7 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_types::{
-    AddToCollectionResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
@@ -14,7 +14,7 @@ use chroma_types::{
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, IncludeList,
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
     Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -347,7 +347,7 @@ async fn update_collection(
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AddToCollectionPayload {
+pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
     documents: Option<Vec<String>>,
@@ -358,15 +358,14 @@ pub struct AddToCollectionPayload {
 async fn collection_add(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<AddToCollectionPayload>,
-) -> Result<Json<AddToCollectionResponse>, ServerError> {
-    tracing::info!("Adding records to collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
+    Json(payload): Json<AddCollectionRecordsPayload>,
+) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     let res = server
         .frontend
-        .add(chroma_types::AddToCollectionRequest {
+        .add(chroma_types::AddCollectionRecordsRequest {
             tenant_id,
             database_name,
             collection_id,
@@ -416,7 +415,7 @@ async fn collection_update(
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct UpsertCollectionPayload {
+pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
     documents: Option<Vec<String>>,
@@ -427,15 +426,15 @@ pub struct UpsertCollectionPayload {
 async fn collection_upsert(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<UpsertCollectionPayload>,
-) -> Result<Json<UpsertCollectionResponse>, ServerError> {
+    Json(payload): Json<UpsertCollectionRecordsPayload>,
+) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     Ok(Json(
         server
             .frontend
-            .upsert(chroma_types::UpsertCollectionRequest {
+            .upsert(chroma_types::UpsertCollectionRecordsRequest {
                 tenant_id,
                 database_name,
                 collection_id,

@@ -289,7 +289,7 @@ impl ChromaError for UpdateCollectionError {
     }
 }
 
-pub struct AddToCollectionRequest {
+pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
@@ -301,21 +301,21 @@ pub struct AddToCollectionRequest {
 }
 
 #[derive(Serialize)]
-pub struct AddToCollectionResponse {}
+pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
-pub enum AddToCollectionError {
+pub enum AddCollectionRecordsError {
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for AddToCollectionError {
+impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AddToCollectionError::InconsistentLength => ErrorCodes::InvalidArgument,
-            AddToCollectionError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            AddCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
+            AddCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -351,7 +351,7 @@ impl ChromaError for UpdateCollectionRecordsError {
     }
 }
 
-pub struct UpsertCollectionRequest {
+pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
@@ -363,21 +363,21 @@ pub struct UpsertCollectionRequest {
 }
 
 #[derive(Serialize)]
-pub struct UpsertCollectionResponse {}
+pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
-pub enum UpsertCollectionError {
+pub enum UpsertCollectionRecordsError {
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for UpsertCollectionError {
+impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionError::InconsistentLength => ErrorCodes::InvalidArgument,
-            UpsertCollectionError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            UpsertCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
+            UpsertCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
         }
     }
 }
