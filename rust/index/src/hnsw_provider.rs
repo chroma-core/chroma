@@ -4,13 +4,14 @@ use super::config::HnswProviderConfig;
 use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
 
 use async_trait::async_trait;
+use chroma_cache::AysncPartitionedMutex;
 use chroma_cache::{Cache, Weighted};
 use chroma_config::Configurable;
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::Storage;
-use chroma_types::{AysncPartitionedMutex, CollectionUuid};
+use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
@@ -83,7 +84,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
             storage.clone(),
             PathBuf::from(&hnsw_config.hnsw_temporary_path),
             cache,
-            hnsw_config.num_parallel_collections,
+            hnsw_config.permitted_parallelism,
             rx,
         ))
     }
@@ -110,7 +111,7 @@ impl HnswIndexProvider {
         storage: Storage,
         storage_path: PathBuf,
         cache: Box<dyn Cache<CollectionUuid, HnswIndexRef>>,
-        num_parallel_collections: u32,
+        permitted_parallelism: u32,
         mut evicted: tokio::sync::mpsc::UnboundedReceiver<(CollectionUuid, HnswIndexRef)>,
     ) -> Self {
         let cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>> = cache.into();
@@ -130,7 +131,10 @@ impl HnswIndexProvider {
             cache,
             storage,
             temporary_storage_path: storage_path,
-            write_mutex: AysncPartitionedMutex::with_workers(num_parallel_collections as usize, ()),
+            write_mutex: AysncPartitionedMutex::with_parallelism(
+                permitted_parallelism as usize,
+                (),
+            ),
             purger,
         }
     }
@@ -161,6 +165,10 @@ impl HnswIndexProvider {
         dimensionality: i32,
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
+        // We take a lock here to synchronize concurrent forks of the same index.
+        // Otherwise, we could end up with a corrupted index since the filesystem
+        // operations are not guaranteed to be atomic.
+        // The lock is a partitioned mutex to allow for higher concurrency across collections.
         let _guard = self.write_mutex.lock(source_id).await;
         let new_id = IndexUuid(Uuid::new_v4());
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
@@ -360,6 +368,10 @@ impl HnswIndexProvider {
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
         let id = IndexUuid(Uuid::new_v4());
+        // We take a lock here to synchronize concurrent creates of the same index.
+        // Otherwise, we could end up with a corrupted index since the filesystem
+        // operations are not guaranteed to be atomic.
+        // The lock is a partitioned mutex to allow for higher concurrency across collections.
         let _guard = self.write_mutex.lock(&id).await;
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 

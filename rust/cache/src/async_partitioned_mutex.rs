@@ -1,3 +1,5 @@
+/// This is a basic partitioned mutex that is not persistent.
+/// The mutex is designed to be holdable across await points (hence async).
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     marker::PhantomData,
@@ -17,7 +19,7 @@ where
 }
 
 // TODO: A sensible value for this.
-const DEFAULT_NUM_PARTITIONS: usize = 16 * 16;
+const DEFAULT_NUM_PARTITIONS: usize = 32768;
 
 impl<K, V, H> AysncPartitionedMutex<K, V, H>
 where
@@ -47,8 +49,12 @@ where
         }
     }
 
-    pub fn with_workers(num_workers: usize, default_value: V) -> Self {
-        Self::with_partitions(num_workers * num_workers, default_value)
+    // Internally the number of partitions of the partitioned mutex
+    // that is used to synchronize concurrent loads is set to
+    // permitted_parallelism * permitted_parallelism. This is
+    // inspired by the birthday paradox.
+    pub fn with_parallelism(parallelism: usize, default_value: V) -> Self {
+        Self::with_partitions(parallelism * parallelism, default_value)
     }
 
     pub async fn lock(&self, key: &K) -> tokio::sync::MutexGuard<'_, V> {

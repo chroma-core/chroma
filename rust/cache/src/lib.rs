@@ -6,12 +6,14 @@ use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod async_partitioned_mutex;
 mod foyer;
 mod nop;
 mod unbounded;
 
 use crate::nop::NopCache;
 use crate::unbounded::UnboundedCache;
+pub use async_partitioned_mutex::*;
 
 pub use foyer::FoyerCacheConfig;
 pub use unbounded::UnboundedCacheConfig;
