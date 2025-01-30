@@ -12,6 +12,7 @@ use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
@@ -259,6 +260,32 @@ impl ChromaError for GetCollectionError {
     }
 }
 
+#[derive(Clone)]
+pub struct CreateCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub name: String,
+    pub metadata: Option<Metadata>,
+    pub configuration_json: Option<Value>,
+    pub get_or_create: bool,
+}
+
+pub type CreateCollectionResponse = Collection;
+
+#[derive(Debug, Error)]
+pub enum CreateCollectionError {
+    #[error("Failed to create collection: {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for CreateCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateCollectionError::SysDB(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
@@ -285,6 +312,33 @@ impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionError::SysDB(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DeleteCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_name: String,
+}
+
+#[derive(Serialize)]
+pub struct DeleteCollectionResponse {}
+
+#[derive(Error, Debug)]
+pub enum DeleteCollectionError {
+    #[error("Could not delete collection: {0}")]
+    SysDB(String),
+    #[error("Collection not found")]
+    NotFound,
+}
+
+impl ChromaError for DeleteCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteCollectionError::SysDB(_) => ErrorCodes::Internal,
+            DeleteCollectionError::NotFound => ErrorCodes::NotFound,
         }
     }
 }

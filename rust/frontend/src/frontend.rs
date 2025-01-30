@@ -10,15 +10,17 @@ use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantRequest, CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    QueryError, QueryRequest, QueryResponse, ResetError, UpdateCollectionError,
-    UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
+    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRequest, DeleteDatabaseError,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest,
+    GetCollectionResponse, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, Include,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
+    ListDatabasesResponse, QueryError, QueryRequest, QueryResponse, ResetError,
+    UpdateCollectionError, UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY,
+    CHROMA_URI_KEY,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -321,6 +323,56 @@ impl Frontend {
         collections.pop().ok_or(GetCollectionError::NotFound)
     }
 
+    pub async fn create_collection(
+        &mut self,
+        request: CreateCollectionRequest,
+    ) -> Result<CreateCollectionResponse, CreateCollectionError> {
+        let collection_id = CollectionUuid::new();
+        let segments = vec![
+            chroma_types::Segment {
+                id: chroma_types::SegmentUuid::new(),
+                r#type: chroma_types::SegmentType::HnswDistributed,
+                scope: chroma_types::SegmentScope::VECTOR,
+                collection: collection_id,
+                metadata: None,
+                file_path: Default::default(),
+            },
+            chroma_types::Segment {
+                id: chroma_types::SegmentUuid::new(),
+                r#type: chroma_types::SegmentType::BlockfileMetadata,
+                scope: chroma_types::SegmentScope::METADATA,
+                collection: collection_id,
+                metadata: None,
+                file_path: Default::default(),
+            },
+            chroma_types::Segment {
+                id: chroma_types::SegmentUuid::new(),
+                r#type: chroma_types::SegmentType::BlockfileRecord,
+                scope: chroma_types::SegmentScope::RECORD,
+                collection: collection_id,
+                metadata: None,
+                file_path: Default::default(),
+            },
+        ];
+
+        let collection = self
+            .sysdb_client
+            .create_collection(
+                request.tenant_id,
+                request.database_name,
+                collection_id,
+                request.name,
+                segments,
+                request.metadata,
+                None,
+                request.get_or_create,
+            )
+            .await
+            .map_err(|err| CreateCollectionError::SysDB(err.to_string()))?;
+
+        Ok(collection)
+    }
+
     pub async fn update_collection(
         &mut self,
         request: UpdateCollectionRequest,
@@ -335,6 +387,43 @@ impl Frontend {
             .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
 
         Ok(UpdateCollectionResponse {})
+    }
+
+    pub async fn delete_collection(
+        &mut self,
+        request: DeleteCollectionRequest,
+    ) -> Result<(), DeleteCollectionError> {
+        let collection = self
+            .sysdb_client
+            .get_collections(
+                None,
+                Some(request.collection_name),
+                Some(request.tenant_id.clone()),
+                Some(request.database_name.clone()),
+            )
+            .await
+            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?
+            .into_iter()
+            .next()
+            .ok_or(DeleteCollectionError::NotFound)?;
+
+        let segments = self
+            .sysdb_client
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?;
+
+        self.sysdb_client
+            .delete_collection(
+                request.tenant_id,
+                request.database_name,
+                collection.collection_id,
+                segments.into_iter().map(|s| s.id).collect(),
+            )
+            .await
+            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?;
+
+        Ok(())
     }
 
     pub async fn add(

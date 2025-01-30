@@ -9,7 +9,7 @@ use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
     DeleteDatabaseResponse, GetDatabaseError, GetDatabaseResponse, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, SegmentFlushInfo,
+    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, SegmentFlushInfo,
     SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
@@ -125,6 +125,38 @@ impl SysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        name: String,
+        segments: Vec<Segment>,
+        metadata: Option<Metadata>,
+        dimension: Option<i32>,
+        get_or_create: bool,
+    ) -> Result<Collection, CreateCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_collection(
+                    tenant,
+                    database,
+                    collection_id,
+                    name,
+                    segments,
+                    metadata,
+                    dimension,
+                    get_or_create,
+                )
+                .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
     pub async fn update_collection(
         &mut self,
         collection_id: CollectionUuid,
@@ -133,6 +165,24 @@ impl SysDb {
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => grpc.update_collection(collection_id, name, metadata).await,
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn delete_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<(), DeleteCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.delete_collection(tenant, database, collection_id, segment_ids)
+                    .await
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -501,6 +551,45 @@ impl GrpcSysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn create_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        name: String,
+        segments: Vec<Segment>,
+        metadata: Option<Metadata>,
+        dimension: Option<i32>,
+        get_or_create: bool,
+    ) -> Result<Collection, CreateCollectionError> {
+        let res = self
+            .client
+            .create_collection(chroma_proto::CreateCollectionRequest {
+                id: collection_id.0.to_string(),
+                tenant,
+                database,
+                name,
+                segments: segments
+                    .into_iter()
+                    .map(chroma_proto::Segment::from)
+                    .collect(),
+                configuration_json_str: "{}".to_string(), // Configuration is currently unused by distributed Chroma
+                metadata: metadata.map(|metadata| metadata.into()),
+                dimension,
+                get_or_create: Some(get_or_create),
+            })
+            .await?;
+
+        let collection = res
+            .into_inner()
+            .collection
+            .ok_or(CreateCollectionError::CollectionFieldMissing)?
+            .try_into()?;
+
+        Ok(collection)
+    }
+
     async fn update_collection(
         &mut self,
         collection_id: CollectionUuid,
@@ -531,6 +620,24 @@ impl GrpcSysDb {
             }
         })?;
 
+        Ok(())
+    }
+
+    async fn delete_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<(), DeleteCollectionError> {
+        self.client
+            .delete_collection(chroma_proto::DeleteCollectionRequest {
+                tenant,
+                database,
+                id: collection_id.0.to_string(),
+                segment_ids: segment_ids.into_iter().map(|id| id.0.to_string()).collect(),
+            })
+            .await?;
         Ok(())
     }
 
@@ -729,6 +836,26 @@ impl ChromaError for GetCollectionsError {
 }
 
 #[derive(Error, Debug)]
+pub enum CreateCollectionError {
+    #[error("Failed to create collection: {0}")]
+    FailedToCreateCollection(#[from] tonic::Status),
+    #[error("Collection field missing from proto response")]
+    CollectionFieldMissing,
+    #[error("Failed to convert proto collection: {0}")]
+    ConversionError(#[from] CollectionConversionError),
+}
+
+impl ChromaError for CreateCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateCollectionError::FailedToCreateCollection(_) => ErrorCodes::Internal,
+            CreateCollectionError::CollectionFieldMissing => ErrorCodes::Internal,
+            CreateCollectionError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
 pub enum UpdateCollectionError {
     #[error("Collection not found")]
     CollectionNotFound,
@@ -741,6 +868,20 @@ impl ChromaError for UpdateCollectionError {
         match self {
             UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
             UpdateCollectionError::FailedToUpdateCollection(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DeleteCollectionError {
+    #[error("Failed to delete collection")]
+    FailedToDeleteCollection(#[from] tonic::Status),
+}
+
+impl ChromaError for DeleteCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteCollectionError::FailedToDeleteCollection(_) => ErrorCodes::Internal,
         }
     }
 }
