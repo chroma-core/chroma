@@ -10,10 +10,11 @@ use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
-    CollectionUuid, CountRequest, CountResponse, CreateDatabaseError, CreateDatabaseRequest,
+    AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CollectionUuid,
+    CountRequest, CountResponse, CreateDatabaseError, CreateDatabaseRequest,
     CreateDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, Include,
-    QueryError, QueryRequest, QueryResponse,
+    QueryError, QueryRequest, QueryResponse, ResetError,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -56,7 +57,6 @@ impl ChromaError for ScorecardRuleError {
 
 #[derive(Clone, Debug)]
 pub struct Frontend {
-    #[allow(dead_code)]
     executor: Executor,
     log_client: Box<chroma_log::Log>,
     scorecard_enabled: Arc<AtomicBool>,
@@ -102,6 +102,15 @@ impl Frontend {
                 ticket: None,
             })
         }
+    }
+
+    pub async fn reset(&mut self) -> Result<(), ResetError> {
+        self.collections_with_segments_provider
+            .collections_with_segments_cache
+            .clear()
+            .await
+            .map_err(|_| ResetError::Cache)?;
+        Ok(())
     }
 
     pub async fn create_database(
@@ -158,8 +167,8 @@ impl Frontend {
 
     pub async fn add(
         &mut self,
-        request: chroma_types::AddToCollectionRequest,
-    ) -> Result<chroma_types::AddToCollectionResponse, chroma_types::AddToCollectionError> {
+        request: AddToCollectionRequest,
+    ) -> Result<AddToCollectionResponse, AddToCollectionError> {
         let collection_id = CollectionUuid(request.collection_id);
 
         let chroma_types::AddToCollectionRequest {

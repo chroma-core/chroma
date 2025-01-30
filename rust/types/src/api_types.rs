@@ -16,26 +16,60 @@ use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Error)]
+pub enum ResetError {
+    #[error("Unable to reset cache")]
+    Cache,
+}
+
+impl ChromaError for ResetError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Serialize)]
+pub struct ChecklistResponse {
+    pub max_batch_size: u32,
+}
+
+#[derive(Serialize)]
 pub struct GetUserIdentityResponse {
     pub user_id: String,
     pub tenant: String,
     pub databases: Vec<String>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
+pub struct CreateTenantRequest {
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateTenantResponse {}
+
+#[derive(Debug, Error)]
+pub enum CreateTenantError {
+    #[error("Tenant already exists")]
+    AlreadyExists,
+    #[error("Rate limited")]
+    RateLimited,
+    #[error("Failed to create tenant in SysDB: {0}")]
+    SysDB(String),
+}
+
+#[derive(Serialize)]
 pub struct GetTenantResponse {
     pub name: String,
 }
 
-#[derive(Clone)]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
     pub database_name: String,
 }
 
-#[derive(Clone)]
+#[derive(Serialize)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -58,17 +92,22 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize)]
+pub struct ListDatabasesResponse {}
+
+#[derive(Serialize)]
+pub struct DeleteDatabaseResponse {}
+
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
 }
 
-#[derive(Clone)]
+#[derive(Serialize)]
 pub struct GetDatabaseResponse {
-    pub database_id: Uuid,
-    pub database_name: String,
-    pub tenant_id: String,
+    pub id: Uuid,
+    pub name: String,
+    pub tenant: String,
 }
 
 #[derive(Error, Debug)]
@@ -188,6 +227,9 @@ pub struct CountRequest {
 
 pub type CountResponse = u32;
 
+pub const CHROMA_KEY: &str = "chroma:";
+pub const CHROMA_URI_KEY: &str = "chroma:uri";
+
 #[derive(Clone)]
 pub struct GetRequest {
     pub tenant_id: String,
@@ -288,9 +330,6 @@ pub struct QueryResponse {
     distances: Option<Vec<Vec<f32>>>,
     include: Vec<Include>,
 }
-
-pub const CHROMA_KEY: &str = "chroma:";
-pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     fn from((result_vec, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {

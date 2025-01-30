@@ -284,9 +284,9 @@ impl GrpcSysDb {
                     Err(_) => return Err(GetDatabaseError::IdParsingError),
                 };
                 Ok(GetDatabaseResponse {
-                    database_id: db_id,
-                    database_name: res.name,
-                    tenant_id: res.tenant,
+                    id: db_id,
+                    name: res.name,
+                    tenant: res.tenant,
                 })
             }
             Err(e) => {
