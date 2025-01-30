@@ -261,7 +261,6 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         Ok(())
     }
 
-    #[instrument(name = "HnswIndex load", level = "info")]
     fn load(
         path: &str,
         index_config: &IndexConfig,

@@ -66,7 +66,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
     }
 
     async fn run(&self, _: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
-        trace!("[{}]: {:?}", self.get_name(), self);
+        // trace!("[{}]: {:?}", self.get_name(), self);
 
         let mut fetched = Vec::new();
         let mut log_client = self.log_client.clone();
@@ -101,7 +101,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 break;
             }
         }
-        tracing::info!(name: "Fetched log records", num_records = fetched.len());
+        // tracing::info!(name: "Fetched log records", num_records = fetched.len());
         Ok(Chunk::new(fetched.into()))
     }
 }

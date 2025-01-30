@@ -468,7 +468,7 @@ impl RootManager {
         match index {
             Some(index) => Ok(Some(index)),
             None => {
-                tracing::info!("Cache miss - fetching root from storage");
+                // tracing::info!("Cache miss - fetching root from storage");
                 let key = Self::get_storage_key(id);
                 tracing::debug!("Reading root from storage with key: {}", key);
                 match self.storage.get(&key).await {

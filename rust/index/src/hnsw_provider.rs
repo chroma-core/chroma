@@ -219,7 +219,6 @@ impl HnswIndexProvider {
         }
     }
 
-    #[instrument(skip(self, buf))]
     async fn copy_bytes_to_local_file(
         &self,
         file_path: &Path,
@@ -252,7 +251,6 @@ impl HnswIndexProvider {
         }
     }
 
-    #[instrument]
     async fn load_hnsw_segment_into_directory(
         &self,
         source_id: &IndexUuid,
@@ -278,11 +276,6 @@ impl HnswIndexProvider {
                             return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
                         }
                     };
-                    tracing::info!(
-                        "Fetched {} bytes from s3 for storage key {:?}",
-                        bytes_read,
-                        key,
-                    );
                     Ok(buf)
                 })
                 .await?;

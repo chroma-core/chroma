@@ -333,39 +333,69 @@ impl DistributedHNSWSegmentReader {
             // Otherwise, we could end up with a corrupted index since the filesystem
             // operations are not guaranteed to be atomic.
             // The lock is a partitioned mutex to allow for higher concurrency across collections.
-            let _guard = hnsw_index_provider.write_mutex.lock(&index_uuid).await;
             let index = match hnsw_index_provider
                 .get(&index_uuid, &segment.collection)
                 .await
             {
-                Some(index) => index,
+                Some(index) => {
+                    println!(
+                        "Cache hit for index {} for collection {}",
+                        index_uuid, segment.collection
+                    );
+                    index
+                }
                 None => {
-                    let distance_function = match distance_function_from_segment(segment) {
-                        Ok(distance_function) => distance_function,
-                        Err(e) => {
-                            return Err(Box::new(
-                                DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
-                            ));
-                        }
-                    };
-                    match hnsw_index_provider
-                        .open(
-                            &index_uuid,
-                            &segment.collection,
-                            dimensionality as i32,
-                            distance_function,
-                        )
+                    let _guard = hnsw_index_provider.write_mutex.lock(&index_uuid).await;
+                    println!(
+                        "Acquired lock for index {} for collection {}",
+                        index_uuid, segment.collection
+                    );
+                    let index = match hnsw_index_provider
+                        .get(&index_uuid, &segment.collection)
                         .await
                     {
-                        Ok(index) => index,
-                        Err(e) => {
-                            return Err(Box::new(
-                                DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
-                                    *e,
-                                ),
-                            ))
+                        Some(index) => {
+                            println!(
+                                "Cache hit for index {} for collection {} after taking lock",
+                                index_uuid, segment.collection
+                            );
+                            index
                         }
-                    }
+                        None => {
+                            let distance_function = match distance_function_from_segment(segment) {
+                                Ok(distance_function) => distance_function,
+                                Err(e) => {
+                                    return Err(Box::new(
+                                        DistributedHNSWSegmentFromSegmentError::DistanceFunctionError(*e),
+                                    ));
+                                }
+                            };
+                            // println!(
+                            //     "Cache miss for index {} for collection {}. Loading from disk.",
+                            //     index_uuid, segment.collection
+                            // );
+                            let index = match hnsw_index_provider
+                                .open(
+                                    &index_uuid,
+                                    &segment.collection,
+                                    dimensionality as i32,
+                                    distance_function,
+                                )
+                                .await
+                            {
+                                Ok(index) => index,
+                                Err(e) => {
+                                    return Err(Box::new(
+                                        DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
+                                            *e,
+                                        ),
+                                    ))
+                                }
+                            };
+                            index
+                        }
+                    };
+                    index
                 }
             };
 

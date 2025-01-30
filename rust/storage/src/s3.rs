@@ -326,7 +326,7 @@ impl S3Storage {
                         }
                     }
                 }
-                tracing::info!("Read {:?} bytes from s3", buf.len());
+                // tracing::info!("Read {:?} bytes from s3", buf.len());
                 Ok(Some(buf))
             })
             .await?;

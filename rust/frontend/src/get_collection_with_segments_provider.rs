@@ -53,7 +53,10 @@ impl CollectionsWithSegmentsProvider {
             .await
             .map_err(|_| QueryError::CollectionSegments)?
         {
-            Some(collection_and_segments) => collection_and_segments,
+            Some(collection_and_segments) => {
+                println!("cache hit for collection {:?}", collection_id);
+                collection_and_segments
+            }
             None => {
                 // We acquire a lock to prevent the sysdb from experiencing a thundering herd.
                 // This can happen when a large number of threads try to get the same collection
@@ -67,7 +70,13 @@ impl CollectionsWithSegmentsProvider {
                     .await
                     .map_err(|_| QueryError::CollectionSegments)?
                 {
-                    Some(collection_and_segments) => collection_and_segments,
+                    Some(collection_and_segments) => {
+                        println!(
+                            "cache hit after acquiring mutex for collection {:?}",
+                            collection_id
+                        );
+                        collection_and_segments
+                    }
                     None => {
                         let collection_and_segments_sysdb = self
                             .sysdb_client

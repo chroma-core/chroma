@@ -10,12 +10,12 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::blockfile_record::{
     ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader,
     RecordSegmentReaderCreationError, RecordSegmentWriter,
 };
+use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
@@ -511,7 +511,7 @@ pub async fn materialize_logs(
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
-    tracing::info!("Total length of logs in materializer: {}", logs.total_len());
+    // tracing::info!("Total length of logs in materializer: {}", logs.total_len());
     // The offset ID that should be used for the next record
     let next_offset_id = match next_offset_id.as_ref() {
         Some(next_offset_id) => next_offset_id.clone(),
@@ -571,9 +571,6 @@ pub async fn materialize_logs(
             }
             Ok(())
         }
-        .instrument(
-            tracing::info_span!(parent: Span::current(), "Materialization read from storage"),
-        )
         .await?;
     }
     // Populate updates to these and fresh records that are being
@@ -841,7 +838,7 @@ pub async fn materialize_logs(
             }
         }
         Ok(())
-    }.instrument(tracing::info_span!(parent: Span::current(), "Materialization main iteration")).await?;
+    }.await?;
     let mut res = vec![];
     for (_key, value) in existing_id_to_materialized {
         // Ignore records that only had invalid ADDS on the log.
