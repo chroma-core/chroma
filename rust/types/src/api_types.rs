@@ -58,9 +58,32 @@ pub enum CreateTenantError {
     SysDB(String),
 }
 
+impl ChromaError for CreateTenantError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateTenantError::AlreadyExists => ErrorCodes::AlreadyExists,
+            CreateTenantError::SysDB(_) => ErrorCodes::Internal,
+            CreateTenantError::RateLimited => ErrorCodes::ResourceExhausted,
+        }
+    }
+}
+
+pub struct GetTenantRequest {
+    pub name: String,
+}
+
 #[derive(Serialize)]
 pub struct GetTenantResponse {
     pub name: String,
+}
+
+#[derive(Debug, Error)]
+pub enum GetTenantError {}
+
+impl ChromaError for GetTenantError {
+    fn code(&self) -> ErrorCodes {
+        todo!()
+    }
 }
 
 pub struct CreateDatabaseRequest {
@@ -93,22 +116,49 @@ impl ChromaError for CreateDatabaseError {
 }
 
 #[derive(Serialize)]
-pub struct ListDatabasesResponse {}
+pub struct Database {
+    pub id: Uuid,
+    pub name: String,
+    pub tenant: String,
+}
+
+pub struct ListDatabasesRequest {
+    pub tenant_id: String,
+}
+
+pub type ListDatabasesResponse = Vec<Database>;
+
+#[derive(Debug, Error)]
+pub enum ListDatabasesError {}
+impl ChromaError for ListDatabasesError {
+    fn code(&self) -> ErrorCodes {
+        todo!()
+    }
+}
+
+pub struct DeleteDatabaseRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
 
 #[derive(Serialize)]
 pub struct DeleteDatabaseResponse {}
+
+#[derive(Debug, Error)]
+pub enum DeleteDatabaseError {}
+
+impl ChromaError for DeleteDatabaseError {
+    fn code(&self) -> ErrorCodes {
+        todo!()
+    }
+}
 
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
 }
 
-#[derive(Serialize)]
-pub struct GetDatabaseResponse {
-    pub id: Uuid,
-    pub name: String,
-    pub tenant: String,
-}
+pub type GetDatabaseResponse = Database;
 
 #[derive(Error, Debug)]
 pub enum GetDatabaseError {

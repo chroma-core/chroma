@@ -8,9 +8,10 @@ use axum::{
 use chroma_types::{
     AddToCollectionResponse, ChecklistResponse, Collection, CollectionUuid, CountRequest,
     CountResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantResponse, GetUserIdentityResponse,
-    IncludeList, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    CreateTenantResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest,
+    GetTenantResponse, GetUserIdentityResponse, IncludeList, ListDatabasesRequest,
+    ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -49,35 +50,15 @@ impl FrontendServer {
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
-            .route("/api/v2/tenants/:tenant_id", get(get_tenant))
+            .route("/api/v2/tenants/:tenant_name", get(get_tenant))
             .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
             .route("/api/v2/tenants/:tenant_id/databases", get(list_databases))
             .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
             .route("/api/v2/tenants/:tenant_id/databases/:name", delete(delete_database))
-            // .route(
-            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
-            //     get(list_collections),
-            // )
-            // .route(
-            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
-            //     post(create_collection),
-            // )
-            // .route(
-            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
-            //     get(count_collections),
-            // )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
                 get(get_collection),
             )
-            // .route(
-            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
-            //     delete(delete_collection),
-            // )
-            // .route(
-            //     "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id",
-            //     put(update_collection),
-            // )
             .route(
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
                 post(collection_add),
@@ -151,16 +132,23 @@ async fn get_user_identity() -> Json<GetUserIdentityResponse> {
 
 async fn create_tenant(
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<CreateTenantRequest>,
+    Json(request): Json<CreateTenantRequest>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
-    todo!()
+    tracing::info!("Creating tenant with name: {}", request.name);
+    Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
-// Dummy implementation for now
-async fn get_tenant() -> Json<GetTenantResponse> {
-    Json(GetTenantResponse {
-        name: "default_tenant".to_string(),
-    })
+async fn get_tenant(
+    Path(name): Path<String>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<GetTenantResponse>, ServerError> {
+    tracing::info!("Getting tenant with name: {}", name);
+    Ok(Json(
+        server
+            .frontend
+            .get_tenant(GetTenantRequest { name })
+            .await?,
+    ))
 }
 
 #[derive(Deserialize, Debug)]
@@ -174,9 +162,9 @@ async fn create_database(
     Json(payload): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
     tracing::info!(
-        "Creating database for tenant: {} and name: {:?}",
+        "Creating database for tenant: {} and name: {}",
         tenant_id,
-        payload
+        payload.name
     );
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
@@ -194,7 +182,11 @@ async fn list_databases(
     Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
-    todo!()
+    tracing::info!("Listing database for tenant: {}", tenant_id);
+    let list_databases = server
+        .frontend
+        .list_databases(ListDatabasesRequest { tenant_id });
+    Ok(Json(list_databases.await?))
 }
 
 async fn get_database(
@@ -220,7 +212,20 @@ async fn delete_database(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
-    todo!()
+    tracing::info!(
+        "Deleting database for tenant: {} and name: {}",
+        tenant_id,
+        database_name
+    );
+    Ok(Json(
+        server
+            .frontend
+            .delete_database(DeleteDatabaseRequest {
+                tenant_id,
+                database_name,
+            })
+            .await?,
+    ))
 }
 
 async fn get_collection(

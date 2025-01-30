@@ -12,8 +12,11 @@ use chroma_types::{
     plan::{Count, Get, Knn},
     AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CollectionUuid,
     CountRequest, CountResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, Include,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetDatabaseError, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
+    GetTenantResponse, Include, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     QueryError, QueryRequest, QueryResponse, ResetError,
 };
 use chroma_types::{
@@ -113,6 +116,20 @@ impl Frontend {
         Ok(())
     }
 
+    pub async fn create_tenant(
+        &mut self,
+        request: CreateTenantRequest,
+    ) -> Result<CreateTenantResponse, CreateTenantError> {
+        todo!()
+    }
+
+    pub async fn get_tenant(
+        &mut self,
+        request: GetTenantRequest,
+    ) -> Result<GetTenantResponse, GetTenantError> {
+        todo!()
+    }
+
     pub async fn create_database(
         &mut self,
         request: CreateDatabaseRequest,
@@ -139,6 +156,13 @@ impl Frontend {
         }
     }
 
+    pub async fn list_databases(
+        &mut self,
+        request: ListDatabasesRequest,
+    ) -> Result<ListDatabasesResponse, ListDatabasesError> {
+        todo!()
+    }
+
     pub async fn get_database(
         &mut self,
         request: GetDatabaseRequest,
@@ -146,6 +170,13 @@ impl Frontend {
         self.sysdb_client
             .get_database(request.database_name, request.tenant_id)
             .await
+    }
+
+    pub async fn delete_database(
+        &mut self,
+        request: DeleteDatabaseRequest,
+    ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
+        todo!()
     }
 
     pub async fn get_collection(
