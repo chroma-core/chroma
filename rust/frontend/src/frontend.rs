@@ -10,16 +10,16 @@ use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
-    AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CollectionUuid,
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantRequest, CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    QueryError, QueryRequest, QueryResponse, ResetError, UpdateCollectionError,
-    UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CountCollectionsRequest,
+    CountCollectionsResponse, CountRequest, CountResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
+    CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, QueryError, QueryRequest,
+    QueryResponse, ResetError, UpdateCollectionError, UpdateCollectionRequest,
+    UpdateCollectionResponse, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -342,8 +342,6 @@ impl Frontend {
         &mut self,
         request: AddToCollectionRequest,
     ) -> Result<AddToCollectionResponse, AddToCollectionError> {
-        let collection_id = CollectionUuid(request.collection_id);
-
         let chroma_types::AddToCollectionRequest {
             ids,
             embeddings,
@@ -360,7 +358,7 @@ impl Frontend {
                 }
             })?;
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(request.collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -374,8 +372,6 @@ impl Frontend {
         chroma_types::UpdateCollectionRecordsResponse,
         chroma_types::UpdateCollectionRecordsError,
     > {
-        let collection_id = CollectionUuid(request.collection_id);
-
         let chroma_types::UpdateCollectionRecordsRequest {
             ids,
             embeddings,
@@ -400,7 +396,7 @@ impl Frontend {
         })?;
 
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(request.collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -411,8 +407,6 @@ impl Frontend {
         &mut self,
         request: chroma_types::UpsertCollectionRequest,
     ) -> Result<chroma_types::UpsertCollectionResponse, chroma_types::UpsertCollectionError> {
-        let collection_id = CollectionUuid(request.collection_id);
-
         let chroma_types::UpsertCollectionRequest {
             ids,
             embeddings,
@@ -437,11 +431,68 @@ impl Frontend {
         })?;
 
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(request.collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         Ok(chroma_types::UpsertCollectionResponse {})
+    }
+
+    pub async fn delete(
+        &mut self,
+        request: chroma_types::DeleteCollectionRecordsRequest,
+    ) -> Result<
+        chroma_types::DeleteCollectionRecordsResponse,
+        chroma_types::DeleteCollectionRecordsError,
+    > {
+        let scan = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(request.collection_id)
+            .await?;
+        let get_result = self
+            .executor
+            .get(Get {
+                scan,
+                filter: Filter {
+                    query_ids: request.ids,
+                    where_clause: request.r#where,
+                },
+                limit: Limit {
+                    skip: 0,
+                    fetch: None,
+                },
+                proj: Projection {
+                    document: false,
+                    embedding: false,
+                    metadata: false,
+                },
+            })
+            .await?;
+
+        if get_result.records.is_empty() {
+            tracing::debug!("Bailing because no records were found");
+            return Ok(chroma_types::DeleteCollectionRecordsResponse {});
+        }
+
+        let records = get_result
+            .records
+            .into_iter()
+            .map(|record| OperationRecord {
+                id: record.id,
+                operation: Operation::Delete,
+                document: None,
+                embedding: None,
+                encoding: None,
+                metadata: None,
+            })
+            .collect::<Vec<_>>();
+
+        self.log_client
+            .push_logs(request.collection_id, records)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(chroma_types::DeleteCollectionRecordsResponse {})
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {

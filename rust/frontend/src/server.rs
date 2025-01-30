@@ -9,12 +9,12 @@ use chroma_types::{
     AddToCollectionResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -83,12 +83,8 @@ impl FrontendServer {
                 post(collection_upsert),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
-                post(collection_update),
-            )
-            .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
-                post(collection_upsert),
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/delete",
+                post(collection_delete),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
@@ -366,7 +362,7 @@ async fn collection_add(
 ) -> Result<Json<AddToCollectionResponse>, ServerError> {
     tracing::info!("Adding records to collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     let res = server
         .frontend
@@ -400,7 +396,7 @@ async fn collection_update(
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     Ok(Json(
         server
@@ -434,7 +430,7 @@ async fn collection_upsert(
     Json(payload): Json<UpsertCollectionPayload>,
 ) -> Result<Json<UpsertCollectionResponse>, ServerError> {
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     Ok(Json(
         server
@@ -451,6 +447,35 @@ async fn collection_upsert(
             })
             .await?,
     ))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeleteCollectionRecordsPayload {
+    ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    where_fields: RawWhereFields,
+}
+
+async fn collection_delete(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<DeleteCollectionRecordsPayload>,
+) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    server
+        .frontend
+        .delete(chroma_types::DeleteCollectionRecordsRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids: payload.ids,
+            r#where: payload.where_fields.parse()?,
+        })
+        .await?;
+
+    Ok(Json(DeleteCollectionRecordsResponse {}))
 }
 
 async fn collection_count(
